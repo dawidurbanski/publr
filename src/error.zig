@@ -22,12 +22,17 @@ const error_layout = layout.LayoutOptions{
 /// Error middleware - catches unhandled errors and renders error pages
 pub fn errorMiddleware(ctx: *Context, next: NextFn) anyerror!void {
     next(ctx) catch |err| {
-        // Log error server-side
+        const trace = @errorReturnTrace();
+
+        // Log error server-side (always, regardless of mode)
         std.debug.print("Error: {}\n", .{err});
+        if (trace) |t| {
+            std.debug.dumpStackTrace(t.*);
+        }
 
         ctx.response.setStatus("500 Internal Server Error");
         if (dev_mode) {
-            ctx.html(render500Dev(err));
+            ctx.html(render500Dev(err, trace));
         } else {
             ctx.html(render500Prod());
         }
@@ -75,35 +80,82 @@ fn render500Prod() []const u8 {
     return layout.wrapLayout(content, error_layout);
 }
 
-/// Render 500 page for dev mode (with error details)
-fn render500Dev(err: anyerror) []const u8 {
+/// Render 500 page for dev mode (with error details and stack trace)
+fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
     const S = struct {
-        var buf: [8192]u8 = undefined;
+        var buf: [16384]u8 = undefined;
     };
 
     const error_name = @errorName(err);
 
-    const content_template =
-        \\<div style="padding: 40px 20px; font-family: system-ui, -apple-system, sans-serif; max-width: 800px; margin: 0 auto;">
+    // Format stack trace if available
+    var trace_buf: [8192]u8 = undefined;
+    var trace_html: []const u8 = "";
+
+    if (trace) |t| {
+        var fbs = std.io.fixedBufferStream(&trace_buf);
+        const writer = fbs.writer();
+
+        // Write stack trace section header
+        writer.writeAll(
+            \\<div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-top: 15px;">
+            \\    <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Stack Trace</h2>
+            \\    <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0; font-size: 12px; line-height: 1.5;">
+        ) catch {};
+
+        // Format each stack frame address
+        const addrs = t.instruction_addresses[0..@min(t.index, t.instruction_addresses.len)];
+        for (addrs, 0..) |addr, i| {
+            writer.print("{d}: 0x{x:0>16}\n", .{ i, addr }) catch {};
+        }
+
+        writer.writeAll(
+            \\</pre>
+            \\    <p style="margin: 10px 0 0 0; color: #6c757d; font-size: 12px;">
+            \\        Full stack trace printed to server console. Use <code>addr2line</code> or check terminal output.
+            \\    </p>
+            \\</div>
+        ) catch {};
+        trace_html = fbs.getWritten();
+    }
+
+    const content_start =
+        \\<div style="padding: 40px 20px; font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 0 auto;">
         \\    <div style="background: #fdf2f2; border: 1px solid #e74c3c; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
         \\        <h1 style="font-size: 24px; margin: 0 0 10px 0; color: #c0392b;">⚠ Internal Server Error</h1>
         \\        <p style="margin: 0; color: #7f8c8d; font-size: 14px;">Development mode - this page shows error details</p>
         \\    </div>
         \\    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px;">
         \\        <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Error</h2>
-        \\        <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;">error.{s}</pre>
+        \\        <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;">error.
+    ;
+
+    const content_end =
+        \\</pre>
         \\    </div>
+    ;
+
+    const footer =
         \\    <div style="margin-top: 30px; text-align: center;">
         \\        <a href="/" style="color: #3498db; text-decoration: none;">← Back to Home</a>
         \\    </div>
         \\</div>
     ;
 
-    const len = std.fmt.bufPrint(&S.buf, content_template, .{error_name}) catch {
-        return render500Prod();
-    };
+    // Assemble the page
+    var offset: usize = 0;
+    @memcpy(S.buf[offset..][0..content_start.len], content_start);
+    offset += content_start.len;
+    @memcpy(S.buf[offset..][0..error_name.len], error_name);
+    offset += error_name.len;
+    @memcpy(S.buf[offset..][0..content_end.len], content_end);
+    offset += content_end.len;
+    @memcpy(S.buf[offset..][0..trace_html.len], trace_html);
+    offset += trace_html.len;
+    @memcpy(S.buf[offset..][0..footer.len], footer);
+    offset += footer.len;
 
-    return layout.wrapLayout(len, error_layout);
+    return layout.wrapLayout(S.buf[0..offset], error_layout);
 }
 
 // Tests
@@ -125,7 +177,7 @@ test "render500Prod returns valid HTML without error details" {
 }
 
 test "render500Dev returns HTML with error name" {
-    const html = render500Dev(error.OutOfMemory);
+    const html = render500Dev(error.OutOfMemory, null);
     try std.testing.expect(std.mem.indexOf(u8, html, "Internal Server Error") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "error.OutOfMemory") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "Development mode") != null);

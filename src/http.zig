@@ -47,6 +47,11 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     try router.get("/admin", handleAdmin);
     try router.get("/static/*", handleStatic);
 
+    // Dev-only test route to trigger 500 error
+    if (dev_mode) {
+        try router.get("/error-test", handleErrorTest);
+    }
+
     // Custom 404 handler
     router.setNotFound(error_pages.notFoundHandler);
 
@@ -209,6 +214,10 @@ fn handleAdmin(ctx: *Context) !void {
     } else {
         ctx.html(layout.wrapLayout(content, layout.admin_layout));
     }
+}
+
+fn handleErrorTest(_: *Context) !void {
+    return error.TestError;
 }
 
 fn handleStatic(ctx: *Context) !void {
