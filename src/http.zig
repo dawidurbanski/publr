@@ -6,6 +6,7 @@ const Method = @import("router.zig").Method;
 const logger = @import("logger.zig");
 const static = @import("static.zig");
 const layout = @import("layout.zig");
+const error_pages = @import("error.zig");
 
 // Embedded static assets with compile-time metadata
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
@@ -29,6 +30,12 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     var router = Router.init(allocator);
     defer router.deinit();
 
+    // Initialize error handling
+    error_pages.init(dev_mode);
+
+    // Error middleware first (catches all errors)
+    try router.use(error_pages.errorMiddleware);
+
     // Dev mode middleware
     if (dev_mode) {
         std.debug.print("Dev mode enabled\n", .{});
@@ -39,6 +46,9 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     try router.get("/", handleIndex);
     try router.get("/admin", handleAdmin);
     try router.get("/static/*", handleStatic);
+
+    // Custom 404 handler
+    router.setNotFound(error_pages.notFoundHandler);
 
     global_router = router;
     defer global_router = null;
