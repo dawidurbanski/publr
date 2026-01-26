@@ -1,0 +1,2 @@
+# Exclude vendored C files from language statistics
+vendor/* linguist-vendored
