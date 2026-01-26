@@ -1,0 +1,204 @@
+const std = @import("std");
+const posix = std.posix;
+
+// Embedded static assets
+const admin_css = @embedFile("static_admin_css");
+const admin_js = @embedFile("static_admin_js");
+
+// Global shutdown flag for signal handler
+var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
+// Track active connections for graceful shutdown
+var active_connections: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+
+pub fn serve(port: u16, dev_mode: bool) !void {
+    _ = dev_mode; // TODO: implement hot reload
+
+    // Set up signal handlers for graceful shutdown
+    setupSignalHandlers();
+
+    const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
+
+    var server = try address.listen(.{
+        .reuse_address = true,
+    });
+    defer server.deinit();
+
+    std.debug.print("Minizen running at http://localhost:{d}\n", .{port});
+    std.debug.print("Press Ctrl+C to stop\n", .{});
+
+    // Set up poll for timeout-based accept
+    var poll_fds = [_]posix.pollfd{
+        .{ .fd = server.stream.handle, .events = posix.POLL.IN, .revents = 0 },
+    };
+
+    while (!shutdown_requested.load(.acquire)) {
+        // Poll with 100ms timeout to periodically check shutdown flag
+        const poll_result = posix.poll(&poll_fds, 100) catch |err| {
+            if (err == error.Interrupted) continue;
+            std.debug.print("Poll error: {}\n", .{err});
+            continue;
+        };
+
+        if (poll_result == 0) continue; // timeout, check shutdown flag
+        if (shutdown_requested.load(.acquire)) break;
+
+        var connection = server.accept() catch |err| {
+            if (err == error.Interrupted) continue;
+            if (err == error.WouldBlock) continue;
+            if (shutdown_requested.load(.acquire)) break;
+            std.debug.print("Accept error: {}\n", .{err});
+            continue;
+        };
+
+        // Spawn thread to handle connection
+        const thread = std.Thread.spawn(.{}, handleConnectionThread, .{connection.stream}) catch |err| {
+            std.debug.print("Thread spawn error: {}\n", .{err});
+            connection.stream.close();
+            continue;
+        };
+        thread.detach();
+    }
+
+    // Graceful shutdown: wait for active connections with timeout
+    std.debug.print("\nShutting down...\n", .{});
+    waitForConnections(5000); // 5 second timeout
+    std.debug.print("Goodbye!\n", .{});
+}
+
+fn setupSignalHandlers() void {
+    const handler = posix.Sigaction{
+        .handler = .{ .handler = signalHandler },
+        .mask = posix.sigemptyset(),
+        .flags = 0,
+    };
+
+    posix.sigaction(posix.SIG.INT, &handler, null);
+    posix.sigaction(posix.SIG.TERM, &handler, null);
+}
+
+fn signalHandler(_: c_int) callconv(.c) void {
+    shutdown_requested.store(true, .release);
+}
+
+fn waitForConnections(timeout_ms: u64) void {
+    const start = std.time.milliTimestamp();
+    while (active_connections.load(.acquire) > 0) {
+        const elapsed: u64 = @intCast(std.time.milliTimestamp() - start);
+        if (elapsed >= timeout_ms) {
+            const remaining = active_connections.load(.acquire);
+            if (remaining > 0) {
+                std.debug.print("Timeout: {d} connection(s) still active\n", .{remaining});
+            }
+            break;
+        }
+        std.Thread.sleep(10 * std.time.ns_per_ms);
+    }
+}
+
+fn handleConnectionThread(stream: std.net.Stream) void {
+    _ = active_connections.fetchAdd(1, .acq_rel);
+    defer {
+        _ = active_connections.fetchSub(1, .acq_rel);
+        stream.close();
+    }
+
+    handleConnection(stream) catch |err| {
+        std.debug.print("Request error: {}\n", .{err});
+    };
+}
+
+fn handleConnection(stream: std.net.Stream) !void {
+    var buf: [4096]u8 = undefined;
+    const n = try stream.read(&buf);
+    if (n == 0) return;
+
+    const request = buf[0..n];
+
+    // Parse first line: "GET /path HTTP/1.1"
+    var lines = std.mem.splitScalar(u8, request, '\n');
+    const first_line = lines.first();
+
+    var parts = std.mem.splitScalar(u8, first_line, ' ');
+    _ = parts.next(); // method
+    const path = parts.next() orelse "/";
+
+    try handleRequest(stream, path);
+}
+
+fn handleRequest(stream: std.net.Stream, path: []const u8) !void {
+    // Remove trailing \r if present
+    const clean_path = std.mem.trimRight(u8, path, "\r");
+
+    if (std.mem.eql(u8, clean_path, "/")) {
+        try sendResponse(stream, "200 OK", "text/html", indexPage());
+    } else if (std.mem.eql(u8, clean_path, "/admin")) {
+        try sendResponse(stream, "200 OK", "text/html", adminPage());
+    } else if (std.mem.startsWith(u8, clean_path, "/static/")) {
+        try serveStatic(stream, clean_path[8..]);
+    } else {
+        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+    }
+}
+
+fn serveStatic(stream: std.net.Stream, file: []const u8) !void {
+    if (std.mem.eql(u8, file, "admin.css")) {
+        try sendResponse(stream, "200 OK", "text/css", admin_css);
+    } else if (std.mem.eql(u8, file, "admin.js")) {
+        try sendResponse(stream, "200 OK", "application/javascript", admin_js);
+    } else {
+        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+    }
+}
+
+fn sendResponse(
+    stream: std.net.Stream,
+    status: []const u8,
+    content_type: []const u8,
+    body: []const u8,
+) !void {
+    var buf: [256]u8 = undefined;
+    const header = try std.fmt.bufPrint(
+        &buf,
+        "HTTP/1.1 {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
+        .{ status, content_type, body.len },
+    );
+    _ = try stream.write(header);
+    _ = try stream.write(body);
+}
+
+fn indexPage() []const u8 {
+    return 
+    \\<!DOCTYPE html>
+    \\<html>
+    \\<head>
+    \\    <meta charset="utf-8">
+    \\    <title>Minizen</title>
+    \\</head>
+    \\<body>
+    \\    <h1>Hello from Minizen</h1>
+    \\    <p><a href="/admin">Go to Admin</a></p>
+    \\</body>
+    \\</html>
+    ;
+}
+
+fn adminPage() []const u8 {
+    return 
+    \\<!DOCTYPE html>
+    \\<html>
+    \\<head>
+    \\    <meta charset="utf-8">
+    \\    <title>Minizen Admin</title>
+    \\    <link rel="stylesheet" href="/static/admin.css">
+    \\</head>
+    \\<body>
+    \\    <div class="container">
+    \\        <h1>Minizen Admin</h1>
+    \\        <p>Admin panel placeholder</p>
+    \\    </div>
+    \\    <script src="/static/admin.js"></script>
+    \\</body>
+    \\</html>
+    ;
+}
