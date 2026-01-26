@@ -83,13 +83,13 @@ fn render500Prod() []const u8 {
 /// Render 500 page for dev mode (with error details and stack trace)
 fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
     const S = struct {
-        var buf: [16384]u8 = undefined;
+        var buf: [32768]u8 = undefined;
     };
 
     const error_name = @errorName(err);
 
     // Format stack trace if available
-    var trace_buf: [8192]u8 = undefined;
+    var trace_buf: [24576]u8 = undefined;
     var trace_html: []const u8 = "";
 
     if (trace) |t| {
@@ -100,22 +100,41 @@ fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
         writer.writeAll(
             \\<div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-top: 15px;">
             \\    <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Stack Trace</h2>
-            \\    <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0; font-size: 12px; line-height: 1.5;">
+            \\    <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0; font-size: 12px; line-height: 1.6;">
         ) catch {};
 
-        // Format each stack frame address
+        // Try to get debug info for symbol resolution
+        const debug_info = std.debug.getSelfDebugInfo() catch null;
         const addrs = t.instruction_addresses[0..@min(t.index, t.instruction_addresses.len)];
-        for (addrs, 0..) |addr, i| {
-            writer.print("{d}: 0x{x:0>16}\n", .{ i, addr }) catch {};
+
+        // Need an allocator for symbol lookup
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const alloc = arena.allocator();
+
+        for (addrs) |addr| {
+            if (debug_info) |di| {
+                if (di.getModuleForAddress(addr)) |module| {
+                    if (module.getSymbolAtAddress(alloc, addr)) |symbol| {
+                        // Got a symbol name
+                        writer.print("<span style=\"color: #e74c3c;\">{s}</span>", .{symbol.name}) catch {};
+                        if (symbol.source_location) |loc| {
+                            writer.print("\n    <span style=\"color: #7f8c8d;\">at {s}:{d}</span>\n", .{ loc.file_name, loc.line }) catch {};
+                        } else {
+                            writer.writeAll("\n") catch {};
+                        }
+                    } else |_| {
+                        writer.print("0x{x:0>16}\n", .{addr}) catch {};
+                    }
+                } else |_| {
+                    writer.print("0x{x:0>16}\n", .{addr}) catch {};
+                }
+            } else {
+                writer.print("0x{x:0>16}\n", .{addr}) catch {};
+            }
         }
 
-        writer.writeAll(
-            \\</pre>
-            \\    <p style="margin: 10px 0 0 0; color: #6c757d; font-size: 12px;">
-            \\        Full stack trace printed to server console. Use <code>addr2line</code> or check terminal output.
-            \\    </p>
-            \\</div>
-        ) catch {};
+        writer.writeAll("</pre>\n</div>") catch {};
         trace_html = fbs.getWritten();
     }
 
