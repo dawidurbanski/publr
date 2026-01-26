@@ -3,6 +3,7 @@ const posix = std.posix;
 const Router = @import("router.zig").Router;
 const Context = @import("router.zig").Context;
 const Method = @import("router.zig").Method;
+const logger = @import("logger.zig");
 
 // Embedded static assets
 const admin_css = @embedFile("static_admin_css");
@@ -18,8 +19,6 @@ var active_connections: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 var global_router: ?Router = null;
 
 pub fn serve(port: u16, dev_mode: bool) !void {
-    _ = dev_mode; // TODO: implement hot reload
-
     // Initialize router
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -27,6 +26,12 @@ pub fn serve(port: u16, dev_mode: bool) !void {
 
     var router = Router.init(allocator);
     defer router.deinit();
+
+    // Dev mode middleware
+    if (dev_mode) {
+        std.debug.print("Dev mode enabled\n", .{});
+        try router.use(logger.requestLogger);
+    }
 
     // Register routes
     try router.get("/", handleIndex);
@@ -155,26 +160,34 @@ fn handleConnection(stream: std.net.Stream) !void {
     }
 }
 
-fn handleIndex(_: *Context, stream: std.net.Stream) !void {
-    try sendResponse(stream, "200 OK", "text/html", indexPage());
+fn handleIndex(ctx: *Context) !void {
+    ctx.response.setContentType("text/html");
+    ctx.response.setBody(indexPage());
 }
 
-fn handleAdmin(_: *Context, stream: std.net.Stream) !void {
-    try sendResponse(stream, "200 OK", "text/html", adminPage());
+fn handleAdmin(ctx: *Context) !void {
+    ctx.response.setContentType("text/html");
+    ctx.response.setBody(adminPage());
 }
 
-fn handleStatic(ctx: *Context, stream: std.net.Stream) !void {
+fn handleStatic(ctx: *Context) !void {
     const file = ctx.wildcard orelse {
-        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setContentType("text/plain");
+        ctx.response.setBody("Not Found");
         return;
     };
 
     if (std.mem.eql(u8, file, "admin.css")) {
-        try sendResponse(stream, "200 OK", "text/css", admin_css);
+        ctx.response.setContentType("text/css");
+        ctx.response.setBody(admin_css);
     } else if (std.mem.eql(u8, file, "admin.js")) {
-        try sendResponse(stream, "200 OK", "application/javascript", admin_js);
+        ctx.response.setContentType("application/javascript");
+        ctx.response.setBody(admin_js);
     } else {
-        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setContentType("text/plain");
+        ctx.response.setBody("Not Found");
     }
 }
 

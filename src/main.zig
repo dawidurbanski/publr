@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const http = @import("http.zig");
 
 pub fn main() !void {
@@ -30,6 +31,7 @@ pub fn main() !void {
 fn runServe(args: *std.process.ArgIterator) !void {
     var cli_port: ?u16 = null;
     var dev_mode: bool = false;
+    var watch_mode: bool = false;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--port") or std.mem.eql(u8, arg, "-p")) {
@@ -43,6 +45,8 @@ fn runServe(args: *std.process.ArgIterator) !void {
             };
         } else if (std.mem.eql(u8, arg, "--dev") or std.mem.eql(u8, arg, "-d")) {
             dev_mode = true;
+        } else if (std.mem.eql(u8, arg, "--watch") or std.mem.eql(u8, arg, "-w")) {
+            watch_mode = true;
         } else {
             std.debug.print("Unknown option: {s}\n", .{arg});
             return;
@@ -50,6 +54,22 @@ fn runServe(args: *std.process.ArgIterator) !void {
     }
 
     const port = resolvePort(cli_port);
+
+    if (watch_mode) {
+        if (builtin.os.tag == .windows) {
+            printWatchNotSupportedWindows();
+            return;
+        }
+        execWatchexec(port, dev_mode) catch |err| {
+            if (err == error.FileNotFound) {
+                printWatchexecMissing();
+                return;
+            }
+            return err;
+        };
+        unreachable;
+    }
+
     try http.serve(port, dev_mode);
 }
 
@@ -70,6 +90,61 @@ fn resolvePort(cli_port: ?u16) u16 {
     return 8080;
 }
 
+/// Execs watchexec to watch .zig files and restart the server on changes.
+/// This replaces the current process with watchexec.
+fn execWatchexec(port: u16, dev_mode: bool) !void {
+    // Build inner command: "zig build run -- serve --port {port} [--dev]"
+    var cmd_buf: [128]u8 = undefined;
+    const inner_cmd = if (dev_mode)
+        try std.fmt.bufPrint(&cmd_buf, "zig build run -- serve --port {d} --dev", .{port})
+    else
+        try std.fmt.bufPrint(&cmd_buf, "zig build run -- serve --port {d}", .{port});
+
+    // Null-terminate for execvpeZ
+    var inner_cmd_z: [129]u8 = undefined;
+    @memcpy(inner_cmd_z[0..inner_cmd.len], inner_cmd);
+    inner_cmd_z[inner_cmd.len] = 0;
+
+    const argv = [_:null]?[*:0]const u8{
+        "watchexec",
+        "-r",
+        "-e",
+        "zig",
+        @ptrCast(&inner_cmd_z),
+    };
+
+    const err = std.posix.execvpeZ("watchexec", &argv, std.c.environ);
+    return err;
+}
+
+fn printWatchexecMissing() void {
+    std.debug.print(
+        \\--watch requires watchexec to be installed.
+        \\
+        \\Options:
+        \\  1. Install watchexec:
+        \\     https://github.com/watchexec/watchexec/blob/main/doc/packages.md
+        \\
+        \\  2. Use watchexec directly:
+        \\     watchexec -r -e zig "zig build run -- serve --port 8080"
+        \\
+        \\  3. Use another watcher (entr, fswatch, etc.)
+        \\
+        \\  4. Manual rebuild: Ctrl+C, then run again
+        \\
+    , .{});
+}
+
+fn printWatchNotSupportedWindows() void {
+    std.debug.print(
+        \\--watch is not supported on Windows.
+        \\
+        \\Use watchexec directly:
+        \\  watchexec -r -e zig "zig build run -- serve --port 8080"
+        \\
+    , .{});
+}
+
 fn printUsage() void {
     const usage =
         \\Minizen - Single-file CMS
@@ -83,6 +158,7 @@ fn printUsage() void {
         \\Serve options:
         \\  --port, -p <port>    Port to listen on (default: 8080, or PORT env var)
         \\  --dev, -d            Enable development mode (hot reload)
+        \\  --watch, -w          Auto-rebuild on file changes (requires watchexec)
         \\
         \\Environment variables:
         \\  PORT                 Default port (overridden by --port flag)
@@ -91,6 +167,7 @@ fn printUsage() void {
         \\  mz serve
         \\  mz serve --port 3000
         \\  mz serve --dev
+        \\  mz serve --watch --dev
         \\
     ;
     std.debug.print("{s}", .{usage});
