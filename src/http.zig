@@ -4,10 +4,11 @@ const Router = @import("router.zig").Router;
 const Context = @import("router.zig").Context;
 const Method = @import("router.zig").Method;
 const logger = @import("logger.zig");
+const static = @import("static.zig");
 
-// Embedded static assets
-const admin_css = @embedFile("static_admin_css");
-const admin_js = @embedFile("static_admin_js");
+// Embedded static assets with compile-time metadata
+const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
+const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
 
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -135,6 +136,8 @@ fn handleConnectionThread(stream: std.net.Stream) void {
     };
 }
 
+const RequestHeader = @import("middleware.zig").RequestHeader;
+
 fn handleConnection(stream: std.net.Stream) !void {
     var buf: [4096]u8 = undefined;
     const n = try stream.read(&buf);
@@ -152,8 +155,27 @@ fn handleConnection(stream: std.net.Stream) !void {
 
     const method = Method.fromString(method_str) orelse .GET;
 
+    // Parse headers
+    var headers: [16]RequestHeader = undefined;
+    var header_count: usize = 0;
+
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trimRight(u8, line, "\r");
+        if (trimmed.len == 0) break; // Empty line marks end of headers
+
+        if (std.mem.indexOf(u8, trimmed, ": ")) |colon_pos| {
+            if (header_count < headers.len) {
+                headers[header_count] = .{
+                    .name = trimmed[0..colon_pos],
+                    .value = trimmed[colon_pos + 2 ..],
+                };
+                header_count += 1;
+            }
+        }
+    }
+
     if (global_router) |*router| {
-        try router.dispatch(method, path, stream);
+        try router.dispatch(method, path, stream, headers[0..header_count]);
     } else {
         // Fallback if router not initialized
         try sendResponse(stream, "500 Internal Server Error", "text/plain", "Server not initialized");
@@ -178,12 +200,12 @@ fn handleStatic(ctx: *Context) !void {
         return;
     };
 
+    const if_none_match = ctx.getRequestHeader("If-None-Match");
+
     if (std.mem.eql(u8, file, "admin.css")) {
-        ctx.response.setContentType("text/css");
-        ctx.response.setBody(admin_css);
+        AdminCss.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "admin.js")) {
-        ctx.response.setContentType("application/javascript");
-        ctx.response.setBody(admin_js);
+        AdminJs.serve(ctx, if_none_match);
     } else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");

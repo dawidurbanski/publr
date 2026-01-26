@@ -146,9 +146,14 @@ pub const Router = struct {
     }
 
     /// Dispatch a request to the matching handler with middleware chain
-    pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream) !void {
+    pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream, headers: []const mw.RequestHeader) !void {
         var ctx = Context.initWithStream(self.allocator, method, path, stream);
         defer ctx.deinit();
+
+        // Copy request headers to context
+        for (headers) |header| {
+            ctx.addRequestHeader(header.name, header.value);
+        }
 
         for (self.routes.items) |route| {
             if (route.method != method) continue;
@@ -234,13 +239,35 @@ pub const Router = struct {
 };
 
 fn sendResponse(stream: std.net.Stream, response: *const Response) !void {
-    var buf: [256]u8 = undefined;
-    const header = try std.fmt.bufPrint(
-        &buf,
-        "HTTP/1.1 {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
+    var buf: [1024]u8 = undefined;
+    var offset: usize = 0;
+
+    // Write status line and standard headers
+    const header_start = try std.fmt.bufPrint(
+        buf[offset..],
+        "HTTP/1.1 {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n",
         .{ response.status, response.content_type, response.body.len },
     );
-    _ = try stream.write(header);
+    offset += header_start.len;
+
+    // Write custom headers
+    for (response.getCustomHeaders()) |maybe_header| {
+        if (maybe_header) |h| {
+            const custom = try std.fmt.bufPrint(
+                buf[offset..],
+                "{s}: {s}\r\n",
+                .{ h.name, h.value },
+            );
+            offset += custom.len;
+        }
+    }
+
+    // Write header terminator
+    buf[offset] = '\r';
+    buf[offset + 1] = '\n';
+    offset += 2;
+
+    _ = try stream.write(buf[0..offset]);
     _ = try stream.write(response.body);
 }
 

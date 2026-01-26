@@ -1,6 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+/// Request header entry
+pub const RequestHeader = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
 /// Request/response context passed through middleware chain
 pub const Context = struct {
     // Request data
@@ -9,6 +15,10 @@ pub const Context = struct {
     params: std.StringHashMapUnmanaged([]const u8),
     wildcard: ?[]const u8,
     allocator: Allocator,
+
+    // Request headers (fixed-size for common headers)
+    request_headers: [16]?RequestHeader,
+    request_header_count: usize,
 
     // Response data (buffered for middleware to modify)
     response: Response,
@@ -26,6 +36,8 @@ pub const Context = struct {
             .params = .{},
             .wildcard = null,
             .allocator = allocator,
+            .request_headers = [_]?RequestHeader{null} ** 16,
+            .request_header_count = 0,
             .response = Response.init(),
             .stream = null,
             .state = .{},
@@ -39,10 +51,32 @@ pub const Context = struct {
             .params = .{},
             .wildcard = null,
             .allocator = allocator,
+            .request_headers = [_]?RequestHeader{null} ** 16,
+            .request_header_count = 0,
             .response = Response.init(),
             .stream = stream,
             .state = .{},
         };
+    }
+
+    /// Add a request header
+    pub fn addRequestHeader(self: *Context, name: []const u8, value: []const u8) void {
+        if (self.request_header_count < self.request_headers.len) {
+            self.request_headers[self.request_header_count] = .{ .name = name, .value = value };
+            self.request_header_count += 1;
+        }
+    }
+
+    /// Get a request header by name (case-insensitive)
+    pub fn getRequestHeader(self: *const Context, name: []const u8) ?[]const u8 {
+        for (self.request_headers[0..self.request_header_count]) |maybe_header| {
+            if (maybe_header) |h| {
+                if (std.ascii.eqlIgnoreCase(h.name, name)) {
+                    return h.value;
+                }
+            }
+        }
+        return null;
     }
 
     /// Start a streaming response (sends headers, enables chunked transfer)
@@ -100,12 +134,20 @@ pub const Context = struct {
     }
 };
 
+/// Custom header entry
+pub const Header = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
 /// Buffered response that middleware can inspect/modify
 pub const Response = struct {
     status: []const u8,
     content_type: []const u8,
     body: []const u8,
     headers_sent: bool,
+    custom_headers: [8]?Header,
+    custom_header_count: usize,
 
     pub fn init() Response {
         return .{
@@ -113,6 +155,8 @@ pub const Response = struct {
             .content_type = "text/html",
             .body = "",
             .headers_sent = false,
+            .custom_headers = [_]?Header{null} ** 8,
+            .custom_header_count = 0,
         };
     }
 
@@ -126,6 +170,19 @@ pub const Response = struct {
 
     pub fn setBody(self: *Response, body: []const u8) void {
         self.body = body;
+    }
+
+    /// Add a custom header to the response
+    pub fn setHeader(self: *Response, name: []const u8, value: []const u8) void {
+        if (self.custom_header_count < self.custom_headers.len) {
+            self.custom_headers[self.custom_header_count] = .{ .name = name, .value = value };
+            self.custom_header_count += 1;
+        }
+    }
+
+    /// Get custom headers as a slice
+    pub fn getCustomHeaders(self: *const Response) []const ?Header {
+        return self.custom_headers[0..self.custom_header_count];
     }
 };
 
@@ -392,4 +449,43 @@ test "middleware can short-circuit" {
 
     try std.testing.expect(!TestState.handler_called);
     try std.testing.expectEqualStrings("401 Unauthorized", ctx.response.status);
+}
+
+test "response custom headers" {
+    var resp = Response.init();
+    resp.setHeader("ETag", "\"abc123\"");
+    resp.setHeader("Cache-Control", "max-age=3600");
+
+    try std.testing.expectEqual(@as(usize, 2), resp.custom_header_count);
+
+    const headers = resp.getCustomHeaders();
+    try std.testing.expectEqual(@as(usize, 2), headers.len);
+    try std.testing.expectEqualStrings("ETag", headers[0].?.name);
+    try std.testing.expectEqualStrings("\"abc123\"", headers[0].?.value);
+    try std.testing.expectEqualStrings("Cache-Control", headers[1].?.name);
+    try std.testing.expectEqualStrings("max-age=3600", headers[1].?.value);
+}
+
+test "context request headers" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.addRequestHeader("If-None-Match", "\"etag123\"");
+    ctx.addRequestHeader("Accept", "text/html");
+
+    try std.testing.expectEqualStrings("\"etag123\"", ctx.getRequestHeader("If-None-Match").?);
+    try std.testing.expectEqualStrings("text/html", ctx.getRequestHeader("Accept").?);
+    try std.testing.expect(ctx.getRequestHeader("Missing") == null);
+}
+
+test "context request headers case-insensitive" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.addRequestHeader("Content-Type", "application/json");
+
+    try std.testing.expectEqualStrings("application/json", ctx.getRequestHeader("content-type").?);
+    try std.testing.expectEqualStrings("application/json", ctx.getRequestHeader("CONTENT-TYPE").?);
 }
