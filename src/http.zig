@@ -5,6 +5,7 @@ const Context = @import("router.zig").Context;
 const Method = @import("router.zig").Method;
 const logger = @import("logger.zig");
 const static = @import("static.zig");
+const layout = @import("layout.zig");
 
 // Embedded static assets with compile-time metadata
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
@@ -183,13 +184,21 @@ fn handleConnection(stream: std.net.Stream) !void {
 }
 
 fn handleIndex(ctx: *Context) !void {
-    ctx.response.setContentType("text/html");
-    ctx.response.setBody(indexPage());
+    const content = indexContent();
+    if (ctx.isPartial()) {
+        ctx.html(content);
+    } else {
+        ctx.html(layout.wrapLayout(content, layout.public_layout));
+    }
 }
 
 fn handleAdmin(ctx: *Context) !void {
-    ctx.response.setContentType("text/html");
-    ctx.response.setBody(adminPage());
+    const content = adminContent();
+    if (ctx.isPartial()) {
+        ctx.html(content);
+    } else {
+        ctx.html(layout.wrapLayout(content, layout.admin_layout));
+    }
 }
 
 fn handleStatic(ctx: *Context) !void {
@@ -229,38 +238,18 @@ fn sendResponse(
     _ = try stream.write(body);
 }
 
-fn indexPage() []const u8 {
+fn indexContent() []const u8 {
     return 
-    \\<!DOCTYPE html>
-    \\<html>
-    \\<head>
-    \\    <meta charset="utf-8">
-    \\    <title>Minizen</title>
-    \\</head>
-    \\<body>
-    \\    <h1>Hello from Minizen</h1>
-    \\    <p><a href="/admin">Go to Admin</a></p>
-    \\</body>
-    \\</html>
+    \\<h1>Hello from Minizen</h1>
+    \\<p><a href="/admin">Go to Admin</a></p>
     ;
 }
 
-fn adminPage() []const u8 {
+fn adminContent() []const u8 {
     return 
-    \\<!DOCTYPE html>
-    \\<html>
-    \\<head>
-    \\    <meta charset="utf-8">
-    \\    <title>Minizen Admin</title>
-    \\    <link rel="stylesheet" href="/static/admin.css">
-    \\</head>
-    \\<body>
-    \\    <div class="container">
-    \\        <h1>Minizen Admin</h1>
-    \\        <p>Admin panel placeholder</p>
-    \\    </div>
-    \\    <script src="/static/admin.js"></script>
-    \\</body>
-    \\</html>
+    \\<div class="container">
+    \\    <h1>Minizen Admin</h1>
+    \\    <p>Admin panel placeholder</p>
+    \\</div>
     ;
 }
