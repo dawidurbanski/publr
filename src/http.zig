@@ -1,5 +1,8 @@
 const std = @import("std");
 const posix = std.posix;
+const Router = @import("router.zig").Router;
+const Context = @import("router.zig").Context;
+const Method = @import("router.zig").Method;
 
 // Embedded static assets
 const admin_css = @embedFile("static_admin_css");
@@ -11,8 +14,27 @@ var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(fal
 // Track active connections for graceful shutdown
 var active_connections: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 
+// Global router instance (initialized once at startup)
+var global_router: ?Router = null;
+
 pub fn serve(port: u16, dev_mode: bool) !void {
     _ = dev_mode; // TODO: implement hot reload
+
+    // Initialize router
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var router = Router.init(allocator);
+    defer router.deinit();
+
+    // Register routes
+    try router.get("/", handleIndex);
+    try router.get("/admin", handleAdmin);
+    try router.get("/static/*", handleStatic);
+
+    global_router = router;
+    defer global_router = null;
 
     // Set up signal handlers for graceful shutdown
     setupSignalHandlers();
@@ -120,28 +142,33 @@ fn handleConnection(stream: std.net.Stream) !void {
     const first_line = lines.first();
 
     var parts = std.mem.splitScalar(u8, first_line, ' ');
-    _ = parts.next(); // method
+    const method_str = parts.next() orelse "GET";
     const path = parts.next() orelse "/";
 
-    try handleRequest(stream, path);
-}
+    const method = Method.fromString(method_str) orelse .GET;
 
-fn handleRequest(stream: std.net.Stream, path: []const u8) !void {
-    // Remove trailing \r if present
-    const clean_path = std.mem.trimRight(u8, path, "\r");
-
-    if (std.mem.eql(u8, clean_path, "/")) {
-        try sendResponse(stream, "200 OK", "text/html", indexPage());
-    } else if (std.mem.eql(u8, clean_path, "/admin")) {
-        try sendResponse(stream, "200 OK", "text/html", adminPage());
-    } else if (std.mem.startsWith(u8, clean_path, "/static/")) {
-        try serveStatic(stream, clean_path[8..]);
+    if (global_router) |*router| {
+        try router.dispatch(method, path, stream);
     } else {
-        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+        // Fallback if router not initialized
+        try sendResponse(stream, "500 Internal Server Error", "text/plain", "Server not initialized");
     }
 }
 
-fn serveStatic(stream: std.net.Stream, file: []const u8) !void {
+fn handleIndex(_: *Context, stream: std.net.Stream) !void {
+    try sendResponse(stream, "200 OK", "text/html", indexPage());
+}
+
+fn handleAdmin(_: *Context, stream: std.net.Stream) !void {
+    try sendResponse(stream, "200 OK", "text/html", adminPage());
+}
+
+fn handleStatic(ctx: *Context, stream: std.net.Stream) !void {
+    const file = ctx.wildcard orelse {
+        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+        return;
+    };
+
     if (std.mem.eql(u8, file, "admin.css")) {
         try sendResponse(stream, "200 OK", "text/css", admin_css);
     } else if (std.mem.eql(u8, file, "admin.js")) {
