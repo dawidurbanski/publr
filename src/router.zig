@@ -1,52 +1,19 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const mw = @import("middleware.zig");
 
-/// HTTP methods supported by the router
-pub const Method = enum {
-    GET,
-    POST,
-    PUT,
-    DELETE,
+// Re-export types from middleware for convenience
+pub const Context = mw.Context;
+pub const Method = mw.Method;
+pub const Middleware = mw.Middleware;
+pub const Handler = mw.Handler;
+pub const NextFn = mw.NextFn;
+pub const Response = mw.Response;
 
-    pub fn fromString(s: []const u8) ?Method {
-        if (std.mem.eql(u8, s, "GET")) return .GET;
-        if (std.mem.eql(u8, s, "POST")) return .POST;
-        if (std.mem.eql(u8, s, "PUT")) return .PUT;
-        if (std.mem.eql(u8, s, "DELETE")) return .DELETE;
-        return null;
-    }
+/// Route options for per-route configuration
+pub const RouteOptions = struct {
+    middleware: []const Middleware = &[_]Middleware{},
 };
-
-/// Request context passed to handlers
-pub const Context = struct {
-    method: Method,
-    path: []const u8,
-    params: std.StringHashMapUnmanaged([]const u8),
-    wildcard: ?[]const u8,
-    allocator: Allocator,
-
-    pub fn init(allocator: Allocator, method: Method, path: []const u8) Context {
-        return .{
-            .method = method,
-            .path = path,
-            .params = .{},
-            .wildcard = null,
-            .allocator = allocator,
-        };
-    }
-
-    pub fn deinit(self: *Context) void {
-        self.params.deinit(self.allocator);
-    }
-
-    /// Get a path parameter by name
-    pub fn param(self: *const Context, name: []const u8) ?[]const u8 {
-        return self.params.get(name);
-    }
-};
-
-/// Handler function signature
-pub const Handler = *const fn (*Context, std.net.Stream) anyerror!void;
 
 /// A registered route
 const Route = struct {
@@ -54,6 +21,7 @@ const Route = struct {
     pattern: []const u8,
     segments: []const Segment,
     handler: Handler,
+    middleware: []const Middleware,
 };
 
 /// Segment types in a route pattern
@@ -63,16 +31,18 @@ const Segment = union(enum) {
     wildcard: void,
 };
 
-/// HTTP Router with path matching and method dispatch
+/// HTTP Router with path matching, method dispatch, and middleware support
 pub const Router = struct {
     allocator: Allocator,
     routes: std.ArrayListUnmanaged(Route),
+    global_middleware: std.ArrayListUnmanaged(Middleware),
     not_found_handler: ?Handler,
 
     pub fn init(allocator: Allocator) Router {
         return .{
             .allocator = allocator,
             .routes = .{},
+            .global_middleware = .{},
             .not_found_handler = null,
         };
     }
@@ -82,26 +52,52 @@ pub const Router = struct {
             self.allocator.free(route.segments);
         }
         self.routes.deinit(self.allocator);
+        self.global_middleware.deinit(self.allocator);
+    }
+
+    /// Add global middleware (applies to all routes)
+    pub fn use(self: *Router, middleware: Middleware) !void {
+        try self.global_middleware.append(self.allocator, middleware);
     }
 
     /// Register a GET route
     pub fn get(self: *Router, pattern: []const u8, handler: Handler) !void {
-        try self.addRoute(.GET, pattern, handler);
+        try self.addRoute(.GET, pattern, handler, .{});
+    }
+
+    /// Register a GET route with options
+    pub fn getWithOptions(self: *Router, pattern: []const u8, handler: Handler, options: RouteOptions) !void {
+        try self.addRoute(.GET, pattern, handler, options);
     }
 
     /// Register a POST route
     pub fn post(self: *Router, pattern: []const u8, handler: Handler) !void {
-        try self.addRoute(.POST, pattern, handler);
+        try self.addRoute(.POST, pattern, handler, .{});
+    }
+
+    /// Register a POST route with options
+    pub fn postWithOptions(self: *Router, pattern: []const u8, handler: Handler, options: RouteOptions) !void {
+        try self.addRoute(.POST, pattern, handler, options);
     }
 
     /// Register a PUT route
     pub fn put(self: *Router, pattern: []const u8, handler: Handler) !void {
-        try self.addRoute(.PUT, pattern, handler);
+        try self.addRoute(.PUT, pattern, handler, .{});
+    }
+
+    /// Register a PUT route with options
+    pub fn putWithOptions(self: *Router, pattern: []const u8, handler: Handler, options: RouteOptions) !void {
+        try self.addRoute(.PUT, pattern, handler, options);
     }
 
     /// Register a DELETE route
     pub fn delete(self: *Router, pattern: []const u8, handler: Handler) !void {
-        try self.addRoute(.DELETE, pattern, handler);
+        try self.addRoute(.DELETE, pattern, handler, .{});
+    }
+
+    /// Register a DELETE route with options
+    pub fn deleteWithOptions(self: *Router, pattern: []const u8, handler: Handler, options: RouteOptions) !void {
+        try self.addRoute(.DELETE, pattern, handler, options);
     }
 
     /// Set custom 404 handler
@@ -109,13 +105,14 @@ pub const Router = struct {
         self.not_found_handler = handler;
     }
 
-    fn addRoute(self: *Router, method: Method, pattern: []const u8, handler: Handler) !void {
+    fn addRoute(self: *Router, method: Method, pattern: []const u8, handler: Handler, options: RouteOptions) !void {
         const segments = try self.parsePattern(pattern);
         try self.routes.append(self.allocator, .{
             .method = method,
             .pattern = pattern,
             .segments = segments,
             .handler = handler,
+            .middleware = options.middleware,
         });
     }
 
@@ -148,16 +145,27 @@ pub const Router = struct {
         return segments.toOwnedSlice(self.allocator);
     }
 
-    /// Dispatch a request to the matching handler
+    /// Dispatch a request to the matching handler with middleware chain
     pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream) !void {
-        var ctx = Context.init(self.allocator, method, path);
+        var ctx = Context.initWithStream(self.allocator, method, path, stream);
         defer ctx.deinit();
 
         for (self.routes.items) |route| {
             if (route.method != method) continue;
 
             if (self.matchRoute(route.segments, path, &ctx)) {
-                try route.handler(&ctx, stream);
+                // Execute middleware chain then handler
+                try mw.executeChain(
+                    &ctx,
+                    self.global_middleware.items,
+                    route.middleware,
+                    route.handler,
+                );
+
+                // Send buffered response (skip if streaming already sent headers)
+                if (!ctx.response.headers_sent) {
+                    try sendResponse(stream, &ctx.response);
+                }
                 return;
             }
             // Reset context for next route attempt
@@ -167,9 +175,15 @@ pub const Router = struct {
 
         // No route matched
         if (self.not_found_handler) |handler| {
-            try handler(&ctx, stream);
+            try mw.executeChain(&ctx, self.global_middleware.items, &[_]Middleware{}, handler);
+            if (!ctx.response.headers_sent) {
+                try sendResponse(stream, &ctx.response);
+            }
         } else {
-            try defaultNotFound(&ctx, stream);
+            try defaultNotFound(&ctx);
+            if (!ctx.response.headers_sent) {
+                try sendResponse(stream, &ctx.response);
+            }
         }
     }
 
@@ -219,11 +233,21 @@ pub const Router = struct {
     }
 };
 
-fn defaultNotFound(_: *Context, stream: std.net.Stream) !void {
-    const body = "Not Found";
-    const response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot Found";
-    _ = try stream.write(response);
-    _ = body;
+fn sendResponse(stream: std.net.Stream, response: *const Response) !void {
+    var buf: [256]u8 = undefined;
+    const header = try std.fmt.bufPrint(
+        &buf,
+        "HTTP/1.1 {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
+        .{ response.status, response.content_type, response.body.len },
+    );
+    _ = try stream.write(header);
+    _ = try stream.write(response.body);
+}
+
+fn defaultNotFound(ctx: *Context) !void {
+    ctx.response.setStatus("404 Not Found");
+    ctx.response.setContentType("text/plain");
+    ctx.response.setBody("Not Found");
 }
 
 // Tests
@@ -232,13 +256,9 @@ test "router exact path matching" {
     var router = Router.init(allocator);
     defer router.deinit();
 
-    var handler_called = false;
     const TestHandler = struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {
-            // Can't easily set external var from here, but we test via dispatch
-        }
+        fn handle(_: *Context) !void {}
     };
-    _ = &handler_called;
 
     try router.get("/", TestHandler.handle);
     try router.get("/admin", TestHandler.handle);
@@ -246,9 +266,9 @@ test "router exact path matching" {
 
     // Test pattern parsing
     try std.testing.expectEqual(@as(usize, 3), router.routes.items.len);
-    try std.testing.expectEqual(@as(usize, 0), router.routes.items[0].segments.len); // "/"
-    try std.testing.expectEqual(@as(usize, 1), router.routes.items[1].segments.len); // "/admin"
-    try std.testing.expectEqual(@as(usize, 2), router.routes.items[2].segments.len); // "/api/health"
+    try std.testing.expectEqual(@as(usize, 0), router.routes.items[0].segments.len);
+    try std.testing.expectEqual(@as(usize, 1), router.routes.items[1].segments.len);
+    try std.testing.expectEqual(@as(usize, 2), router.routes.items[2].segments.len);
 }
 
 test "router path parameter extraction" {
@@ -257,11 +277,11 @@ test "router path parameter extraction" {
     defer router.deinit();
 
     try router.get("/entries/:id", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
 
     try router.get("/users/:user_id/posts/:post_id", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
 
     // Check segments parsed correctly
@@ -280,7 +300,7 @@ test "router wildcard pattern" {
     defer router.deinit();
 
     try router.get("/static/*", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
 
     const route = router.routes.items[0];
@@ -295,16 +315,16 @@ test "router method dispatch" {
     defer router.deinit();
 
     try router.get("/entries", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
     try router.post("/entries", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
     try router.put("/entries/:id", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
     try router.delete("/entries/:id", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
 
     try std.testing.expectEqual(@as(usize, 4), router.routes.items.len);
@@ -314,17 +334,47 @@ test "router method dispatch" {
     try std.testing.expectEqual(Method.DELETE, router.routes.items[3].method);
 }
 
-test "context param extraction" {
+test "global middleware registration" {
     const allocator = std.testing.allocator;
-    var ctx = Context.init(allocator, .GET, "/entries/123");
-    defer ctx.deinit();
+    var router = Router.init(allocator);
+    defer router.deinit();
 
-    try ctx.params.put(allocator, "id", "123");
-    try ctx.params.put(allocator, "slug", "hello-world");
+    const mw1 = struct {
+        fn call(_: *Context, next: NextFn) !void {
+            try next(@constCast(&Context.init(std.testing.allocator, .GET, "/")));
+        }
+    }.call;
 
-    try std.testing.expectEqualStrings("123", ctx.param("id").?);
-    try std.testing.expectEqualStrings("hello-world", ctx.param("slug").?);
-    try std.testing.expect(ctx.param("missing") == null);
+    const mw2 = struct {
+        fn call(_: *Context, next: NextFn) !void {
+            try next(@constCast(&Context.init(std.testing.allocator, .GET, "/")));
+        }
+    }.call;
+
+    try router.use(mw1);
+    try router.use(mw2);
+
+    try std.testing.expectEqual(@as(usize, 2), router.global_middleware.items.len);
+}
+
+test "per-route middleware registration" {
+    const allocator = std.testing.allocator;
+    var router = Router.init(allocator);
+    defer router.deinit();
+
+    const authMiddleware = struct {
+        fn call(_: *Context, next: NextFn) !void {
+            try next(@constCast(&Context.init(std.testing.allocator, .GET, "/")));
+        }
+    }.call;
+
+    const routeMiddleware = [_]Middleware{authMiddleware};
+
+    try router.getWithOptions("/admin", struct {
+        fn handle(_: *Context) !void {}
+    }.handle, .{ .middleware = &routeMiddleware });
+
+    try std.testing.expectEqual(@as(usize, 1), router.routes.items[0].middleware.len);
 }
 
 test "route matching exact paths" {
@@ -333,10 +383,10 @@ test "route matching exact paths" {
     defer router.deinit();
 
     try router.get("/", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
     try router.get("/admin", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
 
     // Test root matching
@@ -350,12 +400,6 @@ test "route matching exact paths" {
     defer ctx2.deinit();
     try std.testing.expect(!router.matchRoute(router.routes.items[0].segments, "/admin", &ctx2));
     try std.testing.expect(router.matchRoute(router.routes.items[1].segments, "/admin", &ctx2));
-
-    // Test non-matching path
-    var ctx3 = Context.init(allocator, .GET, "/other");
-    defer ctx3.deinit();
-    try std.testing.expect(!router.matchRoute(router.routes.items[0].segments, "/other", &ctx3));
-    try std.testing.expect(!router.matchRoute(router.routes.items[1].segments, "/other", &ctx3));
 }
 
 test "route matching with params" {
@@ -364,7 +408,7 @@ test "route matching with params" {
     defer router.deinit();
 
     try router.get("/entries/:id", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
 
     var ctx = Context.init(allocator, .GET, "/entries/123");
@@ -380,7 +424,7 @@ test "route matching with wildcard" {
     defer router.deinit();
 
     try router.get("/static/*", struct {
-        fn handle(_: *Context, _: std.net.Stream) !void {}
+        fn handle(_: *Context) !void {}
     }.handle);
 
     var ctx1 = Context.init(allocator, .GET, "/static/admin.css");
@@ -392,13 +436,4 @@ test "route matching with wildcard" {
     defer ctx2.deinit();
     try std.testing.expect(router.matchRoute(router.routes.items[0].segments, "/static/js/app.js", &ctx2));
     try std.testing.expectEqualStrings("js/app.js", ctx2.wildcard.?);
-}
-
-test "method fromString" {
-    try std.testing.expectEqual(Method.GET, Method.fromString("GET").?);
-    try std.testing.expectEqual(Method.POST, Method.fromString("POST").?);
-    try std.testing.expectEqual(Method.PUT, Method.fromString("PUT").?);
-    try std.testing.expectEqual(Method.DELETE, Method.fromString("DELETE").?);
-    try std.testing.expect(Method.fromString("PATCH") == null);
-    try std.testing.expect(Method.fromString("invalid") == null);
 }

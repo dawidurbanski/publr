@@ -1,0 +1,395 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
+/// Request/response context passed through middleware chain
+pub const Context = struct {
+    // Request data
+    method: Method,
+    path: []const u8,
+    params: std.StringHashMapUnmanaged([]const u8),
+    wildcard: ?[]const u8,
+    allocator: Allocator,
+
+    // Response data (buffered for middleware to modify)
+    response: Response,
+
+    // Raw stream for streaming responses
+    stream: ?std.net.Stream,
+
+    // Arbitrary state for middleware to pass data
+    state: std.StringHashMapUnmanaged(*anyopaque),
+
+    pub fn init(allocator: Allocator, method: Method, path: []const u8) Context {
+        return .{
+            .method = method,
+            .path = path,
+            .params = .{},
+            .wildcard = null,
+            .allocator = allocator,
+            .response = Response.init(),
+            .stream = null,
+            .state = .{},
+        };
+    }
+
+    pub fn initWithStream(allocator: Allocator, method: Method, path: []const u8, stream: std.net.Stream) Context {
+        return .{
+            .method = method,
+            .path = path,
+            .params = .{},
+            .wildcard = null,
+            .allocator = allocator,
+            .response = Response.init(),
+            .stream = stream,
+            .state = .{},
+        };
+    }
+
+    /// Start a streaming response (sends headers, enables chunked transfer)
+    pub fn startStreaming(self: *Context, content_type: []const u8) !void {
+        if (self.stream) |s| {
+            const header = "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+            var buf: [256]u8 = undefined;
+            const formatted = try std.fmt.bufPrint(&buf, header, .{content_type});
+            _ = try s.write(formatted);
+            self.response.headers_sent = true;
+        }
+    }
+
+    /// Write a chunk to the streaming response
+    pub fn writeChunk(self: *Context, data: []const u8) !void {
+        if (self.stream) |s| {
+            // Write chunk size in hex
+            var size_buf: [20]u8 = undefined;
+            const size_str = try std.fmt.bufPrint(&size_buf, "{x}\r\n", .{data.len});
+            _ = try s.write(size_str);
+            // Write chunk data
+            _ = try s.write(data);
+            // Write chunk terminator
+            _ = try s.write("\r\n");
+        }
+    }
+
+    /// End the streaming response
+    pub fn endStreaming(self: *Context) !void {
+        if (self.stream) |s| {
+            // Write final chunk (zero-length)
+            _ = try s.write("0\r\n\r\n");
+        }
+    }
+
+    pub fn deinit(self: *Context) void {
+        self.params.deinit(self.allocator);
+        self.state.deinit(self.allocator);
+    }
+
+    /// Get a path parameter by name
+    pub fn param(self: *const Context, name: []const u8) ?[]const u8 {
+        return self.params.get(name);
+    }
+
+    /// Set state value (for middleware to pass data to handlers)
+    pub fn setState(self: *Context, key: []const u8, value: *anyopaque) !void {
+        try self.state.put(self.allocator, key, value);
+    }
+
+    /// Get state value
+    pub fn getState(self: *const Context, comptime T: type, key: []const u8) ?*T {
+        const ptr = self.state.get(key) orelse return null;
+        return @ptrCast(@alignCast(ptr));
+    }
+};
+
+/// Buffered response that middleware can inspect/modify
+pub const Response = struct {
+    status: []const u8,
+    content_type: []const u8,
+    body: []const u8,
+    headers_sent: bool,
+
+    pub fn init() Response {
+        return .{
+            .status = "200 OK",
+            .content_type = "text/html",
+            .body = "",
+            .headers_sent = false,
+        };
+    }
+
+    pub fn setStatus(self: *Response, status: []const u8) void {
+        self.status = status;
+    }
+
+    pub fn setContentType(self: *Response, content_type: []const u8) void {
+        self.content_type = content_type;
+    }
+
+    pub fn setBody(self: *Response, body: []const u8) void {
+        self.body = body;
+    }
+};
+
+/// HTTP methods supported by the router
+pub const Method = enum {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+
+    pub fn fromString(s: []const u8) ?Method {
+        if (std.mem.eql(u8, s, "GET")) return .GET;
+        if (std.mem.eql(u8, s, "POST")) return .POST;
+        if (std.mem.eql(u8, s, "PUT")) return .PUT;
+        if (std.mem.eql(u8, s, "DELETE")) return .DELETE;
+        return null;
+    }
+};
+
+/// Function to call next middleware or handler in chain
+pub const NextFn = *const fn (*Context) anyerror!void;
+
+/// Middleware function signature
+pub const Middleware = *const fn (*Context, NextFn) anyerror!void;
+
+/// Handler function signature (final handler, no next)
+pub const Handler = *const fn (*Context) anyerror!void;
+
+/// Executes a middleware chain, then calls the handler
+pub fn executeChain(
+    ctx: *Context,
+    global_middleware: []const Middleware,
+    route_middleware: []const Middleware,
+    handler: Handler,
+) anyerror!void {
+    // Build combined chain: global + route middleware
+    const ChainState = struct {
+        global: []const Middleware,
+        route: []const Middleware,
+        handler: Handler,
+        global_idx: usize,
+        route_idx: usize,
+
+        fn next(state: *@This(), c: *Context) anyerror!void {
+            // First, execute global middleware
+            if (state.global_idx < state.global.len) {
+                const mw = state.global[state.global_idx];
+                state.global_idx += 1;
+                return mw(c, makeNextFn(state));
+            }
+
+            // Then, execute route middleware
+            if (state.route_idx < state.route.len) {
+                const mw = state.route[state.route_idx];
+                state.route_idx += 1;
+                return mw(c, makeNextFn(state));
+            }
+
+            // Finally, call the handler
+            return state.handler(c);
+        }
+
+        fn makeNextFn(state: *@This()) NextFn {
+            // Create a closure-like function pointer
+            // We use a thread-local to pass state since Zig doesn't have closures
+            current_chain = state;
+            return &chainNext;
+        }
+    };
+
+    var state = ChainState{
+        .global = global_middleware,
+        .route = route_middleware,
+        .handler = handler,
+        .global_idx = 0,
+        .route_idx = 0,
+    };
+
+    try state.next(ctx);
+}
+
+// Thread-local storage for chain state (needed for NextFn callback)
+threadlocal var current_chain: ?*anyopaque = null;
+
+fn chainNext(ctx: *Context) anyerror!void {
+    const ChainState = struct {
+        global: []const Middleware,
+        route: []const Middleware,
+        handler: Handler,
+        global_idx: usize,
+        route_idx: usize,
+
+        fn next(state: *@This(), c: *Context) anyerror!void {
+            if (state.global_idx < state.global.len) {
+                const mw = state.global[state.global_idx];
+                state.global_idx += 1;
+                current_chain = state;
+                return mw(c, &chainNext);
+            }
+            if (state.route_idx < state.route.len) {
+                const mw = state.route[state.route_idx];
+                state.route_idx += 1;
+                current_chain = state;
+                return mw(c, &chainNext);
+            }
+            return state.handler(c);
+        }
+    };
+
+    if (current_chain) |ptr| {
+        const state: *ChainState = @ptrCast(@alignCast(ptr));
+        try state.next(ctx);
+    }
+}
+
+// Tests
+test "context init and deinit" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/test");
+    defer ctx.deinit();
+
+    try std.testing.expectEqual(Method.GET, ctx.method);
+    try std.testing.expectEqualStrings("/test", ctx.path);
+}
+
+test "context params" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/entries/123");
+    defer ctx.deinit();
+
+    try ctx.params.put(allocator, "id", "123");
+    try std.testing.expectEqualStrings("123", ctx.param("id").?);
+    try std.testing.expect(ctx.param("missing") == null);
+}
+
+test "context state" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/test");
+    defer ctx.deinit();
+
+    var user_id: u32 = 42;
+    try ctx.setState("user_id", &user_id);
+
+    const retrieved = ctx.getState(u32, "user_id").?;
+    try std.testing.expectEqual(@as(u32, 42), retrieved.*);
+}
+
+test "response defaults" {
+    const resp = Response.init();
+    try std.testing.expectEqualStrings("200 OK", resp.status);
+    try std.testing.expectEqualStrings("text/html", resp.content_type);
+    try std.testing.expectEqualStrings("", resp.body);
+}
+
+test "response modification" {
+    var resp = Response.init();
+    resp.setStatus("404 Not Found");
+    resp.setContentType("application/json");
+    resp.setBody("{\"error\": \"not found\"}");
+
+    try std.testing.expectEqualStrings("404 Not Found", resp.status);
+    try std.testing.expectEqualStrings("application/json", resp.content_type);
+    try std.testing.expectEqualStrings("{\"error\": \"not found\"}", resp.body);
+}
+
+test "method fromString" {
+    try std.testing.expectEqual(Method.GET, Method.fromString("GET").?);
+    try std.testing.expectEqual(Method.POST, Method.fromString("POST").?);
+    try std.testing.expectEqual(Method.PUT, Method.fromString("PUT").?);
+    try std.testing.expectEqual(Method.DELETE, Method.fromString("DELETE").?);
+    try std.testing.expect(Method.fromString("PATCH") == null);
+}
+
+test "middleware chain execution" {
+    const allocator = std.testing.allocator;
+
+    // Track execution order
+    const TestState = struct {
+        var order: [10]u8 = undefined;
+        var idx: usize = 0;
+
+        fn reset() void {
+            idx = 0;
+            order = undefined;
+        }
+
+        fn record(c: u8) void {
+            if (idx < order.len) {
+                order[idx] = c;
+                idx += 1;
+            }
+        }
+    };
+
+    TestState.reset();
+
+    const mw1 = struct {
+        fn call(_: *Context, next: NextFn) !void {
+            TestState.record('1');
+            try next(@constCast(&Context.init(std.testing.allocator, .GET, "/")));
+            TestState.record('a');
+        }
+    }.call;
+
+    const mw2 = struct {
+        fn call(_: *Context, next: NextFn) !void {
+            TestState.record('2');
+            try next(@constCast(&Context.init(std.testing.allocator, .GET, "/")));
+            TestState.record('b');
+        }
+    }.call;
+
+    const handler = struct {
+        fn call(_: *Context) !void {
+            TestState.record('H');
+        }
+    }.call;
+
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    const global = [_]Middleware{mw1};
+    const route = [_]Middleware{mw2};
+
+    try executeChain(&ctx, &global, &route, handler);
+
+    // Expected order: 1 -> 2 -> H -> b -> a
+    try std.testing.expectEqualStrings("12Hba", TestState.order[0..TestState.idx]);
+}
+
+test "middleware can short-circuit" {
+    const allocator = std.testing.allocator;
+
+    const TestState = struct {
+        var handler_called: bool = false;
+
+        fn reset() void {
+            handler_called = false;
+        }
+    };
+
+    TestState.reset();
+
+    const authMiddleware = struct {
+        fn call(ctx: *Context, _: NextFn) !void {
+            // Short-circuit: don't call next
+            ctx.response.setStatus("401 Unauthorized");
+        }
+    }.call;
+
+    const handler = struct {
+        fn call(_: *Context) !void {
+            TestState.handler_called = true;
+        }
+    }.call;
+
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    const global = [_]Middleware{authMiddleware};
+    const route = [_]Middleware{};
+
+    try executeChain(&ctx, &global, &route, handler);
+
+    try std.testing.expect(!TestState.handler_called);
+    try std.testing.expectEqualStrings("401 Unauthorized", ctx.response.status);
+}
