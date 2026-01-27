@@ -77,7 +77,7 @@ pub fn build(b: *std.Build) void {
 
     // Import ZSX runtime
     const zsx_runtime = b.createModule(.{
-        .root_source_file = b.path("src/zsx_runtime.zig"),
+        .root_source_file = b.path("src/tools/zsx_runtime.zig"),
     });
 
     // Import generated ZSX views
