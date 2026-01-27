@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@config "./tailwind.config.js";
+
+div {
+    background-color: rgb(30, 30, 33);
+}
+
+h1, p {
+    color: #74fdfd;
+}

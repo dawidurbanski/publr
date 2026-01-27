@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const http = @import("http.zig");
+const mz_config = @import("mz_config");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -60,14 +61,14 @@ fn runServe(args: *std.process.ArgIterator) !void {
             printWatchNotSupportedWindows();
             return;
         }
-        execWatchexec(port, dev_mode) catch |err| {
+        runWithWatchers(port, dev_mode) catch |err| {
             if (err == error.FileNotFound) {
                 printWatchexecMissing();
                 return;
             }
             return err;
         };
-        unreachable;
+        return;
     }
 
     try http.serve(port, dev_mode);
@@ -90,26 +91,58 @@ fn resolvePort(cli_port: ?u16) u16 {
     return 8080;
 }
 
-/// Execs watchexec to watch .zig files and restart the server on changes.
-/// This replaces the current process with watchexec.
-fn execWatchexec(port: u16, dev_mode: bool) !void {
-    // Build inner command: "zig build run -- serve --port {port} [--dev]"
-    var cmd_buf: [128]u8 = undefined;
-    const inner_cmd = if (dev_mode)
-        try std.fmt.bufPrint(&cmd_buf, "zig build run -- serve --port {d} --dev", .{port})
-    else
-        try std.fmt.bufPrint(&cmd_buf, "zig build run -- serve --port {d}", .{port});
+/// Runs the server with watchexec watchers.
+/// Spawns watchexec for .zig/.zon files (server rebuild) and user-defined watchers from mz.zon.
+fn runWithWatchers(port: u16, dev_mode: bool) !void {
+    // Build inner command: run watcher commands then start server
+    // All watcher commands run before zig build so Tailwind CSS is ready
+    var cmd_buf: [512]u8 = undefined;
+    var cmd_offset: usize = 0;
 
-    // Null-terminate for execvpeZ
-    var inner_cmd_z: [129]u8 = undefined;
+    if (@hasField(@TypeOf(mz_config), "dev")) {
+        if (@hasField(@TypeOf(mz_config.dev), "watchers")) {
+            inline for (mz_config.dev.watchers) |watcher| {
+                // Append each watcher command joined by " && "
+                inline for (watcher.cmd, 0..) |arg, i| {
+                    if (i > 0) {
+                        @memcpy(cmd_buf[cmd_offset..][0..1], " ");
+                        cmd_offset += 1;
+                    }
+                    @memcpy(cmd_buf[cmd_offset..][0..arg.len], arg);
+                    cmd_offset += arg.len;
+                }
+                @memcpy(cmd_buf[cmd_offset..][0..4], " && ");
+                cmd_offset += 4;
+            }
+        }
+    }
+
+    const server_cmd = if (dev_mode)
+        try std.fmt.bufPrint(cmd_buf[cmd_offset..], "zig build run -- serve --port {d} --dev", .{port})
+    else
+        try std.fmt.bufPrint(cmd_buf[cmd_offset..], "zig build run -- serve --port {d}", .{port});
+    cmd_offset += server_cmd.len;
+
+    const inner_cmd = cmd_buf[0..cmd_offset];
+
+    // Exec into main watchexec
+    var inner_cmd_z: [513]u8 = undefined;
     @memcpy(inner_cmd_z[0..inner_cmd.len], inner_cmd);
     inner_cmd_z[inner_cmd.len] = 0;
+
+    // In dev mode, don't watch .css - it's served from disk at runtime
+    // Watch .zsx so template edits trigger rebuild (ZSX compiles to Zig)
+    const extensions = if (dev_mode) "zig,zon,zsx" else "zig,zon,zsx,css";
 
     const argv = [_:null]?[*:0]const u8{
         "watchexec",
         "-r",
+        "--stop-signal=SIGINT",
+        "--stop-timeout=0",
         "-e",
-        "zig",
+        extensions,
+        "-i",
+        "src/gen/**",
         @ptrCast(&inner_cmd_z),
     };
 
