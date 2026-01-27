@@ -4,7 +4,7 @@ A single-file CMS written in Zig. Zero dependencies, one binary, one SQLite data
 
 ## Philosophy
 
-No frameworks, no npm, no external dependencies. Every line of code is ours. Target ~4,000 lines of Zig total.
+No frameworks, no npm, no external dependencies. Single binary, zero runtime dependencies. Every line of code is ours.
 
 ## Tech Stack
 
