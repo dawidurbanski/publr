@@ -22,6 +22,13 @@ const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
 const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
 const ThemeCss = static.Asset("theme.css", @embedFile("static_theme_css"));
 
+// Interact modules (shared between admin and themes)
+const InteractCore = static.Asset("core.js", @embedFile("static_interact_core_js"));
+const InteractToggle = static.Asset("toggle.js", @embedFile("static_interact_toggle_js"));
+const InteractPortal = static.Asset("portal.js", @embedFile("static_interact_portal_js"));
+const InteractFocusTrap = static.Asset("focus-trap.js", @embedFile("static_interact_focus_trap_js"));
+const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_dismiss_js"));
+
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
 
@@ -339,6 +346,16 @@ fn handleStatic(ctx: *Context) !void {
         AdminJs.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "theme.css")) {
         ThemeCss.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/core.js")) {
+        InteractCore.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/toggle.js")) {
+        InteractToggle.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/portal.js")) {
+        InteractPortal.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/focus-trap.js")) {
+        InteractFocusTrap.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/dismiss.js")) {
+        InteractDismiss.serve(ctx, if_none_match);
     } else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");
@@ -355,6 +372,16 @@ fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
         "static/admin.js"
     else if (std.mem.eql(u8, file, "theme.css"))
         "themes/demo/static/theme.css"
+    else if (std.mem.eql(u8, file, "interact/core.js"))
+        "static/interact/core.js"
+    else if (std.mem.eql(u8, file, "interact/toggle.js"))
+        "static/interact/toggle.js"
+    else if (std.mem.eql(u8, file, "interact/portal.js"))
+        "static/interact/portal.js"
+    else if (std.mem.eql(u8, file, "interact/focus-trap.js"))
+        "static/interact/focus-trap.js"
+    else if (std.mem.eql(u8, file, "interact/dismiss.js"))
+        "static/interact/dismiss.js"
     else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");

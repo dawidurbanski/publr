@@ -71,6 +71,21 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addAnonymousImport("static_admin_js", .{
         .root_source_file = b.path("static/admin.js"),
     });
+    exe.root_module.addAnonymousImport("static_interact_core_js", .{
+        .root_source_file = b.path("static/interact/core.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_toggle_js", .{
+        .root_source_file = b.path("static/interact/toggle.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_portal_js", .{
+        .root_source_file = b.path("static/interact/portal.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_focus_trap_js", .{
+        .root_source_file = b.path("static/interact/focus-trap.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_dismiss_js", .{
+        .root_source_file = b.path("static/interact/dismiss.js"),
+    });
     exe.root_module.addAnonymousImport("static_theme_css", .{
         .root_source_file = b.path("themes/demo/static/theme.css"),
     });
