@@ -5,12 +5,22 @@ const Context = @import("router.zig").Context;
 const Method = @import("router.zig").Method;
 const logger = @import("logger.zig");
 const static = @import("static.zig");
-const layout = @import("layout.zig");
 const error_pages = @import("error.zig");
+const tpl = @import("tpl.zig");
+const dev = @import("dev.zig");
+
+// Generated ZSX templates
+const zsx_base = @import("zsx_base");
+const zsx_index = @import("zsx_index");
+const zsx_admin_layout = @import("zsx_admin_layout");
+const zsx_admin_dashboard = @import("zsx_admin_dashboard");
+const zsx_admin_posts_list = @import("zsx_admin_posts_list");
+const zsx_admin_posts_edit = @import("zsx_admin_posts_edit");
 
 // Embedded static assets with compile-time metadata
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
 const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
+const ThemeCss = static.Asset("theme.css", @embedFile("static_theme_css"));
 
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -21,7 +31,11 @@ var active_connections: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 // Global router instance (initialized once at startup)
 var global_router: ?Router = null;
 
+// Global dev mode flag for handlers
+var is_dev_mode: bool = false;
+
 pub fn serve(port: u16, dev_mode: bool) !void {
+    is_dev_mode = dev_mode;
     // Initialize router
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -30,21 +44,28 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     var router = Router.init(allocator);
     defer router.deinit();
 
-    // Initialize error handling
+    // Initialize error handling and template system
     error_pages.init(dev_mode);
+    tpl.init(dev_mode);
 
     // Error middleware first (catches all errors)
     try router.use(error_pages.errorMiddleware);
 
     // Dev mode middleware
     if (dev_mode) {
-        std.debug.print("Dev mode enabled\n", .{});
+        std.debug.print("Dev mode enabled (live reload active)\n", .{});
+        try router.use(dev.devMiddleware);
         try router.use(logger.requestLogger);
+        try router.get("/__dev/events", dev.eventsHandler);
+        try router.get("/__dev/ready", dev.readyHandler);
     }
 
     // Register routes
     try router.get("/", handleIndex);
-    try router.get("/admin", handleAdmin);
+    try router.get("/admin", handleAdminDashboard);
+    try router.get("/admin/posts", handleAdminPosts);
+    try router.get("/admin/posts/new", handleAdminPostNew);
+    try router.get("/admin/posts/*", handleAdminPostEdit);
     try router.get("/static/*", handleStatic);
 
     // Dev-only test route to trigger 500 error
@@ -202,21 +223,93 @@ fn handleConnection(stream: std.net.Stream) !void {
 }
 
 fn handleIndex(ctx: *Context) !void {
-    const content = indexContent();
+    const content = tpl.renderFnToSlice(zsx_index.Index, .{});
     if (ctx.isPartial()) {
         ctx.html(content);
     } else {
-        ctx.html(layout.wrapLayout(content, layout.public_layout));
+        ctx.html(wrapWithBase(content, "Minizen", &.{"/static/theme.css"}, &.{}));
     }
 }
 
-fn handleAdmin(ctx: *Context) !void {
-    const content = adminContent();
-    if (ctx.isPartial()) {
-        ctx.html(content);
-    } else {
-        ctx.html(layout.wrapLayout(content, layout.admin_layout));
-    }
+fn handleAdminDashboard(ctx: *Context) !void {
+    // Mock data
+    const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
+    const posts = [_]Post{
+        .{ .id = "1", .title = "Welcome to Minizen", .status = "published", .date = "2024-01-15" },
+        .{ .id = "2", .title = "Getting Started Guide", .status = "draft", .date = "2024-01-14" },
+    };
+
+    const content = tpl.renderFnToSlice(zsx_admin_dashboard.Dashboard, .{
+        "12", "5", "34", "3", true, &posts,
+    });
+
+    ctx.html(wrapAdmin(content, "Dashboard", "", .{ .dashboard = true, .posts = false, .settings = false }));
+}
+
+fn handleAdminPosts(ctx: *Context) !void {
+    const Post = struct { id: []const u8, title: []const u8, author: []const u8, status: []const u8, date: []const u8 };
+    const posts = [_]Post{
+        .{ .id = "1", .title = "Welcome to Minizen", .author = "Admin", .status = "published", .date = "2024-01-15" },
+        .{ .id = "2", .title = "Getting Started Guide", .author = "Admin", .status = "draft", .date = "2024-01-14" },
+        .{ .id = "3", .title = "Advanced Features", .author = "Admin", .status = "draft", .date = "2024-01-13" },
+    };
+
+    const content = tpl.renderFnToSlice(zsx_admin_posts_list.List, .{
+        true, &posts,
+    });
+
+    const actions = "<a href=\"/admin/posts/new\" class=\"btn btn-primary\">New Post</a>";
+    ctx.html(wrapAdmin(content, "Posts", actions, .{ .dashboard = false, .posts = true, .settings = false }));
+}
+
+fn handleAdminPostNew(ctx: *Context) !void {
+    const content = tpl.renderFnToSlice(zsx_admin_posts_edit.Edit, .{
+        .{
+            .title = "",
+            .slug = "",
+            .content = "",
+            .date = "2024-01-15",
+            .is_draft = true,
+            .is_published = false,
+        },
+    });
+
+    ctx.html(wrapAdmin(content, "New Post", "", .{ .dashboard = false, .posts = true, .settings = false }));
+}
+
+fn handleAdminPostEdit(ctx: *Context) !void {
+    _ = ctx.wildcard; // post ID
+
+    const content = tpl.renderFnToSlice(zsx_admin_posts_edit.Edit, .{
+        .{
+            .title = "Welcome to Minizen",
+            .slug = "welcome-to-minizen",
+            .content = "This is the content of the post...",
+            .date = "2024-01-15",
+            .is_draft = false,
+            .is_published = true,
+        },
+    });
+
+    ctx.html(wrapAdmin(content, "Edit Post", "", .{ .dashboard = false, .posts = true, .settings = false }));
+}
+
+const NavState = struct {
+    dashboard: bool,
+    posts: bool,
+    settings: bool,
+};
+
+fn wrapAdmin(content: []const u8, title: []const u8, actions: []const u8, nav: NavState) []const u8 {
+    return tpl.renderFnToSlice(zsx_admin_layout.Layout, .{
+        title, content, actions, nav.dashboard, nav.posts, nav.settings,
+    });
+}
+
+fn wrapWithBase(content: []const u8, title: []const u8, css: []const []const u8, js: []const []const u8) []const u8 {
+    return tpl.renderFnToSlice(zsx_base.Base, .{
+        title, content, css, js,
+    });
 }
 
 fn handleErrorTest(_: *Context) !void {
@@ -231,17 +324,55 @@ fn handleStatic(ctx: *Context) !void {
         return;
     };
 
+    // In dev mode, serve from disk for instant updates
+    if (is_dev_mode) {
+        serveStaticFromDisk(ctx, file);
+        return;
+    }
+
+    // Production: use embedded assets
     const if_none_match = ctx.getRequestHeader("If-None-Match");
 
     if (std.mem.eql(u8, file, "admin.css")) {
         AdminCss.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "admin.js")) {
         AdminJs.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "theme.css")) {
+        ThemeCss.serve(ctx, if_none_match);
     } else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");
         ctx.response.setBody("Not Found");
     }
+}
+
+/// Serve static files from disk (dev mode only)
+fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
+    // Map file names to disk paths
+    const path = if (std.mem.eql(u8, file, "admin.css"))
+        "static/admin.css"
+    else if (std.mem.eql(u8, file, "admin.js"))
+        "static/admin.js"
+    else if (std.mem.eql(u8, file, "theme.css"))
+        "themes/demo/static/theme.css"
+    else {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setContentType("text/plain");
+        ctx.response.setBody("Not Found");
+        return;
+    };
+
+    // Read file from disk
+    const content = std.fs.cwd().readFileAlloc(std.heap.page_allocator, path, 1024 * 1024) catch {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setContentType("text/plain");
+        ctx.response.setBody("File not found");
+        return;
+    };
+    // Note: memory leak in dev mode, acceptable for development
+
+    ctx.response.setContentType(static.getMimeType(file));
+    ctx.response.setBody(content);
 }
 
 fn sendResponse(
@@ -258,20 +389,4 @@ fn sendResponse(
     );
     _ = try stream.write(header);
     _ = try stream.write(body);
-}
-
-fn indexContent() []const u8 {
-    return 
-    \\<h1>Hello from Minizen</h1>
-    \\<p><a href="/admin">Go to Admin</a></p>
-    ;
-}
-
-fn adminContent() []const u8 {
-    return 
-    \\<div class="container">
-    \\    <h1>Minizen Admin</h1>
-    \\    <p>Admin panel placeholder</p>
-    \\</div>
-    ;
 }
