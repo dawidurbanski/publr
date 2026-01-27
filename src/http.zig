@@ -167,7 +167,10 @@ fn handleConnection(stream: std.net.Stream) !void {
 
     var parts = std.mem.splitScalar(u8, first_line, ' ');
     const method_str = parts.next() orelse "GET";
-    const path = parts.next() orelse "/";
+    const raw_path = parts.next() orelse "/";
+
+    // Strip query string — router matches on path only
+    const path = if (std.mem.indexOfScalar(u8, raw_path, '?')) |qi| raw_path[0..qi] else raw_path;
 
     const method = Method.fromString(method_str) orelse .GET;
 

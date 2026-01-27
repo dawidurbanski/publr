@@ -1,0 +1,17 @@
+// 500 error page template (development mode with details)
+pub fn Error500Dev(error_name: []const u8, trace_section: []const u8) {
+    <div style="padding: 40px 20px; font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 0 auto;">
+        <div style="background: #fdf2f2; border: 1px solid #e74c3c; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h1 style="font-size: 24px; margin: 0 0 10px 0; color: #c0392b;">&#x26A0; Internal Server Error</h1>
+            <p style="margin: 0; color: #7f8c8d; font-size: 14px;">Development mode - this page shows error details</p>
+        </div>
+        <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px;">
+            <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Error</h2>
+            <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;">error.{error_name}</pre>
+        </div>
+        {!trace_section}
+        <div style="margin-top: 30px; text-align: center;">
+            <a href="/" style="color: #3498db; text-decoration: none;">&#x2190; Back to Home</a>
+        </div>
+    </div>
+}

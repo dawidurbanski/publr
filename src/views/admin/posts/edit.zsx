@@ -1,0 +1,51 @@
+// Post edit template
+const PostData = struct {
+    title: []const u8,
+    slug: []const u8,
+    content: []const u8,
+    date: []const u8,
+    is_draft: bool,
+    is_published: bool,
+};
+
+pub fn Edit(post: PostData) {
+    <form method="POST" class="form">
+        <div class="form-group">
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" value={post.title} class="form-control" required="" />
+        </div>
+        <div class="form-group">
+            <label for="slug">Slug</label>
+            <input type="text" id="slug" name="slug" value={post.slug} class="form-control" />
+        </div>
+        <div class="form-group">
+            <label for="content">Content</label>
+            <textarea id="content" name="content" class="form-control" rows="12">{post.content}</textarea>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="status">Status</label>
+                <select id="status" name="status" class="form-control">
+                    {if (post.is_draft) (
+                        <option value="draft" selected="">Draft</option>
+                    ) else (
+                        <option value="draft">Draft</option>
+                    )}
+                    {if (post.is_published) (
+                        <option value="published" selected="">Published</option>
+                    ) else (
+                        <option value="published">Published</option>
+                    )}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="date">Publish Date</label>
+                <input type="date" id="date" name="date" value={post.date} class="form-control" />
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save</button>
+            <a href="/admin/posts" class="btn">Cancel</a>
+        </div>
+    </form>
+}

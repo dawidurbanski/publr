@@ -1,0 +1,12 @@
+// 404 error page template
+pub fn Error404(status_code: []const u8, title: []const u8, message: []const u8) {
+    <div style="text-align: center; padding: 60px 20px; font-family: system-ui, -apple-system, sans-serif;">
+        <h1 style="font-size: 72px; margin: 0; color: #e74c3c;">{status_code}</h1>
+        <h2 style="margin: 20px 0; color: #2c3e50;">{title}</h2>
+        <p style="color: #7f8c8d; margin-bottom: 30px;">{message}</p>
+        <div>
+            <a href="/" style="color: #3498db; text-decoration: none; margin-right: 20px;">&#x2190; Home</a>
+            <a href="/admin" style="color: #3498db; text-decoration: none;">Admin &#x2192;</a>
+        </div>
+    </div>
+}
