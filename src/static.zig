@@ -39,7 +39,7 @@ const ETAG_LEN = 18;
 /// Generate ETag from content at compile time using FNV-1a hash
 /// Returns a fixed-size array that can be embedded in structs
 pub fn compileTimeETag(comptime content: []const u8) [ETAG_LEN]u8 {
-    @setEvalBranchQuota(10000);
+    @setEvalBranchQuota(content.len * 10 + 1000);
     const hash = std.hash.Fnv1a_64.hash(content);
     const hex_chars = "0123456789abcdef";
     var buf: [ETAG_LEN]u8 = undefined;
