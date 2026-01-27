@@ -1,9 +1,16 @@
 const std = @import("std");
 const posix = std.posix;
+const Router = @import("router.zig").Router;
+const Context = @import("router.zig").Context;
+const Method = @import("router.zig").Method;
+const logger = @import("logger.zig");
+const static = @import("static.zig");
+const layout = @import("layout.zig");
+const error_pages = @import("error.zig");
 
-// Embedded static assets
-const admin_css = @embedFile("static_admin_css");
-const admin_js = @embedFile("static_admin_js");
+// Embedded static assets with compile-time metadata
+const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
+const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
 
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -11,8 +18,45 @@ var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(fal
 // Track active connections for graceful shutdown
 var active_connections: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 
+// Global router instance (initialized once at startup)
+var global_router: ?Router = null;
+
 pub fn serve(port: u16, dev_mode: bool) !void {
-    _ = dev_mode; // TODO: implement hot reload
+    // Initialize router
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var router = Router.init(allocator);
+    defer router.deinit();
+
+    // Initialize error handling
+    error_pages.init(dev_mode);
+
+    // Error middleware first (catches all errors)
+    try router.use(error_pages.errorMiddleware);
+
+    // Dev mode middleware
+    if (dev_mode) {
+        std.debug.print("Dev mode enabled\n", .{});
+        try router.use(logger.requestLogger);
+    }
+
+    // Register routes
+    try router.get("/", handleIndex);
+    try router.get("/admin", handleAdmin);
+    try router.get("/static/*", handleStatic);
+
+    // Dev-only test route to trigger 500 error
+    if (dev_mode) {
+        try router.get("/error-test", handleErrorTest);
+    }
+
+    // Custom 404 handler
+    router.setNotFound(error_pages.notFoundHandler);
+
+    global_router = router;
+    defer global_router = null;
 
     // Set up signal handlers for graceful shutdown
     setupSignalHandlers();
@@ -108,6 +152,8 @@ fn handleConnectionThread(stream: std.net.Stream) void {
     };
 }
 
+const RequestHeader = @import("middleware.zig").RequestHeader;
+
 fn handleConnection(stream: std.net.Stream) !void {
     var buf: [4096]u8 = undefined;
     const n = try stream.read(&buf);
@@ -120,34 +166,78 @@ fn handleConnection(stream: std.net.Stream) !void {
     const first_line = lines.first();
 
     var parts = std.mem.splitScalar(u8, first_line, ' ');
-    _ = parts.next(); // method
+    const method_str = parts.next() orelse "GET";
     const path = parts.next() orelse "/";
 
-    try handleRequest(stream, path);
-}
+    const method = Method.fromString(method_str) orelse .GET;
 
-fn handleRequest(stream: std.net.Stream, path: []const u8) !void {
-    // Remove trailing \r if present
-    const clean_path = std.mem.trimRight(u8, path, "\r");
+    // Parse headers
+    var headers: [16]RequestHeader = undefined;
+    var header_count: usize = 0;
 
-    if (std.mem.eql(u8, clean_path, "/")) {
-        try sendResponse(stream, "200 OK", "text/html", indexPage());
-    } else if (std.mem.eql(u8, clean_path, "/admin")) {
-        try sendResponse(stream, "200 OK", "text/html", adminPage());
-    } else if (std.mem.startsWith(u8, clean_path, "/static/")) {
-        try serveStatic(stream, clean_path[8..]);
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trimRight(u8, line, "\r");
+        if (trimmed.len == 0) break; // Empty line marks end of headers
+
+        if (std.mem.indexOf(u8, trimmed, ": ")) |colon_pos| {
+            if (header_count < headers.len) {
+                headers[header_count] = .{
+                    .name = trimmed[0..colon_pos],
+                    .value = trimmed[colon_pos + 2 ..],
+                };
+                header_count += 1;
+            }
+        }
+    }
+
+    if (global_router) |*router| {
+        try router.dispatch(method, path, stream, headers[0..header_count]);
     } else {
-        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+        // Fallback if router not initialized
+        try sendResponse(stream, "500 Internal Server Error", "text/plain", "Server not initialized");
     }
 }
 
-fn serveStatic(stream: std.net.Stream, file: []const u8) !void {
-    if (std.mem.eql(u8, file, "admin.css")) {
-        try sendResponse(stream, "200 OK", "text/css", admin_css);
-    } else if (std.mem.eql(u8, file, "admin.js")) {
-        try sendResponse(stream, "200 OK", "application/javascript", admin_js);
+fn handleIndex(ctx: *Context) !void {
+    const content = indexContent();
+    if (ctx.isPartial()) {
+        ctx.html(content);
     } else {
-        try sendResponse(stream, "404 Not Found", "text/plain", "Not Found");
+        ctx.html(layout.wrapLayout(content, layout.public_layout));
+    }
+}
+
+fn handleAdmin(ctx: *Context) !void {
+    const content = adminContent();
+    if (ctx.isPartial()) {
+        ctx.html(content);
+    } else {
+        ctx.html(layout.wrapLayout(content, layout.admin_layout));
+    }
+}
+
+fn handleErrorTest(_: *Context) !void {
+    return error.TestError;
+}
+
+fn handleStatic(ctx: *Context) !void {
+    const file = ctx.wildcard orelse {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setContentType("text/plain");
+        ctx.response.setBody("Not Found");
+        return;
+    };
+
+    const if_none_match = ctx.getRequestHeader("If-None-Match");
+
+    if (std.mem.eql(u8, file, "admin.css")) {
+        AdminCss.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "admin.js")) {
+        AdminJs.serve(ctx, if_none_match);
+    } else {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setContentType("text/plain");
+        ctx.response.setBody("Not Found");
     }
 }
 
@@ -167,38 +257,18 @@ fn sendResponse(
     _ = try stream.write(body);
 }
 
-fn indexPage() []const u8 {
+fn indexContent() []const u8 {
     return 
-    \\<!DOCTYPE html>
-    \\<html>
-    \\<head>
-    \\    <meta charset="utf-8">
-    \\    <title>Minizen</title>
-    \\</head>
-    \\<body>
-    \\    <h1>Hello from Minizen</h1>
-    \\    <p><a href="/admin">Go to Admin</a></p>
-    \\</body>
-    \\</html>
+    \\<h1>Hello from Minizen</h1>
+    \\<p><a href="/admin">Go to Admin</a></p>
     ;
 }
 
-fn adminPage() []const u8 {
+fn adminContent() []const u8 {
     return 
-    \\<!DOCTYPE html>
-    \\<html>
-    \\<head>
-    \\    <meta charset="utf-8">
-    \\    <title>Minizen Admin</title>
-    \\    <link rel="stylesheet" href="/static/admin.css">
-    \\</head>
-    \\<body>
-    \\    <div class="container">
-    \\        <h1>Minizen Admin</h1>
-    \\        <p>Admin panel placeholder</p>
-    \\    </div>
-    \\    <script src="/static/admin.js"></script>
-    \\</body>
-    \\</html>
+    \\<div class="container">
+    \\    <h1>Minizen Admin</h1>
+    \\    <p>Admin panel placeholder</p>
+    \\</div>
     ;
 }
