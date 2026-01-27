@@ -10,6 +10,9 @@ pub fn requestLogger(ctx: *Context, next: NextFn) anyerror!void {
 
     try next(ctx);
 
+    // Skip logging dev ping requests (live reload)
+    if (std.mem.startsWith(u8, ctx.path, "/__dev/")) return;
+
     const elapsed = std.time.milliTimestamp() - start;
     std.debug.print("[{s}] {s} ({s}) {d}ms\n", .{
         @tagName(ctx.method),

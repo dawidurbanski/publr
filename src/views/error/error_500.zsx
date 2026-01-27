@@ -1,0 +1,11 @@
+// 500 error page template (production)
+pub fn Error500() {
+    <div style="text-align: center; padding: 60px 20px; font-family: system-ui, -apple-system, sans-serif;">
+        <h1 style="font-size: 72px; margin: 0; color: #e74c3c;">500</h1>
+        <h2 style="margin: 20px 0; color: #2c3e50;">Something Went Wrong</h2>
+        <p style="color: #7f8c8d; margin-bottom: 30px;">We're sorry, but something went wrong on our end. Please try again later.</p>
+        <div>
+            <a href="/" style="color: #3498db; text-decoration: none;">&#x2190; Back to Home</a>
+        </div>
+    </div>
+}

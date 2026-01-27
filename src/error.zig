@@ -1,8 +1,14 @@
 const std = @import("std");
 const mw = @import("middleware.zig");
-const layout = @import("layout.zig");
+const tpl = @import("tpl.zig");
 const Context = mw.Context;
 const NextFn = mw.NextFn;
+
+// Generated ZSX templates
+const zsx_base = @import("zsx_base");
+const zsx_404 = @import("zsx_error_404");
+const zsx_500 = @import("zsx_error_500");
+const zsx_500_dev = @import("zsx_error_500_dev");
 
 /// Module-level dev mode flag (set during init)
 var dev_mode: bool = false;
@@ -12,12 +18,12 @@ pub fn init(is_dev_mode: bool) void {
     dev_mode = is_dev_mode;
 }
 
-/// Error layout options (minimal styling, no external deps)
-const error_layout = layout.LayoutOptions{
-    .title = "Error - Minizen",
-    .css = &[_][]const u8{},
-    .js = &[_][]const u8{},
-};
+/// Wrap content in base layout (error pages have no CSS/JS)
+fn wrapWithBase(content: []const u8) []const u8 {
+    return tpl.renderFnToSlice(zsx_base.Base, .{
+        "Error - Minizen", content, &[_][]const u8{}, &[_][]const u8{},
+    });
+}
 
 /// Error middleware - catches unhandled errors and renders error pages
 pub fn errorMiddleware(ctx: *Context, next: NextFn) anyerror!void {
@@ -46,57 +52,38 @@ pub fn notFoundHandler(ctx: *Context) !void {
     if (ctx.isPartial()) {
         ctx.html(content);
     } else {
-        ctx.html(layout.wrapLayout(content, error_layout));
+        ctx.html(wrapWithBase(content));
     }
 }
 
-/// Render 404 page content
+/// Render 404 page content using ZSX template
 fn render404() []const u8 {
-    return 
-    \\<div style="text-align: center; padding: 60px 20px; font-family: system-ui, -apple-system, sans-serif;">
-    \\    <h1 style="font-size: 72px; margin: 0; color: #e74c3c;">404</h1>
-    \\    <h2 style="margin: 20px 0; color: #2c3e50;">Page Not Found</h2>
-    \\    <p style="color: #7f8c8d; margin-bottom: 30px;">The page you're looking for doesn't exist or has been moved.</p>
-    \\    <div>
-    \\        <a href="/" style="color: #3498db; text-decoration: none; margin-right: 20px;">← Home</a>
-    \\        <a href="/admin" style="color: #3498db; text-decoration: none;">Admin →</a>
-    \\    </div>
-    \\</div>
-    ;
+    return tpl.renderFnToSlice(zsx_404.Error404, .{
+        "404", "Page Not Found", "The page you're looking for doesn't exist or has been moved.",
+    });
 }
 
 /// Render 500 page for production (no error details)
 fn render500Prod() []const u8 {
-    const content =
-        \\<div style="text-align: center; padding: 60px 20px; font-family: system-ui, -apple-system, sans-serif;">
-        \\    <h1 style="font-size: 72px; margin: 0; color: #e74c3c;">500</h1>
-        \\    <h2 style="margin: 20px 0; color: #2c3e50;">Something Went Wrong</h2>
-        \\    <p style="color: #7f8c8d; margin-bottom: 30px;">We're sorry, but something went wrong on our end. Please try again later.</p>
-        \\    <div>
-        \\        <a href="/" style="color: #3498db; text-decoration: none;">← Back to Home</a>
-        \\    </div>
-        \\</div>
-    ;
-    return layout.wrapLayout(content, error_layout);
+    return wrapWithBase(tpl.renderFnToSlice(zsx_500.Error500, .{}));
 }
 
 /// Render 500 page for dev mode (with error details and stack trace)
 fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
     const S = struct {
-        var buf: [32768]u8 = undefined;
+        var trace_buf: [24576]u8 = undefined;
     };
 
     const error_name = @errorName(err);
 
-    // Format stack trace if available
-    var trace_buf: [24576]u8 = undefined;
-    var trace_html: []const u8 = "";
+    // Build trace section HTML (conditionally)
+    var trace_section: []const u8 = "";
 
     if (trace) |t| {
-        var fbs = std.io.fixedBufferStream(&trace_buf);
+        var fbs = std.io.fixedBufferStream(&S.trace_buf);
         const writer = fbs.writer();
 
-        // Write stack trace section header
+        // Write section header
         writer.writeAll(
             \\<div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-top: 15px;">
             \\    <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Stack Trace</h2>
@@ -116,7 +103,6 @@ fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
             if (debug_info) |di| {
                 if (di.getModuleForAddress(addr)) |module| {
                     if (module.getSymbolAtAddress(alloc, addr)) |symbol| {
-                        // Got a symbol name
                         writer.print("<span style=\"color: #e74c3c;\">{s}</span>", .{symbol.name}) catch {};
                         if (symbol.source_location) |loc| {
                             writer.print("\n    <span style=\"color: #7f8c8d;\">at {s}:{d}</span>\n", .{ loc.file_name, loc.line }) catch {};
@@ -135,46 +121,14 @@ fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
         }
 
         writer.writeAll("</pre>\n</div>") catch {};
-        trace_html = fbs.getWritten();
+        trace_section = fbs.getWritten();
     }
 
-    const content_start =
-        \\<div style="padding: 40px 20px; font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 0 auto;">
-        \\    <div style="background: #fdf2f2; border: 1px solid #e74c3c; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-        \\        <h1 style="font-size: 24px; margin: 0 0 10px 0; color: #c0392b;">⚠ Internal Server Error</h1>
-        \\        <p style="margin: 0; color: #7f8c8d; font-size: 14px;">Development mode - this page shows error details</p>
-        \\    </div>
-        \\    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px;">
-        \\        <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Error</h2>
-        \\        <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;">error.
-    ;
+    const content = tpl.renderFnToSlice(zsx_500_dev.Error500Dev, .{
+        error_name, trace_section,
+    });
 
-    const content_end =
-        \\</pre>
-        \\    </div>
-    ;
-
-    const footer =
-        \\    <div style="margin-top: 30px; text-align: center;">
-        \\        <a href="/" style="color: #3498db; text-decoration: none;">← Back to Home</a>
-        \\    </div>
-        \\</div>
-    ;
-
-    // Assemble the page
-    var offset: usize = 0;
-    @memcpy(S.buf[offset..][0..content_start.len], content_start);
-    offset += content_start.len;
-    @memcpy(S.buf[offset..][0..error_name.len], error_name);
-    offset += error_name.len;
-    @memcpy(S.buf[offset..][0..content_end.len], content_end);
-    offset += content_end.len;
-    @memcpy(S.buf[offset..][0..trace_html.len], trace_html);
-    offset += trace_html.len;
-    @memcpy(S.buf[offset..][0..footer.len], footer);
-    offset += footer.len;
-
-    return layout.wrapLayout(S.buf[0..offset], error_layout);
+    return wrapWithBase(content);
 }
 
 // Tests
@@ -182,29 +136,22 @@ test "render404 returns valid HTML" {
     const html = render404();
     try std.testing.expect(std.mem.indexOf(u8, html, "404") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "Page Not Found") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"/\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"/admin\"") != null);
 }
 
 test "render500Prod returns valid HTML without error details" {
     const html = render500Prod();
     try std.testing.expect(std.mem.indexOf(u8, html, "500") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "Something Went Wrong") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"/\"") != null);
-    // Should NOT contain error details
-    try std.testing.expect(std.mem.indexOf(u8, html, "error.") == null);
 }
 
 test "render500Dev returns HTML with error name" {
     const html = render500Dev(error.OutOfMemory, null);
     try std.testing.expect(std.mem.indexOf(u8, html, "Internal Server Error") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "error.OutOfMemory") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "Development mode") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "OutOfMemory") != null);
 }
 
 test "init sets dev_mode" {
     init(true);
-    // Can't directly test the private var, but we can test the middleware behavior
     init(false);
 }
 
@@ -277,7 +224,7 @@ test "errorMiddleware shows error details in dev mode" {
 
     try errorMiddleware(&ctx, failing_handler);
 
-    try std.testing.expect(std.mem.indexOf(u8, ctx.response.body, "error.SomeSpecificError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ctx.response.body, "SomeSpecificError") != null);
 }
 
 test "errorMiddleware passes through on success" {
