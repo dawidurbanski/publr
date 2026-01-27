@@ -132,6 +132,24 @@ pub const Context = struct {
         const ptr = self.state.get(key) orelse return null;
         return @ptrCast(@alignCast(ptr));
     }
+
+    /// Check if this is a partial (X-Partial: true) request
+    pub fn isPartial(self: *const Context) bool {
+        if (self.getRequestHeader("X-Partial")) |value| {
+            return std.ascii.eqlIgnoreCase(value, "true");
+        }
+        return false;
+    }
+
+    /// Set HTML response body with correct content type
+    pub fn html(self: *Context, content: []const u8) void {
+        self.response.setContentType("text/html");
+        self.response.setBody(content);
+        // Set X-Partial header on partial responses so JS can detect them
+        if (self.isPartial()) {
+            self.response.setHeader("X-Partial", "true");
+        }
+    }
 };
 
 /// Custom header entry
@@ -488,4 +506,75 @@ test "context request headers case-insensitive" {
 
     try std.testing.expectEqualStrings("application/json", ctx.getRequestHeader("content-type").?);
     try std.testing.expectEqualStrings("application/json", ctx.getRequestHeader("CONTENT-TYPE").?);
+}
+
+test "isPartial returns true when X-Partial header is true" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.addRequestHeader("X-Partial", "true");
+    try std.testing.expect(ctx.isPartial());
+}
+
+test "isPartial returns true case-insensitive" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.addRequestHeader("X-Partial", "TRUE");
+    try std.testing.expect(ctx.isPartial());
+}
+
+test "isPartial returns false when header absent" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    try std.testing.expect(!ctx.isPartial());
+}
+
+test "isPartial returns false when header is not true" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.addRequestHeader("X-Partial", "false");
+    try std.testing.expect(!ctx.isPartial());
+}
+
+test "html sets content type and body" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.html("<h1>Test</h1>");
+
+    try std.testing.expectEqualStrings("text/html", ctx.response.content_type);
+    try std.testing.expectEqualStrings("<h1>Test</h1>", ctx.response.body);
+}
+
+test "html sets X-Partial response header on partial request" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.addRequestHeader("X-Partial", "true");
+    ctx.html("<h1>Test</h1>");
+
+    const headers = ctx.response.getCustomHeaders();
+    try std.testing.expectEqual(@as(usize, 1), headers.len);
+    try std.testing.expectEqualStrings("X-Partial", headers[0].?.name);
+    try std.testing.expectEqualStrings("true", headers[0].?.value);
+}
+
+test "html does not set X-Partial header on full request" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .GET, "/");
+    defer ctx.deinit();
+
+    ctx.html("<h1>Test</h1>");
+
+    const headers = ctx.response.getCustomHeaders();
+    try std.testing.expectEqual(@as(usize, 0), headers.len);
 }
