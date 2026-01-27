@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const http = @import("http.zig");
-const mz_config = @import("mz_config");
+const publr_config = @import("publr_config");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -92,16 +92,16 @@ fn resolvePort(cli_port: ?u16) u16 {
 }
 
 /// Runs the server with watchexec watchers.
-/// Spawns watchexec for .zig/.zon files (server rebuild) and user-defined watchers from mz.zon.
+/// Spawns watchexec for .zig/.zon files (server rebuild) and user-defined watchers from publr.zon.
 fn runWithWatchers(port: u16, dev_mode: bool) !void {
     // Build inner command: run watcher commands then start server
     // All watcher commands run before zig build so Tailwind CSS is ready
     var cmd_buf: [512]u8 = undefined;
     var cmd_offset: usize = 0;
 
-    if (@hasField(@TypeOf(mz_config), "dev")) {
-        if (@hasField(@TypeOf(mz_config.dev), "watchers")) {
-            inline for (mz_config.dev.watchers) |watcher| {
+    if (@hasField(@TypeOf(publr_config), "dev")) {
+        if (@hasField(@TypeOf(publr_config.dev), "watchers")) {
+            inline for (publr_config.dev.watchers) |watcher| {
                 // Append each watcher command joined by " && "
                 inline for (watcher.cmd, 0..) |arg, i| {
                     if (i > 0) {
@@ -180,9 +180,9 @@ fn printWatchNotSupportedWindows() void {
 
 fn printUsage() void {
     const usage =
-        \\Minizen - Single-file CMS
+        \\Publr - Single-file CMS
         \\
-        \\Usage: mz <command> [options]
+        \\Usage: publr <command> [options]
         \\
         \\Commands:
         \\  serve    Start the HTTP server
@@ -197,10 +197,10 @@ fn printUsage() void {
         \\  PORT                 Default port (overridden by --port flag)
         \\
         \\Examples:
-        \\  mz serve
-        \\  mz serve --port 3000
-        \\  mz serve --dev
-        \\  mz serve --watch --dev
+        \\  publr serve
+        \\  publr serve --port 3000
+        \\  publr serve --dev
+        \\  publr serve --watch --dev
         \\
     ;
     std.debug.print("{s}", .{usage});

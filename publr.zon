@@ -1,5 +1,5 @@
 .{
-    .name = "minizen",
+    .name = "publr",
     .build = .{
         .preBuild = .{
             .{ "./themes/demo/tailwindcss", "-i", "themes/demo/input.css", "-o", "themes/demo/static/theme.css", "-m" },

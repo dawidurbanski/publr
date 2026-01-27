@@ -1,7 +1,7 @@
 const std = @import("std");
 const Context = @import("router.zig").Context;
 const NextFn = @import("router.zig").NextFn;
-const mz_config = @import("mz_config");
+const publr_config = @import("publr_config");
 
 /// Live reload script using Server-Sent Events.
 /// Single persistent connection — no polling noise in network tab.
@@ -154,9 +154,9 @@ fn getLatestAssetMtime() i128 {
 /// Get the latest mtime from watcher input files (e.g. input.css)
 fn getLatestInputMtime() i128 {
     var max_mtime: i128 = 0;
-    if (@hasField(@TypeOf(mz_config), "dev")) {
-        if (@hasField(@TypeOf(mz_config.dev), "watchers")) {
-            inline for (mz_config.dev.watchers) |watcher| {
+    if (@hasField(@TypeOf(publr_config), "dev")) {
+        if (@hasField(@TypeOf(publr_config.dev), "watchers")) {
+            inline for (publr_config.dev.watchers) |watcher| {
                 if (@hasField(@TypeOf(watcher), "input")) {
                     max_mtime = @max(max_mtime, getFileMtime(watcher.input));
                 }
@@ -166,12 +166,12 @@ fn getLatestInputMtime() i128 {
     return max_mtime;
 }
 
-/// Run all watcher commands from mz.zon (e.g. Tailwind rebuild)
+/// Run all watcher commands from publr.zon (e.g. Tailwind rebuild)
 fn runWatcherCommands() void {
-    if (!@hasField(@TypeOf(mz_config), "dev")) return;
-    if (!@hasField(@TypeOf(mz_config.dev), "watchers")) return;
+    if (!@hasField(@TypeOf(publr_config), "dev")) return;
+    if (!@hasField(@TypeOf(publr_config.dev), "watchers")) return;
 
-    inline for (mz_config.dev.watchers) |watcher| {
+    inline for (publr_config.dev.watchers) |watcher| {
         if (@hasField(@TypeOf(watcher), "input")) {
             const cmd = watcher.cmd;
             const argv: [cmd.len][]const u8 = cmd;

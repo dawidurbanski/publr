@@ -173,11 +173,11 @@ WS   /ws/collab/:entry_id       → Real-time collaboration
 
 ### Template System (Phase 4)
 
-Astro-compatible `.mz` template format with **hybrid parsing (hard requirement):**
+Astro-compatible `.publr` template format with **hybrid parsing (hard requirement):**
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| **Development** | Runtime parsing — read `.mz` from disk each request | Instant hot reload |
+| **Development** | Runtime parsing — read `.publr` from disk each request | Instant hot reload |
 | **Production** | Comptime parsing — templates compiled into binary | Zero overhead |
 
 ```
@@ -204,7 +204,7 @@ const post = try ctx.db.getEntry(ctx.params.slug);
 
 Plugins are comptime only — managed via CLI, compiled into binary.
 
-### Config: `minizen.zon`
+### Config: `publr.zon`
 
 ```zig
 .{
@@ -212,7 +212,7 @@ Plugins are comptime only — managed via CLI, compiled into binary.
     .plugins = .{
         .code_field = .{
             .version = "1.0.0",
-            .source = "github:minizen/code-field",
+            .source = "github:publr/code-field",
         },
     },
 }
@@ -233,17 +233,17 @@ pub const Plugin = struct {
 
 ## Email Strategy
 
-**Principle:** Install Minizen, everything works. No SMTP config required.
+**Principle:** Install Publr, everything works. No SMTP config required.
 
 ### Phase 1: No Email Required
 
 Single-admin self-hosted CMS doesn't need email. User has shell access:
 ```bash
-mz user reset-password admin@example.com
-mz user recovery-link admin@example.com
+publr user reset-password admin@example.com
+publr user recovery-link admin@example.com
 ```
 
-### Phase 2+: Minizen Relay (Zero Config)
+### Phase 2+: Publr Relay (Zero Config)
 
 Default relay service — password reset works out of box:
 - Free tier: 100 emails/month

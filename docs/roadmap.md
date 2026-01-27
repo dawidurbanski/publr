@@ -14,19 +14,19 @@ A complete content platform — CMS, block editor, real-time collaboration, and 
 **End state:**
 ```bash
 $ ls -la
--rwxr-xr-x  1 user  staff  4.2M  minizen
+-rwxr-xr-x  1 user  staff  4.2M  publr
 -rw-r--r--  1 user  staff  128K  data.db
 
-$ ./minizen serve
-Minizen running at http://localhost:8080
+$ ./publr serve
+Publr running at http://localhost:8080
 ```
 
 ## Product Tiers
 
 | Tier | Name | What |
 |------|------|------|
-| Free | **Minizen** | Self-hosted, open source, single binary |
-| Paid | **Minizen Cloud** | Hosted, RTC, automatic updates, managed |
+| Free | **Publr** | Self-hosted, open source, single binary |
+| Paid | **Publr Cloud** | Hosted, RTC, automatic updates, managed |
 
 ## Architecture Phases
 
@@ -57,7 +57,7 @@ Minizen running at http://localhost:8080
 
 ### Phase 4: Build Pipeline
 
-- Astro-compatible `.mz` template format
+- Astro-compatible `.publr` template format
 - **Hybrid template parsing (hard requirement)**
 - Static site generation
 - Asset handling
@@ -101,7 +101,7 @@ Minizen running at http://localhost:8080
 4. Client sync
 
 ### Phase 7: Build Pipeline
-1. `.mz` parser (hybrid comptime/runtime)
+1. `.publr` parser (hybrid comptime/runtime)
 2. Template rendering
 3. Static site generation
 4. Asset pipeline
@@ -111,55 +111,55 @@ Minizen running at http://localhost:8080
 ```bash
 # --- Site Management ---
 
-mz init my-site              # Initialize a new site
-mz serve --port 8080         # Start server
-mz serve --dev               # Development mode (hot reload)
-mz build --output ./dist     # Build static site (Phase 4)
+publr init my-site              # Initialize a new site
+publr serve --port 8080         # Start server
+publr serve --dev               # Development mode (hot reload)
+publr build --output ./dist     # Build static site (Phase 4)
 
 # --- Plugin Management ---
 
-mz plugin add code-field                  # From registry
-mz plugin add github:someone/webhook      # From GitHub
-mz plugin add webhook@2.1.0               # Specific version
-mz plugin add ./my-plugins/custom         # Local
-mz plugin remove webhook
-mz plugin list
-mz plugin update
+publr plugin add code-field                  # From registry
+publr plugin add github:someone/webhook      # From GitHub
+publr plugin add webhook@2.1.0               # Specific version
+publr plugin add ./my-plugins/custom         # Local
+publr plugin remove webhook
+publr plugin list
+publr plugin update
 
 # --- User Management ---
 
-mz user create admin@example.com
-mz user reset-password admin@example.com
-mz user recovery-link admin@example.com
-mz user list
+publr user create admin@example.com
+publr user reset-password admin@example.com
+publr user recovery-link admin@example.com
+publr user list
 ```
 
 ## What Success Looks Like
 
 ```bash
-# Install Minizen globally
+# Install Publr globally
 $ zig build -Doptimize=ReleaseFast
-$ cp zig-out/bin/mz /usr/local/bin/
+$ cp zig-out/bin/publr /usr/local/bin/
 
 # Create a new site
-$ mz init my-blog
+$ publr init my-blog
 $ cd my-blog
 
 # Add a plugin
-$ mz plugin add code-field
+$ publr plugin add code-field
 Fetching code-field@1.0.0...
-Updated minizen.zon
-Regenerated .minizen/plugins.zig
-Run `mz serve` to start with new plugins
+Updated publr.zon
+Regenerated .publr/plugins.zig
+Run `publr serve` to start with new plugins
 
 # Start development
-$ mz serve --dev
-Minizen running at http://localhost:8080
+$ publr serve --dev
+Publr running at http://localhost:8080
 Admin: http://localhost:8080/admin
 Hot reload: enabled
 
 # Build for production
-$ mz build --output ./dist
+$ publr build --output ./dist
 $ ls dist/
 index.html  blog/  assets/  media/
 ```

@@ -5,13 +5,13 @@ pub fn Layout(title: []const u8, content: []const u8, actions: []const u8, nav_d
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{title} - Minizen Admin</title>
+        <title>{title} - Publr Admin</title>
         <link rel="stylesheet" href="/static/admin.css" />
     </head>
     <body class="admin">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <a href="/admin" class="logo">Minizen</a>
+                <a href="/admin" class="logo">Publr</a>
             </div>
             <nav class="sidebar-nav">
                 <a href="/admin" class={if (nav_dashboard) ("nav-item active") else ("nav-item")}>

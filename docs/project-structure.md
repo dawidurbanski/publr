@@ -4,10 +4,10 @@ There are two separate directories: the CMS source (this repo) and user sites.
 
 ## CMS Source (this repo — immutable)
 
-Users never edit these files. This is the Minizen core.
+Users never edit these files. This is the Publr core.
 
 ```
-minizen/
+publr/
 ├── build.zig              # Zig build configuration
 │
 ├── src/
@@ -21,10 +21,10 @@ minizen/
 │   ├── plugin.zig         # Plugin interface definition
 │   │
 │   ├── cli/               # CLI commands
-│   │   ├── init.zig       # `mz init`
-│   │   ├── serve.zig      # `mz serve`
-│   │   ├── build.zig      # `mz build`
-│   │   └── plugin.zig     # `mz plugin add/remove/list`
+│   │   ├── init.zig       # `publr init`
+│   │   ├── serve.zig      # `publr serve`
+│   │   ├── build.zig      # `publr build`
+│   │   └── plugin.zig     # `publr plugin add/remove/list`
 │   │
 │   ├── templates/         # Admin UI (Zig)
 │   │   ├── layout.zig
@@ -44,7 +44,7 @@ minizen/
 │   │   └── presence.zig
 │   │
 │   └── build/             # Phase 4
-│       ├── parser.zig     # .mz template parser
+│       ├── parser.zig     # .publr template parser
 │       ├── generator.zig  # Static site generator
 │       └── assets.zig     # Asset pipeline
 │
@@ -61,13 +61,13 @@ minizen/
     └── stb_image_write.h
 ```
 
-## User Site (created via `mz init my-site`)
+## User Site (created via `publr init my-site`)
 
 This is what users create and manage. They use CLI commands, never touch source.
 
 ```
 my-site/
-├── minizen.zon              # Site config + plugin list
+├── publr.zon                # Site config + plugin list
 │
 ├── plugins/                 # Downloaded plugins (like node_modules)
 │   ├── code-field/
@@ -76,20 +76,20 @@ my-site/
 │   └── webhook/
 │       └── plugin.zig
 │
-├── themes/                  # Site templates (.mz files)
+├── themes/                  # Site templates (.publr files)
 │   └── default/
 │       ├── layouts/
-│       │   └── base.mz
+│       │   └── base.publr
 │       ├── pages/
-│       │   ├── index.mz
-│       │   └── [slug].mz
+│       │   ├── index.publr
+│       │   └── [slug].publr
 │       └── components/
-│           └── header.mz
+│           └── header.publr
 │
 ├── data/
-│   └── minizen.db           # SQLite database
+│   └── publr.db             # SQLite database
 │
-└── .minizen/                # Auto-generated (gitignored)
+└── .publr/                  # Auto-generated (gitignored)
     └── plugins.zig          # Generated plugin imports
 ```
 

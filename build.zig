@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
     transpile_zsx_cmd.addArgs(&.{ "src/views", "src/gen/views" });
 
     const exe = b.addExecutable(.{
-        .name = "mz",
+        .name = "publr",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -30,11 +30,11 @@ pub fn build(b: *std.Build) void {
     // Main exe depends on transpile step
     exe.step.dependOn(&transpile_zsx_cmd.step);
 
-    // Run preBuild hooks from mz.zon (theme tooling, asset pipelines, etc.)
-    const mz_config = @import("mz.zon");
-    if (@hasField(@TypeOf(mz_config), "build")) {
-        if (@hasField(@TypeOf(mz_config.build), "preBuild")) {
-            inline for (mz_config.build.preBuild) |cmd| {
+    // Run preBuild hooks from publr.zon (theme tooling, asset pipelines, etc.)
+    const publr_config = @import("publr.zon");
+    if (@hasField(@TypeOf(publr_config), "build")) {
+        if (@hasField(@TypeOf(publr_config.build), "preBuild")) {
+            inline for (publr_config.build.preBuild) |cmd| {
                 const hook = b.addSystemCommand(&cmd);
                 exe.step.dependOn(&hook.step);
             }
@@ -59,9 +59,9 @@ pub fn build(b: *std.Build) void {
     });
     exe.addIncludePath(b.path("vendor"));
 
-    // Import project config (mz.zon)
-    exe.root_module.addAnonymousImport("mz_config", .{
-        .root_source_file = b.path("mz.zon"),
+    // Import project config (publr.zon)
+    exe.root_module.addAnonymousImport("publr_config", .{
+        .root_source_file = b.path("publr.zon"),
     });
 
     // Embed static assets

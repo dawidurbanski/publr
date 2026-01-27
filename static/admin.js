@@ -1,4 +1,4 @@
-// Minizen Admin Scripts
+// Publr Admin Scripts
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Minizen admin loaded');
+    console.log('Publr admin loaded');
 });

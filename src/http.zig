@@ -89,7 +89,7 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     });
     defer server.deinit();
 
-    std.debug.print("Minizen running at http://localhost:{d}\n", .{port});
+    std.debug.print("Publr running at http://localhost:{d}\n", .{port});
     std.debug.print("Press Ctrl+C to stop\n", .{});
 
     // Set up poll for timeout-based accept
@@ -227,7 +227,7 @@ fn handleIndex(ctx: *Context) !void {
     if (ctx.isPartial()) {
         ctx.html(content);
     } else {
-        ctx.html(wrapWithBase(content, "Minizen", &.{"/static/theme.css"}, &.{}));
+        ctx.html(wrapWithBase(content, "Publr", &.{"/static/theme.css"}, &.{}));
     }
 }
 
@@ -235,7 +235,7 @@ fn handleAdminDashboard(ctx: *Context) !void {
     // Mock data
     const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
     const posts = [_]Post{
-        .{ .id = "1", .title = "Welcome to Minizen", .status = "published", .date = "2024-01-15" },
+        .{ .id = "1", .title = "Welcome to Publr", .status = "published", .date = "2024-01-15" },
         .{ .id = "2", .title = "Getting Started Guide", .status = "draft", .date = "2024-01-14" },
     };
 
@@ -249,7 +249,7 @@ fn handleAdminDashboard(ctx: *Context) !void {
 fn handleAdminPosts(ctx: *Context) !void {
     const Post = struct { id: []const u8, title: []const u8, author: []const u8, status: []const u8, date: []const u8 };
     const posts = [_]Post{
-        .{ .id = "1", .title = "Welcome to Minizen", .author = "Admin", .status = "published", .date = "2024-01-15" },
+        .{ .id = "1", .title = "Welcome to Publr", .author = "Admin", .status = "published", .date = "2024-01-15" },
         .{ .id = "2", .title = "Getting Started Guide", .author = "Admin", .status = "draft", .date = "2024-01-14" },
         .{ .id = "3", .title = "Advanced Features", .author = "Admin", .status = "draft", .date = "2024-01-13" },
     };
@@ -282,8 +282,8 @@ fn handleAdminPostEdit(ctx: *Context) !void {
 
     const content = tpl.renderFnToSlice(zsx_admin_posts_edit.Edit, .{
         .{
-            .title = "Welcome to Minizen",
-            .slug = "welcome-to-minizen",
+            .title = "Welcome to Publr",
+            .slug = "welcome-to-publr",
             .content = "This is the content of the post...",
             .date = "2024-01-15",
             .is_draft = false,

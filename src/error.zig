@@ -21,7 +21,7 @@ pub fn init(is_dev_mode: bool) void {
 /// Wrap content in base layout (error pages have no CSS/JS)
 fn wrapWithBase(content: []const u8) []const u8 {
     return tpl.renderFnToSlice(zsx_base.Base, .{
-        "Error - Minizen", content, &[_][]const u8{}, &[_][]const u8{},
+        "Error - Publr", content, &[_][]const u8{}, &[_][]const u8{},
     });
 }
 
