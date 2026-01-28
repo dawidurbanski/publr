@@ -1,0 +1,24 @@
+// SwitchInput — toggle boolean, syncs aria-checked
+// Props: label, name ([]const u8), checked (bool)
+pub fn SwitchInput(props: struct {
+    label: []const u8,
+    name: []const u8,
+    checked: bool,
+}) {
+    <label data-publr-component="switch" class="switch-label">
+        {if (props.checked) (
+            <input type="checkbox" data-publr-part="input" class="switch-input" name={props.name} checked="checked" />
+        ) else (
+            <input type="checkbox" data-publr-part="input" class="switch-input" name={props.name} />
+        )}
+        <span
+            data-publr-part="track"
+            class="switch-track"
+            role="switch"
+            aria-checked={if (props.checked) ("true") else ("false")}
+        >
+            <span class="switch-thumb"></span>
+        </span>
+        <span>{props.label}</span>
+    </label>
+}

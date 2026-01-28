@@ -16,11 +16,20 @@ const zsx_admin_layout = @import("zsx_admin_layout");
 const zsx_admin_dashboard = @import("zsx_admin_dashboard");
 const zsx_admin_posts_list = @import("zsx_admin_posts_list");
 const zsx_admin_posts_edit = @import("zsx_admin_posts_edit");
+const zsx_admin_components = @import("zsx_admin_components");
 
 // Embedded static assets with compile-time metadata
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
 const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
 const ThemeCss = static.Asset("theme.css", @embedFile("static_theme_css"));
+
+// Interact modules (shared between admin and themes)
+const InteractCore = static.Asset("core.js", @embedFile("static_interact_core_js"));
+const InteractToggle = static.Asset("toggle.js", @embedFile("static_interact_toggle_js"));
+const InteractPortal = static.Asset("portal.js", @embedFile("static_interact_portal_js"));
+const InteractFocusTrap = static.Asset("focus-trap.js", @embedFile("static_interact_focus_trap_js"));
+const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_dismiss_js"));
+const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
 
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -64,6 +73,7 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     try router.get("/", handleIndex);
     try router.get("/admin", handleAdminDashboard);
     try router.get("/admin/posts", handleAdminPosts);
+    try router.get("/admin/components", handleAdminComponents);
     try router.get("/admin/posts/new", handleAdminPostNew);
     try router.get("/admin/posts/*", handleAdminPostEdit);
     try router.get("/static/*", handleStatic);
@@ -243,7 +253,7 @@ fn handleAdminDashboard(ctx: *Context) !void {
         "12", "5", "34", "3", true, &posts,
     });
 
-    ctx.html(wrapAdmin(content, "Dashboard", "", .{ .dashboard = true, .posts = false, .settings = false }));
+    ctx.html(wrapAdmin(content, "Dashboard", "", .{ .dashboard = true, .posts = false, .settings = false, .components = false }));
 }
 
 fn handleAdminPosts(ctx: *Context) !void {
@@ -259,7 +269,12 @@ fn handleAdminPosts(ctx: *Context) !void {
     });
 
     const actions = "<a href=\"/admin/posts/new\" class=\"btn btn-primary\">New Post</a>";
-    ctx.html(wrapAdmin(content, "Posts", actions, .{ .dashboard = false, .posts = true, .settings = false }));
+    ctx.html(wrapAdmin(content, "Posts", actions, .{ .dashboard = false, .posts = true, .settings = false, .components = false }));
+}
+
+fn handleAdminComponents(ctx: *Context) !void {
+    const content = tpl.renderFnToSlice(zsx_admin_components.Components, .{});
+    ctx.html(wrapAdmin(content, "Components", "", .{ .dashboard = false, .posts = false, .settings = false, .components = true }));
 }
 
 fn handleAdminPostNew(ctx: *Context) !void {
@@ -274,7 +289,7 @@ fn handleAdminPostNew(ctx: *Context) !void {
         },
     });
 
-    ctx.html(wrapAdmin(content, "New Post", "", .{ .dashboard = false, .posts = true, .settings = false }));
+    ctx.html(wrapAdmin(content, "New Post", "", .{ .dashboard = false, .posts = true, .settings = false, .components = false }));
 }
 
 fn handleAdminPostEdit(ctx: *Context) !void {
@@ -291,18 +306,19 @@ fn handleAdminPostEdit(ctx: *Context) !void {
         },
     });
 
-    ctx.html(wrapAdmin(content, "Edit Post", "", .{ .dashboard = false, .posts = true, .settings = false }));
+    ctx.html(wrapAdmin(content, "Edit Post", "", .{ .dashboard = false, .posts = true, .settings = false, .components = false }));
 }
 
 const NavState = struct {
     dashboard: bool,
     posts: bool,
     settings: bool,
+    components: bool,
 };
 
 fn wrapAdmin(content: []const u8, title: []const u8, actions: []const u8, nav: NavState) []const u8 {
     return tpl.renderFnToSlice(zsx_admin_layout.Layout, .{
-        title, content, actions, nav.dashboard, nav.posts, nav.settings,
+        title, content, actions, nav.dashboard, nav.posts, nav.settings, nav.components,
     });
 }
 
@@ -339,6 +355,18 @@ fn handleStatic(ctx: *Context) !void {
         AdminJs.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "theme.css")) {
         ThemeCss.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/core.js")) {
+        InteractCore.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/toggle.js")) {
+        InteractToggle.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/portal.js")) {
+        InteractPortal.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/focus-trap.js")) {
+        InteractFocusTrap.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/dismiss.js")) {
+        InteractDismiss.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/components.js")) {
+        InteractComponents.serve(ctx, if_none_match);
     } else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");
@@ -355,6 +383,18 @@ fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
         "static/admin.js"
     else if (std.mem.eql(u8, file, "theme.css"))
         "themes/demo/static/theme.css"
+    else if (std.mem.eql(u8, file, "interact/core.js"))
+        "static/interact/core.js"
+    else if (std.mem.eql(u8, file, "interact/toggle.js"))
+        "static/interact/toggle.js"
+    else if (std.mem.eql(u8, file, "interact/portal.js"))
+        "static/interact/portal.js"
+    else if (std.mem.eql(u8, file, "interact/focus-trap.js"))
+        "static/interact/focus-trap.js"
+    else if (std.mem.eql(u8, file, "interact/dismiss.js"))
+        "static/interact/dismiss.js"
+    else if (std.mem.eql(u8, file, "interact/components.js"))
+        "static/interact/components.js"
     else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");

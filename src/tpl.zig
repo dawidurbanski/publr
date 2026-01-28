@@ -17,6 +17,7 @@ threadlocal var render_index: usize = 0;
 /// Pass args as a tuple matching the function params (writer is prepended automatically).
 /// Result is valid until 4 more calls to renderFnToSlice on this thread.
 pub fn renderFnToSlice(comptime func: anytype, args: anytype) []const u8 {
+    @setEvalBranchQuota(10000);
     const buf = &render_buffers[render_index % render_buffers.len];
     render_index +%= 1;
 
