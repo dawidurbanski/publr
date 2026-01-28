@@ -1,0 +1,19 @@
+// Dialog — modal overlay with focus trap
+// Props: trigger_label, title, body, dismiss_label, confirm_label (empty = no confirm btn), dismissable (bool)
+pub fn Dialog(props: struct { trigger_label: []const u8, title: []const u8, body: []const u8, dismiss_label: []const u8, confirm_label: []const u8, dismissable: bool }) {
+    <div data-publr-component="dialog" data-publr-state="closed" data-publr-dismissable={if (props.dismissable) ("true") else ("false")}>
+        <button data-publr-part="trigger" aria-expanded="false" class="btn">{props.trigger_label}</button>
+        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
+            <div class="dialog-content">
+                <h3>{props.title}</h3>
+                <p>{props.body}</p>
+                <div class="dialog-actions">
+                    <button data-publr-part="close" class="btn">{props.dismiss_label}</button>
+                    {if (props.confirm_label.len > 0) (
+                        <button class="btn btn-primary">{props.confirm_label}</button>
+                    )}
+                </div>
+            </div>
+        </div>
+    </div>
+}

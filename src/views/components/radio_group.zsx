@@ -1,0 +1,18 @@
+// RadioGroup — single selection from a group
+// Props: legend, name ([]const u8), options ([]const { label, value, checked })
+pub fn RadioGroup(props: struct { legend: []const u8, name: []const u8, options: anytype }) {
+    <fieldset data-publr-component="radio-group" class="check-group">
+        <legend class="check-group-legend">{props.legend}</legend>
+        {for (props.options) |opt| (
+            <label class="check-label">
+                {if (opt.checked) (
+                    <input type="radio" name={props.name} value={opt.value} class="radio-input" checked="checked" />
+                ) else (
+                    <input type="radio" name={props.name} value={opt.value} class="radio-input" />
+                )}
+                <span class="radio-indicator"></span>
+                <span>{opt.label}</span>
+            </label>
+        )}
+    </fieldset>
+}

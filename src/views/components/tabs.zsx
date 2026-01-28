@@ -1,0 +1,22 @@
+// Tabs — click tab to show panel, arrow keys for roving focus
+// Props: tabs ([]const { id, label, content, active })
+pub fn Tabs(props: struct { tabs: anytype }) {
+    <div data-publr-component="tabs">
+        <div class="tabs-list" role="tablist" data-publr-part="list">
+            {for (props.tabs) |tab| (
+                <button class="tab-trigger" role="tab" data-publr-part="trigger" data-publr-tab={tab.id} aria-selected={if (tab.active) ("true") else ("false")} tabindex={if (tab.active) ("0") else ("-1")}>{tab.label}</button>
+            )}
+        </div>
+        {for (props.tabs) |tab| (
+            {if (tab.active) (
+                <div class="tab-panel" role="tabpanel" data-publr-part="panel" data-publr-tab={tab.id}>
+                    {!tab.content}
+                </div>
+            ) else (
+                <div class="tab-panel" role="tabpanel" data-publr-part="panel" data-publr-tab={tab.id} hidden="true">
+                    {!tab.content}
+                </div>
+            )}
+        )}
+    </div>
+}

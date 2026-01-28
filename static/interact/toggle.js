@@ -17,6 +17,10 @@
         root.dataset.publrState = 'closed';
         var trigger = root.querySelector('[data-publr-part="trigger"]');
         if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        if (root._publrOnClose) {
+            root._publrOnClose();
+            root._publrOnClose = null;
+        }
         var idx = openStack.indexOf(root);
         if (idx !== -1) openStack.splice(idx, 1);
     }

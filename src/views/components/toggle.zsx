@@ -1,0 +1,10 @@
+// Toggle — open/close a content region
+// Props: label ([]const u8), content ([]const u8, raw HTML)
+pub fn Toggle(props: struct { label: []const u8, content: []const u8 }) {
+    <div data-publr-component="toggle" data-publr-state="closed">
+        <button data-publr-part="trigger" aria-expanded="false" class="btn">{props.label}</button>
+        <div data-publr-part="content" class="toggle-content">
+            {!props.content}
+        </div>
+    </div>
+}

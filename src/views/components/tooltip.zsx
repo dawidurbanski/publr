@@ -1,0 +1,10 @@
+// Tooltip — hover or focus shows a label after 200ms delay
+// Props: trigger_label, text ([]const u8)
+pub fn Tooltip(props: struct { trigger_label: []const u8, text: []const u8 }) {
+    <div data-publr-component="tooltip" data-publr-state="closed">
+        <button data-publr-part="trigger" class="btn">{props.trigger_label}</button>
+        <div data-publr-part="content" class="tooltip-content" role="tooltip">
+            {props.text}
+        </div>
+    </div>
+}

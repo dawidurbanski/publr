@@ -1,0 +1,18 @@
+// CheckboxGroup — multiple selections from a group
+// Props: legend, name ([]const u8), options ([]const { label, value, checked })
+pub fn CheckboxGroup(props: struct { legend: []const u8, name: []const u8, options: anytype }) {
+    <fieldset data-publr-component="checkbox-group" class="check-group">
+        <legend class="check-group-legend">{props.legend}</legend>
+        {for (props.options) |opt| (
+            <label class="check-label">
+                {if (opt.checked) (
+                    <input type="checkbox" name={props.name} value={opt.value} class="check-input" checked="checked" />
+                ) else (
+                    <input type="checkbox" name={props.name} value={opt.value} class="check-input" />
+                )}
+                <span class="check-indicator"></span>
+                <span>{opt.label}</span>
+            </label>
+        )}
+    </fieldset>
+}

@@ -1,5 +1,6 @@
 // Publr Interactivity — Dismiss
 // Click-outside and Escape key handling for open components.
+// Cleanup (unportal, release focus) is handled by _publrOnClose callbacks set by each handler.
 (function() {
     'use strict';
 
@@ -14,10 +15,6 @@
             var content = root.querySelector('[data-publr-part="content"]');
             if (root.contains(e.target) || (content && content.contains(e.target))) continue;
             publr.close(root);
-            var type = root.dataset.publrComponent;
-            if (content && publr.PORTALED && publr.PORTALED.indexOf(type) !== -1) {
-                publr.unportal(content);
-            }
         }
     });
 
@@ -29,9 +26,5 @@
         var type = root.dataset.publrComponent;
         if (type === 'dialog' && root.dataset.publrDismissable === 'false') return;
         publr.close(root);
-        var content = root.querySelector('[data-publr-part="content"]');
-        if (content && publr.PORTALED && publr.PORTALED.indexOf(type) !== -1) {
-            publr.unportal(content);
-        }
     });
 })();
