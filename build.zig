@@ -18,6 +18,22 @@ pub fn build(b: *std.Build) void {
     transpile_zsx_cmd.setCwd(b.path("."));
     transpile_zsx_cmd.addArgs(&.{ "src/views", "src/gen/views" });
 
+    // Build ZSX formatter
+    const zsx_formatter = b.addExecutable(.{
+        .name = "zsx_format",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/zsx_format.zig"),
+            .target = b.graph.host,
+        }),
+    });
+
+    // Format step (zig build fmt)
+    const fmt_step = b.step("fmt", "Format ZSX files");
+    const fmt_cmd = b.addRunArtifact(zsx_formatter);
+    fmt_cmd.setCwd(b.path("."));
+    fmt_cmd.addArgs(&.{"src/views"});
+    fmt_step.dependOn(&fmt_cmd.step);
+
     const exe = b.addExecutable(.{
         .name = "publr",
         .root_module = b.createModule(.{

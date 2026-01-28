@@ -79,7 +79,14 @@ pub fn formatJsx(allocator: Allocator, body: []const u8, base_indent: usize) All
                         // Emit entire inline: <tag>content</tag>
                         const full_end = after_tag + close_pos + close_tag.len;
                         if (needsAttrWrapping(tag_text, indent)) {
+                            // Wrap attributes, then emit content + close tag on new line
                             try writeWrappedTag(allocator, &out, tag_text, indent, tag_result.tag_name);
+                            try out.append(allocator, '\n');
+                            try writeIndent(allocator, &out, indent + 1);
+                            try out.appendSlice(allocator, mem.trim(u8, rest_of_line[0..close_pos], " \t"));
+                            try out.append(allocator, '\n');
+                            try writeIndent(allocator, &out, indent);
+                            try out.appendSlice(allocator, close_tag);
                         } else {
                             try writeIndent(allocator, &out, indent);
                             try out.appendSlice(allocator, body[pos..full_end]);
@@ -386,7 +393,10 @@ fn writeWrappedTag(allocator: Allocator, out: *Out, tag_text: []const u8, indent
     const attr_indent = indent + 1;
 
     while (pos < tag_text.len) {
-        pos = skipWhitespaceInline(tag_text, pos);
+        // Skip whitespace including newlines (for already-wrapped tags)
+        while (pos < tag_text.len and (tag_text[pos] == ' ' or tag_text[pos] == '\t' or tag_text[pos] == '\n' or tag_text[pos] == '\r')) {
+            pos += 1;
+        }
         if (pos >= tag_text.len) break;
 
         if (tag_text[pos] == '>' or (tag_text[pos] == '/' and pos + 1 < tag_text.len and tag_text[pos + 1] == '>')) {
@@ -394,7 +404,7 @@ fn writeWrappedTag(allocator: Allocator, out: *Out, tag_text: []const u8, indent
         }
 
         const attr_start = pos;
-        while (pos < tag_text.len and tag_text[pos] != '=' and tag_text[pos] != ' ' and tag_text[pos] != '>' and tag_text[pos] != '/') {
+        while (pos < tag_text.len and tag_text[pos] != '=' and tag_text[pos] != ' ' and tag_text[pos] != '>' and tag_text[pos] != '/' and tag_text[pos] != '\n') {
             pos += 1;
         }
 
@@ -709,6 +719,26 @@ test "format HTML comment" {
         \\<!-- This is a comment -->
         \\<div>
         \\</div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, result);
+}
+
+test "format inline content with wrapped attributes" {
+    const allocator = std.testing.allocator;
+    // Long style attribute triggers wrapping at indent 3 (109 + 12 = 121 > 120)
+    const input =
+        \\<pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;">error.{error_name}</pre>
+    ;
+    const result = try formatJsx(allocator, input, 3);
+    defer allocator.free(result);
+
+    const expected =
+        \\            <pre
+        \\                style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;"
+        \\            >
+        \\                error.{error_name}
+        \\            </pre>
         \\
     ;
     try std.testing.expectEqualStrings(expected, result);

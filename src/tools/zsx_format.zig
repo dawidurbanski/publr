@@ -2,6 +2,7 @@ const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
+const formatJsx = @import("zsx_fmt_jsx.zig").formatJsx;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -246,14 +247,13 @@ fn runZigFmt(allocator: Allocator, source: []const u8) ![]u8 {
     return stdout;
 }
 
-/// Replace placeholders with original bodies and strip injected void return types.
+/// Replace placeholders with formatted JSX bodies and strip injected void return types.
 fn stitchBodies(allocator: Allocator, formatted: []const u8, bodies: []const []const u8) ![]u8 {
     var output = std.ArrayListUnmanaged(u8){};
 
     var pos: usize = 0;
     while (pos < formatted.len) {
         // Look for placeholder pattern: _ = "ZSX_BLOCK_N";
-        // Also consume leading whitespace on the placeholder line
         if (mem.startsWith(u8, formatted[pos..], "_ = \"ZSX_BLOCK_")) {
             const idx_start = pos + "_ = \"ZSX_BLOCK_".len;
             const idx_end = mem.indexOfPos(u8, formatted, idx_start, "\";") orelse {
@@ -270,15 +270,22 @@ fn stitchBodies(allocator: Allocator, formatted: []const u8, bodies: []const []c
             };
 
             if (idx < bodies.len) {
-                // Remove the leading whitespace and newline that was added for the placeholder line
-                // Find start of placeholder line (after the newline)
+                // Find start of placeholder line and measure its indentation
                 const line_start = if (mem.lastIndexOfScalar(u8, formatted[0..pos], '\n')) |nl| nl + 1 else 0;
-                // Also remove the newline itself (it's at line_start - 1 if line_start > 0)
+                const indent_len = pos - line_start; // spaces before "_ = ..."
+                const base_indent = indent_len / 4; // convert spaces to indent levels (4 spaces per level)
+
+                // Truncate output back to before the placeholder line
                 const truncate_to = if (line_start > 0) line_start - 1 else 0;
-                // Truncate output back to before this line
                 output.shrinkRetainingCapacity(output.items.len - (pos - truncate_to));
 
-                try output.appendSlice(allocator, bodies[idx]);
+                // Format the JSX body with the correct base indentation
+                const formatted_body = formatJsx(allocator, bodies[idx], base_indent) catch bodies[idx];
+                defer if (formatted_body.ptr != bodies[idx].ptr) allocator.free(formatted_body);
+
+                // Append the formatted body (prepend newline since we removed it with truncation)
+                try output.append(allocator, '\n');
+                try output.appendSlice(allocator, formatted_body);
             }
 
             pos = idx_end + 2; // skip past ";
