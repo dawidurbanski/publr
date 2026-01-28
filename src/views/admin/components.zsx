@@ -83,7 +83,10 @@ pub fn Components() {
             <h2>Toggle</h2>
             <p class="showcase-desc">Open/close a content region. Foundation for other components.</p>
             <div class="showcase-example">
-                <Toggle label="Toggle Panel" content="<p>This content is toggled open and closed.</p>" />
+                <Toggle
+                    label="Toggle Panel"
+                    content="<p>This content is toggled open and closed.</p>"
+                />
             </div>
         </section>
         <section class="showcase-section">
@@ -121,7 +124,12 @@ pub fn Components() {
             <h2>Select</h2>
             <p class="showcase-desc">Custom select control. Item click updates a hidden input and display label.</p>
             <div class="showcase-example">
-                <SelectMenu name="status" default_label="Draft" default_value="draft" items={&select_items} />
+                <SelectMenu
+                    name="status"
+                    default_label="Draft"
+                    default_value="draft"
+                    items={&select_items}
+                />
             </div>
         </section>
         <section class="showcase-section">
@@ -140,8 +148,14 @@ pub fn Components() {
             <p class="showcase-desc">Hover or focus shows a small label after 200ms delay.</p>
             <div class="showcase-example">
                 <div class="showcase-row">
-                    <Tooltip trigger_label="Hover me" text="This is a tooltip" />
-                    <Tooltip trigger_label="Focus me" text="Tooltips work on focus too" />
+                    <Tooltip
+                        trigger_label="Hover me"
+                        text="This is a tooltip"
+                    />
+                    <Tooltip
+                        trigger_label="Focus me"
+                        text="Tooltips work on focus too"
+                    />
                 </div>
             </div>
         </section>
@@ -150,10 +164,30 @@ pub fn Components() {
             <p class="showcase-desc">Global notification via publr.toast(message, variant). Auto-dismisses after 4s.</p>
             <div class="showcase-example">
                 <div class="showcase-row">
-                    <button class="btn" onclick="publr.toast('Post saved successfully', 'success')">Success Toast</button>
-                    <button class="btn" onclick="publr.toast('Something went wrong', 'error')">Error Toast</button>
-                    <button class="btn" onclick="publr.toast('Check your connection', 'warning')">Warning Toast</button>
-                    <button class="btn" onclick="publr.toast('Here is some info')">Info Toast</button>
+                    <button
+                        class="btn"
+                        onclick="publr.toast('Post saved successfully', 'success')"
+                    >
+                        Success Toast
+                    </button>
+                    <button
+                        class="btn"
+                        onclick="publr.toast('Something went wrong', 'error')"
+                    >
+                        Error Toast
+                    </button>
+                    <button
+                        class="btn"
+                        onclick="publr.toast('Check your connection', 'warning')"
+                    >
+                        Warning Toast
+                    </button>
+                    <button
+                        class="btn"
+                        onclick="publr.toast('Here is some info')"
+                    >
+                        Info Toast
+                    </button>
                 </div>
             </div>
         </section>
@@ -169,8 +203,16 @@ pub fn Components() {
             <p class="showcase-desc">Toggle boolean state. Syncs aria-checked on change.</p>
             <div class="showcase-example">
                 <div class="showcase-row">
-                    <SwitchInput label="Enable comments" name="comments" checked={false} />
-                    <SwitchInput label="Published" name="published" checked={true} />
+                    <SwitchInput
+                        label="Enable comments"
+                        name="comments"
+                        checked={false}
+                    />
+                    <SwitchInput
+                        label="Published"
+                        name="published"
+                        checked={true}
+                    />
                 </div>
             </div>
         </section>
@@ -178,14 +220,22 @@ pub fn Components() {
             <h2>Checkbox Group</h2>
             <p class="showcase-desc">Multiple selections from a group of options.</p>
             <div class="showcase-example">
-                <CheckboxGroup legend="Categories" name="categories" options={&checkbox_options} />
+                <CheckboxGroup
+                    legend="Categories"
+                    name="categories"
+                    options={&checkbox_options}
+                />
             </div>
         </section>
         <section class="showcase-section">
             <h2>Radio Group</h2>
             <p class="showcase-desc">Single selection from a group of options.</p>
             <div class="showcase-example">
-                <RadioGroup legend="Visibility" name="visibility" options={&radio_options} />
+                <RadioGroup
+                    legend="Visibility"
+                    name="visibility"
+                    options={&radio_options}
+                />
             </div>
         </section>
     </div>

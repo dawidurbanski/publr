@@ -2,7 +2,12 @@
 // Props: trigger_label ([]const u8), items ([]const { label, danger, divider })
 pub fn Dropdown(props: struct { trigger_label: []const u8, items: anytype, }) {
     <div data-publr-component="dropdown" data-publr-state="closed">
-        <button data-publr-part="trigger" aria-expanded="false" aria-haspopup="true" class="btn">
+        <button
+            data-publr-part="trigger"
+            aria-expanded="false"
+            aria-haspopup="true"
+            class="btn"
+        >
             {props.trigger_label}
             &#9662;
         </button>

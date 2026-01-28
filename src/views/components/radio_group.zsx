@@ -6,9 +6,20 @@ pub fn RadioGroup(props: struct { legend: []const u8, name: []const u8, options:
         {for (props.options) |opt| (
             <label class="check-label">
                 {if (opt.checked) (
-                    <input type="radio" name={props.name} value={opt.value} class="radio-input" checked="checked" />
+                    <input
+                        type="radio"
+                        name={props.name}
+                        value={opt.value}
+                        class="radio-input"
+                        checked="checked"
+                    />
                 ) else (
-                    <input type="radio" name={props.name} value={opt.value} class="radio-input" />
+                    <input
+                        type="radio"
+                        name={props.name}
+                        value={opt.value}
+                        class="radio-input"
+                    />
                 )}
                 <span class="radio-indicator"></span>
                 <span>{opt.label}</span>

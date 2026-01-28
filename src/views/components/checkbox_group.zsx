@@ -6,9 +6,20 @@ pub fn CheckboxGroup(props: struct { legend: []const u8, name: []const u8, optio
         {for (props.options) |opt| (
             <label class="check-label">
                 {if (opt.checked) (
-                    <input type="checkbox" name={props.name} value={opt.value} class="check-input" checked="checked" />
+                    <input
+                        type="checkbox"
+                        name={props.name}
+                        value={opt.value}
+                        class="check-input"
+                        checked="checked"
+                    />
                 ) else (
-                    <input type="checkbox" name={props.name} value={opt.value} class="check-input" />
+                    <input
+                        type="checkbox"
+                        name={props.name}
+                        value={opt.value}
+                        class="check-input"
+                    />
                 )}
                 <span class="check-indicator"></span>
                 <span>{opt.label}</span>

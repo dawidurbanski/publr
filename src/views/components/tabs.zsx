@@ -18,11 +18,22 @@ pub fn Tabs(props: struct { tabs: anytype, }) {
         </div>
         {for (props.tabs) |tab| (
             {if (tab.active) (
-                <div class="tab-panel" role="tabpanel" data-publr-part="panel" data-publr-tab={tab.id}>
+                <div
+                    class="tab-panel"
+                    role="tabpanel"
+                    data-publr-part="panel"
+                    data-publr-tab={tab.id}
+                >
                     {!tab.content}
                 </div>
             ) else (
-                <div class="tab-panel" role="tabpanel" data-publr-part="panel" data-publr-tab={tab.id} hidden="true">
+                <div
+                    class="tab-panel"
+                    role="tabpanel"
+                    data-publr-part="panel"
+                    data-publr-tab={tab.id}
+                    hidden="true"
+                >
                     {!tab.content}
                 </div>
             )}

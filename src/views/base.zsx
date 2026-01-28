@@ -4,7 +4,10 @@ pub fn Base(title: []const u8, content: []const u8, css: []const []const u8, js:
     <html>
         <head>
             <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <meta
+                name="viewport"
+                content="width=device-width, initial-scale=1"
+            />
             <title>{title}</title>
             {for (css) |href| (
                 <link rel="stylesheet" href={href} />

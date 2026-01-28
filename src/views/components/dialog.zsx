@@ -14,7 +14,12 @@ pub fn Dialog(props: struct {
         data-publr-dismissable={if (props.dismissable) ("true") else ("false")}
     >
         <button data-publr-part="trigger" aria-expanded="false" class="btn">{props.trigger_label}</button>
-        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
+        <div
+            data-publr-part="content"
+            class="dialog-overlay"
+            role="dialog"
+            aria-modal="true"
+        >
             <div class="dialog-content">
                 <h3>{props.title}</h3>
                 <p>{props.body}</p>

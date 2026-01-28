@@ -174,7 +174,7 @@ fn formatControlFlow(allocator: Allocator, out: *Out, body: []const u8, start: u
     const expr = body[start..expr_end];
 
     // For simple single-line expressions that fit, emit inline
-    if (mem.indexOfScalar(u8, expr, '\n') == null and expr.len + indent * 4 <= 120) {
+    if (mem.indexOfScalar(u8, expr, '\n') == null and expr.len + indent * 4 <= 80) {
         try writeIndent(allocator, out, indent);
         try out.appendSlice(allocator, expr);
         try out.append(allocator, '\n');
@@ -380,7 +380,7 @@ fn needsAttrWrapping(tag_text: []const u8, indent: usize) bool {
     if (trimmed.len == 0 or trimmed[0] == '>' or (trimmed[0] == '/' and trimmed.len > 1 and trimmed[1] == '>')) {
         return false;
     }
-    return tag_text.len + indent * 4 > 120;
+    return tag_text.len + indent * 4 > 80;
 }
 
 fn writeWrappedTag(allocator: Allocator, out: *Out, tag_text: []const u8, indent: usize, tag_name: []const u8) Allocator.Error!void {
@@ -645,7 +645,7 @@ test "format for loop" {
     try std.testing.expectEqualStrings(expected, result);
 }
 
-test "format attribute wrapping over 120 chars" {
+test "format attribute wrapping over 80 chars" {
     const allocator = std.testing.allocator;
     const input =
         \\<Dialog trigger_label="Open Dialog" title="Dismissable Dialog" body="Click outside, press Escape, or use the close button." dismiss_label="Close" confirm_label="Confirm" dismissable={true} />
@@ -726,19 +726,19 @@ test "format HTML comment" {
 
 test "format inline content with wrapped attributes" {
     const allocator = std.testing.allocator;
-    // Long style attribute triggers wrapping at indent 3 (109 + 12 = 121 > 120)
+    // 109-char tag wraps at indent 0 (109 > 80)
     const input =
         \\<pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;">error.{error_name}</pre>
     ;
-    const result = try formatJsx(allocator, input, 3);
+    const result = try formatJsx(allocator, input, 0);
     defer allocator.free(result);
 
     const expected =
-        \\            <pre
-        \\                style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;"
-        \\            >
-        \\                error.{error_name}
-        \\            </pre>
+        \\<pre
+        \\    style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;"
+        \\>
+        \\    error.{error_name}
+        \\</pre>
         \\
     ;
     try std.testing.expectEqualStrings(expected, result);

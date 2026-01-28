@@ -4,7 +4,12 @@ pub fn Index() {
         <div class="bg-white p-8 rounded-lg shadow-lg">
             <h1 class="text-2xl font-bold text-gray-800">Demo Theme</h1>
             <p class="text-gray-600 mt-2">Using Tailwind!</p>
-            <a href="/admin" class="mt-4 inline-block text-blue-600 hover:underline">Go to Admin</a>
+            <a
+                href="/admin"
+                class="mt-4 inline-block text-blue-600 hover:underline"
+            >
+                Go to Admin
+            </a>
         </div>
     </div>
 }

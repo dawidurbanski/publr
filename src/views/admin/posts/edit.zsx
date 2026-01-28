@@ -12,15 +12,35 @@ pub fn Edit(post: PostData) {
     <form method="POST" class="form">
         <div class="form-group">
             <label for="title">Title</label>
-            <input type="text" id="title" name="title" value={post.title} class="form-control" required="" />
+            <input
+                type="text"
+                id="title"
+                name="title"
+                value={post.title}
+                class="form-control"
+                required=""
+            />
         </div>
         <div class="form-group">
             <label for="slug">Slug</label>
-            <input type="text" id="slug" name="slug" value={post.slug} class="form-control" />
+            <input
+                type="text"
+                id="slug"
+                name="slug"
+                value={post.slug}
+                class="form-control"
+            />
         </div>
         <div class="form-group">
             <label for="content">Content</label>
-            <textarea id="content" name="content" class="form-control" rows="12">{post.content}</textarea>
+            <textarea
+                id="content"
+                name="content"
+                class="form-control"
+                rows="12"
+            >
+                {post.content}
+            </textarea>
         </div>
         <div class="form-row">
             <div class="form-group">
@@ -40,7 +60,13 @@ pub fn Edit(post: PostData) {
             </div>
             <div class="form-group">
                 <label for="date">Publish Date</label>
-                <input type="date" id="date" name="date" value={post.date} class="form-control" />
+                <input
+                    type="date"
+                    id="date"
+                    name="date"
+                    value={post.date}
+                    class="form-control"
+                />
             </div>
         </div>
         <div class="form-actions">
