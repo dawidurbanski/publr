@@ -18,6 +18,22 @@ pub fn build(b: *std.Build) void {
     transpile_zsx_cmd.setCwd(b.path("."));
     transpile_zsx_cmd.addArgs(&.{ "src/views", "src/gen/views" });
 
+    // Build ZSX formatter
+    const zsx_formatter = b.addExecutable(.{
+        .name = "zsx_format",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/zsx_format.zig"),
+            .target = b.graph.host,
+        }),
+    });
+
+    // Format step (zig build fmt)
+    const fmt_step = b.step("fmt", "Format ZSX files");
+    const fmt_cmd = b.addRunArtifact(zsx_formatter);
+    fmt_cmd.setCwd(b.path("."));
+    fmt_cmd.addArgs(&.{"src/views"});
+    fmt_step.dependOn(&fmt_cmd.step);
+
     const exe = b.addExecutable(.{
         .name = "publr",
         .root_module = b.createModule(.{
@@ -71,6 +87,24 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addAnonymousImport("static_admin_js", .{
         .root_source_file = b.path("static/admin.js"),
     });
+    exe.root_module.addAnonymousImport("static_interact_core_js", .{
+        .root_source_file = b.path("static/interact/core.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_toggle_js", .{
+        .root_source_file = b.path("static/interact/toggle.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_portal_js", .{
+        .root_source_file = b.path("static/interact/portal.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_focus_trap_js", .{
+        .root_source_file = b.path("static/interact/focus-trap.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_dismiss_js", .{
+        .root_source_file = b.path("static/interact/dismiss.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_components_js", .{
+        .root_source_file = b.path("static/interact/components.js"),
+    });
     exe.root_module.addAnonymousImport("static_theme_css", .{
         .root_source_file = b.path("themes/demo/static/theme.css"),
     });
@@ -78,6 +112,48 @@ pub fn build(b: *std.Build) void {
     // Import ZSX runtime
     const zsx_runtime = b.createModule(.{
         .root_source_file = b.path("src/tools/zsx_runtime.zig"),
+    });
+
+    // Import generated ZSX component views (shared modules)
+    const zsx_components_toggle = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/toggle.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_dialog = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/dialog.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_dropdown = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/dropdown.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_select_menu = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/select_menu.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_popover = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/popover.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_tooltip = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/tooltip.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_tabs = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/tabs.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_switch_input = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/switch_input.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_checkbox_group = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/checkbox_group.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_components_radio_group = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/components/radio_group.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
     });
 
     // Import generated ZSX views
@@ -104,6 +180,22 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zsx_admin_posts_edit", b.createModule(.{
         .root_source_file = b.path("src/gen/views/admin/posts/edit.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe.root_module.addImport("zsx_admin_components", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/components.zig"),
+        .imports = &.{
+            .{ .name = "zsx_runtime", .module = zsx_runtime },
+            .{ .name = "zsx_components_toggle", .module = zsx_components_toggle },
+            .{ .name = "zsx_components_dialog", .module = zsx_components_dialog },
+            .{ .name = "zsx_components_dropdown", .module = zsx_components_dropdown },
+            .{ .name = "zsx_components_select_menu", .module = zsx_components_select_menu },
+            .{ .name = "zsx_components_popover", .module = zsx_components_popover },
+            .{ .name = "zsx_components_tooltip", .module = zsx_components_tooltip },
+            .{ .name = "zsx_components_tabs", .module = zsx_components_tabs },
+            .{ .name = "zsx_components_switch_input", .module = zsx_components_switch_input },
+            .{ .name = "zsx_components_checkbox_group", .module = zsx_components_checkbox_group },
+            .{ .name = "zsx_components_radio_group", .module = zsx_components_radio_group },
+        },
     }));
     exe.root_module.addImport("zsx_error_404", b.createModule(.{
         .root_source_file = b.path("src/gen/views/error/error_404.zig"),
@@ -181,6 +273,22 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("zsx_admin_posts_edit", b.createModule(.{
         .root_source_file = b.path("src/gen/views/admin/posts/edit.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe_tests.root_module.addImport("zsx_admin_components", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/components.zig"),
+        .imports = &.{
+            .{ .name = "zsx_runtime", .module = zsx_runtime },
+            .{ .name = "zsx_components_toggle", .module = zsx_components_toggle },
+            .{ .name = "zsx_components_dialog", .module = zsx_components_dialog },
+            .{ .name = "zsx_components_dropdown", .module = zsx_components_dropdown },
+            .{ .name = "zsx_components_select_menu", .module = zsx_components_select_menu },
+            .{ .name = "zsx_components_popover", .module = zsx_components_popover },
+            .{ .name = "zsx_components_tooltip", .module = zsx_components_tooltip },
+            .{ .name = "zsx_components_tabs", .module = zsx_components_tabs },
+            .{ .name = "zsx_components_switch_input", .module = zsx_components_switch_input },
+            .{ .name = "zsx_components_checkbox_group", .module = zsx_components_checkbox_group },
+            .{ .name = "zsx_components_radio_group", .module = zsx_components_radio_group },
+        },
     }));
     exe_tests.root_module.addImport("zsx_error_404", b.createModule(.{
         .root_source_file = b.path("src/gen/views/error/error_404.zig"),

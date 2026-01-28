@@ -1,40 +1,53 @@
 // Admin layout template
-pub fn Layout(title: []const u8, content: []const u8, actions: []const u8, nav_dashboard: bool, nav_posts: bool, nav_settings: bool) {
+pub fn Layout(title: []const u8, content: []const u8, actions: []const u8, nav_dashboard: bool, nav_posts: bool, nav_settings: bool, nav_components: bool) {
     <!DOCTYPE html>
     <html>
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{title} - Publr Admin</title>
-        <link rel="stylesheet" href="/static/admin.css" />
-    </head>
-    <body class="admin">
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <a href="/admin" class="logo">Publr</a>
-            </div>
-            <nav class="sidebar-nav">
-                <a href="/admin" class={if (nav_dashboard) ("nav-item active") else ("nav-item")}>
-                    <span class="nav-icon">&#9632;</span> Dashboard
-                </a>
-                <a href="/admin/posts" class={if (nav_posts) ("nav-item active") else ("nav-item")}>
-                    <span class="nav-icon">&#9998;</span> Posts
-                </a>
-                <a href="/admin/settings" class={if (nav_settings) ("nav-item active") else ("nav-item")}>
-                    <span class="nav-icon">&#9881;</span> Settings
-                </a>
-            </nav>
-        </aside>
-        <main class="main-content">
-            <header class="top-bar">
-                <h1 class="page-title">{title}</h1>
-                {!actions}
-            </header>
-            <div class="content">
-                {!content}
-            </div>
-        </main>
-        <script src="/static/admin.js"></script>
-    </body>
+        <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>{title} - Publr Admin</title>
+            <link rel="stylesheet" href="/static/admin.css" />
+        </head>
+        <body class="admin">
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <a href="/admin" class="logo">Publr</a>
+                </div>
+                <nav class="sidebar-nav">
+                    <a href="/admin" class={if (nav_dashboard) ("nav-item active") else ("nav-item")}>
+                        <span class="nav-icon">&#9632;</span>
+                        Dashboard
+                    </a>
+                    <a href="/admin/posts" class={if (nav_posts) ("nav-item active") else ("nav-item")}>
+                        <span class="nav-icon">&#9998;</span>
+                        Posts
+                    </a>
+                    <a href="/admin/settings" class={if (nav_settings) ("nav-item active") else ("nav-item")}>
+                        <span class="nav-icon">&#9881;</span>
+                        Settings
+                    </a>
+                    <a href="/admin/components" class={if (nav_components) ("nav-item active") else ("nav-item")}>
+                        <span class="nav-icon">&#9879;</span>
+                        Components
+                    </a>
+                </nav>
+            </aside>
+            <main class="main-content">
+                <header class="top-bar">
+                    <h1 class="page-title">{title}</h1>
+                    {!actions}
+                </header>
+                <div class="content">
+                    {!content}
+                </div>
+            </main>
+            <script src="/static/interact/core.js"></script>
+            <script src="/static/interact/toggle.js"></script>
+            <script src="/static/interact/portal.js"></script>
+            <script src="/static/interact/focus-trap.js"></script>
+            <script src="/static/interact/dismiss.js"></script>
+            <script src="/static/interact/components.js"></script>
+            <script src="/static/admin.js"></script>
+        </body>
     </html>
 }

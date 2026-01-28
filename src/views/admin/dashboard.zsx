@@ -1,5 +1,10 @@
 // Admin dashboard template
-const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
+const Post = struct {
+    id: []const u8,
+    title: []const u8,
+    status: []const u8,
+    date: []const u8,
+};
 
 pub fn Dashboard(posts_count: []const u8, pages_count: []const u8, media_count: []const u8, users_count: []const u8, has_posts: bool, recent_posts: []const Post) {
     <div class="stats-grid">
@@ -26,26 +31,26 @@ pub fn Dashboard(posts_count: []const u8, pages_count: []const u8, media_count: 
         </div>
         <div class="panel-body">
             {if (has_posts) (
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {for (recent_posts) |post| (
-                    <tr>
-                        <td><a href={post.id}>{post.title}</a></td>
-                        <td><span class={post.status}>{post.status}</span></td>
-                        <td>{post.date}</td>
-                    </tr>
-                    )}
-                </tbody>
-            </table>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {for (recent_posts) |post| (
+                            <tr>
+                                <td><a href={post.id}>{post.title}</a></td>
+                                <td><span class={post.status}>{post.status}</span></td>
+                                <td>{post.date}</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
             ) else (
-            <p class="empty-state">No posts yet. <a href="/admin/posts/new">Create your first post</a></p>
+                <p class="empty-state">No posts yet. <a href="/admin/posts/new">Create your first post</a></p>
             )}
         </div>
     </div>

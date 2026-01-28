@@ -1,0 +1,192 @@
+// Admin components showcase — living reference for all interactive components
+const Toggle = @import("zsx_components_toggle").Toggle;
+const Dialog = @import("zsx_components_dialog").Dialog;
+const Dropdown = @import("zsx_components_dropdown").Dropdown;
+const SelectMenu = @import("zsx_components_select_menu").SelectMenu;
+const Popover = @import("zsx_components_popover").Popover;
+const Tooltip = @import("zsx_components_tooltip").Tooltip;
+const Tabs = @import("zsx_components_tabs").Tabs;
+const SwitchInput = @import("zsx_components_switch_input").SwitchInput;
+const CheckboxGroup = @import("zsx_components_checkbox_group").CheckboxGroup;
+const RadioGroup = @import("zsx_components_radio_group").RadioGroup;
+
+// Demo data
+const DropdownItem = struct {
+    label: []const u8,
+    danger: bool,
+    divider: bool,
+};
+const dropdown_items = [_]DropdownItem{
+    .{ .label = "Edit", .danger = false, .divider = false },
+    .{ .label = "Duplicate", .danger = false, .divider = false },
+    .{ .label = "Archive", .danger = false, .divider = false },
+    .{ .label = "Delete", .danger = true, .divider = true },
+};
+
+const SelectItem = struct {
+    label: []const u8,
+    value: []const u8,
+    selected: bool,
+};
+const select_items = [_]SelectItem{
+    .{ .label = "Draft", .value = "draft", .selected = true },
+    .{ .label = "Published", .value = "published", .selected = false },
+    .{ .label = "Archived", .value = "archived", .selected = false },
+};
+
+const TabItem = struct {
+    id: []const u8,
+    label: []const u8,
+    content: []const u8,
+    active: bool,
+};
+const tab_items = [_]TabItem{
+    .{
+        .id = "general",
+        .label = "General",
+        .content = "<p>General settings content goes here.</p>",
+        .active = true,
+    },
+    .{
+        .id = "seo",
+        .label = "SEO",
+        .content = "<p>SEO settings content goes here. Meta title, description, etc.</p>",
+        .active = false,
+    },
+    .{
+        .id = "advanced",
+        .label = "Advanced",
+        .content = "<p>Advanced settings content goes here. Custom CSS, scripts.</p>",
+        .active = false,
+    },
+};
+
+const CheckOption = struct {
+    label: []const u8,
+    value: []const u8,
+    checked: bool,
+};
+const checkbox_options = [_]CheckOption{
+    .{ .label = "News", .value = "news", .checked = false },
+    .{ .label = "Tutorials", .value = "tutorials", .checked = true },
+    .{ .label = "Updates", .value = "updates", .checked = false },
+};
+const radio_options = [_]CheckOption{
+    .{ .label = "Public", .value = "public", .checked = true },
+    .{ .label = "Unlisted", .value = "unlisted", .checked = false },
+    .{ .label = "Private", .value = "private", .checked = false },
+};
+
+pub fn Components() {
+    <div class="showcase">
+        <section class="showcase-section">
+            <h2>Toggle</h2>
+            <p class="showcase-desc">Open/close a content region. Foundation for other components.</p>
+            <div class="showcase-example">
+                <Toggle label="Toggle Panel" content="<p>This content is toggled open and closed.</p>" />
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Dialog</h2>
+            <p class="showcase-desc">Modal overlay with focus trap. Dismissable and non-dismissable variants.</p>
+            <div class="showcase-example">
+                <div class="showcase-row">
+                    <Dialog
+                        trigger_label="Open Dialog"
+                        title="Dismissable Dialog"
+                        body="Click outside, press Escape, or use the close button."
+                        dismiss_label="Close"
+                        confirm_label="Confirm"
+                        dismissable={true}
+                    />
+                    <Dialog
+                        trigger_label="Non-dismissable"
+                        title="Non-dismissable Dialog"
+                        body="Must use the close button. Escape and click-outside are disabled."
+                        dismiss_label="Got it"
+                        confirm_label=""
+                        dismissable={false}
+                    />
+                </div>
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Dropdown Menu</h2>
+            <p class="showcase-desc">Click trigger opens a menu. Arrow keys navigate, Enter selects, Escape closes.</p>
+            <div class="showcase-example">
+                <Dropdown trigger_label="Actions" items={&dropdown_items} />
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Select</h2>
+            <p class="showcase-desc">Custom select control. Item click updates a hidden input and display label.</p>
+            <div class="showcase-example">
+                <SelectMenu name="status" default_label="Draft" default_value="draft" items={&select_items} />
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Popover</h2>
+            <p class="showcase-desc">Click trigger toggles positioned content. Dismissed by click-outside or Escape.</p>
+            <div class="showcase-example">
+                <Popover
+                    trigger_label="Show Info"
+                    title="Popover Title"
+                    body="Additional context or controls can live here. Click outside to dismiss."
+                />
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Tooltip</h2>
+            <p class="showcase-desc">Hover or focus shows a small label after 200ms delay.</p>
+            <div class="showcase-example">
+                <div class="showcase-row">
+                    <Tooltip trigger_label="Hover me" text="This is a tooltip" />
+                    <Tooltip trigger_label="Focus me" text="Tooltips work on focus too" />
+                </div>
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Toast</h2>
+            <p class="showcase-desc">Global notification via publr.toast(message, variant). Auto-dismisses after 4s.</p>
+            <div class="showcase-example">
+                <div class="showcase-row">
+                    <button class="btn" onclick="publr.toast('Post saved successfully', 'success')">Success Toast</button>
+                    <button class="btn" onclick="publr.toast('Something went wrong', 'error')">Error Toast</button>
+                    <button class="btn" onclick="publr.toast('Check your connection', 'warning')">Warning Toast</button>
+                    <button class="btn" onclick="publr.toast('Here is some info')">Info Toast</button>
+                </div>
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Tabs</h2>
+            <p class="showcase-desc">Click tab to show panel. Arrow left/right for roving focus.</p>
+            <div class="showcase-example">
+                <Tabs tabs={&tab_items} />
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Switch</h2>
+            <p class="showcase-desc">Toggle boolean state. Syncs aria-checked on change.</p>
+            <div class="showcase-example">
+                <div class="showcase-row">
+                    <SwitchInput label="Enable comments" name="comments" checked={false} />
+                    <SwitchInput label="Published" name="published" checked={true} />
+                </div>
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Checkbox Group</h2>
+            <p class="showcase-desc">Multiple selections from a group of options.</p>
+            <div class="showcase-example">
+                <CheckboxGroup legend="Categories" name="categories" options={&checkbox_options} />
+            </div>
+        </section>
+        <section class="showcase-section">
+            <h2>Radio Group</h2>
+            <p class="showcase-desc">Single selection from a group of options.</p>
+            <div class="showcase-example">
+                <RadioGroup legend="Visibility" name="visibility" options={&radio_options} />
+            </div>
+        </section>
+    </div>
+}
