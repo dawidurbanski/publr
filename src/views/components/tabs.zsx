@@ -4,7 +4,16 @@ pub fn Tabs(props: struct { tabs: anytype }) {
     <div data-publr-component="tabs">
         <div class="tabs-list" role="tablist" data-publr-part="list">
             {for (props.tabs) |tab| (
-                <button class="tab-trigger" role="tab" data-publr-part="trigger" data-publr-tab={tab.id} aria-selected={if (tab.active) ("true") else ("false")} tabindex={if (tab.active) ("0") else ("-1")}>{tab.label}</button>
+                <button
+                    class="tab-trigger"
+                    role="tab"
+                    data-publr-part="trigger"
+                    data-publr-tab={tab.id}
+                    aria-selected={if (tab.active) ("true") else ("false")}
+                    tabindex={if (tab.active) ("0") else ("-1")}
+                >
+                    {tab.label}
+                </button>
             )}
         </div>
         {for (props.tabs) |tab| (

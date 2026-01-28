@@ -26,7 +26,6 @@ const radio_options = [_]CheckOption{ .{ .label = "Public", .value = "public", .
 
 pub fn Components() {
     <div class="showcase">
-
         <section class="showcase-section">
             <h2>Toggle</h2>
             <p class="showcase-desc">Open/close a content region. Foundation for other components.</p>
@@ -34,18 +33,30 @@ pub fn Components() {
                 <Toggle label="Toggle Panel" content="<p>This content is toggled open and closed.</p>" />
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Dialog</h2>
             <p class="showcase-desc">Modal overlay with focus trap. Dismissable and non-dismissable variants.</p>
             <div class="showcase-example">
                 <div class="showcase-row">
-                    <Dialog trigger_label="Open Dialog" title="Dismissable Dialog" body="Click outside, press Escape, or use the close button." dismiss_label="Close" confirm_label="Confirm" dismissable={true} />
-                    <Dialog trigger_label="Non-dismissable" title="Non-dismissable Dialog" body="Must use the close button. Escape and click-outside are disabled." dismiss_label="Got it" confirm_label="" dismissable={false} />
+                    <Dialog
+                        trigger_label="Open Dialog"
+                        title="Dismissable Dialog"
+                        body="Click outside, press Escape, or use the close button."
+                        dismiss_label="Close"
+                        confirm_label="Confirm"
+                        dismissable={true}
+                    />
+                    <Dialog
+                        trigger_label="Non-dismissable"
+                        title="Non-dismissable Dialog"
+                        body="Must use the close button. Escape and click-outside are disabled."
+                        dismiss_label="Got it"
+                        confirm_label=""
+                        dismissable={false}
+                    />
                 </div>
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Dropdown Menu</h2>
             <p class="showcase-desc">Click trigger opens a menu. Arrow keys navigate, Enter selects, Escape closes.</p>
@@ -53,7 +64,6 @@ pub fn Components() {
                 <Dropdown trigger_label="Actions" items={&dropdown_items} />
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Select</h2>
             <p class="showcase-desc">Custom select control. Item click updates a hidden input and display label.</p>
@@ -61,15 +71,17 @@ pub fn Components() {
                 <SelectMenu name="status" default_label="Draft" default_value="draft" items={&select_items} />
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Popover</h2>
             <p class="showcase-desc">Click trigger toggles positioned content. Dismissed by click-outside or Escape.</p>
             <div class="showcase-example">
-                <Popover trigger_label="Show Info" title="Popover Title" body="Additional context or controls can live here. Click outside to dismiss." />
+                <Popover
+                    trigger_label="Show Info"
+                    title="Popover Title"
+                    body="Additional context or controls can live here. Click outside to dismiss."
+                />
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Tooltip</h2>
             <p class="showcase-desc">Hover or focus shows a small label after 200ms delay.</p>
@@ -80,7 +92,6 @@ pub fn Components() {
                 </div>
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Toast</h2>
             <p class="showcase-desc">Global notification via publr.toast(message, variant). Auto-dismisses after 4s.</p>
@@ -93,7 +104,6 @@ pub fn Components() {
                 </div>
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Tabs</h2>
             <p class="showcase-desc">Click tab to show panel. Arrow left/right for roving focus.</p>
@@ -101,7 +111,6 @@ pub fn Components() {
                 <Tabs tabs={&tab_items} />
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Switch</h2>
             <p class="showcase-desc">Toggle boolean state. Syncs aria-checked on change.</p>
@@ -112,7 +121,6 @@ pub fn Components() {
                 </div>
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Checkbox Group</h2>
             <p class="showcase-desc">Multiple selections from a group of options.</p>
@@ -120,7 +128,6 @@ pub fn Components() {
                 <CheckboxGroup legend="Categories" name="categories" options={&checkbox_options} />
             </div>
         </section>
-
         <section class="showcase-section">
             <h2>Radio Group</h2>
             <p class="showcase-desc">Single selection from a group of options.</p>
@@ -128,6 +135,5 @@ pub fn Components() {
                 <RadioGroup legend="Visibility" name="visibility" options={&radio_options} />
             </div>
         </section>
-
     </div>
 }

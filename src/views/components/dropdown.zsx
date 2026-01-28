@@ -3,14 +3,21 @@
 pub fn Dropdown(props: struct { trigger_label: []const u8, items: anytype }) {
     <div data-publr-component="dropdown" data-publr-state="closed">
         <button data-publr-part="trigger" aria-expanded="false" aria-haspopup="true" class="btn">
-            {props.trigger_label} &#9662;
+            {props.trigger_label}
+            &#9662;
         </button>
         <div data-publr-part="content" class="dropdown-menu" role="menu">
             {for (props.items) |item| (
                 {if (item.divider) (
                     <hr class="dropdown-divider" />
                 )}
-                <button class={if (item.danger) ("dropdown-item dropdown-item-danger") else ("dropdown-item")} role="menuitem" data-publr-part="item">{item.label}</button>
+                <button
+                    class={if (item.danger) ("dropdown-item dropdown-item-danger") else ("dropdown-item")}
+                    role="menuitem"
+                    data-publr-part="item"
+                >
+                    {item.label}
+                </button>
             )}
         </div>
     </div>

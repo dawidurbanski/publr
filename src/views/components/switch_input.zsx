@@ -7,7 +7,12 @@ pub fn SwitchInput(props: struct { label: []const u8, name: []const u8, checked:
         ) else (
             <input type="checkbox" data-publr-part="input" class="switch-input" name={props.name} />
         )}
-        <span data-publr-part="track" class="switch-track" role="switch" aria-checked={if (props.checked) ("true") else ("false")}>
+        <span
+            data-publr-part="track"
+            class="switch-track"
+            role="switch"
+            aria-checked={if (props.checked) ("true") else ("false")}
+        >
             <span class="switch-thumb"></span>
         </span>
         <span>{props.label}</span>

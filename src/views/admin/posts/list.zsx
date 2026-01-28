@@ -3,35 +3,35 @@ const Post = struct { id: []const u8, title: []const u8, author: []const u8, sta
 
 pub fn List(has_posts: bool, posts: []const Post) {
     {if (has_posts) (
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Title</th>
-                <th>Author</th>
-                <th>Status</th>
-                <th>Date</th>
-                <th class="actions-col">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {for (posts) |post| (
-            <tr>
-                <td><a href="/admin/posts/{post.id}">{post.title}</a></td>
-                <td>{post.author}</td>
-                <td><span class={post.status}>{post.status}</span></td>
-                <td>{post.date}</td>
-                <td class="actions-col">
-                    <a href="/admin/posts/{post.id}" class="btn btn-sm">Edit</a>
-                    <button class="btn btn-sm btn-danger">Delete</button>
-                </td>
-            </tr>
-            )}
-        </tbody>
-    </table>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Author</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th class="actions-col">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {for (posts) |post| (
+                    <tr>
+                        <td><a href="/admin/posts/{post.id}">{post.title}</a></td>
+                        <td>{post.author}</td>
+                        <td><span class={post.status}>{post.status}</span></td>
+                        <td>{post.date}</td>
+                        <td class="actions-col">
+                            <a href="/admin/posts/{post.id}" class="btn btn-sm">Edit</a>
+                            <button class="btn btn-sm btn-danger">Delete</button>
+                        </td>
+                    </tr>
+                )}
+            </tbody>
+        </table>
     ) else (
-    <div class="empty-state">
-        <p>No posts yet.</p>
-        <a href="/admin/posts/new" class="btn btn-primary">Create your first post</a>
-    </div>
+        <div class="empty-state">
+            <p>No posts yet.</p>
+            <a href="/admin/posts/new" class="btn btn-primary">Create your first post</a>
+        </div>
     )}
 }
