@@ -5,6 +5,8 @@
     'use strict';
 
     var publr = window.publr || {};
+    var uid = 0;
+    function nextId(prefix) { return 'publr-' + prefix + '-' + (++uid); }
 
     // ── Toggle ──────────────────────────────────────
     publr.register('toggle', function(el) {
@@ -27,6 +29,7 @@
             publr.trapFocus(content);
             el._publrOnClose = function() {
                 publr.releaseFocus(content);
+                trigger.focus();
             };
         });
 
@@ -65,7 +68,7 @@
             }
         });
 
-        // Arrow key navigation
+        // Keyboard navigation
         content.addEventListener('keydown', function(e) {
             var items = content.querySelectorAll('[data-publr-part="item"]');
             if (!items.length) return;
@@ -77,6 +80,12 @@
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 items[(idx - 1 + items.length) % items.length].focus();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                items[0].focus();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                items[items.length - 1].focus();
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (idx >= 0) items[idx].click();
@@ -116,7 +125,9 @@
             }
         });
 
-        // Arrow key navigation
+        // Keyboard navigation + type-ahead
+        var typeBuffer = '';
+        var typeTimer = null;
         content.addEventListener('keydown', function(e) {
             var items = content.querySelectorAll('[data-publr-part="item"]');
             if (!items.length) return;
@@ -128,9 +139,25 @@
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 items[(idx - 1 + items.length) % items.length].focus();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                items[0].focus();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                items[items.length - 1].focus();
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (idx >= 0) items[idx].click();
+            } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+                typeBuffer += e.key.toLowerCase();
+                clearTimeout(typeTimer);
+                typeTimer = setTimeout(function() { typeBuffer = ''; }, 500);
+                for (var k = 0; k < items.length; k++) {
+                    if (items[k].textContent.trim().toLowerCase().indexOf(typeBuffer) === 0) {
+                        items[k].focus();
+                        break;
+                    }
+                }
             }
         });
 
@@ -157,6 +184,9 @@
         var trigger = el.querySelector('[data-publr-part="trigger"]');
         var content = el.querySelector('[data-publr-part="content"]');
         if (!trigger || !content) return;
+        var id = nextId('popover');
+        content.id = id;
+        trigger.setAttribute('aria-controls', id);
 
         trigger.addEventListener('click', function() {
             if (publr.isOpen(el)) {
@@ -179,6 +209,9 @@
         var trigger = el.querySelector('[data-publr-part="trigger"]');
         var content = el.querySelector('[data-publr-part="content"]');
         if (!trigger || !content) return;
+        var id = nextId('tooltip');
+        content.id = id;
+        trigger.setAttribute('aria-describedby', id);
         var timer = null;
 
         function show() {
@@ -201,6 +234,9 @@
         trigger.addEventListener('mouseleave', hide);
         trigger.addEventListener('focus', show);
         trigger.addEventListener('blur', hide);
+        trigger.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') hide();
+        });
     });
 
     // ── Toast ───────────────────────────────────────
@@ -216,24 +252,42 @@
         return toastRegion;
     }
 
+    function dismissToast(toast) {
+        toast.classList.remove('toast-visible');
+        toast.classList.add('toast-exit');
+        setTimeout(function() {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
+    }
+
     publr.toast = function(message, variant) {
         var region = getToastRegion();
         var toast = document.createElement('div');
         toast.className = 'toast toast-' + (variant || 'info');
-        toast.textContent = message;
         toast.setAttribute('role', 'status');
+
+        var text = document.createElement('span');
+        text.textContent = message;
+        toast.appendChild(text);
+
+        var close = document.createElement('button');
+        close.className = 'toast-close';
+        close.setAttribute('aria-label', 'Dismiss');
+        close.textContent = '\u00d7';
+        close.addEventListener('click', function() {
+            clearTimeout(autoTimer);
+            dismissToast(toast);
+        });
+        toast.appendChild(close);
+
         region.appendChild(toast);
 
         requestAnimationFrame(function() {
             toast.classList.add('toast-visible');
         });
 
-        setTimeout(function() {
-            toast.classList.remove('toast-visible');
-            toast.classList.add('toast-exit');
-            setTimeout(function() {
-                if (toast.parentNode) toast.parentNode.removeChild(toast);
-            }, 300);
+        var autoTimer = setTimeout(function() {
+            dismissToast(toast);
         }, 4000);
     };
 
@@ -241,6 +295,21 @@
     publr.register('tabs', function(el) {
         var triggers = el.querySelectorAll('[data-publr-part="trigger"]');
         var panels = el.querySelectorAll('[data-publr-part="panel"]');
+
+        // Wire up aria-controls / aria-labelledby with generated IDs
+        for (var t = 0; t < triggers.length; t++) {
+            var tabId = triggers[t].dataset.publrTab;
+            var triggerId = nextId('tab');
+            var panelId = nextId('tabpanel');
+            triggers[t].id = triggerId;
+            triggers[t].setAttribute('aria-controls', panelId);
+            for (var p = 0; p < panels.length; p++) {
+                if (panels[p].dataset.publrTab === tabId) {
+                    panels[p].id = panelId;
+                    panels[p].setAttribute('aria-labelledby', triggerId);
+                }
+            }
+        }
 
         function activate(tab) {
             var id = tab.dataset.publrTab;
@@ -276,6 +345,14 @@
                 var prev = triggers[(idx - 1 + triggers.length) % triggers.length];
                 prev.focus();
                 activate(prev);
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                triggers[0].focus();
+                activate(triggers[0]);
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                triggers[triggers.length - 1].focus();
+                activate(triggers[triggers.length - 1]);
             }
         });
     });
@@ -300,8 +377,24 @@
     });
 
     // ── Radio Group ─────────────────────────────────
-    publr.register('radio-group', function() {
-        // Semantic HTML handles behavior
+    publr.register('radio-group', function(el) {
+        el.addEventListener('keydown', function(e) {
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+            var radios = el.querySelectorAll('input[type="radio"]');
+            if (!radios.length) return;
+            var idx = Array.prototype.indexOf.call(radios, document.activeElement);
+            if (idx === -1) return;
+            e.preventDefault();
+            var next;
+            if (e.key === 'ArrowDown') {
+                next = radios[(idx + 1) % radios.length];
+            } else {
+                next = radios[(idx - 1 + radios.length) % radios.length];
+            }
+            next.checked = true;
+            next.focus();
+            next.dispatchEvent(new Event('change', { bubbles: true }));
+        });
     });
 
     window.publr = publr;

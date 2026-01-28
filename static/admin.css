@@ -337,28 +337,42 @@ body.admin {
     text-decoration: none;
 }
 
-.btn-primary {
+.btn-primary,
+[data-publr-variant="primary"] {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--text-on-accent);
 }
 
-.btn-primary:hover {
+.btn-primary:hover,
+[data-publr-variant="primary"]:hover {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
 }
 
-.btn-danger {
+.btn-danger,
+[data-publr-variant="danger"] {
     color: var(--color-danger);
     border-color: var(--color-danger);
 }
 
-.btn-danger:hover {
+.btn-danger:hover,
+[data-publr-variant="danger"]:hover {
     background: var(--color-danger);
     color: var(--text-on-accent);
 }
 
-.btn-sm {
+[data-publr-variant="ghost"] {
+    border-color: transparent;
+    background: transparent;
+}
+
+[data-publr-variant="ghost"]:hover {
+    background: var(--bg-tertiary);
+}
+
+.btn-sm,
+[data-publr-size="sm"] {
     padding: 2px var(--space-2);
     font-size: var(--text-xs);
 }
@@ -643,6 +657,27 @@ select.form-control {
     margin-bottom: 0;
 }
 
+.popover-arrow {
+    position: absolute;
+    top: -6px;
+    left: var(--space-4);
+    width: 12px;
+    height: 6px;
+    overflow: hidden;
+}
+
+.popover-arrow::before {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 1px;
+    width: 10px;
+    height: 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    transform: rotate(45deg);
+}
+
 /* ── Tooltip ────────────────────────────────────────── */
 
 .tooltip-content {
@@ -681,7 +716,10 @@ select.form-control {
 }
 
 .toast {
-    padding: var(--space-2) var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
     font-weight: 500;
@@ -691,6 +729,23 @@ select.form-control {
     transform: translateX(20px);
     transition: opacity 0.2s, transform 0.2s;
     max-width: 360px;
+}
+
+.toast-close {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    font-size: var(--text-md);
+    line-height: 1;
+    cursor: pointer;
+    color: inherit;
+    opacity: 0.5;
+    padding: 0 2px;
+    font-family: inherit;
+}
+
+.toast-close:hover {
+    opacity: 1;
 }
 
 .toast-visible {

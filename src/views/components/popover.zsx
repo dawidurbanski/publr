@@ -4,6 +4,7 @@ pub fn Popover(props: struct { trigger_label: []const u8, title: []const u8, bod
     <div data-publr-component="popover" data-publr-state="closed">
         <button data-publr-part="trigger" aria-expanded="false" class="btn">{props.trigger_label}</button>
         <div data-publr-part="content" class="popover-content">
+            <div class="popover-arrow" data-publr-part="arrow"></div>
             <p><strong>{props.title}</strong></p>
             <p>{props.body}</p>
         </div>
