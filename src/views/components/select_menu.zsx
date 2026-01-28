@@ -1,6 +1,6 @@
 // SelectMenu — custom select control with hidden input
 // Props: name, default_label, default_value ([]const u8), items ([]const { label, value, selected })
-pub fn SelectMenu(props: struct { name: []const u8, default_label: []const u8, default_value: []const u8, items: anytype }) {
+pub fn SelectMenu(props: struct { name: []const u8, default_label: []const u8, default_value: []const u8, items: anytype, }) {
     <div data-publr-component="select" data-publr-state="closed">
         <input type="hidden" name={props.name} value={props.default_value} data-publr-part="value" />
         <button data-publr-part="trigger" aria-expanded="false" aria-haspopup="listbox" class="select-trigger">

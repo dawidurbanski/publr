@@ -1,5 +1,10 @@
 // Admin dashboard template
-const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
+const Post = struct {
+    id: []const u8,
+    title: []const u8,
+    status: []const u8,
+    date: []const u8,
+};
 
 pub fn Dashboard(posts_count: []const u8, pages_count: []const u8, media_count: []const u8, users_count: []const u8, has_posts: bool, recent_posts: []const Post) {
     <div class="stats-grid">

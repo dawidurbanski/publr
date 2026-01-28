@@ -1,5 +1,11 @@
 // Posts list template
-const Post = struct { id: []const u8, title: []const u8, author: []const u8, status: []const u8, date: []const u8 };
+const Post = struct {
+    id: []const u8,
+    title: []const u8,
+    author: []const u8,
+    status: []const u8,
+    date: []const u8,
+};
 
 pub fn List(has_posts: bool, posts: []const Post) {
     {if (has_posts) (

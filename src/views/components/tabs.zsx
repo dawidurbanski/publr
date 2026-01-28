@@ -1,6 +1,6 @@
 // Tabs — click tab to show panel, arrow keys for roving focus
 // Props: tabs ([]const { id, label, content, active })
-pub fn Tabs(props: struct { tabs: anytype }) {
+pub fn Tabs(props: struct { tabs: anytype, }) {
     <div data-publr-component="tabs">
         <div class="tabs-list" role="tablist" data-publr-part="list">
             {for (props.tabs) |tab| (

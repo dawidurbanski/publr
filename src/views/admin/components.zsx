@@ -11,7 +11,11 @@ const CheckboxGroup = @import("zsx_components_checkbox_group").CheckboxGroup;
 const RadioGroup = @import("zsx_components_radio_group").RadioGroup;
 
 // Demo data
-const DropdownItem = struct { label: []const u8, danger: bool, divider: bool };
+const DropdownItem = struct {
+    label: []const u8,
+    danger: bool,
+    divider: bool,
+};
 const dropdown_items = [_]DropdownItem{
     .{ .label = "Edit", .danger = false, .divider = false },
     .{ .label = "Duplicate", .danger = false, .divider = false },
@@ -19,21 +23,49 @@ const dropdown_items = [_]DropdownItem{
     .{ .label = "Delete", .danger = true, .divider = true },
 };
 
-const SelectItem = struct { label: []const u8, value: []const u8, selected: bool };
+const SelectItem = struct {
+    label: []const u8,
+    value: []const u8,
+    selected: bool,
+};
 const select_items = [_]SelectItem{
     .{ .label = "Draft", .value = "draft", .selected = true },
     .{ .label = "Published", .value = "published", .selected = false },
     .{ .label = "Archived", .value = "archived", .selected = false },
 };
 
-const TabItem = struct { id: []const u8, label: []const u8, content: []const u8, active: bool };
+const TabItem = struct {
+    id: []const u8,
+    label: []const u8,
+    content: []const u8,
+    active: bool,
+};
 const tab_items = [_]TabItem{
-    .{ .id = "general", .label = "General", .content = "<p>General settings content goes here.</p>", .active = true },
-    .{ .id = "seo", .label = "SEO", .content = "<p>SEO settings content goes here. Meta title, description, etc.</p>", .active = false },
-    .{ .id = "advanced", .label = "Advanced", .content = "<p>Advanced settings content goes here. Custom CSS, scripts.</p>", .active = false },
+    .{
+        .id = "general",
+        .label = "General",
+        .content = "<p>General settings content goes here.</p>",
+        .active = true,
+    },
+    .{
+        .id = "seo",
+        .label = "SEO",
+        .content = "<p>SEO settings content goes here. Meta title, description, etc.</p>",
+        .active = false,
+    },
+    .{
+        .id = "advanced",
+        .label = "Advanced",
+        .content = "<p>Advanced settings content goes here. Custom CSS, scripts.</p>",
+        .active = false,
+    },
 };
 
-const CheckOption = struct { label: []const u8, value: []const u8, checked: bool };
+const CheckOption = struct {
+    label: []const u8,
+    value: []const u8,
+    checked: bool,
+};
 const checkbox_options = [_]CheckOption{
     .{ .label = "News", .value = "news", .checked = false },
     .{ .label = "Tutorials", .value = "tutorials", .checked = true },

@@ -1,6 +1,10 @@
 // Popover — click trigger toggles positioned content
 // Props: trigger_label, title, body ([]const u8)
-pub fn Popover(props: struct { trigger_label: []const u8, title: []const u8, body: []const u8 }) {
+pub fn Popover(props: struct {
+    trigger_label: []const u8,
+    title: []const u8,
+    body: []const u8,
+}) {
     <div data-publr-component="popover" data-publr-state="closed">
         <button data-publr-part="trigger" aria-expanded="false" class="btn">{props.trigger_label}</button>
         <div data-publr-part="content" class="popover-content">
