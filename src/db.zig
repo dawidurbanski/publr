@@ -5,6 +5,10 @@ const c = @cImport({
 
 const Allocator = std.mem.Allocator;
 
+// SQLITE_STATIC (null) tells SQLite the data pointer will remain valid
+// We use this since our bound data lives for the lifetime of the statement
+const SQLITE_STATIC: c.sqlite3_destructor_type = null;
+
 /// SQLite database wrapper
 pub const Db = struct {
     handle: *c.sqlite3,
@@ -34,7 +38,7 @@ pub const Db = struct {
         const rc = c.sqlite3_open(path_z.ptr, &handle);
 
         if (rc != c.SQLITE_OK or handle == null) {
-            if (handle) |h| c.sqlite3_close(h);
+            if (handle) |h| _ = c.sqlite3_close(h);
             return Error.OpenFailed;
         }
 
@@ -117,7 +121,7 @@ pub const Statement = struct {
             @intCast(index),
             value.ptr,
             @intCast(value.len),
-            c.SQLITE_TRANSIENT,
+            SQLITE_STATIC,
         );
         if (rc != c.SQLITE_OK) return Db.Error.BindFailed;
     }
@@ -135,7 +139,7 @@ pub const Statement = struct {
             @intCast(index),
             value.ptr,
             @intCast(value.len),
-            c.SQLITE_TRANSIENT,
+            SQLITE_STATIC,
         );
         if (rc != c.SQLITE_OK) return Db.Error.BindFailed;
     }

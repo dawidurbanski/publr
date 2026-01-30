@@ -5,4 +5,4 @@ zig-out
 .DS_Store
 src/gen/
 themes/*/tailwindcss
-themes/*/static/
+themes/*/static/data/

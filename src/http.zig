@@ -8,6 +8,9 @@ const static = @import("static.zig");
 const error_pages = @import("error.zig");
 const tpl = @import("tpl.zig");
 const dev = @import("dev.zig");
+const db_mod = @import("db.zig");
+const Auth = @import("auth.zig").Auth;
+const auth_middleware = @import("auth_middleware.zig");
 
 // Generated ZSX templates
 const zsx_base = @import("zsx_base");
@@ -51,6 +54,19 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    // Initialize database
+    var db = db_mod.initWithSchema(allocator, "data/publr.db") catch |err| {
+        std.debug.print("Failed to initialize database: {}\n", .{err});
+        return err;
+    };
+    defer db.deinit();
+
+    // Initialize auth
+    var auth = Auth.init(allocator, &db);
+
+    // Initialize auth middleware
+    auth_middleware.init(&auth);
+
     var router = Router.init(allocator);
     defer router.deinit();
 
@@ -60,6 +76,9 @@ pub fn serve(port: u16, dev_mode: bool) !void {
 
     // Error middleware first (catches all errors)
     try router.use(error_pages.errorMiddleware);
+
+    // Auth middleware (protects /admin/* routes)
+    try router.use(auth_middleware.authMiddleware);
 
     // Dev mode middleware
     if (dev_mode) {
