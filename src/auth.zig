@@ -181,8 +181,7 @@ pub const Auth = struct {
         std.crypto.random.bytes(&secret_bytes);
 
         // Encode secret as hex for token
-        var secret_hex: [64]u8 = undefined;
-        _ = std.fmt.bufPrint(&secret_hex, "{s}", .{std.fmt.fmtSliceHexLower(&secret_bytes)}) catch unreachable;
+        const secret_hex = std.fmt.bytesToHex(secret_bytes, .lower);
 
         // Hash secret for storage
         var secret_hash: [32]u8 = undefined;
@@ -323,8 +322,7 @@ pub const Auth = struct {
         var random_bytes: [12]u8 = undefined;
         std.crypto.random.bytes(&random_bytes);
 
-        var hex_buf: [24]u8 = undefined;
-        _ = std.fmt.bufPrint(&hex_buf, "{s}", .{std.fmt.fmtSliceHexLower(&random_bytes)}) catch unreachable;
+        const hex_buf = std.fmt.bytesToHex(random_bytes, .lower);
 
         return std.fmt.allocPrint(self.allocator, "{s}{s}", .{ prefix, hex_buf }) catch return Error.OutOfMemory;
     }

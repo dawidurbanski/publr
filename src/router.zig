@@ -146,13 +146,18 @@ pub const Router = struct {
     }
 
     /// Dispatch a request to the matching handler with middleware chain
-    pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream, headers: []const mw.RequestHeader) !void {
+    pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream, headers: []const mw.RequestHeader, body: ?[]const u8) !void {
         var ctx = Context.initWithStream(self.allocator, method, path, stream);
         defer ctx.deinit();
 
         // Copy request headers to context
         for (headers) |header| {
             ctx.addRequestHeader(header.name, header.value);
+        }
+
+        // Set request body if present
+        if (body) |b| {
+            ctx.setBody(b);
         }
 
         for (self.routes.items) |route| {

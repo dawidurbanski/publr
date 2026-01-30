@@ -200,6 +200,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zsx_components_radio_group", .module = zsx_components_radio_group },
         },
     }));
+    exe.root_module.addImport("zsx_admin_setup", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/setup.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
     exe.root_module.addImport("zsx_error_404", b.createModule(.{
         .root_source_file = b.path("src/gen/views/error/error_404.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
@@ -292,6 +296,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zsx_components_checkbox_group", .module = zsx_components_checkbox_group },
             .{ .name = "zsx_components_radio_group", .module = zsx_components_radio_group },
         },
+    }));
+    exe_tests.root_module.addImport("zsx_admin_setup", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/setup.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
     }));
     exe_tests.root_module.addImport("zsx_error_404", b.createModule(.{
         .root_source_file = b.path("src/gen/views/error/error_404.zig"),

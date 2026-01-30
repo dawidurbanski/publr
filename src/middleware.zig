@@ -20,6 +20,9 @@ pub const Context = struct {
     request_headers: [16]?RequestHeader,
     request_header_count: usize,
 
+    // Request body (for POST/PUT)
+    body: ?[]const u8,
+
     // Response data (buffered for middleware to modify)
     response: Response,
 
@@ -38,6 +41,7 @@ pub const Context = struct {
             .allocator = allocator,
             .request_headers = [_]?RequestHeader{null} ** 16,
             .request_header_count = 0,
+            .body = null,
             .response = Response.init(),
             .stream = null,
             .state = .{},
@@ -53,6 +57,7 @@ pub const Context = struct {
             .allocator = allocator,
             .request_headers = [_]?RequestHeader{null} ** 16,
             .request_header_count = 0,
+            .body = null,
             .response = Response.init(),
             .stream = stream,
             .state = .{},
@@ -149,6 +154,27 @@ pub const Context = struct {
         if (self.isPartial()) {
             self.response.setHeader("X-Partial", "true");
         }
+    }
+
+    /// Get form field value from URL-encoded body
+    pub fn formValue(self: *const Context, name: []const u8) ?[]const u8 {
+        const body_content = self.body orelse return null;
+
+        var iter = std.mem.splitScalar(u8, body_content, '&');
+        while (iter.next()) |pair| {
+            if (std.mem.indexOf(u8, pair, "=")) |eq_pos| {
+                const field_name = pair[0..eq_pos];
+                if (std.mem.eql(u8, field_name, name)) {
+                    return pair[eq_pos + 1 ..];
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Set request body
+    pub fn setBody(self: *Context, body_content: []const u8) void {
+        self.body = body_content;
     }
 };
 
@@ -577,4 +603,24 @@ test "html does not set X-Partial header on full request" {
 
     const headers = ctx.response.getCustomHeaders();
     try std.testing.expectEqual(@as(usize, 0), headers.len);
+}
+
+test "formValue extracts form field from body" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .POST, "/form");
+    defer ctx.deinit();
+
+    ctx.setBody("email=test%40example.com&password=secret123");
+
+    try std.testing.expectEqualStrings("test%40example.com", ctx.formValue("email").?);
+    try std.testing.expectEqualStrings("secret123", ctx.formValue("password").?);
+    try std.testing.expect(ctx.formValue("missing") == null);
+}
+
+test "formValue returns null when no body" {
+    const allocator = std.testing.allocator;
+    var ctx = Context.init(allocator, .POST, "/form");
+    defer ctx.deinit();
+
+    try std.testing.expect(ctx.formValue("email") == null);
 }

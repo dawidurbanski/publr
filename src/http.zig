@@ -20,6 +20,7 @@ const zsx_admin_dashboard = @import("zsx_admin_dashboard");
 const zsx_admin_posts_list = @import("zsx_admin_posts_list");
 const zsx_admin_posts_edit = @import("zsx_admin_posts_edit");
 const zsx_admin_components = @import("zsx_admin_components");
+const zsx_admin_setup = @import("zsx_admin_setup");
 
 // Embedded static assets with compile-time metadata
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
@@ -92,6 +93,8 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     // Register routes
     try router.get("/", handleIndex);
     try router.get("/admin", handleAdminDashboard);
+    try router.get("/admin/setup", handleSetupGet);
+    try router.post("/admin/setup", handleSetupPost);
     try router.get("/admin/posts", handleAdminPosts);
     try router.get("/admin/components", handleAdminComponents);
     try router.get("/admin/posts/new", handleAdminPostNew);
@@ -244,8 +247,20 @@ fn handleConnection(stream: std.net.Stream) !void {
         }
     }
 
+    // Extract body (everything after the empty line)
+    const body: ?[]const u8 = blk: {
+        // Find empty line (end of headers)
+        if (std.mem.indexOf(u8, request, "\r\n\r\n")) |pos| {
+            const body_start = pos + 4;
+            if (body_start < request.len) {
+                break :blk request[body_start..];
+            }
+        }
+        break :blk null;
+    };
+
     if (global_router) |*router| {
-        try router.dispatch(method, path, stream, headers[0..header_count]);
+        try router.dispatch(method, path, stream, headers[0..header_count], body);
     } else {
         // Fallback if router not initialized
         try sendResponse(stream, "500 Internal Server Error", "text/plain", "Server not initialized");
@@ -453,4 +468,148 @@ fn sendResponse(
     );
     _ = try stream.write(header);
     _ = try stream.write(body);
+}
+
+// =============================================================================
+// Setup Wizard Handlers
+// =============================================================================
+
+fn handleSetupGet(ctx: *Context) !void {
+    const auth_instance = auth_middleware.auth orelse {
+        ctx.response.setStatus("500 Internal Server Error");
+        ctx.response.setBody("Auth not initialized");
+        return;
+    };
+
+    // Return 404 if users already exist
+    const has_users = auth_instance.hasUsers() catch {
+        ctx.response.setStatus("500 Internal Server Error");
+        ctx.response.setBody("Database error");
+        return;
+    };
+
+    if (has_users) {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setBody("Not Found");
+        return;
+    }
+
+    // Render setup form
+    const content = tpl.renderFnToSlice(zsx_admin_setup.Setup, .{""});
+    ctx.html(content);
+}
+
+fn handleSetupPost(ctx: *Context) !void {
+    const auth_instance = auth_middleware.auth orelse {
+        ctx.response.setStatus("500 Internal Server Error");
+        ctx.response.setBody("Auth not initialized");
+        return;
+    };
+
+    // Return 404 if users already exist
+    const has_users = auth_instance.hasUsers() catch {
+        ctx.response.setStatus("500 Internal Server Error");
+        ctx.response.setBody("Database error");
+        return;
+    };
+
+    if (has_users) {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setBody("Not Found");
+        return;
+    }
+
+    // Parse form data
+    const email = ctx.formValue("email") orelse {
+        return renderSetupError(ctx, "Email is required");
+    };
+    const password = ctx.formValue("password") orelse {
+        return renderSetupError(ctx, "Password is required");
+    };
+    const confirm_password = ctx.formValue("confirm_password") orelse {
+        return renderSetupError(ctx, "Please confirm your password");
+    };
+
+    // URL decode (basic - handle + for spaces and %XX)
+    var email_buf: [256]u8 = undefined;
+    const decoded_email = urlDecode(email, &email_buf) orelse {
+        return renderSetupError(ctx, "Invalid email format");
+    };
+
+    // Validate
+    if (!isValidEmail(decoded_email)) {
+        return renderSetupError(ctx, "Invalid email format");
+    }
+
+    if (password.len < 8) {
+        return renderSetupError(ctx, "Password must be at least 8 characters");
+    }
+
+    if (!std.mem.eql(u8, password, confirm_password)) {
+        return renderSetupError(ctx, "Passwords do not match");
+    }
+
+    // Create user
+    const user_id = auth_instance.createUser(decoded_email, password) catch |err| {
+        switch (err) {
+            Auth.Error.EmailExists => return renderSetupError(ctx, "An account with this email already exists"),
+            else => return renderSetupError(ctx, "Failed to create account"),
+        }
+    };
+    defer auth_instance.allocator.free(user_id);
+
+    // Create session and auto-login
+    const token = auth_instance.createSession(user_id) catch {
+        return renderSetupError(ctx, "Account created but failed to log in. Please try logging in.");
+    };
+    defer auth_instance.allocator.free(token);
+
+    // Set session cookie
+    auth_middleware.setSessionCookie(ctx, token);
+
+    // Redirect to dashboard
+    ctx.response.setStatus("302 Found");
+    ctx.response.setHeader("Location", "/admin");
+    ctx.response.setBody("");
+}
+
+fn renderSetupError(ctx: *Context, message: []const u8) void {
+    const content = tpl.renderFnToSlice(zsx_admin_setup.Setup, .{message});
+    ctx.html(content);
+}
+
+fn isValidEmail(email: []const u8) bool {
+    // Basic email validation: contains @ and at least one . after @
+    const at_pos = std.mem.indexOf(u8, email, "@") orelse return false;
+    if (at_pos == 0 or at_pos == email.len - 1) return false;
+
+    const after_at = email[at_pos + 1 ..];
+    const dot_pos = std.mem.indexOf(u8, after_at, ".") orelse return false;
+    if (dot_pos == 0 or dot_pos == after_at.len - 1) return false;
+
+    return true;
+}
+
+fn urlDecode(input: []const u8, buf: []u8) ?[]const u8 {
+    var i: usize = 0;
+    var out: usize = 0;
+
+    while (i < input.len and out < buf.len) {
+        if (input[i] == '+') {
+            buf[out] = ' ';
+            i += 1;
+            out += 1;
+        } else if (input[i] == '%' and i + 2 < input.len) {
+            const hex = input[i + 1 .. i + 3];
+            buf[out] = std.fmt.parseInt(u8, hex, 16) catch return null;
+            i += 3;
+            out += 1;
+        } else {
+            buf[out] = input[i];
+            i += 1;
+            out += 1;
+        }
+    }
+
+    return buf[0..out];
 }
