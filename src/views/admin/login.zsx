@@ -1,0 +1,58 @@
+// Login page (standalone, no admin layout)
+pub fn Login(error_message: []const u8) {
+    <!DOCTYPE html>
+    <html>
+        <head>
+            <meta charset="utf-8" />
+            <meta
+                name="viewport"
+                content="width=device-width, initial-scale=1"
+            />
+            <title>Login - Publr</title>
+            <link rel="stylesheet" href="/static/admin.css" />
+        </head>
+        <body>
+            <div class="auth-container">
+                <div class="auth-card">
+                    <div class="auth-header">
+                        <div class="auth-logo">Publr</div>
+                        <h1 class="auth-title">Welcome back</h1>
+                        <p class="auth-subtitle">Sign in to your account</p>
+                    </div>
+
+                    {if (error_message.len > 0) (
+                        <div class="auth-error">{error_message}</div>
+                    )}
+
+                    <form method="POST" action="/admin/login" class="auth-form">
+                        <div class="form-group">
+                            <label class="form-label" for="email">Email</label>
+                            <input
+                                type="email"
+                                id="email"
+                                name="email"
+                                class="form-input"
+                                required="required"
+                                autocomplete="email"
+                            />
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" for="password">Password</label>
+                            <input
+                                type="password"
+                                id="password"
+                                name="password"
+                                class="form-input"
+                                required="required"
+                                autocomplete="current-password"
+                            />
+                        </div>
+
+                        <button type="submit" class="auth-button">Sign In</button>
+                    </form>
+                </div>
+            </div>
+        </body>
+    </html>
+}

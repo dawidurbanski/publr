@@ -82,7 +82,7 @@ pub fn authMiddleware(ctx: *Context, next: NextFn) anyerror!void {
 }
 
 /// Parse a cookie value from the Cookie header
-fn parseCookie(ctx: *Context, name: []const u8) ?[]const u8 {
+pub fn parseCookie(ctx: *Context, name: []const u8) ?[]const u8 {
     const cookie_header = ctx.getRequestHeader("Cookie") orelse return null;
 
     // Cookie header format: "name1=value1; name2=value2"
