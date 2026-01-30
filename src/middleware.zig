@@ -192,6 +192,9 @@ pub const Response = struct {
     headers_sent: bool,
     custom_headers: [8]?Header,
     custom_header_count: usize,
+    /// Buffer for dynamic header values (e.g., Set-Cookie)
+    header_value_buf: [1024]u8,
+    header_value_offset: usize,
 
     pub fn init() Response {
         return .{
@@ -201,6 +204,8 @@ pub const Response = struct {
             .headers_sent = false,
             .custom_headers = [_]?Header{null} ** 8,
             .custom_header_count = 0,
+            .header_value_buf = undefined,
+            .header_value_offset = 0,
         };
     }
 
@@ -222,6 +227,23 @@ pub const Response = struct {
             self.custom_headers[self.custom_header_count] = .{ .name = name, .value = value };
             self.custom_header_count += 1;
         }
+    }
+
+    /// Add a custom header, copying the value into internal buffer
+    /// Use this for dynamically built header values (e.g., Set-Cookie)
+    pub fn setHeaderOwned(self: *Response, name: []const u8, value: []const u8) void {
+        const end = self.header_value_offset + value.len;
+        if (end > self.header_value_buf.len) return; // Buffer full
+        if (self.custom_header_count >= self.custom_headers.len) return;
+
+        // Copy value into buffer
+        @memcpy(self.header_value_buf[self.header_value_offset..end], value);
+        const owned_value = self.header_value_buf[self.header_value_offset..end];
+        self.header_value_offset = end;
+
+        // Store header with owned value
+        self.custom_headers[self.custom_header_count] = .{ .name = name, .value = owned_value };
+        self.custom_header_count += 1;
     }
 
     /// Get custom headers as a slice

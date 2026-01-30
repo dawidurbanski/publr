@@ -123,7 +123,8 @@ pub fn setSessionCookie(ctx: *Context, token: []const u8) void {
         @as(u64, 30 * 24 * 60 * 60), // 30 days
     }) catch return;
 
-    ctx.response.setHeader("Set-Cookie", cookie);
+    // Use setHeaderOwned to copy value into response-owned buffer
+    ctx.response.setHeaderOwned("Set-Cookie", cookie);
 }
 
 /// Clear session cookie
@@ -133,7 +134,8 @@ pub fn clearSessionCookie(ctx: *Context) void {
         SESSION_COOKIE,
     }) catch return;
 
-    ctx.response.setHeader("Set-Cookie", cookie);
+    // Use setHeaderOwned to copy value into response-owned buffer
+    ctx.response.setHeaderOwned("Set-Cookie", cookie);
 }
 
 /// Get authenticated user ID from context (set by authMiddleware)
