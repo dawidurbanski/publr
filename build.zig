@@ -105,6 +105,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addAnonymousImport("static_interact_components_js", .{
         .root_source_file = b.path("static/interact/components.js"),
     });
+    exe.root_module.addAnonymousImport("static_interact_index_js", .{
+        .root_source_file = b.path("static/interact/index.js"),
+    });
     exe.root_module.addAnonymousImport("static_theme_css", .{
         .root_source_file = b.path("themes/demo/static/theme.css"),
     });

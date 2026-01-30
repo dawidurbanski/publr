@@ -30,6 +30,7 @@ const InteractPortal = static.Asset("portal.js", @embedFile("static_interact_por
 const InteractFocusTrap = static.Asset("focus-trap.js", @embedFile("static_interact_focus_trap_js"));
 const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_dismiss_js"));
 const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
+const InteractIndex = static.Asset("index.js", @embedFile("static_interact_index_js"));
 
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -367,6 +368,8 @@ fn handleStatic(ctx: *Context) !void {
         InteractDismiss.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "interact/components.js")) {
         InteractComponents.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/index.js")) {
+        InteractIndex.serve(ctx, if_none_match);
     } else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");
@@ -395,6 +398,8 @@ fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
         "static/interact/dismiss.js"
     else if (std.mem.eql(u8, file, "interact/components.js"))
         "static/interact/components.js"
+    else if (std.mem.eql(u8, file, "interact/index.js"))
+        "static/interact/index.js"
     else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");

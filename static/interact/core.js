@@ -1,39 +1,23 @@
 // Publr Interactivity — Core
 // Shared registry and namespace. Loaded by admin and themes.
-(function() {
-    'use strict';
 
-    var publr = window.publr || {};
-    var handlers = publr.handlers || {};
-    var features = publr.features || {};
+const handlers = {};
+const features = {};
 
-    publr.handlers = handlers;
-    publr.features = features;
+export function register(type, fn) {
+    handlers[type] = fn;
+}
 
-    // Register a component handler (keyed by data-publr-component value)
-    publr.register = function(type, fn) {
-        handlers[type] = fn;
-    };
+export function feature(name, fn) {
+    features[name] = fn;
+}
 
-    // Register an interactivity feature (e.g. toggle, bind, fetch)
-    publr.feature = function(name, fn) {
-        features[name] = fn;
-    };
+export function init() {
+    document.querySelectorAll('[data-publr-component]').forEach(el => {
+        const type = el.dataset.publrComponent;
+        if (handlers[type]) handlers[type](el);
+    });
+    Object.values(features).forEach(fn => fn());
+}
 
-    // Init: scan DOM for components, dispatch to handlers
-    publr.init = function() {
-        var components = document.querySelectorAll('[data-publr-component]');
-        for (var i = 0; i < components.length; i++) {
-            var el = components[i];
-            var type = el.dataset.publrComponent;
-            if (handlers[type]) handlers[type](el, publr);
-        }
-        // Run features
-        for (var name in features) {
-            if (features.hasOwnProperty(name)) features[name](publr);
-        }
-    };
-
-    window.publr = publr;
-    document.addEventListener('DOMContentLoaded', publr.init);
-})();
+document.addEventListener('DOMContentLoaded', init);

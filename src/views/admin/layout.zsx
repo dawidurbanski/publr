@@ -56,12 +56,7 @@ pub fn Layout(title: []const u8, content: []const u8, actions: []const u8, nav_d
                     {!content}
                 </div>
             </main>
-            <script src="/static/interact/core.js"></script>
-            <script src="/static/interact/toggle.js"></script>
-            <script src="/static/interact/portal.js"></script>
-            <script src="/static/interact/focus-trap.js"></script>
-            <script src="/static/interact/dismiss.js"></script>
-            <script src="/static/interact/components.js"></script>
+            <script type="module" src="/static/interact/index.js"></script>
             <script src="/static/admin.js"></script>
         </body>
     </html>
