@@ -6,3 +6,5 @@ zig-out
 src/gen/
 themes/*/tailwindcss
 themes/*/static/data/
+AGENTS.md
+data/
