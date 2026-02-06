@@ -1,7 +1,7 @@
 const std = @import("std");
-const mw = @import("middleware.zig");
-const Auth = @import("auth.zig").Auth;
-const Db = @import("db.zig").Db;
+const mw = @import("middleware");
+const Auth = @import("auth").Auth;
+const Db = @import("db").Db;
 
 const Context = mw.Context;
 const NextFn = mw.NextFn;

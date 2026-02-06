@@ -1,6 +1,6 @@
 const std = @import("std");
-const mw = @import("middleware.zig");
-const auth_middleware = @import("auth_middleware.zig");
+const mw = @import("middleware");
+const auth_middleware = @import("auth_middleware");
 
 const Context = mw.Context;
 const NextFn = mw.NextFn;

@@ -324,12 +324,13 @@ body.admin {
 .nav-panel {
     display: flex;
     flex-direction: column;
-    transition: opacity 0.15s ease, transform 0.15s ease;
+    transition: opacity 0.15s ease-out, transform 0.15s ease-out;
 }
 
 .nav-panel-main {
     opacity: 1;
     transform: translateX(0);
+    view-transition-name: nav-main;
 }
 
 .nav-panel-sub {
@@ -340,6 +341,7 @@ body.admin {
     opacity: 0;
     transform: translateX(30%);
     pointer-events: none;
+    view-transition-name: nav-sub;
 }
 
 .nav-slider.submenu-open .nav-panel-main {
@@ -352,6 +354,45 @@ body.admin {
     opacity: 1;
     transform: translateX(0);
     pointer-events: auto;
+}
+
+/* View Transitions - instant page swap by default */
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation: none;
+}
+
+/* Nav panels: hide old instantly, show new instantly (no animation) */
+::view-transition-old(nav-main),
+::view-transition-old(nav-sub) {
+    display: none;
+}
+
+::view-transition-new(nav-main),
+::view-transition-new(nav-sub) {
+    animation: none;
+}
+
+/* Animate nav panels only when nav state changes */
+html.nav-transitioning::view-transition-old(nav-main),
+html.nav-transitioning::view-transition-old(nav-sub) {
+    display: block;
+    animation: 0.15s ease-out both vt-slide-out;
+}
+
+html.nav-transitioning::view-transition-new(nav-main),
+html.nav-transitioning::view-transition-new(nav-sub) {
+    animation: 0.15s ease-out both vt-slide-in;
+}
+
+@keyframes vt-slide-out {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(-30%); }
+}
+
+@keyframes vt-slide-in {
+    from { opacity: 0; transform: translateX(30%); }
+    to { opacity: 1; transform: translateX(0); }
 }
 
 .nav-back {

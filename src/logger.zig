@@ -1,5 +1,5 @@
 const std = @import("std");
-const mw = @import("middleware.zig");
+const mw = @import("middleware");
 const Context = mw.Context;
 const NextFn = mw.NextFn;
 

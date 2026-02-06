@@ -1,6 +1,6 @@
 const std = @import("std");
-const Db = @import("db.zig").Db;
-const Statement = @import("db.zig").Statement;
+const Db = @import("db").Db;
+const Statement = @import("db").Statement;
 
 const Allocator = std.mem.Allocator;
 const argon2 = std.crypto.pwhash.argon2;
@@ -419,7 +419,7 @@ pub const Auth = struct {
 // =============================================================================
 
 const testing = std.testing;
-const initWithSchema = @import("db.zig").initWithSchema;
+const initWithSchema = @import("db").initWithSchema;
 
 test "Auth: hash and verify password" {
     var db = try initWithSchema(testing.allocator, ":memory:");

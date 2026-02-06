@@ -1,5 +1,5 @@
 const std = @import("std");
-const Context = @import("router.zig").Context;
+const Context = @import("router").Context;
 
 /// MIME type mappings for common file extensions
 const mime_types = .{

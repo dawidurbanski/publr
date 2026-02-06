@@ -5,13 +5,17 @@ const User = struct {
     email: []const u8,
 };
 
-pub fn Profile(error_message: []const u8, user: User, csrf_token: []const u8) {
-    {if (error_message.len > 0) (
-        <div class="auth-error">{error_message}</div>
+pub fn Profile(props: struct {
+    error_message: []const u8,
+    user: User,
+    csrf_token: []const u8,
+}) {
+    {if (props.error_message.len > 0) (
+        <div class="auth-error">{props.error_message}</div>
     )}
 
     <form method="POST" action="/admin/users/profile" class="form">
-        <input type="hidden" name="_csrf" value={csrf_token} />
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
         <div class="form-group">
             <label for="display_name">Display Name</label>
             <input
@@ -20,7 +24,7 @@ pub fn Profile(error_message: []const u8, user: User, csrf_token: []const u8) {
                 name="display_name"
                 class="form-control"
                 required=""
-                value={user.display_name}
+                value={props.user.display_name}
             />
         </div>
         <div class="form-group">
@@ -31,7 +35,7 @@ pub fn Profile(error_message: []const u8, user: User, csrf_token: []const u8) {
                 name="email"
                 class="form-control"
                 required=""
-                value={user.email}
+                value={props.user.email}
             />
         </div>
         <div class="form-group">

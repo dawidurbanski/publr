@@ -1,11 +1,14 @@
 // Add user template
-pub fn New(error_message: []const u8, csrf_token: []const u8) {
-    {if (error_message.len > 0) (
-        <div class="auth-error">{error_message}</div>
+pub fn New(props: struct {
+    error_message: []const u8,
+    csrf_token: []const u8,
+}) {
+    {if (props.error_message.len > 0) (
+        <div class="auth-error">{props.error_message}</div>
     )}
 
     <form method="POST" action="/admin/users/new" class="form">
-        <input type="hidden" name="_csrf" value={csrf_token} />
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
         <div class="form-group">
             <label for="display_name">Display Name</label>
             <input

@@ -1,5 +1,10 @@
 // Base layout template
-pub fn Base(title: []const u8, content: []const u8, css: []const []const u8, js: []const []const u8) {
+pub fn Base(props: struct {
+    title: []const u8,
+    content: []const u8,
+    css: []const []const u8,
+    js: []const []const u8,
+}) {
     <!DOCTYPE html>
     <html>
         <head>
@@ -8,16 +13,16 @@ pub fn Base(title: []const u8, content: []const u8, css: []const []const u8, js:
                 name="viewport"
                 content="width=device-width, initial-scale=1"
             />
-            <title>{title}</title>
-            {for (css) |href| (
+            <title>{props.title}</title>
+            {for (props.css) |href| (
                 <link rel="stylesheet" href={href} />
             )}
         </head>
         <body>
             <main>
-                {!content}
+                {!props.content}
             </main>
-            {for (js) |src| (
+            {for (props.js) |src| (
                 <script src={src}></script>
             )}
         </body>

@@ -1,6 +1,7 @@
 const std = @import("std");
-const Context = @import("router.zig").Context;
-const NextFn = @import("router.zig").NextFn;
+const router_mod = @import("router");
+const Context = router_mod.Context;
+const NextFn = router_mod.NextFn;
 const publr_config = @import("publr_config");
 
 /// Live reload script using Server-Sent Events.

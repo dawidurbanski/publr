@@ -1,5 +1,8 @@
 // Setup wizard page (standalone, no admin layout)
-pub fn Setup(error_message: []const u8, csrf_token: []const u8) {
+pub fn Setup(props: struct {
+    error_message: []const u8,
+    csrf_token: []const u8,
+}) {
     <!DOCTYPE html>
     <html>
         <head>
@@ -20,12 +23,12 @@ pub fn Setup(error_message: []const u8, csrf_token: []const u8) {
                         <p class="auth-subtitle">Create your admin account to get started</p>
                     </div>
 
-                    {if (error_message.len > 0) (
-                        <div class="auth-error">{error_message}</div>
+                    {if (props.error_message.len > 0) (
+                        <div class="auth-error">{props.error_message}</div>
                     )}
 
                     <form method="POST" action="/admin/setup" id="setup-form" class="auth-form">
-                        <input type="hidden" name="_csrf" value={csrf_token} />
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
                         <div class="form-group">
                             <label class="form-label" for="email">Email</label>
                             <input

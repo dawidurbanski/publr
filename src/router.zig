@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const mw = @import("middleware.zig");
+const mw = @import("middleware");
 
 // Re-export types from middleware for convenience
 pub const Context = mw.Context;
@@ -147,7 +147,13 @@ pub const Router = struct {
 
     /// Dispatch a request to the matching handler with middleware chain
     pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream, headers: []const mw.RequestHeader, body: ?[]const u8) !void {
-        var ctx = Context.initWithStream(self.allocator, method, path, stream);
+        // Normalize path: strip trailing slash (except for root "/")
+        const normalized_path = if (path.len > 1 and path[path.len - 1] == '/')
+            path[0 .. path.len - 1]
+        else
+            path;
+
+        var ctx = Context.initWithStream(self.allocator, method, normalized_path, stream);
         defer ctx.deinit();
 
         // Copy request headers to context
@@ -163,7 +169,7 @@ pub const Router = struct {
         for (self.routes.items) |route| {
             if (route.method != method) continue;
 
-            if (self.matchRoute(route.segments, path, &ctx)) {
+            if (self.matchRoute(route.segments, normalized_path, &ctx)) {
                 // Execute middleware chain then handler
                 try mw.executeChain(
                     &ctx,

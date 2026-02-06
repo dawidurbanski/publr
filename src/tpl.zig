@@ -15,8 +15,8 @@ threadlocal var render_index: usize = 0;
 
 /// Render a ZSX function to a slice.
 /// Pass args as a tuple matching the function params (writer is prepended automatically).
-/// Result is valid until 4 more calls to renderFnToSlice on this thread.
-pub fn renderFnToSlice(comptime func: anytype, args: anytype) []const u8 {
+/// Result is valid until 4 more calls to render on this thread.
+pub fn render(comptime func: anytype, args: anytype) []const u8 {
     @setEvalBranchQuota(10000);
     const buf = &render_buffers[render_index % render_buffers.len];
     render_index +%= 1;
@@ -26,39 +26,62 @@ pub fn renderFnToSlice(comptime func: anytype, args: anytype) []const u8 {
     return fbs.getWritten();
 }
 
+/// Render a ZSX function with no arguments.
+/// Shorthand for render(func, .{})
+pub inline fn renderStatic(comptime func: anytype) []const u8 {
+    return render(func, .{});
+}
+
+/// Backwards compatibility alias - use render() instead
+pub const renderFnToSlice = render;
+
 // Tests
-test "renderFnToSlice with params" {
+test "render with params" {
     const mockFn = struct {
-        fn render(writer: anytype, name: anytype) !void {
+        fn call(writer: anytype, name: anytype) !void {
             try writer.writeAll("Hello ");
             try writer.writeAll(name);
         }
-    }.render;
+    }.call;
 
-    const result = renderFnToSlice(mockFn, .{"ZSX"});
+    const result = render(mockFn, .{"ZSX"});
     try std.testing.expectEqualStrings("Hello ZSX", result);
 }
 
-test "renderFnToSlice no params" {
+test "render no params" {
     const mockFn = struct {
-        fn render(writer: anytype) !void {
+        fn call(writer: anytype) !void {
             try writer.writeAll("No params!");
         }
-    }.render;
+    }.call;
 
-    const result = renderFnToSlice(mockFn, .{});
+    const result = renderStatic(mockFn);
     try std.testing.expectEqualStrings("No params!", result);
 }
 
-test "renderFnToSlice multiple params" {
+test "render multiple params" {
     const mockFn = struct {
-        fn render(writer: anytype, greeting: anytype, name: anytype) !void {
+        fn call(writer: anytype, greeting: anytype, name: anytype) !void {
             try writer.writeAll(greeting);
             try writer.writeAll(" ");
             try writer.writeAll(name);
         }
-    }.render;
+    }.call;
 
-    const result = renderFnToSlice(mockFn, .{ "Hi", "World" });
+    const result = render(mockFn, .{ "Hi", "World" });
     try std.testing.expectEqualStrings("Hi World", result);
+}
+
+test "render with props struct" {
+    const mockFn = struct {
+        fn call(writer: anytype, props: anytype) !void {
+            try writer.writeAll("Hello ");
+            try writer.writeAll(props.name);
+            try writer.writeAll(", age ");
+            try writer.print("{d}", .{props.age});
+        }
+    }.call;
+
+    const result = render(mockFn, .{.{ .name = "World", .age = 42 }});
+    try std.testing.expectEqualStrings("Hello World, age 42", result);
 }

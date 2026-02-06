@@ -8,16 +8,19 @@ const PostData = struct {
     is_published: bool,
 };
 
-pub fn Edit(post: PostData, csrf_token: []const u8) {
+pub fn Edit(props: struct {
+    post: PostData,
+    csrf_token: []const u8,
+}) {
     <form method="POST" class="form">
-        <input type="hidden" name="_csrf" value={csrf_token} />
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
         <div class="form-group">
             <label for="title">Title</label>
             <input
                 type="text"
                 id="title"
                 name="title"
-                value={post.title}
+                value={props.post.title}
                 class="form-control"
                 required=""
             />
@@ -28,7 +31,7 @@ pub fn Edit(post: PostData, csrf_token: []const u8) {
                 type="text"
                 id="slug"
                 name="slug"
-                value={post.slug}
+                value={props.post.slug}
                 class="form-control"
             />
         </div>
@@ -40,19 +43,19 @@ pub fn Edit(post: PostData, csrf_token: []const u8) {
                 class="form-control"
                 rows="12"
             >
-                {post.content}
+                {props.post.content}
             </textarea>
         </div>
         <div class="form-row">
             <div class="form-group">
                 <label for="status">Status</label>
                 <select id="status" name="status" class="form-control">
-                    {if (post.is_draft) (
+                    {if (props.post.is_draft) (
                         <option value="draft" selected="">Draft</option>
                     ) else (
                         <option value="draft">Draft</option>
                     )}
-                    {if (post.is_published) (
+                    {if (props.post.is_published) (
                         <option value="published" selected="">Published</option>
                     ) else (
                         <option value="published">Published</option>
@@ -65,7 +68,7 @@ pub fn Edit(post: PostData, csrf_token: []const u8) {
                     type="date"
                     id="date"
                     name="date"
-                    value={post.date}
+                    value={props.post.date}
                     class="form-control"
                 />
             </div>

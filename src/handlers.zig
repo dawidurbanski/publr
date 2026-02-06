@@ -2,9 +2,9 @@
 //! Single dispatch function handles all routes - add routes once, works everywhere
 
 const std = @import("std");
-const tpl = @import("tpl.zig");
-const db_mod = @import("db.zig");
-const Auth = @import("auth.zig").Auth;
+const tpl = @import("tpl");
+const db_mod = @import("db");
+const Auth = @import("auth").Auth;
 
 // Templates
 const zsx_admin_layout = @import("zsx_admin_layout");
@@ -84,6 +84,8 @@ pub const PostListItem = struct {
     author: []const u8,
     status: []const u8,
     date: []const u8,
+    edit_url: []const u8,
+    preview_url: []const u8,
 };
 
 /// Post data for edit view
@@ -254,7 +256,10 @@ fn handleUsersCreate(ctx: RequestContext) RouteResult {
             Auth.Error.EmailExists => "Email already exists",
             else => "Failed to create user",
         };
-        const content = tpl.renderFnToSlice(zsx_admin_users_new.New, .{ msg, ctx.csrf_token });
+        const content = tpl.render(zsx_admin_users_new.New, .{.{
+            .error_message = msg,
+            .csrf_token = ctx.csrf_token,
+        }});
         return .{ .html = wrapAdmin(content, "Add User", "", NavState.users_new_active, ctx.csrf_token) };
     };
 
@@ -300,11 +305,17 @@ fn handleUsersProfileUpdate(ctx: RequestContext) RouteResult {
 // =============================================================================
 
 pub fn renderSetup(error_msg: []const u8, csrf_token: []const u8) []const u8 {
-    return tpl.renderFnToSlice(zsx_admin_setup.Setup, .{ error_msg, csrf_token });
+    return tpl.render(zsx_admin_setup.Setup, .{.{
+        .error_message = error_msg,
+        .csrf_token = csrf_token,
+    }});
 }
 
 pub fn renderLogin(error_msg: []const u8, csrf_token: []const u8) []const u8 {
-    return tpl.renderFnToSlice(zsx_admin_login.Login, .{ error_msg, csrf_token });
+    return tpl.render(zsx_admin_login.Login, .{.{
+        .error_message = error_msg,
+        .csrf_token = csrf_token,
+    }});
 }
 
 pub fn renderDashboard(db: *db_mod.Db, csrf_token: []const u8) []const u8 {
@@ -312,9 +323,14 @@ pub fn renderDashboard(db: *db_mod.Db, csrf_token: []const u8) []const u8 {
     const posts_count = countQuery(db, "SELECT COUNT(*) FROM posts");
 
     const empty_posts: []const PostListItem = &.{};
-    const content = tpl.renderFnToSlice(zsx_admin_dashboard.Dashboard, .{
-        posts_count, "0", "0", users_count, false, empty_posts,
-    });
+    const content = tpl.render(zsx_admin_dashboard.Dashboard, .{.{
+        .posts_count = posts_count,
+        .pages_count = "0",
+        .media_count = "0",
+        .users_count = users_count,
+        .has_posts = false,
+        .recent_posts = empty_posts,
+    }});
 
     return wrapAdmin(content, "Dashboard", "", NavState.dashboard_active, csrf_token);
 }
@@ -323,19 +339,22 @@ pub fn renderPostsList(db: *db_mod.Db, csrf_token: []const u8) []const u8 {
     _ = db; // TODO: Query real posts from database
 
     const posts = [_]PostListItem{
-        .{ .id = "1", .title = "Welcome to Publr", .author = "Admin", .status = "published", .date = "2024-01-15" },
-        .{ .id = "2", .title = "Getting Started Guide", .author = "Admin", .status = "draft", .date = "2024-01-14" },
-        .{ .id = "3", .title = "Advanced Features", .author = "Admin", .status = "draft", .date = "2024-01-13" },
+        .{ .id = "1", .title = "Welcome to Publr", .author = "Admin", .status = "published", .date = "2024-01-15", .edit_url = "/admin/posts/1", .preview_url = "/posts/1" },
+        .{ .id = "2", .title = "Getting Started Guide", .author = "Admin", .status = "draft", .date = "2024-01-14", .edit_url = "/admin/posts/2", .preview_url = "/posts/2" },
+        .{ .id = "3", .title = "Advanced Features", .author = "Admin", .status = "draft", .date = "2024-01-13", .edit_url = "/admin/posts/3", .preview_url = "/posts/3" },
     };
 
-    const content = tpl.renderFnToSlice(zsx_admin_posts_list.List, .{ true, &posts });
+    const content = tpl.render(zsx_admin_posts_list.List, .{.{
+        .has_posts = true,
+        .posts = &posts,
+    }});
     const actions = "<a href=\"/admin/posts/new\" class=\"btn btn-primary\">New Post</a>";
     return wrapAdmin(content, "Posts", actions, NavState.posts_active, csrf_token);
 }
 
 pub fn renderPostNew(csrf_token: []const u8) []const u8 {
-    const content = tpl.renderFnToSlice(zsx_admin_posts_edit.Edit, .{
-        PostEditData{
+    const content = tpl.render(zsx_admin_posts_edit.Edit, .{.{
+        .post = PostEditData{
             .title = "",
             .slug = "",
             .content = "",
@@ -343,8 +362,8 @@ pub fn renderPostNew(csrf_token: []const u8) []const u8 {
             .is_draft = true,
             .is_published = false,
         },
-        csrf_token,
-    });
+        .csrf_token = csrf_token,
+    }});
     return wrapAdmin(content, "New Post", "", NavState.posts_active, csrf_token);
 }
 
@@ -352,8 +371,8 @@ pub fn renderPostEdit(db: *db_mod.Db, post_id: []const u8, csrf_token: []const u
     _ = db;
     _ = post_id; // TODO: Query post from database
 
-    const content = tpl.renderFnToSlice(zsx_admin_posts_edit.Edit, .{
-        PostEditData{
+    const content = tpl.render(zsx_admin_posts_edit.Edit, .{.{
+        .post = PostEditData{
             .title = "Welcome to Publr",
             .slug = "welcome-to-publr",
             .content = "This is the content of the post...",
@@ -361,8 +380,8 @@ pub fn renderPostEdit(db: *db_mod.Db, post_id: []const u8, csrf_token: []const u
             .is_draft = false,
             .is_published = true,
         },
-        csrf_token,
-    });
+        .csrf_token = csrf_token,
+    }});
     return wrapAdmin(content, "Edit Post", "", NavState.posts_active, csrf_token);
 }
 
@@ -390,13 +409,20 @@ pub fn renderUsersList(auth: *Auth, allocator: std.mem.Allocator, csrf_token: []
     }
 
     _ = allocator;
-    const content = tpl.renderFnToSlice(zsx_admin_users_list.List, .{ count > 0, view_users[0..count], csrf_token });
+    const content = tpl.render(zsx_admin_users_list.List, .{.{
+        .has_users = count > 0,
+        .users = view_users[0..count],
+        .csrf_token = csrf_token,
+    }});
     const actions = "<a href=\"/admin/users/new\" class=\"btn btn-primary\">Add New</a>";
     return wrapAdmin(content, "Users", actions, NavState.users_list_active, csrf_token);
 }
 
 pub fn renderUsersNew(csrf_token: []const u8) []const u8 {
-    const content = tpl.renderFnToSlice(zsx_admin_users_new.New, .{ "", csrf_token });
+    const content = tpl.render(zsx_admin_users_new.New, .{.{
+        .error_message = "",
+        .csrf_token = csrf_token,
+    }});
     return wrapAdmin(content, "Add User", "", NavState.users_new_active, csrf_token);
 }
 
@@ -412,11 +438,11 @@ fn renderUsersEditWithError(ctx: RequestContext, user_id: []const u8, error_msg:
     };
     defer ctx.auth.freeUser(&@constCast(&user).*);
 
-    const content = tpl.renderFnToSlice(zsx_admin_users_edit.Edit, .{
-        error_msg,
-        user,
-        ctx.csrf_token,
-    });
+    const content = tpl.render(zsx_admin_users_edit.Edit, .{.{
+        .error_message = error_msg,
+        .user = user,
+        .csrf_token = ctx.csrf_token,
+    }});
     return wrapAdmin(content, "Edit User", "", NavState.users_list_active, ctx.csrf_token);
 }
 
@@ -433,21 +459,21 @@ fn renderUsersProfile(ctx: RequestContext) []const u8 {
         .display_name = "Current User",
         .email = "user@example.com",
     };
-    const content = tpl.renderFnToSlice(zsx_admin_users_profile.Profile, .{
-        "", // error_message
-        user,
-        ctx.csrf_token,
-    });
+    const content = tpl.render(zsx_admin_users_profile.Profile, .{.{
+        .error_message = "",
+        .user = user,
+        .csrf_token = ctx.csrf_token,
+    }});
     return wrapAdmin(content, "Profile", "", NavState.users_profile_active, ctx.csrf_token);
 }
 
 pub fn renderComponents(csrf_token: []const u8) []const u8 {
-    const content = tpl.renderFnToSlice(zsx_admin_components.Components, .{});
+    const content = tpl.renderStatic(zsx_admin_components.Components);
     return wrapAdmin(content, "Components", "", NavState.components_active, csrf_token);
 }
 
 pub fn renderDesignSystem(csrf_token: []const u8) []const u8 {
-    const content = tpl.renderFnToSlice(zsx_admin_design_system.DesignSystem, .{});
+    const content = tpl.renderStatic(zsx_admin_design_system.DesignSystem);
     return wrapAdmin(content, "Design System", "", NavState.design_system_active, csrf_token);
 }
 
@@ -465,21 +491,26 @@ pub fn renderSettings(csrf_token: []const u8) []const u8 {
 // =============================================================================
 
 pub fn wrapAdmin(content: []const u8, title: []const u8, actions: []const u8, nav: NavState, csrf_token: []const u8) []const u8 {
-    return tpl.renderFnToSlice(zsx_admin_layout.Layout, .{
-        title,
-        content,
-        actions,
-        nav.dashboard,
-        nav.posts,
-        nav.users,
-        nav.users_all,
-        nav.users_new,
-        nav.users_profile,
-        nav.settings,
-        nav.components,
-        nav.design_system,
-        csrf_token,
-    });
+    // Generate nav HTML based on NavState
+    const nav_html = buildNavHtml(nav);
+    return tpl.render(zsx_admin_layout.Layout, .{.{
+        .title = title,
+        .content = content,
+        .actions = actions,
+        .nav_html = nav_html,
+        .csrf_token = csrf_token,
+    }});
+}
+
+fn buildNavHtml(nav: NavState) []const u8 {
+    _ = nav; // TODO: Build nav HTML based on active states
+    // For now, return static nav - this should match registry.renderNav output
+    return 
+    \\<a href="/admin" class="nav-item active"><span class="nav-icon">&#9632;</span>Dashboard</a>
+    \\<a href="/admin/posts" class="nav-item"><span class="nav-icon">&#9998;</span>Posts</a>
+    \\<a href="/admin/users" class="nav-item"><span class="nav-icon">&#9787;</span>Users</a>
+    \\<a href="/admin/settings" class="nav-item"><span class="nav-icon">&#9881;</span>Settings</a>
+    ;
 }
 
 // =============================================================================

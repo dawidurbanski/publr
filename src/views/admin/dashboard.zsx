@@ -6,22 +6,29 @@ const Post = struct {
     date: []const u8,
 };
 
-pub fn Dashboard(posts_count: []const u8, pages_count: []const u8, media_count: []const u8, users_count: []const u8, has_posts: bool, recent_posts: []const Post) {
+pub fn Dashboard(props: struct {
+    posts_count: []const u8,
+    pages_count: []const u8,
+    media_count: []const u8,
+    users_count: []const u8,
+    has_posts: bool,
+    recent_posts: []const Post,
+}) {
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="stat-value">{posts_count}</div>
+            <div class="stat-value">{props.posts_count}</div>
             <div class="stat-label">Posts</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{pages_count}</div>
+            <div class="stat-value">{props.pages_count}</div>
             <div class="stat-label">Pages</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{media_count}</div>
+            <div class="stat-value">{props.media_count}</div>
             <div class="stat-label">Media</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{users_count}</div>
+            <div class="stat-value">{props.users_count}</div>
             <div class="stat-label">Users</div>
         </div>
     </div>
@@ -30,7 +37,7 @@ pub fn Dashboard(posts_count: []const u8, pages_count: []const u8, media_count: 
             <h2>Recent Posts</h2>
         </div>
         <div class="panel-body">
-            {if (has_posts) (
+            {if (props.has_posts) (
                 <table class="table">
                     <thead>
                         <tr>
@@ -40,7 +47,7 @@ pub fn Dashboard(posts_count: []const u8, pages_count: []const u8, media_count: 
                         </tr>
                     </thead>
                     <tbody>
-                        {for (recent_posts) |post| (
+                        {for (props.recent_posts) |post| (
                             <tr>
                                 <td><a href={post.id}>{post.title}</a></td>
                                 <td><span class={post.status}>{post.status}</span></td>

@@ -26,10 +26,15 @@ const Post = struct {
     author: []const u8,
     status: []const u8,
     date: []const u8,
+    edit_url: []const u8,
+    preview_url: []const u8,
 };
 
-pub fn List(has_posts: bool, posts: []const Post) {
-    {if (has_posts) (
+pub fn List(props: struct {
+    has_posts: bool,
+    posts: []const Post,
+}) {
+    {if (props.has_posts) (
         <div>
             <table class="table">
                 <thead>
@@ -49,7 +54,7 @@ pub fn List(has_posts: bool, posts: []const Post) {
                     </tr>
                 </thead>
                 <tbody>
-                    {for (posts) |post| (
+                    {for (props.posts) |post| (
                         <tr>
                             <td class="table-col-check">
                                 <input type="checkbox" class="table-checkbox" aria-label="Select post" />
@@ -58,7 +63,7 @@ pub fn List(has_posts: bool, posts: []const Post) {
                                 <div class="table-thumb">{!icon_file}</div>
                             </td>
                             <td>
-                                <a href="/admin/posts/{post.id}">{post.title}</a>
+                                <a href={post.edit_url}>{post.title}</a>
                             </td>
                             <td>
                                 <span class="table-cell-icon">
@@ -83,8 +88,8 @@ pub fn List(has_posts: bool, posts: []const Post) {
                                         {!icon_more}
                                     </button>
                                     <div class="dropdown-menu" data-publr-part="content">
-                                        <a href="/admin/posts/{post.id}" class="dropdown-item">Edit</a>
-                                        <a href="/admin/posts/{post.id}/preview" class="dropdown-item">Preview</a>
+                                        <a href={post.edit_url} class="dropdown-item">Edit</a>
+                                        <a href={post.preview_url} class="dropdown-item">Preview</a>
                                         <hr class="dropdown-divider" />
                                         <button class="dropdown-item dropdown-item-danger">Delete</button>
                                     </div>
@@ -95,7 +100,7 @@ pub fn List(has_posts: bool, posts: []const Post) {
                 </tbody>
             </table>
             <div class="table-footer">
-                <span class="table-item-count">{posts.len} items</span>
+                <span class="table-item-count">{props.posts.len} items</span>
             </div>
         </div>
     ) else (

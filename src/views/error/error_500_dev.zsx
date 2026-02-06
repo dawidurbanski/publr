@@ -1,5 +1,8 @@
 // 500 error page template (development mode with details)
-pub fn Error500Dev(error_name: []const u8, trace_section: []const u8) {
+pub fn Error500Dev(props: struct {
+    error_name: []const u8,
+    trace_section: []const u8,
+}) {
     <div
         style="padding: 40px 20px; font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 0 auto;"
     >
@@ -16,10 +19,10 @@ pub fn Error500Dev(error_name: []const u8, trace_section: []const u8) {
             <pre
                 style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0;"
             >
-                error.{error_name}
+                error.{props.error_name}
             </pre>
         </div>
-        {!trace_section}
+        {!props.trace_section}
         <div style="margin-top: 30px; text-align: center;">
             <a href="/" style="color: #3498db; text-decoration: none;">&#x2190; Back to Home</a>
         </div>

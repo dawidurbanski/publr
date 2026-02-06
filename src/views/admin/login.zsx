@@ -1,5 +1,8 @@
 // Login page (standalone, no admin layout)
-pub fn Login(error_message: []const u8, csrf_token: []const u8) {
+pub fn Login(props: struct {
+    error_message: []const u8,
+    csrf_token: []const u8,
+}) {
     <!DOCTYPE html>
     <html>
         <head>
@@ -20,12 +23,12 @@ pub fn Login(error_message: []const u8, csrf_token: []const u8) {
                         <p class="auth-subtitle">Sign in to your account</p>
                     </div>
 
-                    {if (error_message.len > 0) (
-                        <div class="auth-error">{error_message}</div>
+                    {if (props.error_message.len > 0) (
+                        <div class="auth-error">{props.error_message}</div>
                     )}
 
                     <form method="POST" action="/admin/login" class="auth-form">
-                        <input type="hidden" name="_csrf" value={csrf_token} />
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
                         <div class="form-group">
                             <label class="form-label" for="email">Email</label>
                             <input

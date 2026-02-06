@@ -1,34 +1,33 @@
 const std = @import("std");
 const posix = std.posix;
-const Router = @import("router.zig").Router;
-const Context = @import("router.zig").Context;
-const Method = @import("router.zig").Method;
+const router_mod = @import("router");
+const Router = router_mod.Router;
+const Context = router_mod.Context;
+const Method = router_mod.Method;
 const logger = @import("logger.zig");
 const static = @import("static.zig");
 const error_pages = @import("error.zig");
-const tpl = @import("tpl.zig");
+const tpl = @import("tpl");
 const dev = @import("dev.zig");
-const db_mod = @import("db.zig");
-const Auth = @import("auth.zig").Auth;
-const auth_middleware = @import("auth_middleware.zig");
-const csrf = @import("csrf.zig");
-const handlers = @import("handlers.zig");
+const db_mod = @import("db");
+const Auth = @import("auth").Auth;
+const auth_middleware = @import("auth_middleware");
+const csrf = @import("csrf");
+const admin_api = @import("admin_api");
+
+// Import plugins directly
+const plugin_dashboard = @import("plugin_dashboard");
+const plugin_posts = @import("plugin_posts");
+const plugin_users = @import("plugin_users");
+const plugin_settings = @import("plugin_settings");
+const plugin_components = @import("plugin_components");
+const plugin_design_system = @import("plugin_design_system");
 
 // Generated ZSX templates
 const zsx_base = @import("zsx_base");
 const zsx_index = @import("zsx_index");
-const zsx_admin_layout = @import("zsx_admin_layout");
-const zsx_admin_dashboard = @import("zsx_admin_dashboard");
-const zsx_admin_posts_list = @import("zsx_admin_posts_list");
-const zsx_admin_posts_edit = @import("zsx_admin_posts_edit");
-const zsx_admin_components = @import("zsx_admin_components");
-const zsx_admin_users_list = @import("zsx_admin_users_list");
-const zsx_admin_users_new = @import("zsx_admin_users_new");
-const zsx_admin_users_edit = @import("zsx_admin_users_edit");
-const zsx_admin_users_profile = @import("zsx_admin_users_profile");
 const zsx_admin_setup = @import("zsx_admin_setup");
 const zsx_admin_login = @import("zsx_admin_login");
-const zsx_admin_design_system = @import("zsx_admin_design_system");
 
 // Embedded static assets with compile-time metadata
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
@@ -101,28 +100,17 @@ pub fn serve(port: u16, dev_mode: bool) !void {
         try router.get("/__dev/ready", dev.readyHandler);
     }
 
-    // Register routes
+    // Register core routes
     try router.get("/", handleIndex);
-    try router.get("/admin", handleAdminDashboard);
     try router.get("/admin/setup", handleSetupGet);
     try router.post("/admin/setup", handleSetupPost);
     try router.get("/admin/login", handleLoginGet);
     try router.post("/admin/login", handleLoginPost);
     try router.post("/admin/logout", handleLogout);
-    try router.get("/admin/posts", handleAdminPosts);
-    try router.get("/admin/users", handleAdminUsersList);
-    try router.get("/admin/users/new", handleAdminUsersNew);
-    try router.post("/admin/users/new", handleAdminUsersCreate);
-    try router.get("/admin/users/profile", handleAdminUsersProfile);
-    try router.post("/admin/users/profile", handleAdminUsersProfileUpdate);
-    try router.get("/admin/users/:id", handleAdminUsersEdit);
-    try router.post("/admin/users/:id", handleAdminUsersUpdate);
-    try router.post("/admin/users/:id/delete", handleAdminUsersDelete);
-    try router.get("/admin/components", handleAdminComponents);
-    try router.get("/admin/design-system", handleAdminDesignSystem);
-    try router.get("/admin/posts/new", handleAdminPostNew);
-    try router.get("/admin/posts/*", handleAdminPostEdit);
     try router.get("/static/*", handleStatic);
+
+    // Register plugin routes
+    registerPluginRoutes(&router, allocator);
 
     // Dev-only test route to trigger 500 error
     if (dev_mode) {
@@ -187,6 +175,63 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     std.debug.print("Goodbye!\n", .{});
 }
 
+// =============================================================================
+// Plugin Route Registration
+// =============================================================================
+
+/// All registered admin pages
+/// NOTE: Order matters for route matching! Child pages with literal paths
+/// must come BEFORE parent pages that register parameterized routes (like /:id)
+const all_pages = [_]admin_api.Page{
+    plugin_dashboard.page,
+    plugin_posts.page,
+        // Users: register literal child routes before parent's /:id route
+    plugin_users.page_all, // noop
+    plugin_users.page_new, // /admin/users/new
+    plugin_users.page_profile, // /admin/users/profile
+    plugin_users.page, // /admin/users and /admin/users/:id
+    plugin_settings.page,
+    plugin_components.page,
+    plugin_design_system.page,
+};
+
+/// Register all plugin routes
+fn registerPluginRoutes(router: *Router, allocator: std.mem.Allocator) void {
+    // Create route registrar that wraps the real router
+    const registrar = admin_api.RouteRegistrar{
+        .ctx = router,
+        .register_get = routerRegisterGet,
+        .register_post = routerRegisterPost,
+    };
+
+    // Register routes for each page
+    inline for (all_pages) |page| {
+        const base_path = admin_api.resolvePagePath(page, &all_pages);
+
+        var app = admin_api.PageApp{
+            .base_path = base_path,
+            .page = page,
+            .registrar = registrar,
+            .allocator = allocator,
+        };
+
+        // Call the plugin's setup function
+        page.setup(&app);
+    }
+}
+
+/// Wrapper to register GET route - adapts Router.get to RouteRegistrar interface
+fn routerRegisterGet(ctx: *anyopaque, path: []const u8, handler: admin_api.Handler) void {
+    const router: *Router = @ptrCast(@alignCast(ctx));
+    router.get(path, handler) catch {};
+}
+
+/// Wrapper to register POST route - adapts Router.post to RouteRegistrar interface
+fn routerRegisterPost(ctx: *anyopaque, path: []const u8, handler: admin_api.Handler) void {
+    const router: *Router = @ptrCast(@alignCast(ctx));
+    router.post(path, handler) catch {};
+}
+
 fn setupSignalHandlers() void {
     const handler = posix.Sigaction{
         .handler = .{ .handler = signalHandler },
@@ -229,7 +274,8 @@ fn handleConnectionThread(stream: std.net.Stream) void {
     };
 }
 
-const RequestHeader = @import("middleware.zig").RequestHeader;
+/// Request header - imported from middleware
+const RequestHeader = @import("middleware").RequestHeader;
 
 fn handleConnection(stream: std.net.Stream) !void {
     var buf: [8192]u8 = undefined;
@@ -331,7 +377,7 @@ fn handleConnection(stream: std.net.Stream) !void {
 }
 
 fn handleIndex(ctx: *Context) !void {
-    const content = tpl.renderFnToSlice(zsx_index.Index, .{});
+    const content = tpl.renderStatic(zsx_index.Index);
     if (ctx.isPartial()) {
         ctx.html(content);
     } else {
@@ -339,492 +385,13 @@ fn handleIndex(ctx: *Context) !void {
     }
 }
 
-fn handleAdminDashboard(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-    // Mock data
-    const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
-    const posts = [_]Post{
-        .{ .id = "1", .title = "Welcome to Publr", .status = "published", .date = "2024-01-15" },
-        .{ .id = "2", .title = "Getting Started Guide", .status = "draft", .date = "2024-01-14" },
-    };
-
-    const content = tpl.renderFnToSlice(zsx_admin_dashboard.Dashboard, .{
-        "12", "5", "34", "3", true, &posts,
-    });
-
-    ctx.html(wrapAdmin(content, "Dashboard", "", .{ .dashboard = true, .posts = false, .users = false, .users_all = false, .users_new = false, .users_profile = false, .settings = false, .components = false, .design_system = false }, csrf_token));
-}
-
-fn handleAdminPosts(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    ctx.html(handlers.renderPostsList(auth_instance.db, csrf_token));
-}
-
-fn handleAdminUsersList(ctx: *Context) !void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    const csrf_token = csrf.ensureToken(ctx);
-
-    const users = auth_instance.listUsers() catch {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Database error");
-        return;
-    };
-    defer auth_instance.freeUsers(users);
-
-    const ViewUser = struct {
-        id: []const u8,
-        display_name: []const u8,
-        email: []const u8,
-        edit_url: []const u8,
-        delete_url: []const u8,
-    };
-
-    var view_users: std.ArrayListUnmanaged(ViewUser) = .{};
-    errdefer {
-        for (view_users.items) |vu| {
-            ctx.allocator.free(vu.edit_url);
-            ctx.allocator.free(vu.delete_url);
-        }
-        view_users.deinit(ctx.allocator);
-    }
-
-    for (users) |user| {
-        const edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/users/{s}", .{user.id}) catch {
-            ctx.response.setStatus("500 Internal Server Error");
-            ctx.response.setBody("Out of memory");
-            return;
-        };
-        const delete_url = std.fmt.allocPrint(ctx.allocator, "/admin/users/{s}/delete", .{user.id}) catch {
-            ctx.allocator.free(edit_url);
-            ctx.response.setStatus("500 Internal Server Error");
-            ctx.response.setBody("Out of memory");
-            return;
-        };
-
-        view_users.append(ctx.allocator, .{
-            .id = user.id,
-            .display_name = user.display_name,
-            .email = user.email,
-            .edit_url = edit_url,
-            .delete_url = delete_url,
-        }) catch {
-            ctx.allocator.free(edit_url);
-            ctx.allocator.free(delete_url);
-            ctx.response.setStatus("500 Internal Server Error");
-            ctx.response.setBody("Out of memory");
-            return;
-        };
-    }
-
-    const content = tpl.renderFnToSlice(zsx_admin_users_list.List, .{
-        view_users.items.len > 0, view_users.items, csrf_token,
-    });
-
-    for (view_users.items) |vu| {
-        ctx.allocator.free(vu.edit_url);
-        ctx.allocator.free(vu.delete_url);
-    }
-    view_users.deinit(ctx.allocator);
-
-    const actions = "<a href=\"/admin/users/new\" class=\"btn btn-primary\">Add New</a>";
-    ctx.html(wrapAdmin(content, "Users", actions, .{ .dashboard = false, .posts = false, .users = true, .users_all = true, .users_new = false, .users_profile = false, .settings = false, .components = false, .design_system = false }, csrf_token));
-}
-
-fn handleAdminUsersNew(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.renderFnToSlice(zsx_admin_users_new.New, .{ "", csrf_token });
-    ctx.html(wrapAdmin(content, "Add User", "", .{ .dashboard = false, .posts = false, .users = true, .users_all = false, .users_new = true, .users_profile = false, .settings = false, .components = false, .design_system = false }, csrf_token));
-}
-
-fn handleAdminUsersCreate(ctx: *Context) !void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    const csrf_token = csrf.ensureToken(ctx);
-
-    const display_name_raw = ctx.formValue("display_name") orelse {
-        return renderUsersNewError(ctx, "Display name is required", csrf_token);
-    };
-    const email_raw = ctx.formValue("email") orelse {
-        return renderUsersNewError(ctx, "Email is required", csrf_token);
-    };
-    const password_raw = ctx.formValue("password") orelse {
-        return renderUsersNewError(ctx, "Password is required", csrf_token);
-    };
-    const confirm_raw = ctx.formValue("confirm_password") orelse {
-        return renderUsersNewError(ctx, "Please confirm your password", csrf_token);
-    };
-
-    var display_buf: [256]u8 = undefined;
-    const display_name = urlDecode(display_name_raw, &display_buf) orelse {
-        return renderUsersNewError(ctx, "Invalid display name format", csrf_token);
-    };
-
-    var email_buf: [256]u8 = undefined;
-    const email = urlDecode(email_raw, &email_buf) orelse {
-        return renderUsersNewError(ctx, "Invalid email format", csrf_token);
-    };
-
-    var password_buf: [256]u8 = undefined;
-    const password = urlDecode(password_raw, &password_buf) orelse {
-        return renderUsersNewError(ctx, "Invalid password format", csrf_token);
-    };
-
-    var confirm_buf: [256]u8 = undefined;
-    const confirm_password = urlDecode(confirm_raw, &confirm_buf) orelse {
-        return renderUsersNewError(ctx, "Invalid password format", csrf_token);
-    };
-
-    if (display_name.len == 0) {
-        return renderUsersNewError(ctx, "Display name is required", csrf_token);
-    }
-
-    if (!isValidEmail(email)) {
-        return renderUsersNewError(ctx, "Invalid email format", csrf_token);
-    }
-
-    if (password.len < 8) {
-        return renderUsersNewError(ctx, "Password must be at least 8 characters", csrf_token);
-    }
-
-    if (!std.mem.eql(u8, password, confirm_password)) {
-        return renderUsersNewError(ctx, "Passwords do not match", csrf_token);
-    }
-
-    const user_id = auth_instance.createUser(email, display_name, password) catch |err| {
-        switch (err) {
-            Auth.Error.EmailExists => return renderUsersNewError(ctx, "An account with this email already exists", csrf_token),
-            else => return renderUsersNewError(ctx, "Failed to create user", csrf_token),
-        }
-    };
-    auth_instance.allocator.free(user_id);
-
-    ctx.response.setStatus("303 See Other");
-    ctx.response.setHeader("Location", "/admin/users");
-    ctx.response.setBody("");
-}
-
-fn handleAdminUsersEdit(ctx: *Context) !void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    const csrf_token = csrf.ensureToken(ctx);
-
-    const user_id = ctx.param("id") orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-
-    var user = (auth_instance.getUserById(user_id) catch {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Database error");
-        return;
-    }) orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-    defer auth_instance.freeUser(&user);
-
-    const content = tpl.renderFnToSlice(zsx_admin_users_edit.Edit, .{ "", .{
-        .id = user.id,
-        .display_name = userDisplayName(user),
-        .email = user.email,
-    }, csrf_token });
-
-    ctx.html(wrapAdmin(content, "Edit User", "", .{ .dashboard = false, .posts = false, .users = true, .users_all = true, .users_new = false, .users_profile = false, .settings = false, .components = false, .design_system = false }, csrf_token));
-}
-
-fn handleAdminUsersUpdate(ctx: *Context) !void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    const csrf_token = csrf.ensureToken(ctx);
-
-    const user_id = ctx.param("id") orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-
-    const display_name_raw = ctx.formValue("display_name") orelse {
-        return renderUsersEditError(ctx, user_id, "Display name is required", csrf_token);
-    };
-    const email_raw = ctx.formValue("email") orelse {
-        return renderUsersEditError(ctx, user_id, "Email is required", csrf_token);
-    };
-    const password_raw = ctx.formValue("password");
-    const confirm_raw = ctx.formValue("confirm_password");
-
-    var display_buf: [256]u8 = undefined;
-    const display_name = urlDecode(display_name_raw, &display_buf) orelse {
-        return renderUsersEditError(ctx, user_id, "Invalid display name format", csrf_token);
-    };
-
-    var email_buf: [256]u8 = undefined;
-    const email = urlDecode(email_raw, &email_buf) orelse {
-        return renderUsersEditError(ctx, user_id, "Invalid email format", csrf_token);
-    };
-
-    if (display_name.len == 0) {
-        return renderUsersEditError(ctx, user_id, "Display name is required", csrf_token);
-    }
-
-    if (!isValidEmail(email)) {
-        return renderUsersEditError(ctx, user_id, "Invalid email format", csrf_token);
-    }
-
-    var password: ?[]const u8 = null;
-    if (password_raw) |raw| {
-        if (raw.len > 0) {
-            var password_buf: [256]u8 = undefined;
-            const decoded = urlDecode(raw, &password_buf) orelse {
-                return renderUsersEditError(ctx, user_id, "Invalid password format", csrf_token);
-            };
-            if (decoded.len < 8) {
-                return renderUsersEditError(ctx, user_id, "Password must be at least 8 characters", csrf_token);
-            }
-            if (confirm_raw) |confirm_value| {
-                var confirm_buf: [256]u8 = undefined;
-                const confirm = urlDecode(confirm_value, &confirm_buf) orelse {
-                    return renderUsersEditError(ctx, user_id, "Invalid password format", csrf_token);
-                };
-                if (!std.mem.eql(u8, decoded, confirm)) {
-                    return renderUsersEditError(ctx, user_id, "Passwords do not match", csrf_token);
-                }
-            } else {
-                return renderUsersEditError(ctx, user_id, "Please confirm your password", csrf_token);
-            }
-            password = decoded;
-        }
-    }
-
-    auth_instance.updateUser(user_id, email, display_name, password) catch |err| {
-        switch (err) {
-            Auth.Error.EmailExists => return renderUsersEditError(ctx, user_id, "An account with this email already exists", csrf_token),
-            else => return renderUsersEditError(ctx, user_id, "Failed to update user", csrf_token),
-        }
-    };
-
-    ctx.response.setStatus("303 See Other");
-    ctx.response.setHeader("Location", "/admin/users");
-    ctx.response.setBody("");
-}
-
-fn handleAdminUsersProfile(ctx: *Context) !void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    const csrf_token = csrf.ensureToken(ctx);
-
-    const user_id = auth_middleware.getUserId(ctx) orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-
-    var user = (auth_instance.getUserById(user_id) catch {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Database error");
-        return;
-    }) orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-    defer auth_instance.freeUser(&user);
-
-    const content = tpl.renderFnToSlice(zsx_admin_users_profile.Profile, .{ "", .{
-        .id = user.id,
-        .display_name = userDisplayName(user),
-        .email = user.email,
-    }, csrf_token });
-
-    ctx.html(wrapAdmin(content, "Profile", "", .{ .dashboard = false, .posts = false, .users = true, .users_all = false, .users_new = false, .users_profile = true, .settings = false, .components = false, .design_system = false }, csrf_token));
-}
-
-fn handleAdminUsersProfileUpdate(ctx: *Context) !void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    const csrf_token = csrf.ensureToken(ctx);
-
-    const user_id = auth_middleware.getUserId(ctx) orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-
-    const display_name_raw = ctx.formValue("display_name") orelse {
-        return renderUsersProfileError(ctx, user_id, "Display name is required", csrf_token);
-    };
-    const email_raw = ctx.formValue("email") orelse {
-        return renderUsersProfileError(ctx, user_id, "Email is required", csrf_token);
-    };
-    const password_raw = ctx.formValue("password");
-    const confirm_raw = ctx.formValue("confirm_password");
-
-    var display_buf: [256]u8 = undefined;
-    const display_name = urlDecode(display_name_raw, &display_buf) orelse {
-        return renderUsersProfileError(ctx, user_id, "Invalid display name format", csrf_token);
-    };
-
-    var email_buf: [256]u8 = undefined;
-    const email = urlDecode(email_raw, &email_buf) orelse {
-        return renderUsersProfileError(ctx, user_id, "Invalid email format", csrf_token);
-    };
-
-    if (display_name.len == 0) {
-        return renderUsersProfileError(ctx, user_id, "Display name is required", csrf_token);
-    }
-
-    if (!isValidEmail(email)) {
-        return renderUsersProfileError(ctx, user_id, "Invalid email format", csrf_token);
-    }
-
-    var password: ?[]const u8 = null;
-    if (password_raw) |raw| {
-        if (raw.len > 0) {
-            var password_buf: [256]u8 = undefined;
-            const decoded = urlDecode(raw, &password_buf) orelse {
-                return renderUsersProfileError(ctx, user_id, "Invalid password format", csrf_token);
-            };
-            if (decoded.len < 8) {
-                return renderUsersProfileError(ctx, user_id, "Password must be at least 8 characters", csrf_token);
-            }
-            if (confirm_raw) |confirm_value| {
-                var confirm_buf: [256]u8 = undefined;
-                const confirm = urlDecode(confirm_value, &confirm_buf) orelse {
-                    return renderUsersProfileError(ctx, user_id, "Invalid password format", csrf_token);
-                };
-                if (!std.mem.eql(u8, decoded, confirm)) {
-                    return renderUsersProfileError(ctx, user_id, "Passwords do not match", csrf_token);
-                }
-            } else {
-                return renderUsersProfileError(ctx, user_id, "Please confirm your password", csrf_token);
-            }
-            password = decoded;
-        }
-    }
-
-    auth_instance.updateUser(user_id, email, display_name, password) catch |err| {
-        switch (err) {
-            Auth.Error.EmailExists => return renderUsersProfileError(ctx, user_id, "An account with this email already exists", csrf_token),
-            else => return renderUsersProfileError(ctx, user_id, "Failed to update profile", csrf_token),
-        }
-    };
-
-    ctx.response.setStatus("303 See Other");
-    ctx.response.setHeader("Location", "/admin/users/profile");
-    ctx.response.setBody("");
-}
-
-fn handleAdminUsersDelete(ctx: *Context) !void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-
-    const user_id = ctx.param("id") orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-
-    auth_instance.deleteUser(user_id) catch {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Failed to delete user");
-        return;
-    };
-
-    ctx.response.setStatus("303 See Other");
-    ctx.response.setHeader("Location", "/admin/users");
-    ctx.response.setBody("");
-}
-
-fn handleAdminComponents(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.renderFnToSlice(zsx_admin_components.Components, .{});
-    ctx.html(wrapAdmin(content, "Components", "", .{ .dashboard = false, .posts = false, .users = false, .users_all = false, .users_new = false, .users_profile = false, .settings = false, .components = true, .design_system = false }, csrf_token));
-}
-
-fn handleAdminDesignSystem(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.renderFnToSlice(zsx_admin_design_system.DesignSystem, .{});
-    ctx.html(wrapAdmin(content, "Design System", "", .{ .dashboard = false, .posts = false, .users = false, .users_all = false, .users_new = false, .users_profile = false, .settings = false, .components = false, .design_system = true }, csrf_token));
-}
-
-fn handleAdminPostNew(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-    ctx.html(handlers.renderPostNew(csrf_token));
-}
-
-fn handleAdminPostEdit(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-    const post_id = ctx.wildcard orelse "1";
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-    ctx.html(handlers.renderPostEdit(auth_instance.db, post_id, csrf_token));
-}
-
-const NavState = struct {
-    dashboard: bool,
-    posts: bool,
-    users: bool,
-    users_all: bool,
-    users_new: bool,
-    users_profile: bool,
-    settings: bool,
-    components: bool,
-    design_system: bool,
-};
-
-fn wrapAdmin(content: []const u8, title: []const u8, actions: []const u8, nav: NavState, csrf_token: []const u8) []const u8 {
-    return tpl.renderFnToSlice(zsx_admin_layout.Layout, .{
-        title,
-        content,
-        actions,
-        nav.dashboard,
-        nav.posts,
-        nav.users,
-        nav.users_all,
-        nav.users_new,
-        nav.users_profile,
-        nav.settings,
-        nav.components,
-        nav.design_system,
-        csrf_token,
-    });
-}
-
 fn wrapWithBase(content: []const u8, title: []const u8, css: []const []const u8, js: []const []const u8) []const u8 {
-    return tpl.renderFnToSlice(zsx_base.Base, .{
-        title, content, css, js,
-    });
+    return tpl.render(zsx_base.Base, .{.{
+        .title = title,
+        .content = content,
+        .css = css,
+        .js = js,
+    }});
 }
 
 fn handleErrorTest(_: *Context) !void {
@@ -960,7 +527,10 @@ fn handleSetupGet(ctx: *Context) !void {
     }
 
     // Render setup form
-    const content = tpl.renderFnToSlice(zsx_admin_setup.Setup, .{ "", csrf_token });
+    const content = tpl.render(zsx_admin_setup.Setup, .{.{
+        .error_message = "",
+        .csrf_token = csrf_token,
+    }});
     ctx.html(content);
 }
 
@@ -1041,7 +611,10 @@ fn handleSetupPost(ctx: *Context) !void {
 
 fn renderSetupError(ctx: *Context, message: []const u8) void {
     const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.renderFnToSlice(zsx_admin_setup.Setup, .{ message, csrf_token });
+    const content = tpl.render(zsx_admin_setup.Setup, .{.{
+        .error_message = message,
+        .csrf_token = csrf_token,
+    }});
     ctx.html(content);
 }
 
@@ -1108,7 +681,10 @@ fn handleLoginGet(ctx: *Context) !void {
     }
 
     // Render login form
-    const content = tpl.renderFnToSlice(zsx_admin_login.Login, .{ "", csrf_token });
+    const content = tpl.render(zsx_admin_login.Login, .{.{
+        .error_message = "",
+        .csrf_token = csrf_token,
+    }});
     ctx.html(content);
 }
 
@@ -1179,75 +755,15 @@ fn handleLogout(ctx: *Context) !void {
 
 fn renderLoginError(ctx: *Context, message: []const u8) void {
     const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.renderFnToSlice(zsx_admin_login.Login, .{ message, csrf_token });
+    const content = tpl.render(zsx_admin_login.Login, .{.{
+        .error_message = message,
+        .csrf_token = csrf_token,
+    }});
     ctx.html(content);
-}
-
-fn renderUsersNewError(ctx: *Context, message: []const u8, csrf_token: []const u8) void {
-    const content = tpl.renderFnToSlice(zsx_admin_users_new.New, .{ message, csrf_token });
-    ctx.html(wrapAdmin(content, "Add User", "", .{ .dashboard = false, .posts = false, .users = true, .users_all = false, .users_new = true, .users_profile = false, .settings = false, .components = false, .design_system = false }, csrf_token));
-}
-
-fn renderUsersEditError(ctx: *Context, user_id: []const u8, message: []const u8, csrf_token: []const u8) void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-
-    var user = (auth_instance.getUserById(user_id) catch {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Database error");
-        return;
-    }) orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-    defer auth_instance.freeUser(&user);
-
-    const content = tpl.renderFnToSlice(zsx_admin_users_edit.Edit, .{ message, .{
-        .id = user.id,
-        .display_name = userDisplayName(user),
-        .email = user.email,
-    }, csrf_token });
-
-    ctx.html(wrapAdmin(content, "Edit User", "", .{ .dashboard = false, .posts = false, .users = true, .users_all = true, .users_new = false, .users_profile = false, .settings = false, .components = false, .design_system = false }, csrf_token));
-}
-
-fn renderUsersProfileError(ctx: *Context, user_id: []const u8, message: []const u8, csrf_token: []const u8) void {
-    const auth_instance = auth_middleware.auth orelse {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Auth not initialized");
-        return;
-    };
-
-    var user = (auth_instance.getUserById(user_id) catch {
-        ctx.response.setStatus("500 Internal Server Error");
-        ctx.response.setBody("Database error");
-        return;
-    }) orelse {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setBody("Not Found");
-        return;
-    };
-    defer auth_instance.freeUser(&user);
-
-    const content = tpl.renderFnToSlice(zsx_admin_users_profile.Profile, .{ message, .{
-        .id = user.id,
-        .display_name = userDisplayName(user),
-        .email = user.email,
-    }, csrf_token });
-
-    ctx.html(wrapAdmin(content, "Profile", "", .{ .dashboard = false, .posts = false, .users = true, .users_all = false, .users_new = false, .users_profile = true, .settings = false, .components = false, .design_system = false }, csrf_token));
 }
 
 fn defaultDisplayName(email: []const u8) []const u8 {
     const at_pos = std.mem.indexOf(u8, email, "@") orelse return email;
     if (at_pos == 0) return email;
     return email[0..at_pos];
-}
-
-fn userDisplayName(user: Auth.User) []const u8 {
-    return if (user.display_name.len > 0) user.display_name else user.email;
 }
