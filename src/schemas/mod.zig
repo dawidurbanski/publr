@@ -11,6 +11,10 @@ pub const post = @import("schema_post");
 pub const page = @import("schema_page");
 pub const author = @import("schema_author");
 
+// Media schema (not a content type, but follows same field system)
+pub const media = @import("schema_media");
+pub const Media = media.Media;
+
 /// Core content types - these names are reserved and cannot be used by instance schemas
 pub const Post = post.Post;
 pub const Page = page.Page;
@@ -85,4 +89,16 @@ test "Author schema has expected fields" {
     try std.testing.expect(Author.getField("slug") != null);
     try std.testing.expect(Author.getField("email") != null);
     try std.testing.expect(Author.getField("bio") != null);
+}
+
+test "Media schema has expected fields" {
+    try std.testing.expect(Media.getField("alt_text") != null);
+    try std.testing.expect(Media.getField("caption") != null);
+    try std.testing.expect(Media.getField("credit") != null);
+    try std.testing.expect(Media.getField("focal_point") != null);
+
+    // Credit should be filterable
+    const filterable = Media.getFilterableFields();
+    try std.testing.expect(filterable.len == 1);
+    try std.testing.expectEqualStrings("credit", filterable[0].name);
 }

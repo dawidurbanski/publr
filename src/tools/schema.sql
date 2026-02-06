@@ -98,3 +98,39 @@ CREATE TABLE IF NOT EXISTS entry_terms (
 );
 
 CREATE INDEX IF NOT EXISTS idx_entry_terms_term ON entry_terms(term_id);
+
+-- Media tables
+CREATE TABLE IF NOT EXISTS media (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    storage_key TEXT NOT NULL,
+    visibility TEXT NOT NULL DEFAULT 'public',
+    hash TEXT,
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+);
+
+CREATE TABLE IF NOT EXISTS media_meta (
+    media_id TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value_text TEXT,
+    value_int INTEGER,
+    value_real REAL,
+    PRIMARY KEY (media_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_media_meta_key_text ON media_meta(key, value_text);
+CREATE INDEX IF NOT EXISTS idx_media_meta_key_int ON media_meta(key, value_int);
+CREATE INDEX IF NOT EXISTS idx_media_meta_key_real ON media_meta(key, value_real);
+
+CREATE TABLE IF NOT EXISTS media_terms (
+    media_id TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    term_id TEXT NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+    sort_order INTEGER DEFAULT 0,
+    PRIMARY KEY (media_id, term_id)
+);
+CREATE INDEX IF NOT EXISTS idx_media_terms_term ON media_terms(term_id);

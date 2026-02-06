@@ -275,6 +275,14 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const schema_media_module = b.createModule(.{
+        .root_source_file = b.path("src/schemas/media.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "content_type", .module = content_type_module },
+        },
+    });
+
     // Aggregated core schemas module
     const schemas_module = b.createModule(.{
         .root_source_file = b.path("src/schemas/mod.zig"),
@@ -284,6 +292,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "schema_post", .module = schema_post_module },
             .{ .name = "schema_page", .module = schema_page_module },
             .{ .name = "schema_author", .module = schema_author_module },
+            .{ .name = "schema_media", .module = schema_media_module },
         },
     });
 
@@ -369,6 +378,16 @@ pub fn build(b: *std.Build) void {
             .{ .name = "db", .module = db_module },
         },
     });
+    // Media CRUD API
+    const media_module = b.createModule(.{
+        .root_source_file = b.path("src/media.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "schema_media", .module = schema_media_module },
+        },
+    });
+
     const tpl_module = b.createModule(.{
         .root_source_file = b.path("src/tpl.zig"),
     });
@@ -554,7 +573,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("schemas", schemas_module);
     exe.root_module.addImport("schema_registry", schema_registry_module);
     exe.root_module.addImport("schema_sync", schema_sync_module);
+    exe.root_module.addImport("schema_media", schema_media_module);
     exe.root_module.addImport("cms", cms_module);
+    exe.root_module.addImport("media", media_module);
 
     // Add plugin modules to main exe
     exe.root_module.addImport("plugin_dashboard", plugin_dashboard);
@@ -624,6 +645,8 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("registry", registry_module);
     exe_tests.root_module.addImport("admin_api", admin_api_module);
     exe_tests.root_module.addImport("icons", icons_module);
+    exe_tests.root_module.addImport("schema_media", schema_media_module);
+    exe_tests.root_module.addImport("media", media_module);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");

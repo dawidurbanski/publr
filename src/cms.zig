@@ -81,6 +81,56 @@ pub fn Entry(comptime CT: type) type {
     };
 }
 
+/// Operators for meta field filtering
+pub const MetaOp = enum {
+    eq,
+    neq,
+    gt,
+    gte,
+    lt,
+    lte,
+
+    pub fn toSql(self: MetaOp) []const u8 {
+        return switch (self) {
+            .eq => "=",
+            .neq => "!=",
+            .gt => ">",
+            .gte => ">=",
+            .lt => "<",
+            .lte => "<=",
+        };
+    }
+};
+
+/// Value types for meta filtering
+pub const MetaValue = union(enum) {
+    text: []const u8,
+    int: i64,
+    real: f64,
+
+    /// Return which column to compare against
+    pub fn columnName(self: MetaValue) []const u8 {
+        return switch (self) {
+            .text => "value_text",
+            .int => "value_int",
+            .real => "value_real",
+        };
+    }
+};
+
+/// Filter entries/media by meta table fields
+pub const MetaFilter = struct {
+    key: []const u8,
+    op: MetaOp = .eq,
+    value: MetaValue,
+};
+
+/// Maximum number of MetaFilter joins supported in a single query
+pub const max_meta_filters = 8;
+
+/// Sort direction
+pub const OrderDir = enum { asc, desc };
+
 /// Options for listing entries
 pub const ListOptions = struct {
     /// Filter by status
@@ -92,7 +142,9 @@ pub const ListOptions = struct {
     /// Order by field (default: created_at)
     order_by: []const u8 = "created_at",
     /// Order direction (default: descending)
-    order_dir: enum { asc, desc } = .desc,
+    order_dir: OrderDir = .desc,
+    /// Meta field filters (generates JOINs)
+    meta_filters: []const MetaFilter = &.{},
 };
 
 /// Get a single entry by ID or slug
@@ -130,71 +182,222 @@ pub fn listEntries(
     db: *Db,
     opts: ListOptions,
 ) ![]Entry(CT) {
-    // Build query
-    var sql_buf: [512]u8 = undefined;
+    return listWithMeta(Entry(CT), allocator, db, .{
+        .table = "entries",
+        .id_column = "id",
+        .meta_table = "entry_meta",
+        .meta_fk = "entry_id",
+        .type_filter = .{ .column = "content_type_id", .value = CT.type_id },
+        .select_cols = "id, slug, title, data, status, published_at, created_at, updated_at",
+        .status = opts.status,
+        .limit = opts.limit,
+        .offset = opts.offset,
+        .order_by = opts.order_by,
+        .order_dir = opts.order_dir,
+        .meta_filters = opts.meta_filters,
+        .parse_row = struct {
+            fn parse(a: Allocator, stmt: *Statement) !Entry(CT) {
+                return parseEntryRow(CT, a, stmt);
+            }
+        }.parse,
+    });
+}
+
+/// Generic list query builder with MetaFilter JOIN support.
+/// Used by both listEntries and listMedia to avoid duplicating query logic.
+pub fn listWithMeta(
+    comptime T: type,
+    allocator: Allocator,
+    db: *Db,
+    config: struct {
+        table: []const u8,
+        id_column: []const u8,
+        meta_table: []const u8,
+        meta_fk: []const u8,
+        type_filter: ?struct { column: []const u8, value: []const u8 } = null,
+        select_cols: []const u8,
+        status: ?[]const u8 = null,
+        visibility: ?[]const u8 = null,
+        mime_type: ?[]const u8 = null,
+        limit: ?u32 = null,
+        offset: ?u32 = null,
+        order_by: []const u8 = "created_at",
+        order_dir: OrderDir = .desc,
+        meta_filters: []const MetaFilter = &.{},
+        parse_row: *const fn (Allocator, *Statement) anyerror!T,
+    },
+) ![]T {
+    if (config.meta_filters.len > max_meta_filters) return error.OutOfMemory;
+
+    var sql_buf: [2048]u8 = undefined;
     var sql_len: usize = 0;
 
-    const base = "SELECT id, slug, title, data, status, published_at, created_at, updated_at FROM entries WHERE content_type_id = ?1";
-    @memcpy(sql_buf[0..base.len], base);
-    sql_len = base.len;
+    // SELECT ... FROM table t
+    const select_part = std.fmt.bufPrint(
+        &sql_buf,
+        "SELECT t.{s} FROM {s} t",
+        .{ config.select_cols, config.table },
+    ) catch return error.OutOfMemory;
+    sql_len = select_part.len;
 
-    if (opts.status != null) {
-        const clause = " AND status = ?2";
-        @memcpy(sql_buf[sql_len..][0..clause.len], clause);
-        sql_len += clause.len;
+    // Add meta filter JOINs
+    // Each filter becomes: JOIN meta_table m0 ON m0.fk = t.id AND m0.key = ?N
+    var bind_idx: u32 = 1;
+    for (config.meta_filters, 0..) |_, i| {
+        const join = std.fmt.bufPrint(
+            sql_buf[sql_len..],
+            " JOIN {s} m{} ON m{}.{s} = t.{s} AND m{}.key = ?{}",
+            .{ config.meta_table, i, i, config.meta_fk, config.id_column, i, bind_idx },
+        ) catch return error.OutOfMemory;
+        sql_len += join.len;
+        bind_idx += 1;
     }
 
-    // Add ordering
+    // WHERE 1=1
+    const where = " WHERE 1=1";
+    @memcpy(sql_buf[sql_len..][0..where.len], where);
+    sql_len += where.len;
+
+    // Type filter (entries have content_type_id)
+    const type_bind_idx = bind_idx;
+    if (config.type_filter != null) {
+        const clause = std.fmt.bufPrint(
+            sql_buf[sql_len..],
+            " AND t.{s} = ?{}",
+            .{ config.type_filter.?.column, bind_idx },
+        ) catch return error.OutOfMemory;
+        sql_len += clause.len;
+        bind_idx += 1;
+    }
+
+    // Status filter
+    const status_bind_idx = bind_idx;
+    if (config.status != null) {
+        const clause = std.fmt.bufPrint(
+            sql_buf[sql_len..],
+            " AND t.status = ?{}",
+            .{bind_idx},
+        ) catch return error.OutOfMemory;
+        sql_len += clause.len;
+        bind_idx += 1;
+    }
+
+    // Visibility filter (media)
+    const visibility_bind_idx = bind_idx;
+    if (config.visibility != null) {
+        const clause = std.fmt.bufPrint(
+            sql_buf[sql_len..],
+            " AND t.visibility = ?{}",
+            .{bind_idx},
+        ) catch return error.OutOfMemory;
+        sql_len += clause.len;
+        bind_idx += 1;
+    }
+
+    // Mime type filter (media)
+    const mime_bind_idx = bind_idx;
+    if (config.mime_type != null) {
+        const clause = std.fmt.bufPrint(
+            sql_buf[sql_len..],
+            " AND t.mime_type = ?{}",
+            .{bind_idx},
+        ) catch return error.OutOfMemory;
+        sql_len += clause.len;
+        bind_idx += 1;
+    }
+
+    // Meta filter WHERE conditions
+    // m0.value_text = ?N, m1.value_int > ?N, etc.
+    var meta_value_bind_indices: [max_meta_filters]u32 = undefined;
+    for (config.meta_filters, 0..) |mf, i| {
+        const clause = std.fmt.bufPrint(
+            sql_buf[sql_len..],
+            " AND m{}.{s} {s} ?{}",
+            .{ i, mf.value.columnName(), mf.op.toSql(), bind_idx },
+        ) catch return error.OutOfMemory;
+        sql_len += clause.len;
+        meta_value_bind_indices[i] = bind_idx;
+        bind_idx += 1;
+    }
+
+    // ORDER BY
     const order_clause = std.fmt.bufPrint(
         sql_buf[sql_len..],
-        " ORDER BY {s} {s}",
-        .{ opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC" },
+        " ORDER BY t.{s} {s}",
+        .{ config.order_by, if (config.order_dir == .asc) "ASC" else "DESC" },
     ) catch return error.OutOfMemory;
     sql_len += order_clause.len;
 
-    // Add limit
-    if (opts.limit) |limit| {
-        const limit_clause = std.fmt.bufPrint(
+    // LIMIT
+    if (config.limit) |limit| {
+        const clause = std.fmt.bufPrint(
             sql_buf[sql_len..],
             " LIMIT {}",
             .{limit},
         ) catch return error.OutOfMemory;
-        sql_len += limit_clause.len;
+        sql_len += clause.len;
     }
 
-    // Add offset
-    if (opts.offset) |offset| {
-        const offset_clause = std.fmt.bufPrint(
+    // OFFSET
+    if (config.offset) |offset| {
+        const clause = std.fmt.bufPrint(
             sql_buf[sql_len..],
             " OFFSET {}",
             .{offset},
         ) catch return error.OutOfMemory;
-        sql_len += offset_clause.len;
+        sql_len += clause.len;
     }
 
+    // Prepare and bind
     var stmt = try db.prepare(sql_buf[0..sql_len]);
     defer stmt.deinit();
 
-    try stmt.bindText(1, CT.type_id);
-    if (opts.status) |status| {
-        try stmt.bindText(2, status);
+    // Bind meta filter keys
+    var key_bind: u32 = 1;
+    for (config.meta_filters) |mf| {
+        try stmt.bindText(key_bind, mf.key);
+        key_bind += 1;
+    }
+
+    // Bind type filter
+    if (config.type_filter) |tf| {
+        try stmt.bindText(type_bind_idx, tf.value);
+    }
+
+    // Bind status
+    if (config.status) |status| {
+        try stmt.bindText(status_bind_idx, status);
+    }
+
+    // Bind visibility
+    if (config.visibility) |visibility| {
+        try stmt.bindText(visibility_bind_idx, visibility);
+    }
+
+    // Bind mime type
+    if (config.mime_type) |mime| {
+        try stmt.bindText(mime_bind_idx, mime);
+    }
+
+    // Bind meta filter values
+    for (config.meta_filters, 0..) |mf, i| {
+        switch (mf.value) {
+            .text => |v| try stmt.bindText(meta_value_bind_indices[i], v),
+            .int => |v| try stmt.bindInt(meta_value_bind_indices[i], v),
+            .real => |_| try stmt.bindNull(meta_value_bind_indices[i]), // TODO: bindReal
+        }
     }
 
     // Collect results
-    var entries: std.ArrayListUnmanaged(Entry(CT)) = .{};
-    errdefer {
-        for (entries.items) |_| {
-            // TODO: free entry strings
-        }
-        entries.deinit(allocator);
-    }
+    var items: std.ArrayListUnmanaged(T) = .{};
+    errdefer items.deinit(allocator);
 
     while (try stmt.step()) {
-        const entry = try parseEntryRow(CT, allocator, &stmt);
-        try entries.append(allocator, entry);
+        const item = try config.parse_row(allocator, &stmt);
+        try items.append(allocator, item);
     }
 
-    return entries.toOwnedSlice(allocator);
+    return items.toOwnedSlice(allocator);
 }
 
 /// Parse an entry from a database row
