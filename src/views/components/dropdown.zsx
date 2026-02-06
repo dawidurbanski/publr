@@ -1,5 +1,10 @@
 // Dropdown — click trigger opens a menu with keyboard navigation
 // Props: trigger_label ([]const u8), items ([]const { label, danger, divider })
+
+const icon_chevron_down =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
 pub fn Dropdown(props: struct { trigger_label: []const u8, items: anytype, }) {
     <div data-publr-component="dropdown" data-publr-state="closed">
         <button
@@ -9,7 +14,7 @@ pub fn Dropdown(props: struct { trigger_label: []const u8, items: anytype, }) {
             class="btn"
         >
             {props.trigger_label}
-            &#9662;
+            {!icon_chevron_down}
         </button>
         <div data-publr-part="content" class="dropdown-menu" role="menu">
             {for (props.items) |item| (

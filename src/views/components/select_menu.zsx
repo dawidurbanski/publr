@@ -1,5 +1,10 @@
 // SelectMenu — custom select control with hidden input
 // Props: name, default_label, default_value ([]const u8), items ([]const { label, value, selected })
+
+const icon_chevron_down =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
 pub fn SelectMenu(props: struct { name: []const u8, default_label: []const u8, default_value: []const u8, items: anytype, }) {
     <div data-publr-component="select" data-publr-state="closed">
         <input
@@ -15,7 +20,7 @@ pub fn SelectMenu(props: struct { name: []const u8, default_label: []const u8, d
             class="select-trigger"
         >
             <span data-publr-part="label">{props.default_label}</span>
-            <span class="select-arrow">&#9662;</span>
+            <span class="select-arrow">{!icon_chevron_down}</span>
         </button>
         <div data-publr-part="content" class="select-menu" role="listbox">
             {for (props.items) |item| (
