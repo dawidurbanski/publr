@@ -56,6 +56,44 @@ pub const Db = struct {
         _ = c.sqlite3_close(self.handle);
     }
 
+    /// Serialize database to bytes (for persistence)
+    pub fn serialize(self: *Db) ?[]u8 {
+        var size: c.sqlite3_int64 = 0;
+        const data = c.sqlite3_serialize(self.handle, "main", &size, 0);
+        if (data == null or size <= 0) return null;
+
+        const len: usize = @intCast(size);
+        const result = self.allocator.alloc(u8, len) catch {
+            c.sqlite3_free(data);
+            return null;
+        };
+        @memcpy(result, data[0..len]);
+        c.sqlite3_free(data);
+        return result;
+    }
+
+    /// Deserialize database from bytes
+    pub fn deserialize(self: *Db, data: []const u8) bool {
+        // Allocate memory that SQLite will own
+        const buf = @as([*c]u8, @ptrCast(c.sqlite3_malloc64(data.len))) orelse return false;
+        @memcpy(buf[0..data.len], data);
+
+        const rc = c.sqlite3_deserialize(
+            self.handle,
+            "main",
+            buf,
+            @intCast(data.len),
+            @intCast(data.len),
+            c.SQLITE_DESERIALIZE_FREEONCLOSE | c.SQLITE_DESERIALIZE_RESIZEABLE,
+        );
+
+        if (rc != c.SQLITE_OK) {
+            c.sqlite3_free(buf);
+            return false;
+        }
+        return true;
+    }
+
     /// Execute SQL without results (for DDL, INSERT, UPDATE, DELETE)
     pub fn exec(self: *Db, sql: []const u8) Error!void {
         const sql_z = self.allocator.dupeZ(u8, sql) catch return Error.OutOfMemory;
@@ -201,6 +239,7 @@ const schema_sql =
     \\CREATE TABLE IF NOT EXISTS users (
     \\    id TEXT PRIMARY KEY,
     \\    email TEXT UNIQUE NOT NULL,
+    \\    display_name TEXT DEFAULT '',
     \\    email_verified INTEGER DEFAULT 0,
     \\    password_hash TEXT NOT NULL,
     \\    created_at INTEGER DEFAULT (unixepoch())
@@ -223,7 +262,26 @@ pub fn initWithSchema(allocator: Allocator, path: []const u8) Db.Error!Db {
     var db = try Db.init(allocator, path);
     errdefer db.deinit();
     try db.exec(schema_sql);
+    try ensureUsersDisplayName(&db);
     return db;
+}
+
+fn ensureUsersDisplayName(db: *Db) Db.Error!void {
+    var stmt = db.prepare("PRAGMA table_info(users)") catch return Db.Error.PrepareFailed;
+    defer stmt.deinit();
+
+    var has_display_name = false;
+    while (stmt.step() catch return Db.Error.StepFailed) {
+        const name = stmt.columnText(1) orelse continue;
+        if (std.mem.eql(u8, name, "display_name")) {
+            has_display_name = true;
+            break;
+        }
+    }
+
+    if (!has_display_name) {
+        db.exec("ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''") catch {};
+    }
 }
 
 // Tests

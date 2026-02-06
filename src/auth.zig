@@ -31,6 +31,7 @@ pub const Auth = struct {
     pub const User = struct {
         id: []const u8,
         email: []const u8,
+        display_name: []const u8,
         email_verified: bool,
         created_at: i64,
     };
@@ -77,7 +78,7 @@ pub const Auth = struct {
     // =========================================================================
 
     /// Create a new user with hashed password
-    pub fn createUser(self: *Auth, email: []const u8, password: []const u8) Error![]const u8 {
+    pub fn createUser(self: *Auth, email: []const u8, display_name: []const u8, password: []const u8) Error![]const u8 {
         const password_hash = try self.hashPassword(password);
         defer self.allocator.free(password_hash);
 
@@ -85,13 +86,14 @@ pub const Auth = struct {
         errdefer self.allocator.free(user_id);
 
         var stmt = self.db.prepare(
-            "INSERT INTO users (id, email, password_hash) VALUES (?1, ?2, ?3)",
+            "INSERT INTO users (id, email, display_name, password_hash) VALUES (?1, ?2, ?3, ?4)",
         ) catch return Error.DbError;
         defer stmt.deinit();
 
         stmt.bindText(1, user_id) catch return Error.DbError;
         stmt.bindText(2, email) catch return Error.DbError;
-        stmt.bindText(3, password_hash) catch return Error.DbError;
+        stmt.bindText(3, display_name) catch return Error.DbError;
+        stmt.bindText(4, password_hash) catch return Error.DbError;
 
         _ = stmt.step() catch return Error.EmailExists;
 
@@ -101,7 +103,7 @@ pub const Auth = struct {
     /// Get user by email (for login)
     pub fn getUserByEmail(self: *Auth, email: []const u8) Error!?User {
         var stmt = self.db.prepare(
-            "SELECT id, email, email_verified, created_at FROM users WHERE email = ?1",
+            "SELECT id, email, display_name, email_verified, created_at FROM users WHERE email = ?1",
         ) catch return Error.DbError;
         defer stmt.deinit();
 
@@ -113,15 +115,16 @@ pub const Auth = struct {
         return User{
             .id = self.allocator.dupe(u8, stmt.columnText(0).?) catch return Error.OutOfMemory,
             .email = self.allocator.dupe(u8, stmt.columnText(1).?) catch return Error.OutOfMemory,
-            .email_verified = stmt.columnInt(2) != 0,
-            .created_at = stmt.columnInt(3),
+            .display_name = self.allocator.dupe(u8, stmt.columnText(2) orelse "") catch return Error.OutOfMemory,
+            .email_verified = stmt.columnInt(3) != 0,
+            .created_at = stmt.columnInt(4),
         };
     }
 
     /// Get user by ID
     pub fn getUserById(self: *Auth, user_id: []const u8) Error!?User {
         var stmt = self.db.prepare(
-            "SELECT id, email, email_verified, created_at FROM users WHERE id = ?1",
+            "SELECT id, email, display_name, email_verified, created_at FROM users WHERE id = ?1",
         ) catch return Error.DbError;
         defer stmt.deinit();
 
@@ -133,9 +136,40 @@ pub const Auth = struct {
         return User{
             .id = self.allocator.dupe(u8, stmt.columnText(0).?) catch return Error.OutOfMemory,
             .email = self.allocator.dupe(u8, stmt.columnText(1).?) catch return Error.OutOfMemory,
-            .email_verified = stmt.columnInt(2) != 0,
-            .created_at = stmt.columnInt(3),
+            .display_name = self.allocator.dupe(u8, stmt.columnText(2) orelse "") catch return Error.OutOfMemory,
+            .email_verified = stmt.columnInt(3) != 0,
+            .created_at = stmt.columnInt(4),
         };
+    }
+
+    /// List all users
+    pub fn listUsers(self: *Auth) Error![]User {
+        var stmt = self.db.prepare(
+            "SELECT id, email, display_name, email_verified, created_at FROM users ORDER BY created_at DESC",
+        ) catch return Error.DbError;
+        defer stmt.deinit();
+
+        var users: std.ArrayListUnmanaged(User) = .{};
+        errdefer {
+            for (users.items) |*user| self.freeUser(user);
+            users.deinit(self.allocator);
+        }
+
+        while (stmt.step() catch return Error.DbError) {
+            const id = stmt.columnText(0) orelse continue;
+            const email = stmt.columnText(1) orelse "";
+            const display_name = stmt.columnText(2) orelse "";
+            const user = User{
+                .id = self.allocator.dupe(u8, id) catch return Error.OutOfMemory,
+                .email = self.allocator.dupe(u8, email) catch return Error.OutOfMemory,
+                .display_name = self.allocator.dupe(u8, display_name) catch return Error.OutOfMemory,
+                .email_verified = stmt.columnInt(3) != 0,
+                .created_at = stmt.columnInt(4),
+            };
+            users.append(self.allocator, user) catch return Error.OutOfMemory;
+        }
+
+        return users.toOwnedSlice(self.allocator) catch return Error.OutOfMemory;
     }
 
     /// Check if any users exist (for setup wizard)
@@ -165,6 +199,46 @@ pub const Auth = struct {
         try self.verifyPassword(password, stored_hash);
 
         return self.allocator.dupe(u8, user_id) catch return Error.OutOfMemory;
+    }
+
+    /// Update user fields (email/display name) and optionally password
+    pub fn updateUser(self: *Auth, user_id: []const u8, email: []const u8, display_name: []const u8, password: ?[]const u8) Error!void {
+        if (password) |pwd| {
+            const password_hash = try self.hashPassword(pwd);
+            defer self.allocator.free(password_hash);
+
+            var stmt = self.db.prepare(
+                "UPDATE users SET email = ?1, display_name = ?2, password_hash = ?3 WHERE id = ?4",
+            ) catch return Error.DbError;
+            defer stmt.deinit();
+
+            stmt.bindText(1, email) catch return Error.DbError;
+            stmt.bindText(2, display_name) catch return Error.DbError;
+            stmt.bindText(3, password_hash) catch return Error.DbError;
+            stmt.bindText(4, user_id) catch return Error.DbError;
+
+            _ = stmt.step() catch return Error.EmailExists;
+            return;
+        }
+
+        var stmt = self.db.prepare(
+            "UPDATE users SET email = ?1, display_name = ?2 WHERE id = ?3",
+        ) catch return Error.DbError;
+        defer stmt.deinit();
+
+        stmt.bindText(1, email) catch return Error.DbError;
+        stmt.bindText(2, display_name) catch return Error.DbError;
+        stmt.bindText(3, user_id) catch return Error.DbError;
+
+        _ = stmt.step() catch return Error.EmailExists;
+    }
+
+    /// Delete a user (sessions cascade)
+    pub fn deleteUser(self: *Auth, user_id: []const u8) Error!void {
+        var stmt = self.db.prepare("DELETE FROM users WHERE id = ?1") catch return Error.DbError;
+        defer stmt.deinit();
+        stmt.bindText(1, user_id) catch return Error.DbError;
+        _ = stmt.step() catch return Error.DbError;
     }
 
     // =========================================================================
@@ -331,6 +405,12 @@ pub const Auth = struct {
     pub fn freeUser(self: *Auth, user: *User) void {
         self.allocator.free(user.id);
         self.allocator.free(user.email);
+        self.allocator.free(user.display_name);
+    }
+
+    pub fn freeUsers(self: *Auth, users: []User) void {
+        for (users) |*user| self.freeUser(user);
+        self.allocator.free(users);
     }
 };
 
@@ -364,7 +444,7 @@ test "Auth: create and authenticate user" {
 
     var auth = Auth.init(testing.allocator, &db);
 
-    const user_id = try auth.createUser("test@example.com", "password123");
+    const user_id = try auth.createUser("test@example.com", "Test User", "password123");
     defer testing.allocator.free(user_id);
 
     // Should start with "u_"
@@ -394,7 +474,7 @@ test "Auth: hasUsers returns correct state" {
     try testing.expect(!try auth.hasUsers());
 
     // After creating user
-    const user_id = try auth.createUser("admin@example.com", "password");
+    const user_id = try auth.createUser("admin@example.com", "Admin", "password");
     defer testing.allocator.free(user_id);
 
     try testing.expect(try auth.hasUsers());
@@ -407,7 +487,7 @@ test "Auth: session creation and validation" {
     var auth = Auth.init(testing.allocator, &db);
 
     // Create user
-    const user_id = try auth.createUser("user@example.com", "pass123");
+    const user_id = try auth.createUser("user@example.com", "User", "pass123");
     defer testing.allocator.free(user_id);
 
     // Create session
@@ -432,7 +512,7 @@ test "Auth: session invalidation" {
 
     var auth = Auth.init(testing.allocator, &db);
 
-    const user_id = try auth.createUser("user@example.com", "pass123");
+    const user_id = try auth.createUser("user@example.com", "User", "pass123");
     defer testing.allocator.free(user_id);
 
     const token = try auth.createSession(user_id);
@@ -469,7 +549,7 @@ test "Auth: invalidate all sessions for user" {
 
     var auth = Auth.init(testing.allocator, &db);
 
-    const user_id = try auth.createUser("user@example.com", "pass123");
+    const user_id = try auth.createUser("user@example.com", "User", "pass123");
     defer testing.allocator.free(user_id);
 
     // Create multiple sessions
@@ -498,7 +578,7 @@ test "Auth: get user by email and id" {
 
     var auth = Auth.init(testing.allocator, &db);
 
-    const user_id = try auth.createUser("find@example.com", "pass");
+    const user_id = try auth.createUser("find@example.com", "Find User", "pass");
     defer testing.allocator.free(user_id);
 
     // By email
