@@ -8,8 +8,9 @@ const PostData = struct {
     is_published: bool,
 };
 
-pub fn Edit(post: PostData) {
+pub fn Edit(post: PostData, csrf_token: []const u8) {
     <form method="POST" class="form">
+        <input type="hidden" name="_csrf" value={csrf_token} />
         <div class="form-group">
             <label for="title">Title</label>
             <input

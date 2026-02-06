@@ -1,5 +1,5 @@
 // Setup wizard page (standalone, no admin layout)
-pub fn Setup(error_message: []const u8) {
+pub fn Setup(error_message: []const u8, csrf_token: []const u8) {
     <!DOCTYPE html>
     <html>
         <head>
@@ -25,6 +25,7 @@ pub fn Setup(error_message: []const u8) {
                     )}
 
                     <form method="POST" action="/admin/setup" id="setup-form" class="auth-form">
+                        <input type="hidden" name="_csrf" value={csrf_token} />
                         <div class="form-group">
                             <label class="form-label" for="email">Email</label>
                             <input
