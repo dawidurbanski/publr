@@ -3,7 +3,6 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
     // Build ZSX transpiler
     const zsx_transpiler = b.addExecutable(.{
         .name = "zsx_transpile",
@@ -184,6 +183,22 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/gen/views/admin/posts/edit.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
     }));
+    exe.root_module.addImport("zsx_admin_users_list", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/list.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe.root_module.addImport("zsx_admin_users_new", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/new.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe.root_module.addImport("zsx_admin_users_edit", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/edit.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe.root_module.addImport("zsx_admin_users_profile", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/profile.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
     exe.root_module.addImport("zsx_admin_components", b.createModule(.{
         .root_source_file = b.path("src/gen/views/admin/components.zig"),
         .imports = &.{
@@ -206,6 +221,10 @@ pub fn build(b: *std.Build) void {
     }));
     exe.root_module.addImport("zsx_admin_login", b.createModule(.{
         .root_source_file = b.path("src/gen/views/admin/login.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe.root_module.addImport("zsx_admin_design_system", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/design_system.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
     }));
     exe.root_module.addImport("zsx_error_404", b.createModule(.{
@@ -285,6 +304,22 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/gen/views/admin/posts/edit.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
     }));
+    exe_tests.root_module.addImport("zsx_admin_users_list", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/list.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe_tests.root_module.addImport("zsx_admin_users_new", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/new.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe_tests.root_module.addImport("zsx_admin_users_edit", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/edit.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    exe_tests.root_module.addImport("zsx_admin_users_profile", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/profile.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
     exe_tests.root_module.addImport("zsx_admin_components", b.createModule(.{
         .root_source_file = b.path("src/gen/views/admin/components.zig"),
         .imports = &.{
@@ -309,6 +344,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/gen/views/admin/login.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
     }));
+    exe_tests.root_module.addImport("zsx_admin_design_system", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/design_system.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
     exe_tests.root_module.addImport("zsx_error_404", b.createModule(.{
         .root_source_file = b.path("src/gen/views/error/error_404.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
@@ -325,4 +364,132 @@ pub fn build(b: *std.Build) void {
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
+
+    // =========================================================================
+    // Browser WASM Build (full CMS with embedded SQLite)
+    // =========================================================================
+    const browser_step = b.step("browser", "Build browser WASM module");
+
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .wasi,
+    });
+
+    const browser_wasm = b.addExecutable(.{
+        .name = "cms",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wasm_main.zig"),
+            .target = wasm_target,
+            .optimize = .ReleaseSmall,
+        }),
+    });
+
+    // WASM-specific settings
+    browser_wasm.rdynamic = true;
+
+    // Link libc for SQLite
+    browser_wasm.linkLibC();
+
+    // Add SQLite C source (same as native build)
+    browser_wasm.addCSourceFile(.{
+        .file = b.path("vendor/sqlite3.c"),
+        .flags = &.{
+            "-DSQLITE_DQS=0",
+            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+            "-DSQLITE_USE_ALLOCA=1",
+            "-DSQLITE_THREADSAFE=0", // Single-threaded for WASM
+            "-DSQLITE_TEMP_STORE=2",
+            "-DSQLITE_ENABLE_FTS5",
+            "-DSQLITE_ENABLE_JSON1",
+            "-DSQLITE_OMIT_LOAD_EXTENSION",
+        },
+    });
+    browser_wasm.addIncludePath(b.path("vendor"));
+
+    // Add ZSX runtime and views (same as native)
+    browser_wasm.root_module.addImport("zsx_base", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/base.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_layout", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/layout.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_dashboard", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/dashboard.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_setup", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/setup.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_login", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/login.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_users_list", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/list.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_users_new", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/new.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_users_edit", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/edit.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_posts_list", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/posts/list.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_posts_edit", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/posts/edit.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_users_profile", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/users/profile.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_design_system", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/design_system.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+    browser_wasm.root_module.addImport("zsx_admin_components", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/components.zig"),
+        .imports = &.{
+            .{ .name = "zsx_runtime", .module = zsx_runtime },
+            .{ .name = "zsx_components_toggle", .module = zsx_components_toggle },
+            .{ .name = "zsx_components_dialog", .module = zsx_components_dialog },
+            .{ .name = "zsx_components_dropdown", .module = zsx_components_dropdown },
+            .{ .name = "zsx_components_select_menu", .module = zsx_components_select_menu },
+            .{ .name = "zsx_components_popover", .module = zsx_components_popover },
+            .{ .name = "zsx_components_tooltip", .module = zsx_components_tooltip },
+            .{ .name = "zsx_components_tabs", .module = zsx_components_tabs },
+            .{ .name = "zsx_components_switch_input", .module = zsx_components_switch_input },
+            .{ .name = "zsx_components_checkbox_group", .module = zsx_components_checkbox_group },
+            .{ .name = "zsx_components_radio_group", .module = zsx_components_radio_group },
+        },
+    }));
+    browser_wasm.root_module.addImport("zsx_error_404", b.createModule(.{
+        .root_source_file = b.path("src/gen/views/error/error_404.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    }));
+
+    // Embed static assets
+    browser_wasm.root_module.addAnonymousImport("static_admin_css", .{
+        .root_source_file = b.path("static/admin.css"),
+    });
+    browser_wasm.root_module.addAnonymousImport("static_admin_js", .{
+        .root_source_file = b.path("static/admin.js"),
+    });
+
+    // Browser build depends on transpile step
+    browser_wasm.step.dependOn(&transpile_zsx_cmd.step);
+
+    // Install to browser/ directory
+    const browser_install = b.addInstallArtifact(browser_wasm, .{
+        .dest_dir = .{ .override = .{ .custom = "browser" } },
+    });
+    browser_step.dependOn(&browser_install.step);
 }
