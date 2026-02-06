@@ -17,7 +17,7 @@ pub const Context = struct {
     allocator: Allocator,
 
     // Request headers (fixed-size for common headers)
-    request_headers: [16]?RequestHeader,
+    request_headers: [32]?RequestHeader,
     request_header_count: usize,
 
     // Request body (for POST/PUT)
@@ -39,7 +39,7 @@ pub const Context = struct {
             .params = .{},
             .wildcard = null,
             .allocator = allocator,
-            .request_headers = [_]?RequestHeader{null} ** 16,
+            .request_headers = [_]?RequestHeader{null} ** 32,
             .request_header_count = 0,
             .body = null,
             .response = Response.init(),
@@ -55,7 +55,7 @@ pub const Context = struct {
             .params = .{},
             .wildcard = null,
             .allocator = allocator,
-            .request_headers = [_]?RequestHeader{null} ** 16,
+            .request_headers = [_]?RequestHeader{null} ** 32,
             .request_header_count = 0,
             .body = null,
             .response = Response.init(),
