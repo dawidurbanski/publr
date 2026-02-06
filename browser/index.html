@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Zig CMS</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; }
+        body { font-family: system-ui; display: flex; }
+
+        /* Skeleton layout matching CMS */
+        .skeleton-sidebar {
+            width: 220px;
+            min-height: 100vh;
+            background: #22262f;
+            flex-shrink: 0;
+        }
+        .skeleton-main {
+            flex: 1;
+            background: #22262f;
+        }
+        .skeleton-content {
+            background: #fff;
+            min-height: 100vh;
+            border-radius: 12px 0 0 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="skeleton-sidebar"></div>
+    <div class="skeleton-main">
+        <div class="skeleton-content"></div>
+    </div>
+
+    <script type="module">
+        import { initCMS } from './cms-runtime.js';
+
+        // Import interact modules and get init function
+        import { init as initComponents } from '../static/interact/index.js';
+
+        let cms = null;
+        let cssLoaded = false;
+
+        async function navigate(path, body = '', method = 'GET') {
+            const res = await cms.request(method, path, body);
+
+            // Handle redirects
+            if (res.status === 302 && res.redirect) {
+                history.pushState({}, '', res.redirect);
+                return navigate(res.redirect);
+            }
+
+            // Update URL
+            if (method === 'GET' && window.location.pathname !== path) {
+                history.pushState({}, '', path);
+            }
+
+            // Render response
+            document.body.innerHTML = res.body;
+
+            // Inject CSS if needed (once)
+            if (!cssLoaded) {
+                const cssRes = await cms.request('GET', '/static/admin.css');
+                const style = document.createElement('style');
+                style.id = 'cms-css';
+                style.textContent = cssRes.body;
+                document.head.appendChild(style);
+                cssLoaded = true;
+            }
+
+            // Initialize interactive components after DOM update
+            initComponents();
+
+            // Intercept links
+            document.querySelectorAll('a[href^="/"]').forEach(a => {
+                a.addEventListener('click', e => {
+                    e.preventDefault();
+                    navigate(a.getAttribute('href'));
+                });
+            });
+
+            // Intercept forms
+            document.querySelectorAll('form').forEach(form => {
+                form.addEventListener('submit', async e => {
+                    e.preventDefault();
+                    const action = form.getAttribute('action') || path;
+                    const formData = new URLSearchParams(new FormData(form)).toString();
+                    await navigate(action, formData, 'POST');
+                    await cms.save();
+                });
+            });
+        }
+
+        // Browser back/forward
+        window.addEventListener('popstate', () => navigate(location.pathname));
+
+        // Init
+        (async () => {
+            try {
+                cms = await initCMS('/cms.wasm');
+                window.cms = cms;
+
+                // Auto-save periodically
+                setInterval(() => cms.save(), 30000);
+
+                // Navigate to current URL or default
+                const path = location.pathname === '/' ? '/admin' : location.pathname;
+                await navigate(path);
+            } catch (e) {
+                console.error(e);
+            }
+        })();
+    </script>
+</body>
+</html>
