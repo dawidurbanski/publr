@@ -43,7 +43,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // Main exe depends on transpile step
+    // Main exe depends on transpile step (init_db dependency added later)
     exe.step.dependOn(&transpile_zsx_cmd.step);
 
     // Run preBuild hooks from publr.zon (theme tooling, asset pipelines, etc.)
@@ -242,6 +242,65 @@ pub fn build(b: *std.Build) void {
     });
 
     // =========================================================================
+    // Schema Modules
+    // =========================================================================
+    const field_module = b.createModule(.{
+        .root_source_file = b.path("src/schema/field.zig"),
+    });
+    const content_type_module = b.createModule(.{
+        .root_source_file = b.path("src/schema/content_type.zig"),
+        .imports = &.{.{ .name = "field", .module = field_module }},
+    });
+
+    // Core content type schemas
+    const schema_post_module = b.createModule(.{
+        .root_source_file = b.path("src/schemas/post.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "content_type", .module = content_type_module },
+        },
+    });
+    const schema_page_module = b.createModule(.{
+        .root_source_file = b.path("src/schemas/page.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "content_type", .module = content_type_module },
+        },
+    });
+    const schema_author_module = b.createModule(.{
+        .root_source_file = b.path("src/schemas/author.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "content_type", .module = content_type_module },
+        },
+    });
+
+    // Aggregated core schemas module
+    const schemas_module = b.createModule(.{
+        .root_source_file = b.path("src/schemas/mod.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "content_type", .module = content_type_module },
+            .{ .name = "schema_post", .module = schema_post_module },
+            .{ .name = "schema_page", .module = schema_page_module },
+            .{ .name = "schema_author", .module = schema_author_module },
+        },
+    });
+
+    // Schema registry (merges all layers)
+    const schema_registry_module = b.createModule(.{
+        .root_source_file = b.path("src/schema/registry.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "content_type", .module = content_type_module },
+            .{ .name = "schemas", .module = schemas_module },
+        },
+    });
+
+    // Note: schema_sync_module needs db_module, which is defined below.
+    // We'll add the import after db_module is created.
+
+    // =========================================================================
     // Core Modules (shared between main exe and plugins)
     // =========================================================================
     const middleware_module = b.createModule(.{
@@ -253,6 +312,62 @@ pub fn build(b: *std.Build) void {
     });
     const db_module = b.createModule(.{
         .root_source_file = b.path("src/db.zig"),
+    });
+
+    // Schema sync (needs db_module)
+    const schema_sync_module = b.createModule(.{
+        .root_source_file = b.path("src/schema/sync.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "db", .module = db_module },
+        },
+    });
+
+    // =========================================================================
+    // Database Initialization Tool (comptime schema generation)
+    // =========================================================================
+    const init_db = b.addExecutable(.{
+        .name = "init_db",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/init_db.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    init_db.linkLibC();
+    init_db.addCSourceFile(.{
+        .file = b.path("vendor/sqlite3.c"),
+        .flags = &.{
+            "-DSQLITE_DQS=0",
+            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+            "-DSQLITE_USE_ALLOCA=1",
+            "-DSQLITE_THREADSAFE=1",
+            "-DSQLITE_TEMP_STORE=2",
+            "-DSQLITE_ENABLE_FTS5",
+            "-DSQLITE_ENABLE_JSON1",
+        },
+    });
+    init_db.addIncludePath(b.path("vendor"));
+
+    // Add schema modules to init_db
+    init_db.root_module.addImport("schema_registry", schema_registry_module);
+    init_db.root_module.addImport("field", field_module);
+
+    // Run init_db as build step
+    const init_db_cmd = b.addRunArtifact(init_db);
+    init_db_cmd.addArg("data/publr.db");
+
+    // Main exe depends on database init
+    exe.step.dependOn(&init_db_cmd.step);
+
+    // CMS query API
+    const cms_module = b.createModule(.{
+        .root_source_file = b.path("src/cms.zig"),
+        .imports = &.{
+            .{ .name = "field", .module = field_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "db", .module = db_module },
+        },
     });
     const tpl_module = b.createModule(.{
         .root_source_file = b.path("src/tpl.zig"),
@@ -312,6 +427,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "db", .module = db_module },
             .{ .name = "csrf", .module = csrf_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "schemas", .module = schemas_module },
+            .{ .name = "schema_sync", .module = schema_sync_module },
             .{ .name = "zsx_admin_posts_list", .module = zsx_admin_posts_list },
             .{ .name = "zsx_admin_posts_edit", .module = zsx_admin_posts_edit },
             .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
@@ -428,6 +547,14 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("csrf", csrf_module);
     exe.root_module.addImport("auth", auth_module);
     exe.root_module.addImport("auth_middleware", auth_middleware_module);
+
+    // Add schema modules to main exe
+    exe.root_module.addImport("field", field_module);
+    exe.root_module.addImport("content_type", content_type_module);
+    exe.root_module.addImport("schemas", schemas_module);
+    exe.root_module.addImport("schema_registry", schema_registry_module);
+    exe.root_module.addImport("schema_sync", schema_sync_module);
+    exe.root_module.addImport("cms", cms_module);
 
     // Add plugin modules to main exe
     exe.root_module.addImport("plugin_dashboard", plugin_dashboard);

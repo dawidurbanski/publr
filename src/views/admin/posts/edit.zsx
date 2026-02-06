@@ -11,8 +11,9 @@ const PostData = struct {
 pub fn Edit(props: struct {
     post: PostData,
     csrf_token: []const u8,
+    action: []const u8 = "",
 }) {
-    <form method="POST" class="form">
+    <form method="POST" action={props.action} class="form">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <div class="form-group">
             <label for="title">Title</label>

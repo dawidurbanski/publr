@@ -1,0 +1,747 @@
+//! Field Definition and Builder Functions
+//!
+//! Provides the FieldDef struct and comptime builder functions for defining
+//! content type schemas. Core fields and plugin fields are identical - same
+//! FieldDef struct, same pattern, no second-class citizens.
+//!
+//! Example:
+//! ```zig
+//! const Post = ContentType("post", "Blog Post", &.{
+//!     field.String("title", .{ .required = true, .max_length = 200 }),
+//!     field.Slug("slug", .{ .source = "title" }),
+//!     field.Text("body", .{ .required = true }),
+//!     field.Taxonomy("category"),
+//!     field.Integer("view_count", .{ .filterable = true }),
+//! });
+//! ```
+
+const std = @import("std");
+
+// =============================================================================
+// Core Types
+// =============================================================================
+
+/// Context passed to field render functions
+pub const RenderContext = struct {
+    /// Field name (form input name)
+    name: []const u8,
+    /// Human-readable display name
+    display_name: []const u8,
+    /// Current field value (null if not set)
+    value: ?[]const u8,
+    /// Whether field is required
+    required: bool,
+    /// Validation errors for this field
+    errors: ?[]const []const u8 = null,
+};
+
+/// Storage hint for the field - determines where data is persisted
+pub const StorageHint = enum {
+    /// Store only in entries.data JSON blob
+    data_only,
+    /// Store in entries.data AND entry_meta table for filtering
+    data_and_meta,
+    /// Store in entry_terms table (taxonomies)
+    taxonomy,
+};
+
+/// Meta value type for entry_meta storage
+pub const MetaValueType = enum {
+    text,
+    int,
+    real,
+};
+
+/// Field definition - the unit of schema composition
+pub const FieldDef = struct {
+    /// Field identifier (used as JSON key and form input name)
+    name: []const u8,
+
+    /// Human-readable label
+    display_name: []const u8,
+
+    /// Field type identifier (e.g., "string", "text", "taxonomy")
+    field_type_id: []const u8,
+
+    /// Zig type for this field's data (used in comptime struct generation)
+    zig_type: type,
+
+    /// Whether field is required
+    required: bool = false,
+
+    /// Storage hint - where to persist this field's data
+    storage: StorageHint = .data_only,
+
+    /// Meta value type (only used when storage = .data_and_meta)
+    meta_type: MetaValueType = .text,
+
+    /// Taxonomy ID (only used when storage = .taxonomy)
+    taxonomy_id: ?[]const u8 = null,
+
+    /// Source field for auto-generation (e.g., slug from title)
+    source_field: ?[]const u8 = null,
+
+    /// Validation function - returns error message or null if valid
+    validate: *const fn (value: []const u8) ?[]const u8,
+
+    /// Render function - emits field HTML to writer
+    render: *const fn (writer: std.io.AnyWriter, ctx: RenderContext) anyerror!void,
+};
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Convert snake_case to Title Case: "featured_image" -> "Featured Image"
+pub fn humanize(comptime name: []const u8) []const u8 {
+    comptime {
+        var result: [name.len]u8 = undefined;
+        var capitalize_next = true;
+
+        for (name, 0..) |ch, i| {
+            if (ch == '_') {
+                result[i] = ' ';
+                capitalize_next = true;
+            } else if (capitalize_next) {
+                result[i] = std.ascii.toUpper(ch);
+                capitalize_next = false;
+            } else {
+                result[i] = ch;
+            }
+        }
+
+        const final = result;
+        return &final;
+    }
+}
+
+/// No-op validation - always passes
+fn noValidation(_: []const u8) ?[]const u8 {
+    return null;
+}
+
+/// No-op render - does nothing
+fn noRender(_: std.io.AnyWriter, _: RenderContext) !void {}
+
+// =============================================================================
+// Builder Functions
+// =============================================================================
+
+/// Single-line text input
+pub fn String(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    max_length: ?usize = null,
+    min_length: ?usize = null,
+    display: ?[]const u8 = null,
+    filterable: bool = false,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            if (opts.min_length) |min| {
+                if (value.len > 0 and value.len < min) {
+                    return "Value is too short";
+                }
+            }
+            if (opts.max_length) |max| {
+                if (value.len > max) {
+                    return "Value is too long";
+                }
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <input type="text" class="form-control" id="{s}" name="{s}" value="{s}"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+
+            if (opts.max_length) |max| {
+                try writer.print(" maxlength=\"{}\"", .{max});
+            }
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(" />\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "string",
+        .zig_type = []const u8,
+        .required = opts.required,
+        .storage = if (opts.filterable) .data_and_meta else .data_only,
+        .meta_type = .text,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Multi-line text input (textarea)
+pub fn Text(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    rows: u8 = 5,
+    display: ?[]const u8 = null,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <textarea class="form-control" id="{s}" name="{s}" rows="{}"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, opts.rows });
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.print(">{s}</textarea>\n</div>\n", .{ctx.value orelse ""});
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "text",
+        .zig_type = []const u8,
+        .required = opts.required,
+        .storage = .data_only,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// URL-friendly slug, optionally auto-generated from a source field
+pub fn Slug(comptime name: []const u8, comptime opts: struct {
+    source: ?[]const u8 = null,
+    required: bool = false,
+    display: ?[]const u8 = null,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            for (value) |ch| {
+                if (!std.ascii.isAlphanumeric(ch) and ch != '-' and ch != '_') {
+                    return "Slug can only contain letters, numbers, hyphens, and underscores";
+                }
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <input type="text" class="form-control" id="{s}" name="{s}" value="{s}"
+                \\         data-widget="slug"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            if (opts.source) |src| {
+                try writer.print(" data-source=\"{s}\"", .{src});
+            }
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(" />\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "slug",
+        .zig_type = []const u8,
+        .required = opts.required,
+        .storage = .data_only,
+        .source_field = opts.source,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Reference to another content type entry
+pub fn Ref(comptime name: []const u8, comptime opts: struct {
+    to: []const u8,
+    many: bool = false,
+    required: bool = false,
+    display: ?[]const u8 = null,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            // References should be entry IDs (e_xxx format)
+            if (value.len > 0 and !std.mem.startsWith(u8, value, "e_")) {
+                return "Invalid entry reference";
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <div data-widget="ref-picker" data-ref-type="{s}" data-ref-many="{s}"
+                \\       data-name="{s}" data-value="{s}">
+                \\    <input type="hidden" name="{s}" value="{s}" />
+                \\    <button type="button" class="btn btn-sm">Select {s}</button>
+                \\  </div>
+                \\</div>
+            , .{
+                ctx.name,
+                ctx.display_name,
+                opts.to,
+                if (opts.many) "true" else "false",
+                ctx.name,
+                ctx.value orelse "",
+                ctx.name,
+                ctx.value orelse "",
+                opts.to,
+            });
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "reference",
+        .zig_type = if (opts.many) []const []const u8 else []const u8,
+        .required = opts.required,
+        .storage = .data_only,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Dropdown select with fixed options
+pub fn Select(comptime name: []const u8, comptime opts: struct {
+    options: []const []const u8,
+    required: bool = false,
+    default_value: ?[]const u8 = null,
+    display: ?[]const u8 = null,
+    filterable: bool = false,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            if (value.len > 0) {
+                for (opts.options) |opt| {
+                    if (std.mem.eql(u8, value, opt)) return null;
+                }
+                return "Invalid option selected";
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <select class="form-control" id="{s}" name="{s}"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name });
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(">\n");
+
+            // Empty option if not required
+            if (!ctx.required) {
+                try writer.writeAll("    <option value=\"\">-- Select --</option>\n");
+            }
+
+            const current = ctx.value orelse opts.default_value orelse "";
+            inline for (opts.options) |opt| {
+                const selected = if (std.mem.eql(u8, current, opt)) " selected" else "";
+                try writer.print("    <option value=\"{s}\"{s}>{s}</option>\n", .{ opt, selected, opt });
+            }
+
+            try writer.writeAll("  </select>\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "select",
+        .zig_type = []const u8,
+        .required = opts.required,
+        .storage = if (opts.filterable) .data_and_meta else .data_only,
+        .meta_type = .text,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Boolean checkbox
+pub fn Boolean(comptime name: []const u8, comptime opts: struct {
+    default_value: bool = false,
+    display: ?[]const u8 = null,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(_: []const u8) ?[]const u8 {
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            const checked = if (ctx.value) |v|
+                std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "1") or std.mem.eql(u8, v, "on")
+            else
+                opts.default_value;
+
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-check">
+                \\    <input type="checkbox" class="form-check-input" name="{s}" value="true"{s} />
+                \\    <span class="form-check-label">{s}</span>
+                \\  </label>
+                \\</div>
+            , .{
+                ctx.name,
+                if (checked) " checked" else "",
+                ctx.display_name,
+            });
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "boolean",
+        .zig_type = bool,
+        .required = false,
+        .storage = .data_only,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Date/time picker
+pub fn DateTime(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    display: ?[]const u8 = null,
+    filterable: bool = false,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            // TODO: validate datetime format
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <input type="datetime-local" class="form-control" id="{s}" name="{s}" value="{s}"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(" />\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "datetime",
+        .zig_type = ?i64, // Unix timestamp
+        .required = opts.required,
+        .storage = if (opts.filterable) .data_and_meta else .data_only,
+        .meta_type = .int,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Image/media reference
+pub fn Image(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    display: ?[]const u8 = null,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            // Media IDs should be m_xxx format
+            if (value.len > 0 and !std.mem.startsWith(u8, value, "m_")) {
+                return "Invalid media reference";
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <div data-widget="image-picker" data-name="{s}" data-value="{s}">
+                \\    <input type="hidden" name="{s}" value="{s}" />
+                \\    <button type="button" class="btn btn-sm">Select Image</button>
+                \\  </div>
+                \\</div>
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.value orelse "", ctx.name, ctx.value orelse "" });
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "image",
+        .zig_type = ?[]const u8,
+        .required = opts.required,
+        .storage = .data_only,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Integer number input
+pub fn Integer(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    min: ?i64 = null,
+    max: ?i64 = null,
+    display: ?[]const u8 = null,
+    filterable: bool = false,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            if (value.len > 0) {
+                const parsed = std.fmt.parseInt(i64, value, 10) catch {
+                    return "Must be a valid integer";
+                };
+                if (opts.min) |min| {
+                    if (parsed < min) return "Value is too small";
+                }
+                if (opts.max) |max| {
+                    if (parsed > max) return "Value is too large";
+                }
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <input type="number" class="form-control" id="{s}" name="{s}" value="{s}"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            if (opts.min) |min| {
+                try writer.print(" min=\"{}\"", .{min});
+            }
+            if (opts.max) |max| {
+                try writer.print(" max=\"{}\"", .{max});
+            }
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(" />\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "integer",
+        .zig_type = ?i64,
+        .required = opts.required,
+        .storage = if (opts.filterable) .data_and_meta else .data_only,
+        .meta_type = .int,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Floating-point number input
+pub fn Number(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    min: ?f64 = null,
+    max: ?f64 = null,
+    step: ?f64 = null,
+    display: ?[]const u8 = null,
+    filterable: bool = false,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            if (value.len > 0) {
+                const parsed = std.fmt.parseFloat(f64, value) catch {
+                    return "Must be a valid number";
+                };
+                if (opts.min) |min| {
+                    if (parsed < min) return "Value is too small";
+                }
+                if (opts.max) |max| {
+                    if (parsed > max) return "Value is too large";
+                }
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <input type="number" class="form-control" id="{s}" name="{s}" value="{s}"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            if (opts.min) |min| {
+                try writer.print(" min=\"{d}\"", .{min});
+            }
+            if (opts.max) |max| {
+                try writer.print(" max=\"{d}\"", .{max});
+            }
+            if (opts.step) |step| {
+                try writer.print(" step=\"{d}\"", .{step});
+            } else {
+                try writer.writeAll(" step=\"any\"");
+            }
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(" />\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "number",
+        .zig_type = ?f64,
+        .required = opts.required,
+        .storage = if (opts.filterable) .data_and_meta else .data_only,
+        .meta_type = .real,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Taxonomy field - categorical data stored in entry_terms
+pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
+    required: bool = false,
+    many: bool = true,
+    display: ?[]const u8 = null,
+}) FieldDef {
+    // Pre-compute humanized name at comptime
+    const humanized_taxonomy = comptime humanize(taxonomy_id);
+
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <div data-widget="taxonomy-picker" data-taxonomy="{s}" data-many="{s}"
+                \\       data-name="{s}" data-value="{s}">
+                \\    <input type="hidden" name="{s}" value="{s}" />
+                \\    <button type="button" class="btn btn-sm">Select {s}</button>
+                \\  </div>
+                \\</div>
+            , .{
+                ctx.name,
+                ctx.display_name,
+                taxonomy_id,
+                if (opts.many) "true" else "false",
+                ctx.name,
+                ctx.value orelse "",
+                ctx.name,
+                ctx.value orelse "",
+                humanized_taxonomy,
+            });
+        }
+    };
+
+    return .{
+        .name = taxonomy_id,
+        .display_name = opts.display orelse humanize(taxonomy_id),
+        .field_type_id = "taxonomy",
+        .zig_type = if (opts.many) []const []const u8 else []const u8,
+        .required = opts.required,
+        .storage = .taxonomy,
+        .taxonomy_id = taxonomy_id,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+test "humanize converts snake_case to Title Case" {
+    // humanize is comptime-only, so we test with comptime
+    comptime {
+        if (!std.mem.eql(u8, "Featured Image", humanize("featured_image"))) unreachable;
+        if (!std.mem.eql(u8, "Title", humanize("title"))) unreachable;
+        if (!std.mem.eql(u8, "Published At", humanize("published_at"))) unreachable;
+    }
+}
+
+test "String field validates max_length" {
+    const field = String("title", .{ .max_length = 5 });
+    try std.testing.expect(field.validate("hello") == null);
+    try std.testing.expect(field.validate("hello!") != null);
+}
+
+test "String field validates required" {
+    const field = String("title", .{ .required = true });
+    try std.testing.expect(field.validate("") != null);
+    try std.testing.expect(field.validate("hello") == null);
+}
+
+test "Integer field validates range" {
+    const field = Integer("count", .{ .min = 0, .max = 100 });
+    try std.testing.expect(field.validate("50") == null);
+    try std.testing.expect(field.validate("-1") != null);
+    try std.testing.expect(field.validate("101") != null);
+    try std.testing.expect(field.validate("abc") != null);
+}
+
+test "Slug field validates characters" {
+    const field = Slug("slug", .{});
+    try std.testing.expect(field.validate("hello-world") == null);
+    try std.testing.expect(field.validate("hello_world") == null);
+    try std.testing.expect(field.validate("hello world") != null);
+    try std.testing.expect(field.validate("hello!") != null);
+}
+
+test "Select field validates options" {
+    const field = Select("status", .{ .options = &.{ "draft", "published" } });
+    try std.testing.expect(field.validate("draft") == null);
+    try std.testing.expect(field.validate("published") == null);
+    try std.testing.expect(field.validate("invalid") != null);
+}
+
+test "Boolean field always validates" {
+    const field = Boolean("featured", .{});
+    try std.testing.expect(field.validate("true") == null);
+    try std.testing.expect(field.validate("false") == null);
+    try std.testing.expect(field.validate("") == null);
+}

@@ -62,9 +62,9 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Initialize database
-    var db = db_mod.initWithSchema(allocator, "data/publr.db") catch |err| {
-        std.debug.print("Failed to initialize database: {}\n", .{err});
+    // Open database (created at build time by init_db)
+    var db = db_mod.Db.init(allocator, "data/publr.db") catch |err| {
+        std.debug.print("Failed to open database: {}\n", .{err});
         return err;
     };
     defer db.deinit();

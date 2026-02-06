@@ -234,56 +234,6 @@ pub const Statement = struct {
     }
 };
 
-/// Schema for auth tables
-const schema_sql =
-    \\CREATE TABLE IF NOT EXISTS users (
-    \\    id TEXT PRIMARY KEY,
-    \\    email TEXT UNIQUE NOT NULL,
-    \\    display_name TEXT DEFAULT '',
-    \\    email_verified INTEGER DEFAULT 0,
-    \\    password_hash TEXT NOT NULL,
-    \\    created_at INTEGER DEFAULT (unixepoch())
-    \\);
-    \\
-    \\CREATE TABLE IF NOT EXISTS sessions (
-    \\    id TEXT PRIMARY KEY,
-    \\    secret_hash BLOB NOT NULL,
-    \\    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    \\    expires_at INTEGER NOT NULL,
-    \\    created_at INTEGER DEFAULT (unixepoch())
-    \\);
-    \\
-    \\CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-    \\CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
-;
-
-/// Initialize database with schema
-pub fn initWithSchema(allocator: Allocator, path: []const u8) Db.Error!Db {
-    var db = try Db.init(allocator, path);
-    errdefer db.deinit();
-    try db.exec(schema_sql);
-    try ensureUsersDisplayName(&db);
-    return db;
-}
-
-fn ensureUsersDisplayName(db: *Db) Db.Error!void {
-    var stmt = db.prepare("PRAGMA table_info(users)") catch return Db.Error.PrepareFailed;
-    defer stmt.deinit();
-
-    var has_display_name = false;
-    while (stmt.step() catch return Db.Error.StepFailed) {
-        const name = stmt.columnText(1) orelse continue;
-        if (std.mem.eql(u8, name, "display_name")) {
-            has_display_name = true;
-            break;
-        }
-    }
-
-    if (!has_display_name) {
-        db.exec("ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''") catch {};
-    }
-}
-
 // Tests
 test "Db: open in-memory database" {
     var db = try Db.init(std.testing.allocator, ":memory:");
@@ -394,56 +344,6 @@ test "Db: statement reset and reuse" {
     _ = try count_stmt.step();
 
     try std.testing.expectEqual(@as(i64, 2), count_stmt.columnInt(0));
-}
-
-test "Db: schema initialization" {
-    var db = try initWithSchema(std.testing.allocator, ":memory:");
-    defer db.deinit();
-
-    // Verify users table exists
-    var stmt = try db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
-    defer stmt.deinit();
-    const has_users = try stmt.step();
-    try std.testing.expect(has_users);
-
-    // Verify sessions table exists
-    var stmt2 = try db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'");
-    defer stmt2.deinit();
-    const has_sessions = try stmt2.step();
-    try std.testing.expect(has_sessions);
-}
-
-test "Db: foreign key cascade delete" {
-    var db = try initWithSchema(std.testing.allocator, ":memory:");
-    defer db.deinit();
-
-    // Insert user
-    var insert_user = try db.prepare("INSERT INTO users (id, email, password_hash) VALUES (?1, ?2, ?3)");
-    defer insert_user.deinit();
-    try insert_user.bindText(1, "u_test");
-    try insert_user.bindText(2, "test@example.com");
-    try insert_user.bindText(3, "hash123");
-    _ = try insert_user.step();
-
-    // Insert session
-    var insert_session = try db.prepare(
-        "INSERT INTO sessions (id, secret_hash, user_id, expires_at) VALUES (?1, ?2, ?3, ?4)",
-    );
-    defer insert_session.deinit();
-    try insert_session.bindText(1, "s_test");
-    try insert_session.bindBlob(2, "secret");
-    try insert_session.bindText(3, "u_test");
-    try insert_session.bindInt(4, 9999999999);
-    _ = try insert_session.step();
-
-    // Delete user - should cascade to sessions
-    try db.exec("DELETE FROM users WHERE id = 'u_test'");
-
-    // Verify session was deleted
-    var count = try db.prepare("SELECT COUNT(*) FROM sessions WHERE user_id = 'u_test'");
-    defer count.deinit();
-    _ = try count.step();
-    try std.testing.expectEqual(@as(i64, 0), count.columnInt(0));
 }
 
 test "Db: auto-creates parent directory" {

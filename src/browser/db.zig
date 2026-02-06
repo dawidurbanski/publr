@@ -165,33 +165,5 @@ pub const Statement = struct {
     }
 };
 
-/// Schema for auth tables (same as native version)
-pub const schema_sql =
-    \\CREATE TABLE IF NOT EXISTS users (
-    \\    id TEXT PRIMARY KEY,
-    \\    email TEXT UNIQUE NOT NULL,
-    \\    display_name TEXT DEFAULT '',
-    \\    email_verified INTEGER DEFAULT 0,
-    \\    password_hash TEXT NOT NULL,
-    \\    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    \\);
-    \\
-    \\CREATE TABLE IF NOT EXISTS sessions (
-    \\    id TEXT PRIMARY KEY,
-    \\    secret_hash BLOB NOT NULL,
-    \\    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    \\    expires_at INTEGER NOT NULL,
-    \\    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    \\);
-    \\
-    \\CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-    \\CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
-;
-
-/// Initialize database with schema
-pub fn initWithSchema(allocator: Allocator, path: []const u8) Db.Error!Db {
-    var db = try Db.init(allocator, path);
-    errdefer db.deinit();
-    try db.exec(schema_sql);
-    return db;
-}
+// Note: Schema initialization happens at build time via init_db.
+// For browser builds, the caller should apply schema.sql after Db.init().

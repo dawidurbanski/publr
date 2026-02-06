@@ -11,6 +11,9 @@ const handlers = @import("handlers.zig");
 const admin_css = @embedFile("static_admin_css");
 const admin_js = @embedFile("static_admin_js");
 
+// Database schema (single source of truth)
+const schema_sql = @embedFile("tools/schema.sql");
+
 // Required for libc linking in WASM
 pub fn main() void {}
 
@@ -75,7 +78,8 @@ export fn wasm_get_redirect_len() usize {
 export fn cms_init() i32 {
     if (global_db != null) return 0;
 
-    global_db = db.initWithSchema(allocator, ":memory:") catch return -1;
+    global_db = db.Db.init(allocator, ":memory:") catch return -1;
+    global_db.?.exec(schema_sql) catch return -1;
     global_auth = auth_mod.Auth.init(allocator, &global_db.?);
     tpl.init(false);
 

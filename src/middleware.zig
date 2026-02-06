@@ -156,8 +156,8 @@ pub const Context = struct {
         }
     }
 
-    /// Get form field value from URL-encoded body
-    pub fn formValue(self: *const Context, name: []const u8) ?[]const u8 {
+    /// Get form field value from URL-encoded body (returns decoded value)
+    pub fn formValue(self: *Context, name: []const u8) ?[]const u8 {
         const body_content = self.body orelse return null;
 
         var iter = std.mem.splitScalar(u8, body_content, '&');
@@ -165,11 +165,53 @@ pub const Context = struct {
             if (std.mem.indexOf(u8, pair, "=")) |eq_pos| {
                 const field_name = pair[0..eq_pos];
                 if (std.mem.eql(u8, field_name, name)) {
-                    return pair[eq_pos + 1 ..];
+                    const encoded = pair[eq_pos + 1 ..];
+                    return urlDecode(self.allocator, encoded) catch encoded;
                 }
             }
         }
         return null;
+    }
+
+    /// Decode URL-encoded string (percent-encoding and + for spaces)
+    fn urlDecode(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+        // Allocate max possible size (decoding only shrinks)
+        const output = try allocator.alloc(u8, input.len);
+        var out_i: usize = 0;
+        var i: usize = 0;
+
+        while (i < input.len) {
+            if (input[i] == '%' and i + 2 < input.len) {
+                // Try to decode %XX
+                const hi = hexDigit(input[i + 1]);
+                const lo = hexDigit(input[i + 2]);
+                if (hi != null and lo != null) {
+                    output[out_i] = (hi.? << 4) | lo.?;
+                    out_i += 1;
+                    i += 3;
+                    continue;
+                }
+            }
+            if (input[i] == '+') {
+                // + is space in form encoding
+                output[out_i] = ' ';
+            } else {
+                output[out_i] = input[i];
+            }
+            out_i += 1;
+            i += 1;
+        }
+
+        return output[0..out_i];
+    }
+
+    fn hexDigit(c: u8) ?u8 {
+        return switch (c) {
+            '0'...'9' => c - '0',
+            'a'...'f' => c - 'a' + 10,
+            'A'...'F' => c - 'A' + 10,
+            else => null,
+        };
     }
 
     /// Set request body
@@ -627,15 +669,16 @@ test "html does not set X-Partial header on full request" {
     try std.testing.expectEqual(@as(usize, 0), headers.len);
 }
 
-test "formValue extracts form field from body" {
+test "formValue extracts and decodes form field from body" {
     const allocator = std.testing.allocator;
     var ctx = Context.init(allocator, .POST, "/form");
     defer ctx.deinit();
 
-    ctx.setBody("email=test%40example.com&password=secret123");
+    ctx.setBody("email=test%40example.com&password=secret123&msg=Hello+World%21");
 
-    try std.testing.expectEqualStrings("test%40example.com", ctx.formValue("email").?);
+    try std.testing.expectEqualStrings("test@example.com", ctx.formValue("email").?);
     try std.testing.expectEqualStrings("secret123", ctx.formValue("password").?);
+    try std.testing.expectEqualStrings("Hello World!", ctx.formValue("msg").?);
     try std.testing.expect(ctx.formValue("missing") == null);
 }
 

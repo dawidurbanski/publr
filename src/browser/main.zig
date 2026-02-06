@@ -2,6 +2,9 @@ const std = @import("std");
 const db = @import("db.zig");
 const Db = db.Db;
 
+// Database schema (single source of truth)
+const schema_sql = @embedFile("../tools/schema.sql");
+
 // Use a simple bump allocator for WASM
 var wasm_memory: [8 * 1024 * 1024]u8 = undefined; // 8MB
 var fba = std.heap.FixedBufferAllocator.init(&wasm_memory);
@@ -77,12 +80,14 @@ export fn cms_init() i32 {
         return 0; // Already initialized
     }
 
-    global_db = db.initWithSchema(allocator, "browser.db") catch |err| {
-        const msg = switch (err) {
-            db.Db.Error.OpenFailed => "Failed to open database",
-            db.Db.Error.ExecFailed => "Failed to execute schema",
-            else => "Unknown database error",
-        };
+    global_db = Db.init(allocator, "browser.db") catch {
+        const msg = "Failed to open database";
+        @memcpy(result_buffer[0..msg.len], msg);
+        return -1;
+    };
+
+    global_db.?.exec(schema_sql) catch {
+        const msg = "Failed to execute schema";
         @memcpy(result_buffer[0..msg.len], msg);
         return -1;
     };
