@@ -1,0 +1,88 @@
+// Users list template
+
+// SVG Icons
+const icon_users =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 3.46776C17.4817 4.20411 18.5 5.73314 18.5 7.5C18.5 9.26686 17.4817 10.7959 16 11.5322M18 16.7664C19.5115 17.4503 20.8725 18.565 22 20M2 20C3.94649 17.5226 6.58918 16 9.5 16C12.4108 16 15.0535 17.5226 17 20M14 7.5C14 9.98528 11.9853 12 9.5 12C7.01472 12 5 9.98528 5 7.5C5 5.01472 7.01472 3 9.5 3C11.9853 3 14 5.01472 14 7.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_more =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 13C12.5523 13 13 12.5523 13 12C13 11.4477 12.5523 11 12 11C11.4477 11 11 11.4477 11 12C11 12.5523 11.4477 13 12 13Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 6C12.5523 6 13 5.55228 13 5C13 4.44772 12.5523 4 12 4C11.4477 4 11 4.44772 11 5C11 5.55228 11.4477 6 12 6Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 20C12.5523 20 13 19.5523 13 19C13 18.4477 12.5523 18 12 18C11.4477 18 11 18.4477 11 19C11 19.5523 11.4477 20 12 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_chevron_up =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 15L12 9L6 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
+const User = struct {
+    id: []const u8,
+    display_name: []const u8,
+    email: []const u8,
+    edit_url: []const u8,
+    delete_url: []const u8,
+};
+
+pub fn List(has_users: bool, users: []const User, csrf_token: []const u8) {
+    {if (has_users) (
+        <div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th class="table-col-check">
+                            <input type="checkbox" class="table-checkbox" aria-label="Select all" />
+                        </th>
+                        <th class="table-col-thumb"></th>
+                        <th class="table-sortable">
+                            Name
+                            <span class="table-sort-icon">{!icon_chevron_up}</span>
+                        </th>
+                        <th>Email</th>
+                        <th class="actions-col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {for (users) |user| (
+                        <tr>
+                            <td class="table-col-check">
+                                <input type="checkbox" class="table-checkbox" aria-label="Select user" />
+                            </td>
+                            <td class="table-col-thumb">
+                                <div class="table-thumb">{!icon_users}</div>
+                            </td>
+                            <td>
+                                <a href={user.edit_url}>
+                                    {if (user.display_name.len > 0) (
+                                        <span>{user.display_name}</span>
+                                    ) else (
+                                        <span>{user.email}</span>
+                                    )}
+                                </a>
+                            </td>
+                            <td>{user.email}</td>
+                            <td class="actions-col">
+                                <div data-publr-component="dropdown">
+                                    <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
+                                        {!icon_more}
+                                    </button>
+                                    <div class="dropdown-menu" data-publr-part="content">
+                                        <a href={user.edit_url} class="dropdown-item">Edit</a>
+                                        <hr class="dropdown-divider" />
+                                        <form method="POST" action={user.delete_url} style="margin: 0;">
+                                            <input type="hidden" name="_csrf" value={csrf_token} />
+                                            <button type="submit" class="dropdown-item dropdown-item-danger">Delete</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+            <div class="table-footer">
+                <span class="table-item-count">{users.len} users</span>
+            </div>
+        </div>
+    ) else (
+        <div class="empty-state">
+            <p>No users yet.</p>
+            <a href="/admin/users/new" class="btn btn-primary">Add your first user</a>
+        </div>
+    )}
+}

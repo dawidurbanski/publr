@@ -385,3 +385,23 @@ register('radio-group', (el) => {
         next.dispatchEvent(new Event('change', { bubbles: true }));
     });
 });
+
+// ── Nav Slider ─────────────────────────────────
+register('nav-slider', (el) => {
+    const slider = el.querySelector('.nav-slider');
+    const triggers = el.querySelectorAll('[data-publr-part="trigger"]');
+    const backBtns = el.querySelectorAll('[data-publr-part="back"]');
+    if (!slider) return;
+
+    triggers.forEach(trigger => {
+        trigger.addEventListener('click', () => {
+            slider.classList.add('submenu-open');
+        });
+    });
+
+    backBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            slider.classList.remove('submenu-open');
+        });
+    });
+});

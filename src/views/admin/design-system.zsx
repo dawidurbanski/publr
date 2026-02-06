@@ -1,0 +1,605 @@
+// Design System reference page - Generated from Figma
+pub fn DesignSystem() {
+    <div class="ds-page">
+        // Colors Section
+        <section class="ds-section">
+            <h2 class="ds-section-title">Colors</h2>
+
+            // Base Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Base</h3>
+                <div class="ds-color-grid">
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch ds-swatch-light" style="background: #ffffff;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">White</span>
+                            <span class="ds-color-value">#ffffff</span>
+                        </div>
+                    </div>
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch" style="background: #000000;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">Black</span>
+                            <span class="ds-color-value">#000000</span>
+                        </div>
+                    </div>
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch ds-swatch-transparent"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">Transparent</span>
+                            <span class="ds-color-value">#ffffff00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            // Gray (Light Mode)
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Gray (Light Mode)</h3>
+                <div class="ds-color-scale">
+                    <div class="ds-scale-swatch" style="background: #fdfdfd;">
+                        <span class="ds-scale-label">25</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fafafa;">
+                        <span class="ds-scale-label">50</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #f5f5f5;">
+                        <span class="ds-scale-label">100</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #e9eaeb;">
+                        <span class="ds-scale-label">200</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #d5d7da;">
+                        <span class="ds-scale-label">300</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #a4a7ae;">
+                        <span class="ds-scale-label">400</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #717680;">
+                        <span class="ds-scale-label ds-scale-label-light">500</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #535862;">
+                        <span class="ds-scale-label ds-scale-label-light">600</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #414651;">
+                        <span class="ds-scale-label ds-scale-label-light">700</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #252b37;">
+                        <span class="ds-scale-label ds-scale-label-light">800</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #181d27;">
+                        <span class="ds-scale-label ds-scale-label-light">900</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #0a0d12;">
+                        <span class="ds-scale-label ds-scale-label-light">950</span>
+                    </div>
+                </div>
+            </div>
+
+            // Gray (Dark Mode)
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Gray (Dark Mode)</h3>
+                <div class="ds-color-scale">
+                    <div class="ds-scale-swatch" style="background: #f0f0f1;">
+                        <span class="ds-scale-label">100</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #ececed;">
+                        <span class="ds-scale-label">200</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #cecfd2;">
+                        <span class="ds-scale-label">300</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #94979c;">
+                        <span class="ds-scale-label">400</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #85888e;">
+                        <span class="ds-scale-label ds-scale-label-light">500</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #61656c;">
+                        <span class="ds-scale-label ds-scale-label-light">600</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #373a41;">
+                        <span class="ds-scale-label ds-scale-label-light">700</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #22262f;">
+                        <span class="ds-scale-label ds-scale-label-light">800</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #13161b;">
+                        <span class="ds-scale-label ds-scale-label-light">900</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #0c0e12;">
+                        <span class="ds-scale-label ds-scale-label-light">950</span>
+                    </div>
+                </div>
+            </div>
+
+            // Brand Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Brand</h3>
+                <div class="ds-color-scale">
+                    <div class="ds-scale-swatch" style="background: #fafdff;">
+                        <span class="ds-scale-label">25</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #f5fcff;">
+                        <span class="ds-scale-label">50</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #ebf6ff;">
+                        <span class="ds-scale-label">100</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #d7eafe;">
+                        <span class="ds-scale-label">200</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #bbd2fb;">
+                        <span class="ds-scale-label">300</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #92b7f6;">
+                        <span class="ds-scale-label">400</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #7787ed;">
+                        <span class="ds-scale-label ds-scale-label-light">500</span>
+                    </div>
+                    <div class="ds-scale-swatch ds-scale-active" style="background: #565dd9;">
+                        <span class="ds-scale-label ds-scale-label-light">600</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #4157c6;">
+                        <span class="ds-scale-label ds-scale-label-light">700</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #383d9e;">
+                        <span class="ds-scale-label ds-scale-label-light">800</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #30397d;">
+                        <span class="ds-scale-label ds-scale-label-light">900</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #00026c;">
+                        <span class="ds-scale-label ds-scale-label-light">950</span>
+                    </div>
+                </div>
+            </div>
+
+            // Error Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Error</h3>
+                <div class="ds-color-scale">
+                    <div class="ds-scale-swatch" style="background: #fffbfa;">
+                        <span class="ds-scale-label">25</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fef3f2;">
+                        <span class="ds-scale-label">50</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fee4e2;">
+                        <span class="ds-scale-label">100</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fecdca;">
+                        <span class="ds-scale-label">200</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fda29b;">
+                        <span class="ds-scale-label">300</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #f97066;">
+                        <span class="ds-scale-label">400</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #f04438;">
+                        <span class="ds-scale-label ds-scale-label-light">500</span>
+                    </div>
+                    <div class="ds-scale-swatch ds-scale-active" style="background: #d92d20;">
+                        <span class="ds-scale-label ds-scale-label-light">600</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #b42318;">
+                        <span class="ds-scale-label ds-scale-label-light">700</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #912018;">
+                        <span class="ds-scale-label ds-scale-label-light">800</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #7a271a;">
+                        <span class="ds-scale-label ds-scale-label-light">900</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #55160c;">
+                        <span class="ds-scale-label ds-scale-label-light">950</span>
+                    </div>
+                </div>
+            </div>
+
+            // Warning Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Warning</h3>
+                <div class="ds-color-scale">
+                    <div class="ds-scale-swatch" style="background: #fffcf5;">
+                        <span class="ds-scale-label">25</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fffaeb;">
+                        <span class="ds-scale-label">50</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fef0c7;">
+                        <span class="ds-scale-label">100</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fedf89;">
+                        <span class="ds-scale-label">200</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fec84b;">
+                        <span class="ds-scale-label">300</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #fdb022;">
+                        <span class="ds-scale-label">400</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #f79009;">
+                        <span class="ds-scale-label">500</span>
+                    </div>
+                    <div class="ds-scale-swatch ds-scale-active" style="background: #dc6803;">
+                        <span class="ds-scale-label ds-scale-label-light">600</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #b54708;">
+                        <span class="ds-scale-label ds-scale-label-light">700</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #93370d;">
+                        <span class="ds-scale-label ds-scale-label-light">800</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #7a2e0e;">
+                        <span class="ds-scale-label ds-scale-label-light">900</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #4e1d09;">
+                        <span class="ds-scale-label ds-scale-label-light">950</span>
+                    </div>
+                </div>
+            </div>
+
+            // Success Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Success</h3>
+                <div class="ds-color-scale">
+                    <div class="ds-scale-swatch" style="background: #f6fef9;">
+                        <span class="ds-scale-label">25</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #ecfdf3;">
+                        <span class="ds-scale-label">50</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #dcfae6;">
+                        <span class="ds-scale-label">100</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #abefc6;">
+                        <span class="ds-scale-label">200</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #75e0a7;">
+                        <span class="ds-scale-label">300</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #47cd89;">
+                        <span class="ds-scale-label">400</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #17b26a;">
+                        <span class="ds-scale-label ds-scale-label-light">500</span>
+                    </div>
+                    <div class="ds-scale-swatch ds-scale-active" style="background: #079455;">
+                        <span class="ds-scale-label ds-scale-label-light">600</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #067647;">
+                        <span class="ds-scale-label ds-scale-label-light">700</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #085d3a;">
+                        <span class="ds-scale-label ds-scale-label-light">800</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #074d31;">
+                        <span class="ds-scale-label ds-scale-label-light">900</span>
+                    </div>
+                    <div class="ds-scale-swatch" style="background: #053321;">
+                        <span class="ds-scale-label ds-scale-label-light">950</span>
+                    </div>
+                </div>
+            </div>
+
+            // Semantic Text Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Text Colors</h3>
+                <div class="ds-color-grid">
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch" style="background: #181d27;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">text-primary (900)</span>
+                            <span class="ds-color-value">#181d27</span>
+                        </div>
+                    </div>
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch" style="background: #414651;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">text-secondary (700)</span>
+                            <span class="ds-color-value">#414651</span>
+                        </div>
+                    </div>
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch" style="background: #535862;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">text-tertiary (600)</span>
+                            <span class="ds-color-value">#535862</span>
+                        </div>
+                    </div>
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch" style="background: #4157c6;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">text-brand-secondary (700)</span>
+                            <span class="ds-color-value">#4157c6</span>
+                        </div>
+                    </div>
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch" style="background: #d92d20;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">text-error-primary (600)</span>
+                            <span class="ds-color-value">#d92d20</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            // Background Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Background</h3>
+                <div class="ds-color-grid">
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch ds-swatch-light" style="background: #ffffff;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">bg-primary</span>
+                            <span class="ds-color-value">#ffffff</span>
+                        </div>
+                    </div>
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch ds-swatch-light" style="background: #fafafa;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">bg-secondary</span>
+                            <span class="ds-color-value">#fafafa</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            // Border Colors
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Border</h3>
+                <div class="ds-color-grid">
+                    <div class="ds-color-card">
+                        <div class="ds-color-swatch ds-swatch-light" style="background: #e9eaeb;"></div>
+                        <div class="ds-color-info">
+                            <span class="ds-color-name">border-secondary</span>
+                            <span class="ds-color-value">#e9eaeb</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        // Typography Section
+        <section class="ds-section">
+            <h2 class="ds-section-title">Typography</h2>
+
+            // Font Family
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Font Family</h3>
+                <div class="ds-type-specimen">
+                    <p class="ds-specimen-sample">Geist</p>
+                    <p class="ds-specimen-chars">ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>
+                    <p class="ds-specimen-chars">abcdefghijklmnopqrstuvwxyz</p>
+                    <p class="ds-specimen-chars">0123456789</p>
+                </div>
+            </div>
+
+            // Font Weights
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Font Weights</h3>
+                <div class="ds-weights-list">
+                    <div class="ds-weight-item">
+                        <span class="ds-weight-sample" style="font-weight: 400;">Ag</span>
+                        <div class="ds-weight-info">
+                            <span class="ds-weight-name">Regular</span>
+                            <span class="ds-weight-value">400</span>
+                        </div>
+                    </div>
+                    <div class="ds-weight-item">
+                        <span class="ds-weight-sample" style="font-weight: 500;">Ag</span>
+                        <div class="ds-weight-info">
+                            <span class="ds-weight-name">Medium</span>
+                            <span class="ds-weight-value">500</span>
+                        </div>
+                    </div>
+                    <div class="ds-weight-item">
+                        <span class="ds-weight-sample" style="font-weight: 600;">Ag</span>
+                        <div class="ds-weight-info">
+                            <span class="ds-weight-name">Semibold</span>
+                            <span class="ds-weight-value">600</span>
+                        </div>
+                    </div>
+                    <div class="ds-weight-item">
+                        <span class="ds-weight-sample" style="font-weight: 700;">Ag</span>
+                        <div class="ds-weight-info">
+                            <span class="ds-weight-name">Bold</span>
+                            <span class="ds-weight-value">700</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            // Display Type Scale
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Display Scale</h3>
+                <div class="ds-type-scale">
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 72px; line-height: 90px; letter-spacing: -2px;">Display 2xl</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">display-2xl</span>
+                            <span class="ds-type-size">72px / 90px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 60px; line-height: 72px; letter-spacing: -2px;">Display xl</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">display-xl</span>
+                            <span class="ds-type-size">60px / 72px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 48px; line-height: 60px; letter-spacing: -2px;">Display lg</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">display-lg</span>
+                            <span class="ds-type-size">48px / 60px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 36px; line-height: 44px; letter-spacing: -2px;">Display md</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">display-md</span>
+                            <span class="ds-type-size">36px / 44px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 30px; line-height: 38px;">Display sm</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">display-sm</span>
+                            <span class="ds-type-size">30px / 38px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 24px; line-height: 32px;">Display xs</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">display-xs</span>
+                            <span class="ds-type-size">24px / 32px</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            // Text Type Scale
+            <div class="ds-subsection">
+                <h3 class="ds-subsection-title">Text Scale</h3>
+                <div class="ds-type-scale">
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 20px; line-height: 30px;">Text xl</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">text-xl</span>
+                            <span class="ds-type-size">20px / 30px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 18px; line-height: 28px;">Text lg</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">text-lg</span>
+                            <span class="ds-type-size">18px / 28px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 16px; line-height: 24px;">Text md</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">text-md</span>
+                            <span class="ds-type-size">16px / 24px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 14px; line-height: 20px;">Text sm</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">text-sm</span>
+                            <span class="ds-type-size">14px / 20px</span>
+                        </div>
+                    </div>
+                    <div class="ds-type-row">
+                        <span class="ds-type-sample" style="font-size: 12px; line-height: 18px;">Text xs</span>
+                        <div class="ds-type-meta">
+                            <span class="ds-type-var">text-xs</span>
+                            <span class="ds-type-size">12px / 18px</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        // Spacing Section
+        <section class="ds-section">
+            <h2 class="ds-section-title">Spacing</h2>
+
+            <div class="ds-spacing-list">
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 2px;"></div>
+                    <span class="ds-spacing-name">spacing-xxs</span>
+                    <span class="ds-spacing-value">2px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 4px;"></div>
+                    <span class="ds-spacing-name">spacing-xs</span>
+                    <span class="ds-spacing-value">4px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 8px;"></div>
+                    <span class="ds-spacing-name">spacing-md</span>
+                    <span class="ds-spacing-value">8px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 12px;"></div>
+                    <span class="ds-spacing-name">spacing-lg</span>
+                    <span class="ds-spacing-value">12px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 16px;"></div>
+                    <span class="ds-spacing-name">spacing-xl</span>
+                    <span class="ds-spacing-value">16px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 20px;"></div>
+                    <span class="ds-spacing-name">spacing-2xl</span>
+                    <span class="ds-spacing-value">20px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 24px;"></div>
+                    <span class="ds-spacing-name">spacing-3xl</span>
+                    <span class="ds-spacing-value">24px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 32px;"></div>
+                    <span class="ds-spacing-name">spacing-4xl</span>
+                    <span class="ds-spacing-value">32px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 48px;"></div>
+                    <span class="ds-spacing-name">spacing-6xl</span>
+                    <span class="ds-spacing-value">48px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 64px;"></div>
+                    <span class="ds-spacing-name">spacing-7xl</span>
+                    <span class="ds-spacing-value">64px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 80px;"></div>
+                    <span class="ds-spacing-name">spacing-8xl</span>
+                    <span class="ds-spacing-value">80px</span>
+                </div>
+                <div class="ds-spacing-item">
+                    <div class="ds-spacing-bar" style="width: 128px;"></div>
+                    <span class="ds-spacing-name">spacing-10xl</span>
+                    <span class="ds-spacing-value">128px</span>
+                </div>
+            </div>
+        </section>
+
+        // Border Radius Section
+        <section class="ds-section">
+            <h2 class="ds-section-title">Border Radius</h2>
+
+            <div class="ds-radius-list">
+                <div class="ds-radius-item">
+                    <div class="ds-radius-box" style="border-radius: 12px;"></div>
+                    <div class="ds-radius-info">
+                        <span class="ds-radius-name">radius-xl</span>
+                        <span class="ds-radius-value">12px</span>
+                    </div>
+                </div>
+                <div class="ds-radius-item">
+                    <div class="ds-radius-box" style="border-radius: 20px;"></div>
+                    <div class="ds-radius-info">
+                        <span class="ds-radius-name">radius-3xl</span>
+                        <span class="ds-radius-value">20px</span>
+                    </div>
+                </div>
+                <div class="ds-radius-item">
+                    <div class="ds-radius-box" style="border-radius: 9999px;"></div>
+                    <div class="ds-radius-info">
+                        <span class="ds-radius-name">radius-full</span>
+                        <span class="ds-radius-value">9999px</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+}

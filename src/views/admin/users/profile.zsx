@@ -1,0 +1,64 @@
+// Profile template
+const User = struct {
+    id: []const u8,
+    display_name: []const u8,
+    email: []const u8,
+};
+
+pub fn Profile(error_message: []const u8, user: User, csrf_token: []const u8) {
+    {if (error_message.len > 0) (
+        <div class="auth-error">{error_message}</div>
+    )}
+
+    <form method="POST" action="/admin/users/profile" class="form">
+        <input type="hidden" name="_csrf" value={csrf_token} />
+        <div class="form-group">
+            <label for="display_name">Display Name</label>
+            <input
+                type="text"
+                id="display_name"
+                name="display_name"
+                class="form-control"
+                required=""
+                value={user.display_name}
+            />
+        </div>
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input
+                type="email"
+                id="email"
+                name="email"
+                class="form-control"
+                required=""
+                value={user.email}
+            />
+        </div>
+        <div class="form-group">
+            <label for="password">New Password</label>
+            <input
+                type="password"
+                id="password"
+                name="password"
+                class="form-control"
+                minlength="8"
+                autocomplete="new-password"
+            />
+            <p class="form-hint">Leave blank to keep the current password.</p>
+        </div>
+        <div class="form-group">
+            <label for="confirm_password">Confirm Password</label>
+            <input
+                type="password"
+                id="confirm_password"
+                name="confirm_password"
+                class="form-control"
+                minlength="8"
+                autocomplete="new-password"
+            />
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Update Profile</button>
+        </div>
+    </form>
+}
