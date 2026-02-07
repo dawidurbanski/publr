@@ -9,3 +9,4 @@ themes/*/static/data/
 AGENTS.md
 data/
 browser/node_modules/
+*.wasm
