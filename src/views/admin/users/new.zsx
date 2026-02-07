@@ -7,7 +7,7 @@ pub fn New(props: struct {
         <div class="auth-error">{props.error_message}</div>
     )}
 
-    <form method="POST" action="/admin/users/new" class="form">
+    <form method="POST" action="/admin/settings/users" class="form">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <div class="form-group">
             <label for="display_name">Display Name</label>
@@ -56,7 +56,7 @@ pub fn New(props: struct {
         </div>
         <div class="form-actions">
             <button type="submit" class="btn btn-primary">Create User</button>
-            <a href="/admin/users" class="btn">Cancel</a>
+            <a href="/admin/settings/users" class="btn">Cancel</a>
         </div>
     </form>
 }

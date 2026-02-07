@@ -16,6 +16,8 @@ const mw = @import("middleware");
 const csrf = @import("csrf");
 const tpl = @import("tpl");
 const zsx_admin_layout = @import("zsx_admin_layout");
+const auth_middleware = @import("auth_middleware");
+const gravatar = @import("gravatar");
 
 // Import all plugins
 const dashboard = @import("plugin_dashboard");
@@ -25,40 +27,42 @@ const users = @import("plugin_users");
 const settings = @import("plugin_settings");
 const components = @import("plugin_components");
 const design_system = @import("plugin_design_system");
+const icons = @import("icons");
 
 /// All registered admin pages, sorted by position
 pub const pages: []const admin.Page = &[_]admin.Page{
-    // Dashboard
     dashboard.page,
-    // Posts
     posts.page,
-    // Media
     media_plugin.page,
-    // Users
     users.page,
-    users.page_all,
-    users.page_new,
     users.page_profile,
-    // Settings
     settings.page,
-    // Components
     components.page,
-    // Design System
     design_system.page,
 };
 
-/// Get all top-level navigation items (pages without parent)
+/// Pages excluded from main navigation (accessed via other means)
+const hidden_from_nav = [_][]const u8{ "settings", "users", "components", "design_system" };
+
+fn isHiddenFromNav(page_id: []const u8) bool {
+    for (hidden_from_nav) |hidden_id| {
+        if (std.mem.eql(u8, page_id, hidden_id)) return true;
+    }
+    return false;
+}
+
+/// Get all top-level navigation items (pages without parent, excluding hidden)
 pub fn getNavItems() []const admin.Page {
     comptime {
         var count: usize = 0;
         for (pages) |page| {
-            if (page.parent == null) count += 1;
+            if (page.parent == null and !isHiddenFromNav(page.id)) count += 1;
         }
 
         var items: [count]admin.Page = undefined;
         var i: usize = 0;
         for (pages) |page| {
-            if (page.parent == null) {
+            if (page.parent == null and !isHiddenFromNav(page.id)) {
                 items[i] = page;
                 i += 1;
             }
@@ -142,7 +146,6 @@ pub fn findByPath(path: []const u8) ?admin.Page {
 /// Generate navigation HTML for a specific current page
 pub fn renderNav(comptime current_id: []const u8) []const u8 {
     @setEvalBranchQuota(10000);
-    const icons = @import("icons");
     comptime {
         var buf: [16384]u8 = undefined;
         var len: usize = 0;
@@ -273,18 +276,25 @@ pub const design_system_plugin = design_system;
 /// ```zig
 /// fn handleDashboard(ctx: *Context) !void {
 ///     const content = tpl.render(zsx_dashboard.Dashboard, .{.{...}});
-///     ctx.html(registry.renderPage(page, ctx, content, ""));
+///     ctx.html(registry.renderPage(page, ctx, content));
 /// }
 /// ```
-pub fn renderPage(comptime pg: admin.Page, ctx: *mw.Context, content: []const u8, actions: []const u8) []const u8 {
+pub fn renderPage(comptime pg: admin.Page, ctx: *mw.Context, content: []const u8) []const u8 {
+    return renderPageWith(pg, ctx, content, "");
+}
+
+pub fn renderPageWith(comptime pg: admin.Page, ctx: *mw.Context, content: []const u8, subtitle: []const u8) []const u8 {
     const csrf_token = csrf.ensureToken(ctx);
     const nav_html = comptime renderNav(pg.id);
+    const user_email = auth_middleware.getUserEmail(ctx) orelse "";
+    const gravatar_url = gravatar.url(user_email, 32);
     return tpl.render(zsx_admin_layout.Layout, .{.{
         .title = pg.title,
         .content = content,
-        .actions = actions,
         .nav_html = nav_html,
         .csrf_token = csrf_token,
+        .user_gravatar_url = gravatar_url.slice(),
+        .subtitle = subtitle,
     }});
 }
 

@@ -22,5 +22,5 @@ fn setup(app: *admin.PageApp) void {
 
 fn handleDesignSystem(ctx: *Context) !void {
     const content = tpl.renderStatic(zsx_admin_design_system.DesignSystem);
-    ctx.html(registry.renderPage(page, ctx, content, ""));
+    ctx.html(registry.renderPage(page, ctx, content));
 }

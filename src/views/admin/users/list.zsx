@@ -86,7 +86,7 @@ pub fn List(props: struct {
     ) else (
         <div class="empty-state">
             <p>No users yet.</p>
-            <a href="/admin/users/new" class="btn btn-primary">Add your first user</a>
+            <a href="/admin/settings/users/new" class="btn btn-primary">Add your first user</a>
         </div>
     )}
 }

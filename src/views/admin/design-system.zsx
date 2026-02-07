@@ -1,11 +1,8 @@
-// Design System reference page - Generated from Figma
 pub fn DesignSystem() {
     <div class="ds-page">
-        // Colors Section
         <section class="ds-section">
             <h2 class="ds-section-title">Colors</h2>
 
-            // Base Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Base</h3>
                 <div class="ds-color-grid">
@@ -33,7 +30,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Gray (Light Mode)
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Gray (Light Mode)</h3>
                 <div class="ds-color-scale">
@@ -76,7 +72,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Gray (Dark Mode)
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Gray (Dark Mode)</h3>
                 <div class="ds-color-scale">
@@ -113,7 +108,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Brand Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Brand</h3>
                 <div class="ds-color-scale">
@@ -156,7 +150,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Error Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Error</h3>
                 <div class="ds-color-scale">
@@ -199,7 +192,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Warning Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Warning</h3>
                 <div class="ds-color-scale">
@@ -242,7 +234,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Success Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Success</h3>
                 <div class="ds-color-scale">
@@ -285,7 +276,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Semantic Text Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Text Colors</h3>
                 <div class="ds-color-grid">
@@ -327,7 +317,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Background Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Background</h3>
                 <div class="ds-color-grid">
@@ -348,7 +337,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Border Colors
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Border</h3>
                 <div class="ds-color-grid">
@@ -363,11 +351,9 @@ pub fn DesignSystem() {
             </div>
         </section>
 
-        // Typography Section
         <section class="ds-section">
             <h2 class="ds-section-title">Typography</h2>
 
-            // Font Family
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Font Family</h3>
                 <div class="ds-type-specimen">
@@ -378,7 +364,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Font Weights
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Font Weights</h3>
                 <div class="ds-weights-list">
@@ -413,7 +398,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Display Type Scale
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Display Scale</h3>
                 <div class="ds-type-scale">
@@ -462,7 +446,6 @@ pub fn DesignSystem() {
                 </div>
             </div>
 
-            // Text Type Scale
             <div class="ds-subsection">
                 <h3 class="ds-subsection-title">Text Scale</h3>
                 <div class="ds-type-scale">
@@ -505,7 +488,6 @@ pub fn DesignSystem() {
             </div>
         </section>
 
-        // Spacing Section
         <section class="ds-section">
             <h2 class="ds-section-title">Spacing</h2>
 
@@ -573,7 +555,6 @@ pub fn DesignSystem() {
             </div>
         </section>
 
-        // Border Radius Section
         <section class="ds-section">
             <h2 class="ds-section-title">Border Radius</h2>
 

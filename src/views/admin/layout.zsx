@@ -5,9 +5,10 @@ const icons = @import("icons");
 pub fn Layout(props: struct {
     title: []const u8,
     content: []const u8,
-    actions: []const u8,
     nav_html: []const u8,
     csrf_token: []const u8,
+    user_gravatar_url: []const u8,
+    subtitle: []const u8 = "",
 }) {
     <!DOCTYPE html>
     <html>
@@ -34,13 +35,10 @@ pub fn Layout(props: struct {
                     {!props.nav_html}
                 </nav>
                 <div class="sidebar-footer">
-                    <form method="POST" action="/admin/logout">
-                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <button type="submit" class="logout-button">
-                            <span class="nav-icon">{!icons.logout}</span>
-                            Logout
-                        </button>
-                    </form>
+                    <a href="/admin/settings" class="settings-link">
+                        <span class="nav-icon">{!icons.settings}</span>
+                        Settings
+                    </a>
                 </div>
             </aside>
             <main class="main-content">
@@ -50,9 +48,22 @@ pub fn Layout(props: struct {
                             <h1 class="page-title">{props.title}</h1>
                         </div>
                         <div class="content-header-right">
-                            {!props.actions}
+                            <div data-publr-component="dropdown" class="avatar-dropdown">
+                                <button data-publr-part="trigger" class="avatar-trigger" aria-label="User menu">
+                                    <img src={props.user_gravatar_url} alt="" class="avatar-img" />
+                                </button>
+                                <div class="dropdown-menu dropdown-menu-right" data-publr-part="content">
+                                    <a href="/admin/users/profile" class="dropdown-item">Profile</a>
+                                    <hr class="dropdown-divider" />
+                                    <form method="POST" action="/admin/logout">
+                                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                        <button type="submit" class="dropdown-item">Logout</button>
+                                    </form>
+                                </div>
+                            </div>
                         </div>
                     </header>
+                    {!props.subtitle}
                     <div class="content-body">
                         {!props.content}
                     </div>
@@ -60,6 +71,7 @@ pub fn Layout(props: struct {
             </main>
             <script type="module" src="/static/interact/index.js"></script>
             <script src="/static/admin.js"></script>
+            <script src="/static/media-selection.js"></script>
         </body>
     </html>
 }

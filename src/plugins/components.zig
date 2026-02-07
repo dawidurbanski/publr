@@ -22,5 +22,5 @@ fn setup(app: *admin.PageApp) void {
 
 fn handleComponents(ctx: *Context) !void {
     const content = tpl.renderStatic(zsx_admin_components.Components);
-    ctx.html(registry.renderPage(page, ctx, content, ""));
+    ctx.html(registry.renderPage(page, ctx, content));
 }
