@@ -76,9 +76,11 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(b.path("vendor"));
 
     // Add STB image processing (decode, resize, encode)
+    // stb_image_resize2 does intentional misaligned uint64 stores in stbir__pack_coefficients,
+    // which triggers UBSan in debug builds. Disable alignment sanitizer for this file.
     exe.addCSourceFile(.{
         .file = b.path("vendor/stb_impl.c"),
-        .flags = &.{},
+        .flags = &.{"-fno-sanitize=alignment"},
     });
 
     // Add libwebp (two-file amalgamation: libwebp.c + libwebp.h)
@@ -121,6 +123,9 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addAnonymousImport("static_interact_index_js", .{
         .root_source_file = b.path("static/interact/index.js"),
+    });
+    exe.root_module.addAnonymousImport("static_media_selection_js", .{
+        .root_source_file = b.path("static/media-selection.js"),
     });
     exe.root_module.addAnonymousImport("static_theme_css", .{
         .root_source_file = b.path("themes/demo/static/theme.css"),
@@ -344,6 +349,7 @@ pub fn build(b: *std.Build) void {
     const db_module = b.createModule(.{
         .root_source_file = b.path("src/db.zig"),
     });
+    db_module.addIncludePath(b.path("vendor"));
 
     // Schema sync (needs db_module)
     const schema_sync_module = b.createModule(.{
@@ -404,6 +410,10 @@ pub fn build(b: *std.Build) void {
     const storage_module = b.createModule(.{
         .root_source_file = b.path("src/storage.zig"),
     });
+    // SVG sanitizer
+    const svg_sanitize_module = b.createModule(.{
+        .root_source_file = b.path("src/svg_sanitize.zig"),
+    });
     // Media CRUD API
     const media_module = b.createModule(.{
         .root_source_file = b.path("src/media.zig"),
@@ -412,6 +422,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "cms", .module = cms_module },
             .{ .name = "schema_media", .module = schema_media_module },
             .{ .name = "storage", .module = storage_module },
+            .{ .name = "svg_sanitize", .module = svg_sanitize_module },
         },
     });
     // Media filesystem sync
@@ -421,6 +432,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "db", .module = db_module },
             .{ .name = "media", .module = media_module },
             .{ .name = "storage", .module = storage_module },
+            .{ .name = "svg_sanitize", .module = svg_sanitize_module },
         },
     });
     media_sync_module.addIncludePath(b.path("vendor"));
@@ -468,6 +480,9 @@ pub fn build(b: *std.Build) void {
     });
     const icons_module = b.createModule(.{
         .root_source_file = b.path("src/icons.zig"),
+    });
+    const gravatar_module = b.createModule(.{
+        .root_source_file = b.path("src/gravatar.zig"),
     });
 
     // Add icons to layout module (needs icons for search/logout icons)
@@ -532,7 +547,14 @@ pub fn build(b: *std.Build) void {
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
+            .{ .name = "auth", .module = auth_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "zsx_admin_users_list", .module = zsx_admin_users_list },
+            .{ .name = "zsx_admin_users_new", .module = zsx_admin_users_new },
+            .{ .name = "zsx_admin_users_edit", .module = zsx_admin_users_edit },
+            .{ .name = "zsx_admin_components", .module = zsx_admin_components },
+            .{ .name = "zsx_admin_design_system", .module = zsx_admin_design_system },
         },
     });
     const plugin_components = b.createModule(.{
@@ -591,6 +613,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "gravatar", .module = gravatar_module },
             .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
             .{ .name = "plugin_dashboard", .module = plugin_dashboard },
             .{ .name = "plugin_posts", .module = plugin_posts },
@@ -652,6 +676,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("schema_media", schema_media_module);
     exe.root_module.addImport("cms", cms_module);
     exe.root_module.addImport("storage", storage_module);
+    exe.root_module.addImport("svg_sanitize", svg_sanitize_module);
     exe.root_module.addImport("media", media_module);
     exe.root_module.addImport("media_sync", media_sync_module);
     exe.root_module.addImport("media_handler", media_handler_module);
@@ -708,7 +733,7 @@ pub fn build(b: *std.Build) void {
     // Add STB image processing
     exe_tests.addCSourceFile(.{
         .file = b.path("vendor/stb_impl.c"),
-        .flags = &.{},
+        .flags = &.{"-fno-sanitize=alignment"},
     });
 
     // Add libwebp (same split amalgamation as main exe)
@@ -743,6 +768,7 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("icons", icons_module);
     exe_tests.root_module.addImport("schema_media", schema_media_module);
     exe_tests.root_module.addImport("storage", storage_module);
+    exe_tests.root_module.addImport("svg_sanitize", svg_sanitize_module);
     exe_tests.root_module.addImport("media", media_module);
     exe_tests.root_module.addImport("media_sync", media_sync_module);
     exe_tests.root_module.addImport("media_handler", media_handler_module);
@@ -793,6 +819,19 @@ pub fn build(b: *std.Build) void {
     });
     browser_wasm.addIncludePath(b.path("vendor"));
 
+    // Add STB image processing (decode, resize, encode)
+    browser_wasm.addCSourceFile(.{
+        .file = b.path("vendor/stb_impl.c"),
+        .flags = &.{"-fno-sanitize=alignment"},
+    });
+
+    // Add libwebp (same split amalgamation as native build)
+    for (0..124) |part| {
+        var buf: [32]u8 = undefined;
+        const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
+        browser_wasm.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+    }
+
     // Add ZSX runtime and views (same as native)
     browser_wasm.root_module.addImport("zsx_base", zsx_base);
     browser_wasm.root_module.addImport("zsx_admin_layout", zsx_admin_layout);
@@ -807,15 +846,67 @@ pub fn build(b: *std.Build) void {
     browser_wasm.root_module.addImport("zsx_admin_users_profile", zsx_admin_users_profile);
     browser_wasm.root_module.addImport("zsx_admin_design_system", zsx_admin_design_system);
     browser_wasm.root_module.addImport("zsx_admin_components", zsx_admin_components);
+    browser_wasm.root_module.addImport("zsx_admin_media_list", zsx_admin_media_list);
+    browser_wasm.root_module.addImport("zsx_admin_media_edit", zsx_admin_media_edit);
     browser_wasm.root_module.addImport("zsx_error_404", zsx_error_404);
 
-    // Embed static assets
-    browser_wasm.root_module.addAnonymousImport("static_admin_css", .{
-        .root_source_file = b.path("static/admin.css"),
+    // WASM storage module (SQLite blob backend)
+    const wasm_storage_module = b.createModule(.{
+        .root_source_file = b.path("src/wasm_storage.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "storage", .module = storage_module },
+        },
     });
-    browser_wasm.root_module.addAnonymousImport("static_admin_js", .{
-        .root_source_file = b.path("static/admin.js"),
+
+    // WASM media handler module (serves media from SQLite blobs)
+    const wasm_media_handler_module = b.createModule(.{
+        .root_source_file = b.path("src/wasm_media_handler.zig"),
+        .imports = &.{
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "wasm_storage", .module = wasm_storage_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "media_handler", .module = media_handler_module },
+            .{ .name = "image", .module = image_module },
+            .{ .name = "storage", .module = storage_module },
+        },
     });
+
+    // WASM router module
+    const wasm_router_module = b.createModule(.{
+        .root_source_file = b.path("src/wasm_router.zig"),
+        .imports = &.{
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "admin_api", .module = admin_api_module },
+        },
+    });
+
+    // Add core modules to WASM build
+    browser_wasm.root_module.addImport("db", db_module);
+    browser_wasm.root_module.addImport("tpl", tpl_module);
+    browser_wasm.root_module.addImport("auth", auth_module);
+    browser_wasm.root_module.addImport("middleware", middleware_module);
+    browser_wasm.root_module.addImport("admin_api", admin_api_module);
+    browser_wasm.root_module.addImport("registry", registry_module);
+    browser_wasm.root_module.addImport("wasm_router", wasm_router_module);
+    browser_wasm.root_module.addImport("auth_middleware", auth_middleware_module);
+    browser_wasm.root_module.addImport("csrf", csrf_module);
+    browser_wasm.root_module.addImport("icons", icons_module);
+
+    // Media/storage modules for WASM
+    browser_wasm.root_module.addImport("storage", storage_module);
+    browser_wasm.root_module.addImport("svg_sanitize", svg_sanitize_module);
+    browser_wasm.root_module.addImport("cms", cms_module);
+    browser_wasm.root_module.addImport("media", media_module);
+    browser_wasm.root_module.addImport("image", image_module);
+    browser_wasm.root_module.addImport("schema_media", schema_media_module);
+    browser_wasm.root_module.addImport("media_handler", media_handler_module);
+    browser_wasm.root_module.addImport("wasm_storage", wasm_storage_module);
+    browser_wasm.root_module.addImport("wasm_media_handler", wasm_media_handler_module);
+
+    // Add wasm_storage to modules that conditionally import it
+    media_module.addImport("wasm_storage", wasm_storage_module);
+    plugin_media.addImport("wasm_storage", wasm_storage_module);
 
     // Browser build depends on transpile step
     browser_wasm.step.dependOn(&transpile_zsx_cmd.step);

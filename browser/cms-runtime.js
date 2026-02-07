@@ -13,7 +13,7 @@ function call(method, ...args) {
 }
 
 export async function initCMS(wasmUrl = '/cms.wasm') {
-    worker = new Worker(new URL('./cms-worker.js', import.meta.url), { type: 'module' });
+    worker = new Worker(new URL('./cms-worker.js?v=' + Date.now(), import.meta.url), { type: 'module' });
     worker.onmessage = ({ data: { id, success, result, error } }) => {
         const p = pending.get(id);
         if (p) {
@@ -43,6 +43,23 @@ export async function initCMS(wasmUrl = '/cms.wasm') {
             return res;
         },
 
+        async requestBinary(method, path, bodyBytes, contentType) {
+            const res = await call('requestBinary', method, path, bodyBytes, contentType);
+
+            if (res.redirect?.includes('|')) {
+                const [rpath, token] = res.redirect.split('|');
+                localStorage.setItem('cms_session', token);
+                await call('setSession', token);
+                res.redirect = rpath;
+            }
+
+            return res;
+        },
+
+        async getMedia(path) {
+            return await call('getMedia', path);
+        },
+
         async save() {
             return await call('save');
         },
@@ -50,6 +67,12 @@ export async function initCMS(wasmUrl = '/cms.wasm') {
         clearSession() {
             localStorage.removeItem('cms_session');
             call('setSession', null);
+        },
+
+        async reset() {
+            localStorage.removeItem('cms_session');
+            await call('reset');
+            location.reload();
         }
     };
 }

@@ -2,6 +2,7 @@
 // Simple interface: just call request(method, path, body)
 
 let wasmInstance = null;
+let wasmBytes = null;
 const DB_FILENAME = 'cms.sqlite';
 
 // =============================================================================
@@ -61,6 +62,27 @@ function readRedirect() {
     return new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len));
 }
 
+function writeBytes(bytes) {
+    if (!bytes || bytes.length === 0) return { ptr: 0, len: 0 };
+    const ptr = wasmInstance.exports.wasm_alloc(bytes.length);
+    if (!ptr) throw new Error('Alloc failed');
+    new Uint8Array(wasmInstance.exports.memory.buffer).set(bytes, ptr);
+    return { ptr, len: bytes.length };
+}
+
+function readContentType() {
+    const ptr = wasmInstance.exports.wasm_get_content_type_ptr();
+    const len = wasmInstance.exports.wasm_get_content_type_len();
+    if (len === 0) return null;
+    return new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len));
+}
+
+function readResultBinary() {
+    const ptr = wasmInstance.exports.wasm_get_result_ptr();
+    const len = wasmInstance.exports.wasm_get_result_len();
+    return new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len).slice();
+}
+
 // =============================================================================
 // WASI Stubs
 // =============================================================================
@@ -104,29 +126,28 @@ const wasiStubs = {
 
 const ops = {
     async init(wasmUrl) {
+        wasmBytes = await (await fetch(wasmUrl)).arrayBuffer();
         const { instance } = await WebAssembly.instantiate(
-            await (await fetch(wasmUrl)).arrayBuffer(),
+            wasmBytes,
             { wasi_snapshot_preview1: wasiStubs }
         );
         wasmInstance = instance;
         wasmInstance.exports._start?.();
 
-        // Try restore from OPFS
+        // Try to restore from OPFS
         const saved = await loadFromOPFS();
-        if (saved?.byteLength > 0) {
-            const ptr = wasmInstance.exports.wasm_alloc(saved.length);
-            if (ptr) {
-                new Uint8Array(wasmInstance.exports.memory.buffer).set(saved, ptr);
-                if (wasmInstance.exports.cms_import_db(ptr, saved.length) === 0) {
-                    wasmInstance.exports.wasm_free(ptr, saved.length);
-                    console.log('[Worker] Restored from OPFS');
-                    return { success: true, restored: true };
-                }
-                wasmInstance.exports.wasm_free(ptr, saved.length);
+        if (saved && saved.length > 0) {
+            if (wasmInstance.exports.cms_init() !== 0) throw new Error('Init failed');
+            const b = writeBytes(saved);
+            const imported = wasmInstance.exports.cms_import_db(b.ptr, b.len);
+            if (b.len > 0) wasmInstance.exports.wasm_free(b.ptr, b.len);
+            if (imported === 0) {
+                console.log('[Worker] Restored from OPFS (' + saved.length + ' bytes)');
+                return { success: true, restored: true };
             }
+            console.warn('[Worker] OPFS restore failed, starting fresh');
         }
 
-        // Fresh init
         if (wasmInstance.exports.cms_init() !== 0) throw new Error('Init failed');
         console.log('[Worker] Fresh database');
         return { success: true, restored: false };
@@ -160,6 +181,68 @@ const ops = {
         return { status, redirect, body: body_out };
     },
 
+    requestBinary(method, path, bodyBytes, contentType) {
+        const m = writeString(method);
+        const p = writeString(path);
+        const b = writeBytes(bodyBytes);
+
+        // Set Content-Type header before request
+        const ctName = writeString('Content-Type');
+        const ctVal = writeString(contentType);
+        wasmInstance.exports.cms_set_request_header(ctName.ptr, ctName.len, ctVal.ptr, ctVal.len);
+        if (ctName.len > 0) wasmInstance.exports.wasm_free(ctName.ptr, ctName.len);
+        if (ctVal.len > 0) wasmInstance.exports.wasm_free(ctVal.ptr, ctVal.len);
+
+        wasmInstance.exports.cms_request(m.ptr, m.len, p.ptr, p.len, b.ptr, b.len);
+
+        if (m.len > 0) wasmInstance.exports.wasm_free(m.ptr, m.len);
+        if (p.len > 0) wasmInstance.exports.wasm_free(p.ptr, p.len);
+        if (b.len > 0) wasmInstance.exports.wasm_free(b.ptr, b.len);
+
+        const status = wasmInstance.exports.wasm_get_status();
+        const redirect = readRedirect();
+        const body_out = readResult();
+
+        return { status, redirect, body: body_out };
+    },
+
+    getMedia(path) {
+        const m = writeString('GET');
+        const p = writeString('/media/' + path);
+        const b = writeString('');
+
+        wasmInstance.exports.cms_request(m.ptr, m.len, p.ptr, p.len, b.ptr, b.len);
+
+        if (m.len > 0) wasmInstance.exports.wasm_free(m.ptr, m.len);
+        if (p.len > 0) wasmInstance.exports.wasm_free(p.ptr, p.len);
+
+        const contentType = readContentType();
+        const data = readResultBinary();
+
+        return { data, contentType };
+    },
+
+    async reset() {
+        // Delete OPFS file
+        try {
+            const root = await navigator.storage.getDirectory();
+            await root.removeEntry(DB_FILENAME);
+            console.log('[Worker] OPFS file deleted');
+        } catch (e) {
+            console.log('[Worker] OPFS delete:', e.message);
+        }
+        // Re-instantiate WASM completely (bypasses cms_init guard)
+        const { instance } = await WebAssembly.instantiate(
+            wasmBytes,
+            { wasi_snapshot_preview1: wasiStubs }
+        );
+        wasmInstance = instance;
+        wasmInstance.exports._start?.();
+        if (wasmInstance.exports.cms_init() !== 0) throw new Error('Init failed');
+        console.log('[Worker] Database fully reset');
+        return true;
+    },
+
     async save() {
         if (wasmInstance.exports.cms_export_db() !== 0) return false;
         const ptr = wasmInstance.exports.wasm_get_result_ptr();
@@ -183,4 +266,4 @@ self.onmessage = async ({ data: { id, method, args } }) => {
     }
 };
 
-console.log('[Worker] Ready');
+console.log('[Worker] Ready v3 — OPFS enabled');
