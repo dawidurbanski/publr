@@ -75,6 +75,20 @@ pub fn build(b: *std.Build) void {
     });
     exe.addIncludePath(b.path("vendor"));
 
+    // Add STB image processing (decode, resize, encode)
+    exe.addCSourceFile(.{
+        .file = b.path("vendor/stb_impl.c"),
+        .flags = &.{},
+    });
+
+    // Add libwebp (two-file amalgamation: libwebp.c + libwebp.h)
+    // Split amalgamation: same file compiled 124 times with different PART values
+    for (0..124) |part| {
+        var buf: [32]u8 = undefined;
+        const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
+        exe.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+    }
+
     // Import project config (publr.zon)
     exe.root_module.addAnonymousImport("publr_config", .{
         .root_source_file = b.path("publr.zon"),
@@ -419,6 +433,11 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/admin_api.zig"),
         .imports = &.{.{ .name = "middleware", .module = middleware_module }},
     });
+    // Image processing (stb + libwebp wrappers)
+    const image_module = b.createModule(.{
+        .root_source_file = b.path("src/image.zig"),
+    });
+    image_module.addIncludePath(b.path("vendor"));
     // Media serve handler
     const media_handler_module = b.createModule(.{
         .root_source_file = b.path("src/media_handler.zig"),
@@ -426,6 +445,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "storage", .module = storage_module },
             .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "image", .module = image_module },
         },
     });
     const icons_module = b.createModule(.{
@@ -592,6 +612,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("storage", storage_module);
     exe.root_module.addImport("media", media_module);
     exe.root_module.addImport("media_handler", media_handler_module);
+    exe.root_module.addImport("image", image_module);
 
     // Add plugin modules to main exe
     exe.root_module.addImport("plugin_dashboard", plugin_dashboard);
@@ -640,6 +661,19 @@ pub fn build(b: *std.Build) void {
     });
     exe_tests.addIncludePath(b.path("vendor"));
 
+    // Add STB image processing
+    exe_tests.addCSourceFile(.{
+        .file = b.path("vendor/stb_impl.c"),
+        .flags = &.{},
+    });
+
+    // Add libwebp (same split amalgamation as main exe)
+    for (0..124) |part| {
+        var buf: [32]u8 = undefined;
+        const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
+        exe_tests.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+    }
+
     // Add imports to test executable
     exe_tests.root_module.addImport("zsx_base", zsx_base);
     exe_tests.root_module.addImport("zsx_index", zsx_index);
@@ -665,6 +699,7 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("storage", storage_module);
     exe_tests.root_module.addImport("media", media_module);
     exe_tests.root_module.addImport("media_handler", media_handler_module);
+    exe_tests.root_module.addImport("image", image_module);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");

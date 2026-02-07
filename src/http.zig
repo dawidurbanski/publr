@@ -314,8 +314,10 @@ fn handleConnection(stream: std.net.Stream) !void {
     const method_str = parts.next() orelse "GET";
     const raw_path = parts.next() orelse "/";
 
-    // Strip query string — router matches on path only
-    const path = if (std.mem.indexOfScalar(u8, raw_path, '?')) |qi| raw_path[0..qi] else raw_path;
+    // Split path and query string — router matches on path only
+    const qi = std.mem.indexOfScalar(u8, raw_path, '?');
+    const path = if (qi) |i| raw_path[0..i] else raw_path;
+    const query: ?[]const u8 = if (qi) |i| raw_path[i + 1 ..] else null;
 
     const method = Method.fromString(method_str) orelse .GET;
 
@@ -371,7 +373,7 @@ fn handleConnection(stream: std.net.Stream) !void {
     };
 
     if (global_router) |*router| {
-        try router.dispatch(method, path, stream, headers[0..header_count], body);
+        try router.dispatch(method, path, stream, headers[0..header_count], body, query);
     } else {
         // Fallback if router not initialized
         try sendResponse(stream, "500 Internal Server Error", "text/plain", "Server not initialized");

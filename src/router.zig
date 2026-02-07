@@ -146,7 +146,7 @@ pub const Router = struct {
     }
 
     /// Dispatch a request to the matching handler with middleware chain
-    pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream, headers: []const mw.RequestHeader, body: ?[]const u8) !void {
+    pub fn dispatch(self: *Router, method: Method, path: []const u8, stream: std.net.Stream, headers: []const mw.RequestHeader, body: ?[]const u8, query: ?[]const u8) !void {
         // Normalize path: strip trailing slash (except for root "/")
         const normalized_path = if (path.len > 1 and path[path.len - 1] == '/')
             path[0 .. path.len - 1]
@@ -155,6 +155,9 @@ pub const Router = struct {
 
         var ctx = Context.initWithStream(self.allocator, method, normalized_path, stream);
         defer ctx.deinit();
+
+        // Set query string
+        ctx.query = query;
 
         // Copy request headers to context
         for (headers) |header| {

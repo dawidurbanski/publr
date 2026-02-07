@@ -2,7 +2,7 @@
 
 ## The Curated Exceptions List
 
-This project has exactly two external dependencies, both vendored as single C files:
+This project has exactly three external dependencies, all vendored:
 
 | File | Purpose | Lines | License |
 |------|---------|-------|---------|
@@ -10,8 +10,9 @@ This project has exactly two external dependencies, both vendored as single C fi
 | `vendor/stb_image.h` | Image decode | ~8k | Public domain |
 | `vendor/stb_image_resize2.h` | Image resize | ~3k | Public domain |
 | `vendor/stb_image_write.h` | Image encode | ~2k | Public domain |
+| `vendor/libwebp.c` + `.h` | WebP encoding | ~64k | BSD-3-Clause |
 
-**Total external code:** ~263k lines of C, all public domain, all vendored.
+**Total external code:** ~323k lines of C, all permissively licensed, all vendored.
 
 ## Decision Flow
 
@@ -95,6 +96,7 @@ This project has exactly two external dependencies, both vendored as single C fi
 | Password hashing | Use Zig std | `std.crypto.pwhash` exists |
 | Database | ✓ Vendor SQLite | Critical infra, passes all criteria |
 | Image resize | ✓ Vendor stb_image | Critical infra, passes all criteria |
+| WebP encoding | ✓ Vendor libwebp | Critical infra (image optimization), BSD-3, widely adopted |
 | Markdown parsing | Write ourselves | Not critical, ~800 lines |
 | WebSocket | Write ourselves | Not critical, ~400 lines on top of std |
 | YAML config | REJECTED | Just use JSON, no need |

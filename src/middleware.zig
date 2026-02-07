@@ -20,6 +20,9 @@ pub const Context = struct {
     request_headers: [32]?RequestHeader,
     request_header_count: usize,
 
+    // Query string (everything after ? in URL)
+    query: ?[]const u8,
+
     // Request body (for POST/PUT)
     body: ?[]const u8,
 
@@ -41,6 +44,7 @@ pub const Context = struct {
             .allocator = allocator,
             .request_headers = [_]?RequestHeader{null} ** 32,
             .request_header_count = 0,
+            .query = null,
             .body = null,
             .response = Response.init(),
             .stream = null,
@@ -57,6 +61,7 @@ pub const Context = struct {
             .allocator = allocator,
             .request_headers = [_]?RequestHeader{null} ** 32,
             .request_header_count = 0,
+            .query = null,
             .body = null,
             .response = Response.init(),
             .stream = stream,
