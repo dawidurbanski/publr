@@ -623,3 +623,257 @@ register('nav-slider', (el) => {
         });
     });
 });
+
+// ── Image Picker ───────────────────────────────
+let imagePickerModal = null;
+let currentImagePicker = null;
+
+function getImagePickerModal() {
+    if (imagePickerModal) return imagePickerModal;
+
+    // Create modal HTML
+    const modal = document.createElement('div');
+    modal.className = 'image-picker-modal';
+    modal.innerHTML = `
+        <div class="image-picker-modal-content">
+            <div class="image-picker-modal-header">
+                <h3>Select Image</h3>
+                <button type="button" class="image-picker-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="image-picker-modal-toolbar">
+                <div class="image-picker-modal-search">
+                    <input type="text" placeholder="Search media..." />
+                </div>
+            </div>
+            <div class="image-picker-modal-body">
+                <div class="image-picker-modal-grid"></div>
+            </div>
+            <div class="image-picker-modal-footer">
+                <div class="image-picker-modal-pagination"></div>
+                <div class="image-picker-modal-actions">
+                    <button type="button" class="btn btn-sm" data-action="cancel">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-primary" data-action="select" disabled>Select</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    imagePickerModal = modal;
+
+    // Wire up modal events
+    const closeBtn = modal.querySelector('.image-picker-modal-close');
+    const cancelBtn = modal.querySelector('[data-action="cancel"]');
+    const selectBtn = modal.querySelector('[data-action="select"]');
+    const searchInput = modal.querySelector('.image-picker-modal-search input');
+    const grid = modal.querySelector('.image-picker-modal-grid');
+
+    closeBtn.addEventListener('click', closeImagePickerModal);
+    cancelBtn.addEventListener('click', closeImagePickerModal);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeImagePickerModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('open')) {
+            closeImagePickerModal();
+        }
+    });
+
+    selectBtn.addEventListener('click', () => {
+        const selected = grid.querySelector('.selected');
+        if (selected && currentImagePicker) {
+            const mediaId = selected.dataset.mediaId;
+            const thumbUrl = selected.dataset.thumbUrl;
+            const altText = selected.dataset.altText || '';
+            selectImage(currentImagePicker, mediaId, thumbUrl, altText);
+            closeImagePickerModal();
+        }
+    });
+
+    let searchTimer = null;
+    searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+            loadMediaItems(searchInput.value);
+        }, 300);
+    });
+
+    // Grid item selection
+    grid.addEventListener('click', (e) => {
+        const item = e.target.closest('.image-picker-modal-item');
+        if (!item) return;
+
+        grid.querySelectorAll('.image-picker-modal-item').forEach(i => {
+            i.classList.remove('selected');
+        });
+        item.classList.add('selected');
+        selectBtn.disabled = false;
+    });
+
+    // Double-click to select immediately
+    grid.addEventListener('dblclick', (e) => {
+        const item = e.target.closest('.image-picker-modal-item');
+        if (!item || !currentImagePicker) return;
+
+        const mediaId = item.dataset.mediaId;
+        const thumbUrl = item.dataset.thumbUrl;
+        const altText = item.dataset.altText || '';
+        selectImage(currentImagePicker, mediaId, thumbUrl, altText);
+        closeImagePickerModal();
+    });
+
+    return modal;
+}
+
+function openImagePickerModal(picker) {
+    currentImagePicker = picker;
+    const modal = getImagePickerModal();
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    // Reset search
+    const searchInput = modal.querySelector('.image-picker-modal-search input');
+    searchInput.value = '';
+
+    // Load media items
+    loadMediaItems('');
+
+    // Focus search
+    setTimeout(() => searchInput.focus(), 100);
+}
+
+function closeImagePickerModal() {
+    if (imagePickerModal) {
+        imagePickerModal.classList.remove('open');
+        document.body.style.overflow = '';
+        currentImagePicker = null;
+
+        // Clear selection
+        const selectBtn = imagePickerModal.querySelector('[data-action="select"]');
+        selectBtn.disabled = true;
+        imagePickerModal.querySelectorAll('.image-picker-modal-item.selected').forEach(i => {
+            i.classList.remove('selected');
+        });
+    }
+}
+
+function loadMediaItems(search) {
+    const modal = getImagePickerModal();
+    const grid = modal.querySelector('.image-picker-modal-grid');
+    const selectBtn = modal.querySelector('[data-action="select"]');
+
+    grid.innerHTML = '<div class="image-picker-modal-loading">Loading...</div>';
+    selectBtn.disabled = true;
+
+    // Build URL with search param
+    let url = '/admin/media/picker/list';
+    if (search) {
+        url += '?search=' + encodeURIComponent(search);
+    }
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            if (!data.items || data.items.length === 0) {
+                grid.innerHTML = `
+                    <div class="image-picker-modal-empty">
+                        <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <span>No images found</span>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = data.items.map(item => `
+                <button type="button" class="image-picker-modal-item"
+                        data-media-id="${item.id}"
+                        data-thumb-url="${item.thumb_url}"
+                        data-alt-text="${item.alt_text || ''}">
+                    ${item.is_image
+                        ? `<img src="${item.thumb_url}" alt="${item.alt_text || item.filename}" loading="lazy" />`
+                        : `<div class="image-picker-modal-item-icon">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M14 2.26946V6.4C14 6.96005 14 7.24008 14.109 7.45399C14.2049 7.64215 14.3578 7.79513 14.546 7.89101C14.7599 8 15.0399 8 15.6 8H19.7305M20 9.98822V17.2C20 18.8802 20 19.7202 19.673 20.362C19.3854 20.9265 18.9265 21.3854 18.362 21.673C17.7202 22 16.8802 22 15.2 22H8.8C7.11984 22 6.27976 22 5.63803 21.673C5.07354 21.3854 4.6146 20.9265 4.32698 20.362C4 19.7202 4 18.8802 4 17.2V6.8C4 5.11984 4 4.27976 4.32698 3.63803C4.6146 3.07354 5.07354 2.6146 5.63803 2.32698C6.27976 2 7.11984 2 8.8 2H12.0118C12.7455 2 13.1124 2 13.4577 2.08289C13.7638 2.15638 14.0564 2.27759 14.3249 2.44208C14.6276 2.6276 14.887 2.88703 15.4059 3.40589L18.5941 6.59411C19.113 7.11297 19.3724 7.3724 19.5579 7.67515C19.7224 7.94356 19.8436 8.2362 19.9171 8.5423C20 8.88757 20 9.25445 20 9.98822Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                           </div>`
+                    }
+                    <div class="image-picker-modal-item-name">${item.filename}</div>
+                </button>
+            `).join('');
+        })
+        .catch(err => {
+            console.error('Failed to load media:', err);
+            grid.innerHTML = '<div class="image-picker-modal-empty"><span>Failed to load media</span></div>';
+        });
+}
+
+function selectImage(picker, mediaId, thumbUrl, altText) {
+    const hidden = picker.querySelector('[data-publr-part="value"]');
+    const preview = picker.querySelector('[data-publr-part="preview"]');
+    const alt = picker.querySelector('[data-publr-part="alt"]');
+    const trigger = picker.querySelector('[data-publr-part="trigger"]');
+    const remove = picker.querySelector('[data-publr-part="remove"]');
+
+    // Update hidden input
+    if (hidden) hidden.value = mediaId;
+
+    // Update preview
+    if (preview) {
+        preview.innerHTML = `<img src="${thumbUrl}" alt="${altText}" class="image-picker-thumb" />`;
+    }
+
+    // Update alt text display
+    if (alt) {
+        alt.textContent = altText ? `Alt: ${altText}` : '';
+    }
+
+    // Update state and button text
+    picker.dataset.publrState = 'selected';
+    if (trigger) trigger.textContent = 'Change Image';
+    if (remove) remove.classList.remove('hidden');
+}
+
+function clearImage(picker) {
+    const hidden = picker.querySelector('[data-publr-part="value"]');
+    const preview = picker.querySelector('[data-publr-part="preview"]');
+    const alt = picker.querySelector('[data-publr-part="alt"]');
+    const trigger = picker.querySelector('[data-publr-part="trigger"]');
+    const remove = picker.querySelector('[data-publr-part="remove"]');
+
+    // Clear hidden input
+    if (hidden) hidden.value = '';
+
+    // Reset preview
+    if (preview) {
+        preview.innerHTML = `
+            <div class="image-picker-placeholder">
+                <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>No image selected</span>
+            </div>
+        `;
+    }
+
+    // Clear alt text
+    if (alt) alt.textContent = '';
+
+    // Update state and button text
+    picker.dataset.publrState = 'empty';
+    if (trigger) trigger.textContent = 'Select Image';
+    if (remove) remove.classList.add('hidden');
+}
+
+register('image-picker', (el) => {
+    const trigger = el.querySelector('[data-publr-part="trigger"]');
+    const removeBtn = el.querySelector('[data-publr-part="remove"]');
+
+    if (trigger) {
+        trigger.addEventListener('click', () => {
+            openImagePickerModal(el);
+        });
+    }
+
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            clearImage(el);
+        });
+    }
+});

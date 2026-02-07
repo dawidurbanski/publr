@@ -42,6 +42,8 @@ pub const page = admin.registerPage(.{
 fn setup(app: *admin.PageApp) void {
     app.render(handleList);
     app.get("/:id", handleEdit);
+    app.get("/picker/list", handlePickerList);
+    app.get("/picker/thumb/:id", handlePickerThumb);
     app.post(handleUpload);
     if (!is_wasm) {
         app.postAt("/sync", handleSync);
@@ -543,6 +545,97 @@ fn handleEdit(ctx: *Context) !void {
     }});
 
     ctx.html(registry.renderPage(page, ctx, content));
+}
+
+/// JSON endpoint for image picker modal - lists media items for selection
+fn handlePickerList(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        ctx.response.setHeader("Content-Type", "application/json");
+        ctx.response.setBody("{\"items\":[]}");
+        return;
+    };
+
+    const raw_search = parseQueryParam(ctx.query, "search");
+    const search_term: ?[]const u8 = if (raw_search) |s| if (s.len > 0) percentDecode(ctx.allocator, s) else null else null;
+    const search_pattern: ?[]const u8 = if (search_term) |s| std.fmt.allocPrint(ctx.allocator, "%{s}%", .{s}) catch null else null;
+
+    const list_opts: media.MediaListOptions = .{
+        .limit = 50,
+        .offset = 0,
+        .order_by = "created_at",
+        .order_dir = .desc,
+        .search = search_pattern,
+    };
+
+    const entries = media.listMedia(ctx.allocator, db, list_opts) catch &[_]media.MediaRecord{};
+
+    // Build JSON response using ArrayListUnmanaged
+    var json: std.ArrayListUnmanaged(u8) = .{};
+    var writer = json.writer(ctx.allocator);
+
+    writer.writeAll("{\"items\":[") catch {};
+    for (entries, 0..) |entry, i| {
+        if (i > 0) writer.writeAll(",") catch {};
+
+        const is_image = std.mem.startsWith(u8, entry.mime_type, "image/");
+
+        // Get alt_text from data struct
+        const alt_text = entry.data.alt_text orelse "";
+
+        // Build thumb URL
+        const thumb_url = if (is_image)
+            std.fmt.allocPrint(ctx.allocator, "/media/{s}?w=150", .{entry.storage_key}) catch ""
+        else
+            "";
+
+        writer.print(
+            \\{{"id":"{s}","filename":"{s}","mime_type":"{s}","is_image":{s},"thumb_url":"{s}","alt_text":"{s}"}}
+        , .{
+            entry.id,
+            entry.filename,
+            entry.mime_type,
+            if (is_image) "true" else "false",
+            thumb_url,
+            alt_text,
+        }) catch {};
+    }
+    writer.writeAll("]}") catch {};
+
+    ctx.response.setHeader("Content-Type", "application/json");
+    ctx.response.setBody(json.items);
+}
+
+/// Returns a thumbnail for a specific media item by ID (for image picker preview)
+fn handlePickerThumb(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    const media_id = ctx.param("id") orelse {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setBody("Media not found");
+        return;
+    };
+
+    const record = media.getMedia(ctx.allocator, db, media_id) catch {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setBody("Media not found");
+        return;
+    } orelse {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setBody("Media not found");
+        return;
+    };
+
+    // Redirect to the actual media URL with resize parameter
+    const is_image = std.mem.startsWith(u8, record.mime_type, "image/");
+    const url = if (is_image)
+        std.fmt.allocPrint(ctx.allocator, "/media/{s}?w=300", .{record.storage_key}) catch "/admin/media"
+    else
+        std.fmt.allocPrint(ctx.allocator, "/media/{s}", .{record.storage_key}) catch "/admin/media";
+
+    redirect(ctx, url);
 }
 
 fn handleUpload(ctx: *Context) !void {

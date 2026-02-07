@@ -500,6 +500,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "db", .module = db_module },
             .{ .name = "csrf", .module = csrf_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "media", .module = media_module },
             .{ .name = "zsx_admin_dashboard", .module = zsx_admin_dashboard },
             .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
         },
