@@ -6,6 +6,8 @@ const PostData = struct {
     date: []const u8,
     is_draft: bool,
     is_published: bool,
+    featured_image: []const u8,
+    featured_image_url: []const u8,
 };
 
 pub fn Edit(props: struct {
@@ -46,6 +48,37 @@ pub fn Edit(props: struct {
             >
                 {props.post.content}
             </textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Featured Image</label>
+            {if (props.post.featured_image.len > 0) (
+                <div class="image-picker" data-publr-component="image-picker" data-publr-state="selected">
+                    <input type="hidden" name="featured_image" value={props.post.featured_image} data-publr-part="value" />
+                    <div class="image-picker-preview" data-publr-part="preview">
+                        <img src={props.post.featured_image_url} alt="" class="image-picker-thumb" />
+                    </div>
+                    <div class="image-picker-actions">
+                        <button type="button" class="btn btn-sm" data-publr-part="trigger">Change Image</button>
+                        <button type="button" class="btn btn-sm btn-ghost" data-publr-part="remove">Remove</button>
+                    </div>
+                    <div class="image-picker-alt" data-publr-part="alt"></div>
+                </div>
+            ) else (
+                <div class="image-picker" data-publr-component="image-picker" data-publr-state="empty">
+                    <input type="hidden" name="featured_image" value="" data-publr-part="value" />
+                    <div class="image-picker-preview" data-publr-part="preview">
+                        <div class="image-picker-placeholder">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <span>No image selected</span>
+                        </div>
+                    </div>
+                    <div class="image-picker-actions">
+                        <button type="button" class="btn btn-sm" data-publr-part="trigger">Select Image</button>
+                        <button type="button" class="btn btn-sm btn-ghost hidden" data-publr-part="remove">Remove</button>
+                    </div>
+                    <div class="image-picker-alt" data-publr-part="alt"></div>
+                </div>
+            )}
         </div>
         <div class="form-row">
             <div class="form-group">

@@ -110,6 +110,8 @@ fn handleNew(ctx: *Context) !void {
         date: []const u8,
         is_draft: bool,
         is_published: bool,
+        featured_image: []const u8,
+        featured_image_url: []const u8,
     };
 
     const content = tpl.render(zsx_admin_posts_edit.Edit, .{.{
@@ -120,6 +122,8 @@ fn handleNew(ctx: *Context) !void {
             .date = formatDate(std.time.timestamp(), ctx.allocator) catch "Unknown",
             .is_draft = true,
             .is_published = false,
+            .featured_image = "",
+            .featured_image_url = "",
         },
         .csrf_token = csrf_token,
         .action = "/admin/posts",
@@ -156,9 +160,18 @@ fn handleEdit(ctx: *Context) !void {
         date: []const u8,
         is_draft: bool,
         is_published: bool,
+        featured_image: []const u8,
+        featured_image_url: []const u8,
     };
 
     const edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
+
+    // Get featured image URL if set
+    const featured_image_id = entry.data.featured_image orelse "";
+    const featured_image_url = if (featured_image_id.len > 0)
+        std.fmt.allocPrint(ctx.allocator, "/admin/media/picker/thumb/{s}", .{featured_image_id}) catch ""
+    else
+        "";
 
     const content = tpl.render(zsx_admin_posts_edit.Edit, .{.{
         .post = PostData{
@@ -168,6 +181,8 @@ fn handleEdit(ctx: *Context) !void {
             .date = formatDate(entry.created_at, ctx.allocator) catch "Unknown",
             .is_draft = entry.isDraft(),
             .is_published = entry.isPublished(),
+            .featured_image = featured_image_id,
+            .featured_image_url = featured_image_url,
         },
         .csrf_token = csrf_token,
         .action = edit_url,
@@ -187,6 +202,8 @@ fn handleCreate(ctx: *Context) !void {
     const slug = ctx.formValue("slug") orelse "";
     const body = ctx.formValue("content") orelse "";
     const status = ctx.formValue("status") orelse "draft";
+    const featured_image_raw = ctx.formValue("featured_image") orelse "";
+    const featured_image: ?[]const u8 = if (featured_image_raw.len > 0) featured_image_raw else null;
 
     // Create new post
     const data = Post.Data{
@@ -199,7 +216,7 @@ fn handleCreate(ctx: *Context) !void {
         .tag = null,
         .published_at = null,
         .featured = false,
-        .featured_image = null,
+        .featured_image = featured_image,
         .meta_description = null,
     };
 
@@ -226,6 +243,8 @@ fn handleUpdate(ctx: *Context) !void {
     const slug = ctx.formValue("slug") orelse "";
     const body = ctx.formValue("content") orelse "";
     const status = ctx.formValue("status") orelse "draft";
+    const featured_image_raw = ctx.formValue("featured_image") orelse "";
+    const featured_image: ?[]const u8 = if (featured_image_raw.len > 0) featured_image_raw else null;
 
     // Update post
     const data = Post.Data{
@@ -238,7 +257,7 @@ fn handleUpdate(ctx: *Context) !void {
         .tag = null,
         .published_at = null,
         .featured = false,
-        .featured_image = null,
+        .featured_image = featured_image,
         .meta_description = null,
     };
 
