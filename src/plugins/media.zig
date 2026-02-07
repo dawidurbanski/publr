@@ -11,10 +11,12 @@ const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const csrf = @import("csrf");
 const media = @import("media");
+const media_sync = @import("media_sync");
 const storage = @import("storage");
 const auth_middleware = @import("auth_middleware");
 const media_handler = @import("media_handler");
 const registry = @import("registry");
+const db_mod = @import("db");
 const zsx_admin_media_list = @import("zsx_admin_media_list");
 const zsx_admin_media_edit = @import("zsx_admin_media_edit");
 
@@ -32,6 +34,12 @@ fn setup(app: *admin.PageApp) void {
     app.render(handleList);
     app.get("/:id", handleEdit);
     app.post(handleUpload);
+    app.postAt("/sync", handleSync);
+    app.postAt("/folders", handleCreateFolder);
+    app.postAt("/folders/delete", handleDeleteFolder);
+    app.postAt("/folders/rename", handleRenameFolder);
+    app.postAt("/tags", handleCreateTag);
+    app.postAt("/tags/delete", handleDeleteTag);
     app.postAt("/:id", handleUpdate);
     app.postAt("/:id/delete", handleDelete);
     app.postAt("/:id/toggle-visibility", handleToggleVisibility);
@@ -59,31 +67,83 @@ fn handleList(ctx: *Context) !void {
 
     const csrf_token = csrf.ensureToken(ctx);
 
-    // Parse view mode from query string (default: grid)
+    // Parse query params
     const view_mode = parseQueryParam(ctx.query, "view") orelse "grid";
+    const folder_filter = parseQueryParam(ctx.query, "folder");
+    const tag_filter = parseQueryParam(ctx.query, "tag");
+    const show_unreviewed = parseQueryParam(ctx.query, "unreviewed") != null;
 
-    // Fetch media from database
-    const entries = media.listMedia(ctx.allocator, db, .{
-        .limit = 50,
-        .order_by = "created_at",
-        .order_dir = .desc,
-    }) catch |err| {
-        std.debug.print("Error listing media: {}\n", .{err});
-        const content = tpl.render(zsx_admin_media_list.List, .{.{
-            .has_media = false,
-            .media = &[_]MediaListItem{},
-            .csrf_token = csrf_token,
-            .view_mode = view_mode,
-            .total_count = 0,
-        }});
-        ctx.html(registry.renderPage(page, ctx, content, ""));
-        return;
+    // Fetch media based on filter
+    const entries = blk: {
+        if (show_unreviewed) {
+            break :blk media.listUnreviewedMedia(ctx.allocator, db, .{
+                .limit = 50,
+                .order_by = "created_at",
+                .order_dir = .desc,
+            }) catch &[_]media.MediaRecord{};
+        } else if (folder_filter) |fid| {
+            break :blk media.listMediaByTerm(ctx.allocator, db, fid, .{
+                .limit = 50,
+                .order_by = "created_at",
+                .order_dir = .desc,
+            }) catch &[_]media.MediaRecord{};
+        } else if (tag_filter) |tid| {
+            break :blk media.listMediaByTerm(ctx.allocator, db, tid, .{
+                .limit = 50,
+                .order_by = "created_at",
+                .order_dir = .desc,
+            }) catch &[_]media.MediaRecord{};
+        } else {
+            break :blk media.listMedia(ctx.allocator, db, .{
+                .limit = 50,
+                .order_by = "created_at",
+                .order_dir = .desc,
+            }) catch &[_]media.MediaRecord{};
+        }
     };
 
     // Get total count
     const total_count = media.countMedia(db, .{}) catch 0;
+    const unreviewed_count = media.countUnreviewedMedia(db) catch 0;
 
-    // Convert to view format
+    // Fetch folders and tags for sidebar
+    const folders = media.listTerms(ctx.allocator, db, media.tax_media_folders) catch &[_]media.TermRecord{};
+    const tags = media.listTerms(ctx.allocator, db, media.tax_media_tags) catch &[_]media.TermRecord{};
+
+    // Convert folders to view format
+    const folder_items = ctx.allocator.alloc(FolderItem, folders.len) catch {
+        ctx.html("Error allocating memory");
+        return;
+    };
+    for (folders, 0..) |f, i| {
+        const count = media.countMediaInTerm(db, f.id) catch 0;
+        folder_items[i] = .{
+            .id = f.id,
+            .name = f.name,
+            .parent_id = f.parent_id orelse "",
+            .count = count,
+            .is_active = if (folder_filter) |fid| std.mem.eql(u8, fid, f.id) else false,
+            .url = std.fmt.allocPrint(ctx.allocator, "?folder={s}", .{f.id}) catch "?folder=",
+        };
+    }
+
+    // Convert tags to view format
+    const tag_items = ctx.allocator.alloc(TagItem, tags.len) catch {
+        ctx.html("Error allocating memory");
+        return;
+    };
+    for (tags, 0..) |t, i| {
+        const count = media.countMediaInTerm(db, t.id) catch 0;
+        tag_items[i] = .{
+            .id = t.id,
+            .name = t.name,
+            .count = count,
+            .is_active = if (tag_filter) |tid| std.mem.eql(u8, tid, t.id) else false,
+            .url = std.fmt.allocPrint(ctx.allocator, "?tag={s}", .{t.id}) catch "?tag=",
+        };
+    }
+
+    // Convert media to view format
     var items = ctx.allocator.alloc(MediaListItem, entries.len) catch {
         ctx.html("Error allocating memory");
         return;
@@ -113,6 +173,14 @@ fn handleList(ctx: *Context) !void {
         .csrf_token = csrf_token,
         .view_mode = view_mode,
         .total_count = total_count,
+        .folders = folder_items,
+        .tags = tag_items,
+        .active_folder = folder_filter orelse "",
+        .active_tag = tag_filter orelse "",
+        .show_unreviewed = show_unreviewed,
+        .unreviewed_count = unreviewed_count,
+        .view_grid_url = "?view=grid",
+        .view_list_url = "?view=list",
     }});
 
     ctx.html(registry.renderPage(page, ctx, content, ""));
@@ -146,6 +214,47 @@ fn handleEdit(ctx: *Context) !void {
     else
         "";
 
+    // Get folders and tags for this media item
+    const all_folders = media.listTerms(ctx.allocator, db, media.tax_media_folders) catch &[_]media.TermRecord{};
+    const assigned_folder_ids = media.getMediaTermIds(ctx.allocator, db, media_id, media.tax_media_folders) catch &[_][]const u8{};
+    const assigned_tag_ids = media.getMediaTermIds(ctx.allocator, db, media_id, media.tax_media_tags) catch &[_][]const u8{};
+    const assigned_tag_names = media.getMediaTermNames(ctx.allocator, db, media_id, media.tax_media_tags) catch &[_][]const u8{};
+
+    // Convert to view format
+    const folder_options = ctx.allocator.alloc(FolderOption, all_folders.len) catch {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+    for (all_folders, 0..) |f, i| {
+        folder_options[i] = .{
+            .id = f.id,
+            .name = f.name,
+            .is_selected = isTermSelected(f.id, assigned_folder_ids),
+        };
+    }
+
+    // Build comma-separated list of selected folder IDs
+    var selected_folder_ids: []const u8 = "";
+    if (assigned_folder_ids.len > 0) {
+        var buf: std.ArrayList(u8) = .{};
+        for (assigned_folder_ids, 0..) |fid, i| {
+            if (i > 0) buf.appendSlice(ctx.allocator, ",") catch {};
+            buf.appendSlice(ctx.allocator, fid) catch {};
+        }
+        selected_folder_ids = buf.toOwnedSlice(ctx.allocator) catch "";
+    }
+
+    // Join tag names with comma for display
+    var tag_display: []const u8 = "";
+    if (assigned_tag_names.len > 0) {
+        var buf: std.ArrayList(u8) = .{};
+        for (assigned_tag_names, 0..) |name, i| {
+            if (i > 0) buf.appendSlice(ctx.allocator, ", ") catch {};
+            buf.appendSlice(ctx.allocator, name) catch {};
+        }
+        tag_display = buf.toOwnedSlice(ctx.allocator) catch "";
+    }
+
     const content = tpl.render(zsx_admin_media_edit.Edit, .{.{
         .media = .{
             .id = record.id,
@@ -168,6 +277,10 @@ fn handleEdit(ctx: *Context) !void {
         .action = std.fmt.allocPrint(ctx.allocator, "/admin/media/{s}", .{media_id}) catch "/admin/media",
         .delete_url = std.fmt.allocPrint(ctx.allocator, "/admin/media/{s}/delete", .{media_id}) catch "/admin/media",
         .toggle_url = std.fmt.allocPrint(ctx.allocator, "/admin/media/{s}/toggle-visibility", .{media_id}) catch "/admin/media",
+        .folders = folder_options,
+        .tags_display = tag_display,
+        .assigned_tag_ids = assigned_tag_ids,
+        .selected_folder_ids = selected_folder_ids,
     }});
 
     ctx.html(registry.renderPage(page, ctx, content, ""));
@@ -268,6 +381,48 @@ fn handleUpdate(ctx: *Context) !void {
         std.debug.print("Error updating media: {}\n", .{err});
     };
 
+    // Update folder assignments (comma-separated in hidden field)
+    const folders_input = ctx.formValue("folders");
+    // Update tag assignments from comma-separated tag names
+    const tags_input = ctx.formValue("tags");
+
+    // Build combined term_ids list
+    var all_term_ids: std.ArrayListUnmanaged([]const u8) = .{};
+    defer all_term_ids.deinit(ctx.allocator);
+
+    // Add folder term IDs
+    if (folders_input) |fids_str| {
+        if (fids_str.len > 0) {
+            var folder_iter = std.mem.splitScalar(u8, fids_str, ',');
+            while (folder_iter.next()) |fid| {
+                const trimmed = std.mem.trim(u8, fid, " ");
+                if (trimmed.len > 0) {
+                    all_term_ids.append(ctx.allocator, trimmed) catch {};
+                }
+            }
+        }
+    }
+
+    // Resolve tag names to IDs (create if needed)
+    if (tags_input) |tags_str| {
+        if (tags_str.len > 0) {
+            var tag_iter = std.mem.splitScalar(u8, tags_str, ',');
+            while (tag_iter.next()) |raw_tag| {
+                const tag_name = std.mem.trim(u8, raw_tag, " ");
+                if (tag_name.len == 0) continue;
+
+                // Find existing tag or create new one
+                const tag_id = findOrCreateTag(ctx.allocator, db, tag_name) catch continue;
+                all_term_ids.append(ctx.allocator, tag_id) catch {};
+            }
+        }
+    }
+
+    // Sync all term associations
+    media.syncMediaTerms(db, media_id, all_term_ids.items) catch |err| {
+        std.debug.print("Error syncing terms: {}\n", .{err});
+    };
+
     redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/media/{s}", .{media_id}) catch "/admin/media");
 }
 
@@ -308,8 +463,190 @@ fn handleToggleVisibility(ctx: *Context) !void {
 }
 
 // =============================================================================
+// Sync, Folder & Tag Handlers
+// =============================================================================
+
+fn handleSync(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    storage.initDirectories() catch {};
+
+    const result = media_sync.syncFilesystem(ctx.allocator, db) catch |err| {
+        std.debug.print("Sync error: {}\n", .{err});
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    // Redirect with result summary in query string
+    const url = std.fmt.allocPrint(ctx.allocator, "/admin/media?synced=1&new={d}&missing={d}", .{
+        result.new_count,
+        result.missing_count,
+    }) catch "/admin/media";
+
+    redirect(ctx, url);
+}
+
+fn handleCreateFolder(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    const name = ctx.formValue("folder_name") orelse {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    if (name.len == 0) {
+        redirect(ctx, "/admin/media");
+        return;
+    }
+
+    const parent_id = if (ctx.formValue("parent_id")) |pid| if (pid.len > 0) pid else null else null;
+
+    _ = media.createTerm(ctx.allocator, db, media.tax_media_folders, name, parent_id) catch |err| {
+        std.debug.print("Error creating folder: {}\n", .{err});
+    };
+
+    redirect(ctx, "/admin/media");
+}
+
+fn handleDeleteFolder(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    const term_id = ctx.formValue("term_id") orelse {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    media.deleteTerm(db, term_id) catch |err| {
+        std.debug.print("Error deleting folder: {}\n", .{err});
+    };
+
+    redirect(ctx, "/admin/media");
+}
+
+fn handleRenameFolder(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    const term_id = ctx.formValue("term_id") orelse {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+    const new_name = ctx.formValue("folder_name") orelse {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    media.renameTerm(db, term_id, new_name) catch |err| {
+        std.debug.print("Error renaming folder: {}\n", .{err});
+    };
+
+    redirect(ctx, "/admin/media");
+}
+
+fn handleCreateTag(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    const name = ctx.formValue("tag_name") orelse {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    if (name.len == 0) {
+        redirect(ctx, "/admin/media");
+        return;
+    }
+
+    _ = media.createTerm(ctx.allocator, db, media.tax_media_tags, name, null) catch |err| {
+        std.debug.print("Error creating tag: {}\n", .{err});
+    };
+
+    redirect(ctx, "/admin/media");
+}
+
+fn handleDeleteTag(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    const term_id = ctx.formValue("term_id") orelse {
+        redirect(ctx, "/admin/media");
+        return;
+    };
+
+    media.deleteTerm(db, term_id) catch |err| {
+        std.debug.print("Error deleting tag: {}\n", .{err});
+    };
+
+    redirect(ctx, "/admin/media");
+}
+
+/// Find a tag by name or create it
+fn findOrCreateTag(allocator: std.mem.Allocator, db: *db_mod.Db, name: []const u8) ![]const u8 {
+    // Check if tag exists
+    var stmt = try db.prepare(
+        "SELECT id FROM terms WHERE taxonomy_id = ?1 AND name = ?2 LIMIT 1",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, media.tax_media_tags);
+    try stmt.bindText(2, name);
+
+    if (try stmt.step()) {
+        return try allocator.dupe(u8, stmt.columnText(0) orelse return error.StepFailed);
+    }
+
+    // Create new tag
+    const term = try media.createTerm(allocator, db, media.tax_media_tags, name, null);
+    return term.id;
+}
+
+fn isTermSelected(term_id: []const u8, assigned_ids: []const []const u8) bool {
+    for (assigned_ids) |aid| {
+        if (std.mem.eql(u8, term_id, aid)) return true;
+    }
+    return false;
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
+
+const FolderItem = struct {
+    id: []const u8,
+    name: []const u8,
+    parent_id: []const u8,
+    count: u32,
+    is_active: bool,
+    url: []const u8,
+};
+
+const TagItem = struct {
+    id: []const u8,
+    name: []const u8,
+    count: u32,
+    is_active: bool,
+    url: []const u8,
+};
+
+const FolderOption = struct {
+    id: []const u8,
+    name: []const u8,
+    is_selected: bool,
+};
 
 const MediaListItem = struct {
     id: []const u8,

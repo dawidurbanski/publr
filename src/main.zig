@@ -2,6 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const http = @import("http.zig");
 const publr_config = @import("publr_config");
+const db_mod = @import("db");
+const media_sync = @import("media_sync");
+const storage = @import("storage");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -21,11 +24,51 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, command, "serve")) {
         try runServe(&args);
+    } else if (std.mem.eql(u8, command, "media")) {
+        try runMedia(allocator, &args);
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
         printUsage();
     } else {
         std.debug.print("Unknown command: {s}\n\n", .{command});
         printUsage();
+    }
+}
+
+fn runMedia(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void {
+    const subcommand = args.next() orelse {
+        std.debug.print("Usage: publr media <subcommand>\n\nSubcommands:\n  sync    Sync filesystem with database\n\n", .{});
+        return;
+    };
+
+    if (std.mem.eql(u8, subcommand, "sync")) {
+        // Ensure media directories exist
+        storage.initDirectories() catch |err| {
+            std.debug.print("Error creating media directories: {}\n", .{err});
+            return;
+        };
+
+        // Open database
+        var db = db_mod.Db.init(allocator, "data/publr.db") catch |err| {
+            std.debug.print("Error opening database: {}\n", .{err});
+            return;
+        };
+        defer db.deinit();
+
+        std.debug.print("Syncing media files...\n", .{});
+
+        const result = media_sync.syncFilesystem(allocator, &db) catch |err| {
+            std.debug.print("Sync error: {}\n", .{err});
+            return;
+        };
+
+        std.debug.print("Sync complete:\n  New files: {d}\n  Missing files: {d}\n  Skipped: {d}\n  Errors: {d}\n", .{
+            result.new_count,
+            result.missing_count,
+            result.skipped_count,
+            result.error_count,
+        });
+    } else {
+        std.debug.print("Unknown media subcommand: {s}\n", .{subcommand});
     }
 }
 
@@ -185,8 +228,9 @@ fn printUsage() void {
         \\Usage: publr <command> [options]
         \\
         \\Commands:
-        \\  serve    Start the HTTP server
-        \\  help     Show this help message
+        \\  serve        Start the HTTP server
+        \\  media sync   Sync filesystem with media database
+        \\  help         Show this help message
         \\
         \\Serve options:
         \\  --port, -p <port>    Port to listen on (default: 8080, or PORT env var)

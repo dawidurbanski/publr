@@ -1,4 +1,4 @@
-// Media edit template — metadata editor with preview
+// Media edit template — metadata editor with preview, folders, tags
 
 const std = @import("std");
 
@@ -27,12 +27,22 @@ const MediaData = struct {
     created_at: []const u8,
 };
 
+const FolderOption = struct {
+    id: []const u8,
+    name: []const u8,
+    is_selected: bool,
+};
+
 pub fn Edit(props: struct {
     media: MediaData,
     csrf_token: []const u8,
     action: []const u8,
     delete_url: []const u8,
     toggle_url: []const u8,
+    folders: []const FolderOption,
+    tags_display: []const u8,
+    assigned_tag_ids: []const []const u8,
+    selected_folder_ids: []const u8,
 }) {
     <div class="media-edit">
         <div class="media-edit-preview">
@@ -150,6 +160,49 @@ pub fn Edit(props: struct {
                     />
                 </div>
 
+                {if (props.folders.len > 0) (
+                    <div class="form-group">
+                        <label>Folders</label>
+                        <div class="media-folder-checkboxes" data-publr-component="folder-picker" data-publr-input="folders">
+                            {for (props.folders) |folder| (
+                                <label class="media-folder-checkbox">
+                                    {if (folder.is_selected) (
+                                        <input
+                                            type="checkbox"
+                                            data-publr-part="checkbox"
+                                            value={folder.id}
+                                            checked="checked"
+                                        />
+                                    ) else (
+                                        <input
+                                            type="checkbox"
+                                            data-publr-part="checkbox"
+                                            value={folder.id}
+                                        />
+                                    )}
+                                    {" "}
+                                    {folder.name}
+                                </label>
+                            )}
+                        </div>
+                        <input type="hidden" name="folders" id="folders-hidden" value={props.selected_folder_ids} />
+                        <span class="form-hint">A file can be in multiple folders.</span>
+                    </div>
+                ) else (<span></span>)}
+
+                <div class="form-group">
+                    <label for="tags">Tags</label>
+                    <input
+                        type="text"
+                        id="tags"
+                        name="tags"
+                        value={props.tags_display}
+                        class="form-control"
+                        placeholder="Comma-separated tags"
+                    />
+                    <span class="form-hint">Separate tags with commas. New tags are created automatically.</span>
+                </div>
+
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">Save</button>
                     <a href="/admin/media" class="btn">Cancel</a>
@@ -168,3 +221,4 @@ pub fn Edit(props: struct {
         </div>
     </div>
 }
+

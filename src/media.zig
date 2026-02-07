@@ -513,6 +513,343 @@ fn parseMediaRow(allocator: Allocator, stmt: *Statement) !MediaRecord {
 }
 
 // =============================================================================
+// Term Management (Folders & Tags)
+// =============================================================================
+
+pub const TermRecord = struct {
+    id: []const u8,
+    taxonomy_id: []const u8,
+    slug: []const u8,
+    name: []const u8,
+    parent_id: ?[]const u8,
+    description: []const u8,
+    sort_order: i64,
+};
+
+/// Taxonomy IDs
+pub const tax_media_folders = "tax_media_folders";
+pub const tax_media_tags = "tax_media_tags";
+
+/// Generate a unique term ID with t_ prefix
+pub fn generateTermId(allocator: Allocator) ![]u8 {
+    var id_buf: [20]u8 = undefined;
+    id_buf[0] = 't';
+    id_buf[1] = '_';
+
+    var rand_buf: [12]u8 = undefined;
+    std.crypto.random.bytes(&rand_buf);
+
+    const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
+    for (rand_buf, 0..) |byte, i| {
+        id_buf[2 + i] = charset[byte % charset.len];
+    }
+
+    return try allocator.dupe(u8, id_buf[0..14]);
+}
+
+/// Create a term (folder or tag)
+pub fn createTerm(
+    allocator: Allocator,
+    db: *Db,
+    taxonomy_id: []const u8,
+    name: []const u8,
+    parent_id: ?[]const u8,
+) !TermRecord {
+    const id = try generateTermId(allocator);
+    const slug = try slugify(allocator, name);
+    defer allocator.free(slug);
+
+    var stmt = try db.prepare(
+        \\INSERT INTO terms (id, taxonomy_id, slug, name, parent_id, description, sort_order)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, '', 0)
+    );
+    defer stmt.deinit();
+
+    try stmt.bindText(1, id);
+    try stmt.bindText(2, taxonomy_id);
+    try stmt.bindText(3, slug);
+    try stmt.bindText(4, name);
+    if (parent_id) |pid| try stmt.bindText(5, pid) else try stmt.bindNull(5);
+
+    _ = try stmt.step();
+
+    return .{
+        .id = id,
+        .taxonomy_id = try allocator.dupe(u8, taxonomy_id),
+        .slug = try allocator.dupe(u8, slug),
+        .name = try allocator.dupe(u8, name),
+        .parent_id = if (parent_id) |pid| try allocator.dupe(u8, pid) else null,
+        .description = try allocator.dupe(u8, ""),
+        .sort_order = 0,
+    };
+}
+
+/// List terms for a taxonomy, ordered by sort_order then name
+pub fn listTerms(
+    allocator: Allocator,
+    db: *Db,
+    taxonomy_id: []const u8,
+) ![]TermRecord {
+    var stmt = try db.prepare(
+        "SELECT id, taxonomy_id, slug, name, parent_id, description, sort_order FROM terms WHERE taxonomy_id = ?1 ORDER BY sort_order, name",
+    );
+    defer stmt.deinit();
+
+    try stmt.bindText(1, taxonomy_id);
+
+    var items: std.ArrayListUnmanaged(TermRecord) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, .{
+            .id = try allocator.dupe(u8, stmt.columnText(0) orelse ""),
+            .taxonomy_id = try allocator.dupe(u8, stmt.columnText(1) orelse ""),
+            .slug = try allocator.dupe(u8, stmt.columnText(2) orelse ""),
+            .name = try allocator.dupe(u8, stmt.columnText(3) orelse ""),
+            .parent_id = if (stmt.columnText(4)) |p| try allocator.dupe(u8, p) else null,
+            .description = try allocator.dupe(u8, stmt.columnText(5) orelse ""),
+            .sort_order = stmt.columnInt(6),
+        });
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Rename a term
+pub fn renameTerm(db: *Db, term_id: []const u8, new_name: []const u8) !void {
+    var stmt = try db.prepare("UPDATE terms SET name = ?2 WHERE id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, term_id);
+    try stmt.bindText(2, new_name);
+    _ = try stmt.step();
+}
+
+/// Delete a term (cascades to media_terms associations)
+pub fn deleteTerm(db: *Db, term_id: []const u8) !void {
+    // First, unparent any children
+    var unparent = try db.prepare("UPDATE terms SET parent_id = NULL WHERE parent_id = ?1");
+    defer unparent.deinit();
+    try unparent.bindText(1, term_id);
+    _ = try unparent.step();
+
+    var stmt = try db.prepare("DELETE FROM terms WHERE id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, term_id);
+    _ = try stmt.step();
+}
+
+/// Get term IDs assigned to a media item, optionally filtered by taxonomy
+pub fn getMediaTermIds(
+    allocator: Allocator,
+    db: *Db,
+    media_id: []const u8,
+    taxonomy_id: ?[]const u8,
+) ![][]const u8 {
+    var items: std.ArrayListUnmanaged([]const u8) = .{};
+    errdefer items.deinit(allocator);
+
+    if (taxonomy_id) |tax_id| {
+        var stmt = try db.prepare(
+            "SELECT mt.term_id FROM media_terms mt JOIN terms t ON t.id = mt.term_id WHERE mt.media_id = ?1 AND t.taxonomy_id = ?2",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, media_id);
+        try stmt.bindText(2, tax_id);
+
+        while (try stmt.step()) {
+            try items.append(allocator, try allocator.dupe(u8, stmt.columnText(0) orelse ""));
+        }
+    } else {
+        var stmt = try db.prepare("SELECT term_id FROM media_terms WHERE media_id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, media_id);
+
+        while (try stmt.step()) {
+            try items.append(allocator, try allocator.dupe(u8, stmt.columnText(0) orelse ""));
+        }
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Get term names assigned to a media item for a taxonomy (for display)
+pub fn getMediaTermNames(
+    allocator: Allocator,
+    db: *Db,
+    media_id: []const u8,
+    taxonomy_id: []const u8,
+) ![][]const u8 {
+    var stmt = try db.prepare(
+        "SELECT t.name FROM media_terms mt JOIN terms t ON t.id = mt.term_id WHERE mt.media_id = ?1 AND t.taxonomy_id = ?2 ORDER BY t.name",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, media_id);
+    try stmt.bindText(2, taxonomy_id);
+
+    var items: std.ArrayListUnmanaged([]const u8) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try allocator.dupe(u8, stmt.columnText(0) orelse ""));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Count media in a specific term
+pub fn countMediaInTerm(db: *Db, term_id: []const u8) !u32 {
+    var stmt = try db.prepare("SELECT COUNT(*) FROM media_terms WHERE term_id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, term_id);
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// List media filtered by term_id. Returns media IDs in that term.
+pub fn listMediaByTerm(
+    allocator: Allocator,
+    db: *Db,
+    term_id: []const u8,
+    opts: MediaListOptions,
+) ![]MediaRecord {
+    // Build query with term join
+    var sql_buf: [1024]u8 = undefined;
+    const sql = std.fmt.bufPrint(&sql_buf,
+        \\SELECT m.id, m.filename, m.mime_type, m.size, m.width, m.height,
+        \\m.storage_key, m.visibility, m.hash, m.data, m.created_at, m.updated_at
+        \\FROM media m
+        \\JOIN media_terms mt ON mt.media_id = m.id
+        \\WHERE mt.term_id = ?1
+        \\ORDER BY m.{s} {s}
+        \\{s}{s}
+    , .{
+        opts.order_by,
+        if (opts.order_dir == .asc) "ASC" else "DESC",
+        if (opts.limit != null) "LIMIT " else "",
+        if (opts.limit != null) "?" else "",
+    }) catch return error.OutOfMemory;
+
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+    try stmt.bindText(1, term_id);
+    if (opts.limit) |l| {
+        try stmt.bindInt(2, @intCast(l));
+    }
+
+    var items: std.ArrayListUnmanaged(MediaRecord) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try parseMediaRow(allocator, &stmt));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Check if a media record exists with a given storage key
+pub fn mediaExistsByStorageKey(db: *Db, storage_key: []const u8) !bool {
+    var stmt = try db.prepare("SELECT 1 FROM media WHERE storage_key = ?1 LIMIT 1");
+    defer stmt.deinit();
+    try stmt.bindText(1, storage_key);
+    return try stmt.step();
+}
+
+/// Flag a media record as missing (file no longer on disk)
+pub fn flagMediaMissing(db: *Db, media_id: []const u8) !void {
+    // Use the data JSON to store a "missing" flag
+    var stmt = try db.prepare(
+        "UPDATE media SET data = json_set(data, '$.synced_missing', 1), updated_at = unixepoch() WHERE id = ?1",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, media_id);
+    _ = try stmt.step();
+}
+
+/// Mark a media record as synced (unreviewed)
+pub fn markMediaSynced(db: *Db, media_id: []const u8) !void {
+    var stmt = try db.prepare(
+        "UPDATE media SET data = json_set(data, '$.synced', 1), updated_at = unixepoch() WHERE id = ?1",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, media_id);
+    _ = try stmt.step();
+}
+
+/// Count unreviewed (synced) media
+pub fn countUnreviewedMedia(db: *Db) !u32 {
+    var stmt = try db.prepare(
+        "SELECT COUNT(*) FROM media WHERE json_extract(data, '$.synced') = 1",
+    );
+    defer stmt.deinit();
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// List unreviewed (synced) media
+pub fn listUnreviewedMedia(
+    allocator: Allocator,
+    db: *Db,
+    opts: MediaListOptions,
+) ![]MediaRecord {
+    var sql_buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrint(&sql_buf,
+        \\SELECT id, filename, mime_type, size, width, height,
+        \\storage_key, visibility, hash, data, created_at, updated_at
+        \\FROM media WHERE json_extract(data, '$.synced') = 1
+        \\ORDER BY {s} {s}
+        \\{s}{s}
+    , .{
+        opts.order_by,
+        if (opts.order_dir == .asc) "ASC" else "DESC",
+        if (opts.limit != null) "LIMIT " else "",
+        if (opts.limit != null) "?" else "",
+    }) catch return error.OutOfMemory;
+
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+    if (opts.limit) |l| {
+        try stmt.bindInt(1, @intCast(l));
+    }
+
+    var items: std.ArrayListUnmanaged(MediaRecord) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try parseMediaRow(allocator, &stmt));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Simple slugify: lowercase, replace non-alphanumeric with hyphens
+fn slugify(allocator: Allocator, name: []const u8) ![]u8 {
+    var buf = try allocator.alloc(u8, name.len);
+    var len: usize = 0;
+    var prev_hyphen = false;
+
+    for (name) |c| {
+        const lower = if (c >= 'A' and c <= 'Z') c + 32 else c;
+        if (std.ascii.isAlphanumeric(lower)) {
+            buf[len] = lower;
+            len += 1;
+            prev_hyphen = false;
+        } else if (!prev_hyphen and len > 0) {
+            buf[len] = '-';
+            len += 1;
+            prev_hyphen = true;
+        }
+    }
+
+    if (len > 0 and buf[len - 1] == '-') len -= 1;
+    if (len == 0) {
+        allocator.free(buf);
+        return try allocator.dupe(u8, "term");
+    }
+
+    return try allocator.realloc(buf, len);
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -829,4 +1166,165 @@ test "listMedia with MetaFilter" {
 test "Visibility re-export from storage" {
     try std.testing.expectEqualStrings("public", Visibility.public.toString());
     try std.testing.expectEqualStrings("private", Visibility.private.toString());
+}
+
+test "slugify: basic name" {
+    const slug = try slugify(std.testing.allocator, "My Folder");
+    defer std.testing.allocator.free(slug);
+    try std.testing.expectEqualStrings("my-folder", slug);
+}
+
+test "slugify: special chars" {
+    const slug = try slugify(std.testing.allocator, "Photo & Videos (2026)");
+    defer std.testing.allocator.free(slug);
+    try std.testing.expectEqualStrings("photo-videos-2026", slug);
+}
+
+test "createTerm and listTerms" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    const term = try createTerm(std.testing.allocator, &db, tax_media_folders, "Photos", null);
+    defer std.testing.allocator.free(term.id);
+    defer std.testing.allocator.free(term.taxonomy_id);
+    defer std.testing.allocator.free(term.slug);
+    defer std.testing.allocator.free(term.name);
+    defer std.testing.allocator.free(term.description);
+
+    try std.testing.expectEqualStrings("Photos", term.name);
+    try std.testing.expectEqualStrings("photos", term.slug);
+
+    const terms = try listTerms(std.testing.allocator, &db, tax_media_folders);
+    defer {
+        for (terms) |t| {
+            std.testing.allocator.free(t.id);
+            std.testing.allocator.free(t.taxonomy_id);
+            std.testing.allocator.free(t.slug);
+            std.testing.allocator.free(t.name);
+            std.testing.allocator.free(t.description);
+            if (t.parent_id) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(terms);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), terms.len);
+    try std.testing.expectEqualStrings("Photos", terms[0].name);
+}
+
+test "renameTerm" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    const term = try createTerm(std.testing.allocator, &db, tax_media_tags, "Old Name", null);
+    defer std.testing.allocator.free(term.id);
+    defer std.testing.allocator.free(term.taxonomy_id);
+    defer std.testing.allocator.free(term.slug);
+    defer std.testing.allocator.free(term.name);
+    defer std.testing.allocator.free(term.description);
+
+    try renameTerm(&db, term.id, "New Name");
+
+    const terms = try listTerms(std.testing.allocator, &db, tax_media_tags);
+    defer {
+        for (terms) |t| {
+            std.testing.allocator.free(t.id);
+            std.testing.allocator.free(t.taxonomy_id);
+            std.testing.allocator.free(t.slug);
+            std.testing.allocator.free(t.name);
+            std.testing.allocator.free(t.description);
+            if (t.parent_id) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(terms);
+    }
+
+    try std.testing.expectEqualStrings("New Name", terms[0].name);
+}
+
+test "deleteTerm removes term and unparents children" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    defer std.testing.allocator.free(parent.id);
+    defer std.testing.allocator.free(parent.taxonomy_id);
+    defer std.testing.allocator.free(parent.slug);
+    defer std.testing.allocator.free(parent.name);
+    defer std.testing.allocator.free(parent.description);
+
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    defer std.testing.allocator.free(child.id);
+    defer std.testing.allocator.free(child.taxonomy_id);
+    defer std.testing.allocator.free(child.slug);
+    defer std.testing.allocator.free(child.name);
+    defer std.testing.allocator.free(child.description);
+    defer if (child.parent_id) |p| std.testing.allocator.free(p);
+
+    try deleteTerm(&db, parent.id);
+
+    const terms = try listTerms(std.testing.allocator, &db, tax_media_folders);
+    defer {
+        for (terms) |t| {
+            std.testing.allocator.free(t.id);
+            std.testing.allocator.free(t.taxonomy_id);
+            std.testing.allocator.free(t.slug);
+            std.testing.allocator.free(t.name);
+            std.testing.allocator.free(t.description);
+            if (t.parent_id) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(terms);
+    }
+
+    // Only child remains with null parent
+    try std.testing.expectEqual(@as(usize, 1), terms.len);
+    try std.testing.expect(terms[0].parent_id == null);
+}
+
+test "getMediaTermIds returns assigned terms" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    const record = try createMedia(std.testing.allocator, &db, .{
+        .filename = "photo.jpg",
+        .mime_type = "image/jpeg",
+        .size = 100,
+        .storage_key = "2026/02/photo.jpg",
+    });
+    defer std.testing.allocator.free(record.id);
+    defer std.testing.allocator.free(record.filename);
+    defer std.testing.allocator.free(record.mime_type);
+    defer std.testing.allocator.free(record.storage_key);
+    defer std.testing.allocator.free(record.visibility);
+
+    const folder = try createTerm(std.testing.allocator, &db, tax_media_folders, "Folder", null);
+    defer std.testing.allocator.free(folder.id);
+    defer std.testing.allocator.free(folder.taxonomy_id);
+    defer std.testing.allocator.free(folder.slug);
+    defer std.testing.allocator.free(folder.name);
+    defer std.testing.allocator.free(folder.description);
+
+    try syncMediaTerms(&db, record.id, &.{folder.id});
+
+    const term_ids = try getMediaTermIds(std.testing.allocator, &db, record.id, tax_media_folders);
+    defer {
+        for (term_ids) |tid| std.testing.allocator.free(tid);
+        std.testing.allocator.free(term_ids);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), term_ids.len);
+    try std.testing.expectEqualStrings(folder.id, term_ids[0]);
+}
+
+test "mediaExistsByStorageKey" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    _ = try createMedia(std.testing.allocator, &db, .{
+        .filename = "exists.jpg",
+        .mime_type = "image/jpeg",
+        .size = 100,
+        .storage_key = "2026/02/exists.jpg",
+    });
+
+    try std.testing.expect(try mediaExistsByStorageKey(&db, "2026/02/exists.jpg"));
+    try std.testing.expect(!try mediaExistsByStorageKey(&db, "2026/02/missing.jpg"));
 }

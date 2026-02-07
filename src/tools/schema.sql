@@ -134,3 +134,7 @@ CREATE TABLE IF NOT EXISTS media_terms (
     PRIMARY KEY (media_id, term_id)
 );
 CREATE INDEX IF NOT EXISTS idx_media_terms_term ON media_terms(term_id);
+
+-- Media taxonomies
+INSERT OR IGNORE INTO taxonomies (id, slug, name, hierarchical) VALUES ('tax_media_folders', 'media-folders', 'Media Folders', 1);
+INSERT OR IGNORE INTO taxonomies (id, slug, name, hierarchical) VALUES ('tax_media_tags', 'media-tags', 'Media Tags', 0);

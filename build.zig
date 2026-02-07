@@ -414,6 +414,16 @@ pub fn build(b: *std.Build) void {
             .{ .name = "storage", .module = storage_module },
         },
     });
+    // Media filesystem sync
+    const media_sync_module = b.createModule(.{
+        .root_source_file = b.path("src/media_sync.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "media", .module = media_module },
+            .{ .name = "storage", .module = storage_module },
+        },
+    });
+    media_sync_module.addIncludePath(b.path("vendor"));
 
     const tpl_module = b.createModule(.{
         .root_source_file = b.path("src/tpl.zig"),
@@ -559,9 +569,11 @@ pub fn build(b: *std.Build) void {
             .{ .name = "csrf", .module = csrf_module },
             .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "media", .module = media_module },
+            .{ .name = "media_sync", .module = media_sync_module },
             .{ .name = "storage", .module = storage_module },
             .{ .name = "schema_media", .module = schema_media_module },
             .{ .name = "media_handler", .module = media_handler_module },
+            .{ .name = "db", .module = db_module },
             .{ .name = "zsx_admin_media_list", .module = zsx_admin_media_list },
             .{ .name = "zsx_admin_media_edit", .module = zsx_admin_media_edit },
             .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
@@ -641,6 +653,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("cms", cms_module);
     exe.root_module.addImport("storage", storage_module);
     exe.root_module.addImport("media", media_module);
+    exe.root_module.addImport("media_sync", media_sync_module);
     exe.root_module.addImport("media_handler", media_handler_module);
     exe.root_module.addImport("image", image_module);
 
@@ -731,6 +744,7 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("schema_media", schema_media_module);
     exe_tests.root_module.addImport("storage", storage_module);
     exe_tests.root_module.addImport("media", media_module);
+    exe_tests.root_module.addImport("media_sync", media_sync_module);
     exe_tests.root_module.addImport("media_handler", media_handler_module);
     exe_tests.root_module.addImport("image", image_module);
 
