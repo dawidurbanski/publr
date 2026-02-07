@@ -10,24 +10,13 @@ const Db = db_mod.Db;
 const Statement = db_mod.Statement;
 const cms = @import("cms");
 const media_schema = @import("schema_media");
+const storage = @import("storage");
 
 const Allocator = std.mem.Allocator;
 
-/// Visibility levels for media files
-pub const Visibility = enum {
-    public,
-    private,
-
-    pub fn toString(self: Visibility) []const u8 {
-        return @tagName(self);
-    }
-
-    pub fn fromString(s: []const u8) ?Visibility {
-        if (std.mem.eql(u8, s, "public")) return .public;
-        if (std.mem.eql(u8, s, "private")) return .private;
-        return null;
-    }
-};
+pub const Visibility = storage.Visibility;
+pub const StorageBackend = storage.StorageBackend;
+pub const ImageParams = storage.ImageParams;
 
 /// Media record from the database
 pub const MediaRecord = struct {
@@ -201,12 +190,92 @@ pub fn updateMedia(
     return try getMedia(allocator, db, id);
 }
 
-/// Delete a media record
+/// Upload a file: validate, store on disk, compute hash, create DB record.
+/// This is the high-level entry point for media uploads.
+pub fn uploadMedia(
+    allocator: Allocator,
+    db: *Db,
+    backend: StorageBackend,
+    input: UploadInput,
+) !MediaRecord {
+    // Validate size
+    const max_size = input.max_size orelse storage.default_max_size;
+    if (!storage.validateSize(input.data.len, max_size)) {
+        return error.FileTooLarge;
+    }
+
+    // Validate mime type
+    if (!storage.validateMimeType(input.mime_type)) {
+        return error.InvalidMimeType;
+    }
+
+    // Compute SHA-256 hash
+    const hash = try storage.computeHash(allocator, input.data);
+
+    // Save to storage backend
+    const storage_key = try backend.save(allocator, input.filename, input.data, input.visibility);
+
+    // Create DB record
+    return createMedia(allocator, db, .{
+        .filename = input.filename,
+        .mime_type = input.mime_type,
+        .size = @intCast(input.data.len),
+        .width = input.width,
+        .height = input.height,
+        .storage_key = storage_key,
+        .visibility = input.visibility,
+        .hash = hash,
+        .data = input.metadata,
+    });
+}
+
+/// Input for uploadMedia
+pub const UploadInput = struct {
+    filename: []const u8,
+    mime_type: []const u8,
+    data: []const u8,
+    visibility: Visibility = .public,
+    width: ?i64 = null,
+    height: ?i64 = null,
+    metadata: media_schema.Media.Data = .{},
+    max_size: ?usize = null,
+};
+
+/// Delete a media record (DB only, no file cleanup)
 pub fn deleteMedia(db: *Db, media_id: []const u8) !void {
     var stmt = try db.prepare("DELETE FROM media WHERE id = ?1");
     defer stmt.deinit();
     try stmt.bindText(1, media_id);
     _ = try stmt.step();
+}
+
+/// Full delete: remove files from storage, then remove DB record.
+/// Looks up the storage key from the DB, deletes via backend, then removes the record.
+pub fn fullDeleteMedia(
+    allocator: Allocator,
+    db: *Db,
+    backend: StorageBackend,
+    media_id: []const u8,
+) !void {
+    // Get the record to find the storage key
+    const record = try getMedia(allocator, db, media_id) orelse return;
+    defer {
+        allocator.free(record.id);
+        allocator.free(record.filename);
+        allocator.free(record.mime_type);
+        allocator.free(record.storage_key);
+        allocator.free(record.visibility);
+        if (record.hash) |h| allocator.free(h);
+    }
+
+    // Delete files from storage
+    backend.delete(allocator, record.storage_key) catch |err| {
+        // Log but don't fail — DB record should still be cleaned up
+        std.debug.print("Warning: failed to delete storage for {s}: {}\n", .{ media_id, err });
+    };
+
+    // Delete DB record (cascades to media_meta and media_terms)
+    try deleteMedia(db, media_id);
 }
 
 /// Count media records
@@ -652,10 +721,7 @@ test "listMedia with MetaFilter" {
     try std.testing.expectEqualStrings("john.jpg", results[0].filename);
 }
 
-test "Visibility enum conversions" {
+test "Visibility re-export from storage" {
     try std.testing.expectEqualStrings("public", Visibility.public.toString());
     try std.testing.expectEqualStrings("private", Visibility.private.toString());
-    try std.testing.expect(Visibility.fromString("public") == .public);
-    try std.testing.expect(Visibility.fromString("private") == .private);
-    try std.testing.expect(Visibility.fromString("invalid") == null);
 }

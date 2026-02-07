@@ -378,6 +378,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "db", .module = db_module },
         },
     });
+    // Storage backend
+    const storage_module = b.createModule(.{
+        .root_source_file = b.path("src/storage.zig"),
+    });
     // Media CRUD API
     const media_module = b.createModule(.{
         .root_source_file = b.path("src/media.zig"),
@@ -385,6 +389,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "db", .module = db_module },
             .{ .name = "cms", .module = cms_module },
             .{ .name = "schema_media", .module = schema_media_module },
+            .{ .name = "storage", .module = storage_module },
         },
     });
 
@@ -575,6 +580,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("schema_sync", schema_sync_module);
     exe.root_module.addImport("schema_media", schema_media_module);
     exe.root_module.addImport("cms", cms_module);
+    exe.root_module.addImport("storage", storage_module);
     exe.root_module.addImport("media", media_module);
 
     // Add plugin modules to main exe
@@ -646,6 +652,7 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("admin_api", admin_api_module);
     exe_tests.root_module.addImport("icons", icons_module);
     exe_tests.root_module.addImport("schema_media", schema_media_module);
+    exe_tests.root_module.addImport("storage", storage_module);
     exe_tests.root_module.addImport("media", media_module);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
