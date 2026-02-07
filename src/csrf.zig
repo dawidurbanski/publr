@@ -41,8 +41,57 @@ pub fn ensureToken(ctx: *Context) []const u8 {
 
 fn validateCsrf(ctx: *Context) bool {
     const cookie_token = auth_middleware.parseCookie(ctx, CSRF_COOKIE) orelse return false;
-    const form_token = ctx.formValue(CSRF_FIELD) orelse ctx.getRequestHeader("X-CSRF-Token") orelse return false;
+    const form_token = ctx.formValue(CSRF_FIELD) orelse
+        ctx.getRequestHeader("X-CSRF-Token") orelse
+        multipartFormValue(ctx, CSRF_FIELD) orelse
+        return false;
     return std.mem.eql(u8, cookie_token, form_token);
+}
+
+/// Extract a form field value from a multipart/form-data body.
+/// Only used as fallback when URL-encoded parsing fails.
+fn multipartFormValue(ctx: *Context, name: []const u8) ?[]const u8 {
+    const content_type = ctx.getRequestHeader("Content-Type") orelse return null;
+    const boundary_marker = "boundary=";
+    const boundary_idx = std.mem.indexOf(u8, content_type, boundary_marker) orelse return null;
+    const boundary = content_type[boundary_idx + boundary_marker.len ..];
+    if (boundary.len == 0) return null;
+
+    const body_content = ctx.body orelse return null;
+
+    // Build the needle: Content-Disposition: form-data; name="<name>"
+    var needle_buf: [128]u8 = undefined;
+    const needle = std.fmt.bufPrint(&needle_buf, "name=\"{s}\"", .{name}) catch return null;
+
+    // Find the part containing this field name
+    var search_pos: usize = 0;
+    while (std.mem.indexOfPos(u8, body_content, search_pos, needle)) |name_pos| {
+        // Find the blank line after headers (\r\n\r\n)
+        const after_name = body_content[name_pos..];
+        const header_end = std.mem.indexOf(u8, after_name, "\r\n\r\n") orelse {
+            search_pos = name_pos + needle.len;
+            continue;
+        };
+
+        // Check this is NOT a file field (no filename= before the header end)
+        const header_section = after_name[0..header_end];
+        if (std.mem.indexOf(u8, header_section, "filename=") != null) {
+            search_pos = name_pos + needle.len;
+            continue;
+        }
+
+        const value_start = name_pos + header_end + 4;
+        const remaining = body_content[value_start..];
+
+        // Value ends at next boundary
+        var delim_buf: [256]u8 = undefined;
+        const delim = std.fmt.bufPrint(&delim_buf, "\r\n--{s}", .{boundary}) catch return null;
+
+        const value_end = std.mem.indexOf(u8, remaining, delim) orelse remaining.len;
+        return remaining[0..value_end];
+    }
+
+    return null;
 }
 
 fn isStateChanging(method: mw.Method) bool {

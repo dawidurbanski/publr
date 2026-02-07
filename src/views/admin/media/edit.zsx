@@ -1,0 +1,170 @@
+// Media edit template — metadata editor with preview
+
+const std = @import("std");
+
+const icon_image =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_file =
+    \\<svg class="icon icon-lg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2.26946V6.4C14 6.96005 14 7.24008 14.109 7.45399C14.2049 7.64215 14.3578 7.79513 14.546 7.89101C14.7599 8 15.0399 8 15.6 8H19.7305M20 9.98822V17.2C20 18.8802 20 19.7202 19.673 20.362C19.3854 20.9265 18.9265 21.3854 18.362 21.673C17.7202 22 16.8802 22 15.2 22H8.8C7.11984 22 6.27976 22 5.63803 21.673C5.07354 21.3854 4.6146 20.9265 4.32698 20.362C4 19.7202 4 18.8802 4 17.2V6.8C4 5.11984 4 4.27976 4.32698 3.63803C4.6146 3.07354 5.07354 2.6146 5.63803 2.32698C6.27976 2 7.11984 2 8.8 2H12.0118C12.7455 2 13.1124 2 13.4577 2.08289C13.7638 2.15638 14.0564 2.27759 14.3249 2.44208C14.6276 2.6276 14.887 2.88703 15.4059 3.40589L18.5941 6.59411C19.113 7.11297 19.3724 7.3724 19.5579 7.67515C19.7224 7.94356 19.8436 8.2362 19.9171 8.5423C20 8.88757 20 9.25445 20 9.98822Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
+const MediaData = struct {
+    id: []const u8,
+    filename: []const u8,
+    mime_type: []const u8,
+    size_display: []const u8,
+    dimensions: []const u8,
+    visibility: []const u8,
+    is_image: bool,
+    is_private: bool,
+    preview_url: []const u8,
+    media_url: []const u8,
+    alt_text: []const u8,
+    caption: []const u8,
+    credit: []const u8,
+    focal_point: []const u8,
+    created_at: []const u8,
+};
+
+pub fn Edit(props: struct {
+    media: MediaData,
+    csrf_token: []const u8,
+    action: []const u8,
+    delete_url: []const u8,
+    toggle_url: []const u8,
+}) {
+    <div class="media-edit">
+        <div class="media-edit-preview">
+            {if (props.media.is_image) (
+                <div class="media-preview-image" data-publr-component="focal-point" data-publr-value={props.media.focal_point} data-publr-input="focal_point">
+                    <img src={props.media.preview_url} alt={props.media.filename} draggable="false" data-publr-part="image" />
+                    <div class="focal-point-marker" data-publr-part="marker" data-publr-component="tooltip">
+                        <div data-publr-part="trigger" class="focal-point-marker-dot"></div>
+                        <span data-publr-part="content" class="tooltip-content">Click to set focal point for image cropping</span>
+                    </div>
+                    <span class="focal-point-label" data-publr-part="label"></span>
+                </div>
+            ) else (
+                <div class="media-preview-file">
+                    {!icon_file}
+                    <span class="media-preview-filename">{props.media.filename}</span>
+                </div>
+            )}
+
+            <div class="media-file-info">
+                <dl class="media-info-list">
+                    <div class="media-info-row">
+                        <dt>Filename</dt>
+                        <dd>{props.media.filename}</dd>
+                    </div>
+                    <div class="media-info-row">
+                        <dt>Type</dt>
+                        <dd>{props.media.mime_type}</dd>
+                    </div>
+                    <div class="media-info-row">
+                        <dt>Size</dt>
+                        <dd>{props.media.size_display}</dd>
+                    </div>
+                    {if (props.media.dimensions.len > 0) (
+                        <div class="media-info-row">
+                            <dt>Dimensions</dt>
+                            <dd>{props.media.dimensions}</dd>
+                        </div>
+                    ) else (<span></span>)}
+                    <div class="media-info-row">
+                        <dt>Uploaded</dt>
+                        <dd>{props.media.created_at}</dd>
+                    </div>
+                    <div class="media-info-row">
+                        <dt>URL</dt>
+                        <dd><a href={props.media.media_url} class="media-url-link" target="_blank">{props.media.media_url}</a></dd>
+                    </div>
+                </dl>
+            </div>
+
+            <div class="media-visibility">
+                <div class="media-visibility-status">
+                    <span class={if (props.media.is_private) ("badge badge-draft") else ("badge badge-published")}>{props.media.visibility}</span>
+                </div>
+                <form method="POST" action={props.toggle_url} class="media-visibility-form">
+                    <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    {if (props.media.is_private) (
+                        <button type="submit" class="btn btn-sm">Make Public</button>
+                    ) else (
+                        <button type="submit" class="btn btn-sm">Make Private</button>
+                    )}
+                </form>
+            </div>
+        </div>
+
+        <div class="media-edit-form">
+            <form method="POST" action={props.action} class="form">
+                <input type="hidden" name="_csrf" value={props.csrf_token} />
+
+                <div class="form-group">
+                    <label for="alt_text">Alt Text</label>
+                    <input
+                        type="text"
+                        id="alt_text"
+                        name="alt_text"
+                        value={props.media.alt_text}
+                        class="form-control"
+                        placeholder="Describe this image for accessibility"
+                    />
+                    <span class="form-hint">Describes the image for screen readers and when images fail to load.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="caption">Caption</label>
+                    <textarea
+                        id="caption"
+                        name="caption"
+                        class="form-control"
+                        rows="3"
+                        placeholder="Optional caption displayed below the media"
+                    >{props.media.caption}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="credit">Credit</label>
+                    <input
+                        type="text"
+                        id="credit"
+                        name="credit"
+                        value={props.media.credit}
+                        class="form-control"
+                        placeholder="Photo by..."
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="focal_point">Focal Point</label>
+                    <input
+                        type="text"
+                        id="focal_point"
+                        name="focal_point"
+                        value={props.media.focal_point}
+                        class="form-control"
+                        readonly=""
+                    />
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <a href="/admin/media" class="btn">Cancel</a>
+                </div>
+            </form>
+
+            <div class="media-danger-zone">
+                <h3 class="media-danger-title">Danger Zone</h3>
+                <form method="POST" action={props.delete_url}>
+                    <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <button type="submit" class="btn btn-danger" onclick="return confirm('Delete this file permanently? This cannot be undone.')">
+                        Delete File
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+}

@@ -128,30 +128,30 @@ fn fsDelete(allocator: Allocator, storage_key: []const u8) anyerror!void {
 /// Generate a URL for a stored media file
 fn fsUrl(allocator: Allocator, storage_key: []const u8, _: Visibility, params: ImageParams) anyerror![]const u8 {
     // Base URL: /media/{storage_key}
-    var buf = std.ArrayList(u8).init(allocator);
-    errdefer buf.deinit();
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
 
-    try buf.appendSlice("/media/");
-    try buf.appendSlice(storage_key);
+    try buf.appendSlice(allocator, "/media/");
+    try buf.appendSlice(allocator, storage_key);
 
     // Append query params if any
     var has_param = false;
     if (params.width) |w| {
-        try buf.append('?');
-        try std.fmt.format(buf.writer(), "w={}", .{w});
+        try buf.append(allocator, '?');
+        try std.fmt.format(buf.writer(allocator), "w={}", .{w});
         has_param = true;
     }
     if (params.height) |h| {
-        try buf.append(if (has_param) '&' else '?');
-        try std.fmt.format(buf.writer(), "h={}", .{h});
+        try buf.append(allocator, if (has_param) '&' else '?');
+        try std.fmt.format(buf.writer(allocator), "h={}", .{h});
         has_param = true;
     }
     if (params.format) |f| {
-        try buf.append(if (has_param) '&' else '?');
-        try std.fmt.format(buf.writer(), "fmt={s}", .{@tagName(f)});
+        try buf.append(allocator, if (has_param) '&' else '?');
+        try std.fmt.format(buf.writer(allocator), "fmt={s}", .{@tagName(f)});
     }
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 // =============================================================================
@@ -250,16 +250,38 @@ fn epochDayToYMD(epoch_day: u64) YMD {
     };
 }
 
-fn sanitizeFilename(filename: []const u8) struct { stem: []const u8, ext: []const u8 } {
+const SanitizedFilename = struct { stem: []const u8, ext: []const u8 };
+
+threadlocal var sanitize_buf: [256]u8 = undefined;
+
+fn sanitizeFilename(filename: []const u8) SanitizedFilename {
     // Find extension
     const dot_idx = std.mem.lastIndexOfScalar(u8, filename, '.');
     const raw_stem = if (dot_idx) |i| filename[0..i] else filename;
     const ext = if (dot_idx) |i| filename[i..] else "";
 
-    // Sanitize stem: lowercase is done at query time, just limit to safe chars
-    // For now return the raw stem (we trust the caller for basic safety)
-    // A full sanitizer would strip non-alphanumeric except hyphens/underscores
-    return .{ .stem = if (raw_stem.len > 0) raw_stem else "file", .ext = ext };
+    // Sanitize stem: keep alphanumeric, hyphens, underscores; replace rest with hyphen
+    var out_len: usize = 0;
+    var prev_hyphen = false;
+    for (raw_stem) |c| {
+        if (out_len >= sanitize_buf.len) break;
+        const lower = if (c >= 'A' and c <= 'Z') c + 32 else c;
+        if (std.ascii.isAlphanumeric(lower) or lower == '_') {
+            sanitize_buf[out_len] = lower;
+            out_len += 1;
+            prev_hyphen = false;
+        } else if (!prev_hyphen and out_len > 0) {
+            sanitize_buf[out_len] = '-';
+            out_len += 1;
+            prev_hyphen = true;
+        }
+    }
+
+    // Trim trailing hyphen
+    if (out_len > 0 and sanitize_buf[out_len - 1] == '-') out_len -= 1;
+
+    const stem = if (out_len > 0) sanitize_buf[0..out_len] else "file";
+    return .{ .stem = stem, .ext = ext };
 }
 
 fn randomSuffix(buf: *[6]u8) void {
@@ -304,6 +326,45 @@ fn deleteCacheDerivatives(allocator: Allocator, storage_key: []const u8, visibil
         if (std.mem.startsWith(u8, entry.name, stem)) {
             const rest = entry.name[stem.len..];
             if (rest.len > 0 and (rest[0] == '_' or rest[0] == '.')) {
+                dir.deleteFile(entry.name) catch {};
+            }
+        }
+    }
+}
+
+/// Delete only resized cached derivatives (those with `_w` suffix) for a storage key.
+/// Used when focal point changes — format-only conversions are unaffected.
+pub fn deleteResizedDerivatives(allocator: Allocator, storage_key: []const u8) !void {
+    try deleteResizedForVisibility(allocator, storage_key, .public);
+    try deleteResizedForVisibility(allocator, storage_key, .private);
+}
+
+fn deleteResizedForVisibility(allocator: Allocator, storage_key: []const u8, visibility: Visibility) !void {
+    const dir_part = std.fs.path.dirname(storage_key) orelse "";
+    const basename = std.fs.path.basename(storage_key);
+    const dot_idx = std.mem.lastIndexOfScalar(u8, basename, '.') orelse basename.len;
+    const stem = basename[0..dot_idx];
+
+    const cache_base = switch (visibility) {
+        .public => media_dir ++ "/.cache",
+        .private => media_dir ++ "/.private/.cache",
+    };
+
+    const cache_dir_path = if (dir_part.len > 0)
+        try std.fmt.allocPrint(allocator, "{s}/{s}", .{ cache_base, dir_part })
+    else
+        try allocator.dupe(u8, cache_base);
+    defer allocator.free(cache_dir_path);
+
+    var dir = std.fs.cwd().openDir(cache_dir_path, .{ .iterate = true }) catch return;
+    defer dir.close();
+
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        if (std.mem.startsWith(u8, entry.name, stem)) {
+            const rest = entry.name[stem.len..];
+            // Delete resized/cropped derivatives: _w300, _h200, _w80_h80, _w80_h80_fp34-25, etc.
+            if (rest.len > 1 and rest[0] == '_' and (rest[1] == 'w' or rest[1] == 'h')) {
                 dir.deleteFile(entry.name) catch {};
             }
         }
@@ -384,12 +445,28 @@ test "sanitizeFilename: splits stem and extension" {
     try std.testing.expectEqualStrings(".jpg", r1.ext);
 
     const r2 = sanitizeFilename("my.file.png");
-    try std.testing.expectEqualStrings("my.file", r2.stem);
+    try std.testing.expectEqualStrings("my-file", r2.stem);
     try std.testing.expectEqualStrings(".png", r2.ext);
 
     const r3 = sanitizeFilename("noext");
     try std.testing.expectEqualStrings("noext", r3.stem);
     try std.testing.expectEqualStrings("", r3.ext);
+}
+
+test "sanitizeFilename: spaces and special chars become hyphens" {
+    const r1 = sanitizeFilename("Screenshot 2025-12-31 at 23.34.51.png");
+    try std.testing.expectEqualStrings("screenshot-2025-12-31-at-23-34-51", r1.stem);
+    try std.testing.expectEqualStrings(".png", r1.ext);
+
+    const r2 = sanitizeFilename("My Photo (1).jpg");
+    try std.testing.expectEqualStrings("my-photo-1", r2.stem);
+    try std.testing.expectEqualStrings(".jpg", r2.ext);
+}
+
+test "sanitizeFilename: lowercases stem" {
+    const r = sanitizeFilename("MyFile.PDF");
+    try std.testing.expectEqualStrings("myfile", r.stem);
+    try std.testing.expectEqualStrings(".PDF", r.ext);
 }
 
 test "sanitizeFilename: empty stem becomes 'file'" {

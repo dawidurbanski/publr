@@ -20,6 +20,7 @@ const zsx_admin_layout = @import("zsx_admin_layout");
 // Import all plugins
 const dashboard = @import("plugin_dashboard");
 const posts = @import("plugin_posts");
+const media_plugin = @import("plugin_media");
 const users = @import("plugin_users");
 const settings = @import("plugin_settings");
 const components = @import("plugin_components");
@@ -31,6 +32,8 @@ pub const pages: []const admin.Page = &[_]admin.Page{
     dashboard.page,
     // Posts
     posts.page,
+    // Media
+    media_plugin.page,
     // Users
     users.page,
     users.page_all,
@@ -253,6 +256,7 @@ pub fn renderNav(comptime current_id: []const u8) []const u8 {
 // Re-export plugin modules for handlers that need them
 pub const dashboard_plugin = dashboard;
 pub const posts_plugin = posts;
+pub const media_plugin_ref = media_plugin;
 pub const users_plugin = users;
 pub const settings_plugin = settings;
 pub const components_plugin = components;

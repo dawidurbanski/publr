@@ -36,11 +36,21 @@ pub const ImageFormat = enum {
     }
 };
 
+/// Fit mode for width+height crops
+pub const FitMode = enum {
+    crop, // pixel-crop at native resolution (default)
+    cover, // resize to cover, then crop
+};
+
 /// Parameters for image processing
 pub const ImageParams = struct {
     width: ?u32 = null,
+    height: ?u32 = null,
+    focal_x: u8 = 50, // 0-100, default center
+    focal_y: u8 = 50,
+    fit: FitMode = .crop,
     format: ?ImageFormat = null,
-    quality: u8 = 80,
+    quality: u8 = 90,
 };
 
 /// Result of image processing
@@ -96,6 +106,22 @@ pub fn cacheSuffix(allocator: Allocator, params: ImageParams, output_format: Ima
     if (params.width) |w| {
         try std.fmt.format(buf.writer(allocator), "_w{d}", .{w});
     }
+    if (params.height) |h| {
+        try std.fmt.format(buf.writer(allocator), "_h{d}", .{h});
+    }
+
+    // Include fit mode, focal point, quality in cache key when non-default
+    if (params.width != null and params.height != null) {
+        if (params.fit == .cover) {
+            try buf.appendSlice(allocator, "_cover");
+        }
+        if (params.focal_x != 50 or params.focal_y != 50) {
+            try std.fmt.format(buf.writer(allocator), "_fp{d}-{d}", .{ params.focal_x, params.focal_y });
+        }
+    }
+    if (params.quality != 90) {
+        try std.fmt.format(buf.writer(allocator), "_q{d}", .{params.quality});
+    }
 
     // Append format suffix when converting to a different format
     const is_conversion = switch (output_format) {
@@ -144,44 +170,92 @@ pub fn processImage(allocator: Allocator, source_bytes: []const u8, params: Imag
     var resize_pixels: ?[]u8 = null;
     defer if (resize_pixels) |p| allocator.free(p);
 
+    var crop_pixels: ?[]u8 = null;
+    defer if (crop_pixels) |p| allocator.free(p);
+
     var active_pixels: [*]u8 = pixels;
 
-    if (params.width) |requested_w| {
+    const pixel_layout: c.stbir_pixel_layout = if (channels == 4)
+        c.STBIR_4CHANNEL
+    else if (channels == 3)
+        c.STBIR_RGB
+    else if (channels == 1)
+        c.STBIR_1CHANNEL
+    else
+        c.STBIR_RGB;
+
+    if (params.width != null and params.height != null) {
+        const tw = params.width.?;
+        const th = params.height.?;
+        if (tw > 0 and th > 0) {
+            if (params.fit == .crop) {
+                // Pixel-crop: extract tw x th at native resolution, no resize
+                const crop_w = @min(tw, width);
+                const crop_h = @min(th, height);
+
+                if (crop_w != width or crop_h != height) {
+                    const cropped = try cropRect(allocator, active_pixels, width, height, channels, crop_w, crop_h, params.focal_x, params.focal_y);
+                    crop_pixels = cropped;
+                    active_pixels = cropped.ptr;
+                    width = crop_w;
+                    height = crop_h;
+                }
+            } else if (tw < width or th < height) {
+                // Cover + crop: resize to cover both dimensions, then crop
+                const scale_w = @as(f64, @floatFromInt(tw)) / @as(f64, @floatFromInt(width));
+                const scale_h = @as(f64, @floatFromInt(th)) / @as(f64, @floatFromInt(height));
+                const scale = @max(scale_w, scale_h);
+
+                // Never upscale: cap scale at 1.0
+                const capped_scale = @min(scale, 1.0);
+                var scaled_w: u32 = @intFromFloat(@as(f64, @floatFromInt(width)) * capped_scale);
+                var scaled_h: u32 = @intFromFloat(@as(f64, @floatFromInt(height)) * capped_scale);
+                if (scaled_w == 0) scaled_w = 1;
+                if (scaled_h == 0) scaled_h = 1;
+
+                // Resize to cover dimensions
+                if (scaled_w != width or scaled_h != height) {
+                    const out_buf = try resizeBuffer(allocator, active_pixels, width, height, scaled_w, scaled_h, channels, pixel_layout);
+                    resize_pixels = out_buf;
+                    active_pixels = out_buf.ptr;
+                    width = scaled_w;
+                    height = scaled_h;
+                }
+
+                // Crop to exact target (clamped to actual size)
+                const crop_w = @min(tw, width);
+                const crop_h = @min(th, height);
+
+                if (crop_w != width or crop_h != height) {
+                    const cropped = try cropRect(allocator, active_pixels, width, height, channels, crop_w, crop_h, params.focal_x, params.focal_y);
+                    crop_pixels = cropped;
+                    active_pixels = cropped.ptr;
+                    width = crop_w;
+                    height = crop_h;
+                }
+            }
+        }
+    } else if (params.width) |requested_w| {
+        // Width-only: resize proportionally
         if (requested_w < width and requested_w > 0) {
             const new_w = requested_w;
             const new_h: u32 = @intCast(@as(u64, height) * new_w / width);
             if (new_h == 0) return error.InvalidDimensions;
 
-            const out_size = new_w * new_h * channels;
-            const out_buf = try allocator.alloc(u8, out_size);
-            errdefer allocator.free(out_buf);
+            const out_buf = try resizeBuffer(allocator, active_pixels, width, height, new_w, new_h, channels, pixel_layout);
+            resize_pixels = out_buf;
+            active_pixels = out_buf.ptr;
+            width = new_w;
+            height = new_h;
+        }
+    } else if (params.height) |requested_h| {
+        // Height-only: resize proportionally
+        if (requested_h < height and requested_h > 0) {
+            const new_h = requested_h;
+            const new_w: u32 = @intCast(@as(u64, width) * new_h / height);
+            if (new_w == 0) return error.InvalidDimensions;
 
-            const pixel_layout: c.stbir_pixel_layout = if (channels == 4)
-                c.STBIR_RGBA
-            else if (channels == 3)
-                c.STBIR_RGB
-            else if (channels == 1)
-                c.STBIR_1CHANNEL
-            else
-                c.STBIR_RGB;
-
-            const result = c.stbir_resize_uint8_srgb(
-                pixels,
-                @intCast(width),
-                @intCast(height),
-                0, // input stride (0 = packed)
-                out_buf.ptr,
-                @intCast(new_w),
-                @intCast(new_h),
-                0, // output stride
-                pixel_layout,
-            );
-
-            if (result == null) {
-                allocator.free(out_buf);
-                return error.ResizeFailed;
-            }
-
+            const out_buf = try resizeBuffer(allocator, active_pixels, width, height, new_w, new_h, channels, pixel_layout);
             resize_pixels = out_buf;
             active_pixels = out_buf.ptr;
             width = new_w;
@@ -202,6 +276,86 @@ pub fn processImage(allocator: Allocator, source_bytes: []const u8, params: Imag
         .width = width,
         .height = height,
     };
+}
+
+// =============================================================================
+// Resize & Crop Helpers
+// =============================================================================
+
+/// Resize a pixel buffer to new dimensions. Caller owns the returned slice.
+fn resizeBuffer(
+    allocator: Allocator,
+    src: [*]const u8,
+    src_w: u32,
+    src_h: u32,
+    dst_w: u32,
+    dst_h: u32,
+    channels: u32,
+    pixel_layout: c.stbir_pixel_layout,
+) ![]u8 {
+    const out_size = dst_w * dst_h * channels;
+    const out_buf = try allocator.alloc(u8, out_size);
+    errdefer allocator.free(out_buf);
+
+    const result = c.stbir_resize_uint8_linear(
+        src,
+        @intCast(src_w),
+        @intCast(src_h),
+        0,
+        out_buf.ptr,
+        @intCast(dst_w),
+        @intCast(dst_h),
+        0,
+        pixel_layout,
+    );
+
+    if (result == null) {
+        allocator.free(out_buf);
+        return error.ResizeFailed;
+    }
+
+    return out_buf;
+}
+
+/// Crop a sub-rectangle from a pixel buffer, centered on the focal point.
+/// focal_x/focal_y are 0-100 percentages. Caller owns the returned slice.
+fn cropRect(
+    allocator: Allocator,
+    src: [*]const u8,
+    src_w: u32,
+    src_h: u32,
+    channels: u32,
+    crop_w: u32,
+    crop_h: u32,
+    focal_x: u8,
+    focal_y: u8,
+) ![]u8 {
+    // Calculate crop origin from focal point, clamped to bounds
+    const fx = @as(f64, @floatFromInt(focal_x)) / 100.0;
+    const fy = @as(f64, @floatFromInt(focal_y)) / 100.0;
+
+    const ideal_x: i64 = @as(i64, @intFromFloat(fx * @as(f64, @floatFromInt(src_w)))) - @as(i64, @intCast(crop_w / 2));
+    const ideal_y: i64 = @as(i64, @intFromFloat(fy * @as(f64, @floatFromInt(src_h)))) - @as(i64, @intCast(crop_h / 2));
+
+    const max_x: i64 = @as(i64, @intCast(src_w)) - @as(i64, @intCast(crop_w));
+    const max_y: i64 = @as(i64, @intCast(src_h)) - @as(i64, @intCast(crop_h));
+
+    const ox: u32 = @intCast(std.math.clamp(ideal_x, 0, max_x));
+    const oy: u32 = @intCast(std.math.clamp(ideal_y, 0, max_y));
+
+    // Copy rows
+    const src_stride = src_w * channels;
+    const dst_stride = crop_w * channels;
+    const out_buf = try allocator.alloc(u8, crop_h * dst_stride);
+    errdefer allocator.free(out_buf);
+
+    for (0..crop_h) |row| {
+        const src_offset = (oy + @as(u32, @intCast(row))) * src_stride + ox * channels;
+        const dst_offset = @as(u32, @intCast(row)) * dst_stride;
+        @memcpy(out_buf[dst_offset..][0..dst_stride], src[src_offset..][0..dst_stride]);
+    }
+
+    return out_buf;
 }
 
 // =============================================================================
@@ -329,6 +483,54 @@ test "cacheSuffix: width + webp conversion" {
     try std.testing.expectEqualStrings("_w300.webp", suffix);
 }
 
+test "cacheSuffix: height only" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .height = 400 }, .jpeg, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_h400", suffix);
+}
+
+test "cacheSuffix: width + height" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .width = 80, .height = 80 }, .jpeg, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_w80_h80", suffix);
+}
+
+test "cacheSuffix: width + height + webp" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .width = 200, .height = 150 }, .webp, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_w200_h150.webp", suffix);
+}
+
+test "cacheSuffix: width + height + non-default focal point" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .width = 80, .height = 80, .focal_x = 34, .focal_y = 25 }, .jpeg, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_w80_h80_fp34-25", suffix);
+}
+
+test "cacheSuffix: width + height + default focal point omitted" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .width = 80, .height = 80 }, .jpeg, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_w80_h80", suffix);
+}
+
+test "cacheSuffix: cover mode included in suffix" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .width = 80, .height = 80, .fit = .cover }, .jpeg, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_w80_h80_cover", suffix);
+}
+
+test "cacheSuffix: non-default quality" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .width = 300, .quality = 80 }, .jpeg, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_w300_q80", suffix);
+}
+
+test "cacheSuffix: default quality omitted" {
+    const suffix = try cacheSuffix(std.testing.allocator, .{ .width = 300 }, .jpeg, "image/jpeg");
+    defer std.testing.allocator.free(suffix);
+    try std.testing.expectEqualStrings("_w300", suffix);
+}
+
 test "cacheSuffix: webp conversion only (no resize)" {
     const suffix = try cacheSuffix(std.testing.allocator, .{}, .webp, "image/jpeg");
     defer std.testing.allocator.free(suffix);
@@ -398,4 +600,45 @@ test "processImage: decode 1x1 JPEG and re-encode" {
     try std.testing.expectEqual(@as(u32, 1), result.height);
     try std.testing.expectEqual(ImageFormat.jpeg, result.format);
     try std.testing.expect(result.data.len > 0);
+}
+
+test "cropRect: center crop" {
+    // 4x4 image, 3 channels, crop to 2x2 centered at 50,50
+    var src: [4 * 4 * 3]u8 = undefined;
+    for (&src, 0..) |*b, i| b.* = @intCast(i % 256);
+
+    const cropped = try cropRect(std.testing.allocator, &src, 4, 4, 3, 2, 2, 50, 50);
+    defer std.testing.allocator.free(cropped);
+
+    // 2x2 * 3 channels = 12 bytes
+    try std.testing.expectEqual(@as(usize, 12), cropped.len);
+}
+
+test "cropRect: top-left focal point" {
+    // 10x10, crop to 4x4 with focal at (0, 0) → origin should be (0, 0)
+    var src: [10 * 10 * 3]u8 = undefined;
+    for (&src, 0..) |*b, i| b.* = @intCast(i % 256);
+
+    const cropped = try cropRect(std.testing.allocator, &src, 10, 10, 3, 4, 4, 0, 0);
+    defer std.testing.allocator.free(cropped);
+
+    // First pixel of cropped should match first pixel of source
+    try std.testing.expectEqual(src[0], cropped[0]);
+    try std.testing.expectEqual(src[1], cropped[1]);
+    try std.testing.expectEqual(src[2], cropped[2]);
+}
+
+test "cropRect: bottom-right focal point" {
+    // 10x10, crop to 4x4 with focal at (100, 100) → origin clamped to (6, 6)
+    var src: [10 * 10 * 3]u8 = undefined;
+    for (&src, 0..) |*b, i| b.* = @intCast(i % 256);
+
+    const cropped = try cropRect(std.testing.allocator, &src, 10, 10, 3, 4, 4, 100, 100);
+    defer std.testing.allocator.free(cropped);
+
+    // First pixel of cropped should match pixel at (6, 6) in source
+    const expected_offset = (6 * 10 + 6) * 3;
+    try std.testing.expectEqual(src[expected_offset], cropped[0]);
+    try std.testing.expectEqual(src[expected_offset + 1], cropped[1]);
+    try std.testing.expectEqual(src[expected_offset + 2], cropped[2]);
 }

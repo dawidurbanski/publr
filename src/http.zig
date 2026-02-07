@@ -19,6 +19,7 @@ const media_handler = @import("media_handler");
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
 const plugin_posts = @import("plugin_posts");
+const plugin_media = @import("plugin_media");
 const plugin_users = @import("plugin_users");
 const plugin_settings = @import("plugin_settings");
 const plugin_components = @import("plugin_components");
@@ -187,6 +188,7 @@ pub fn serve(port: u16, dev_mode: bool) !void {
 const all_pages = [_]admin_api.Page{
     plugin_dashboard.page,
     plugin_posts.page,
+    plugin_media.page,
         // Users: register literal child routes before parent's /:id route
     plugin_users.page_all, // noop
     plugin_users.page_new, // /admin/users/new
@@ -279,6 +281,9 @@ fn handleConnectionThread(stream: std.net.Stream) void {
 /// Request header - imported from middleware
 const RequestHeader = @import("middleware").RequestHeader;
 
+/// Max request body size (2MB — enough for 1MB upload + multipart overhead)
+const max_body_size: usize = 2 * 1024 * 1024;
+
 fn handleConnection(stream: std.net.Stream) !void {
     var buf: [8192]u8 = undefined;
 
@@ -348,29 +353,58 @@ fn handleConnection(stream: std.net.Stream) !void {
         }
     }
 
-    // Check if request would exceed buffer
+    // Read body — use stack buffer for small requests, heap for large ones
+    var heap_body: ?[]u8 = null;
+    defer if (heap_body) |hb| std.heap.page_allocator.free(hb);
+
+    var body: ?[]const u8 = null;
+
     if (content_length > 0) {
-        const expected_total = header_end + content_length;
-        if (expected_total > buf.len) {
+        if (content_length > max_body_size) {
             try sendResponse(stream, "413 Content Too Large", "text/plain", "Request body too large");
             return;
         }
 
-        // Read until we have the full body
-        while (total_read < expected_total) {
-            const n = try stream.read(buf[total_read..]);
-            if (n == 0) break;
-            total_read += n;
+        const already_read = total_read - header_end;
+
+        if (header_end + content_length <= buf.len) {
+            // Small body — fits in stack buffer
+            while (total_read < header_end + content_length) {
+                const n = try stream.read(buf[total_read..]);
+                if (n == 0) break;
+                total_read += n;
+            }
+            if (header_end < total_read) {
+                body = buf[header_end..total_read];
+            }
+        } else {
+            // Large body — allocate on heap
+            const body_buf = std.heap.page_allocator.alloc(u8, content_length) catch {
+                try sendResponse(stream, "413 Content Too Large", "text/plain", "Request body too large");
+                return;
+            };
+            heap_body = body_buf;
+
+            // Copy bytes already read past the headers
+            if (already_read > 0) {
+                @memcpy(body_buf[0..already_read], buf[header_end..total_read]);
+            }
+
+            // Read the rest
+            var body_read = already_read;
+            while (body_read < content_length) {
+                const n = stream.read(body_buf[body_read..content_length]) catch break;
+                if (n == 0) break;
+                body_read += n;
+            }
+            body = body_buf[0..body_read];
+        }
+    } else {
+        // No Content-Length but might have partial body from header read
+        if (header_end < total_read) {
+            body = buf[header_end..total_read];
         }
     }
-
-    // Extract body (everything after the headers)
-    const body: ?[]const u8 = blk: {
-        if (header_end < total_read) {
-            break :blk buf[header_end..total_read];
-        }
-        break :blk null;
-    };
 
     if (global_router) |*router| {
         try router.dispatch(method, path, stream, headers[0..header_count], body, query);

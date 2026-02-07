@@ -242,6 +242,14 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/gen/views/admin/design_system.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
     });
+    const zsx_admin_media_list = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/media/list.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
+    const zsx_admin_media_edit = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/admin/media/edit.zig"),
+        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    });
     const zsx_error_404 = b.createModule(.{
         .root_source_file = b.path("src/gen/views/error/error_404.zig"),
         .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
@@ -541,6 +549,24 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
         },
     });
+    const plugin_media = b.createModule(.{
+        .root_source_file = b.path("src/plugins/media.zig"),
+        .imports = &.{
+            .{ .name = "admin_api", .module = admin_api_module },
+            .{ .name = "icons", .module = icons_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "tpl", .module = tpl_module },
+            .{ .name = "csrf", .module = csrf_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "media", .module = media_module },
+            .{ .name = "storage", .module = storage_module },
+            .{ .name = "schema_media", .module = schema_media_module },
+            .{ .name = "media_handler", .module = media_handler_module },
+            .{ .name = "zsx_admin_media_list", .module = zsx_admin_media_list },
+            .{ .name = "zsx_admin_media_edit", .module = zsx_admin_media_edit },
+            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+        },
+    });
 
     // =========================================================================
     // Registry Module (imports all plugins)
@@ -556,6 +582,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
             .{ .name = "plugin_dashboard", .module = plugin_dashboard },
             .{ .name = "plugin_posts", .module = plugin_posts },
+            .{ .name = "plugin_media", .module = plugin_media },
             .{ .name = "plugin_users", .module = plugin_users },
             .{ .name = "plugin_settings", .module = plugin_settings },
             .{ .name = "plugin_components", .module = plugin_components },
@@ -566,6 +593,7 @@ pub fn build(b: *std.Build) void {
     // Add registry to plugins (must be done after registry_module is created)
     plugin_dashboard.addImport("registry", registry_module);
     plugin_posts.addImport("registry", registry_module);
+    plugin_media.addImport("registry", registry_module);
     plugin_users.addImport("registry", registry_module);
     plugin_settings.addImport("registry", registry_module);
     plugin_components.addImport("registry", registry_module);
@@ -586,6 +614,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zsx_admin_setup", zsx_admin_setup);
     exe.root_module.addImport("zsx_admin_login", zsx_admin_login);
     exe.root_module.addImport("zsx_admin_design_system", zsx_admin_design_system);
+    exe.root_module.addImport("zsx_admin_media_list", zsx_admin_media_list);
+    exe.root_module.addImport("zsx_admin_media_edit", zsx_admin_media_edit);
     exe.root_module.addImport("zsx_error_404", zsx_error_404);
     exe.root_module.addImport("zsx_error_500", zsx_error_500);
     exe.root_module.addImport("zsx_error_500_dev", zsx_error_500_dev);
@@ -617,6 +647,7 @@ pub fn build(b: *std.Build) void {
     // Add plugin modules to main exe
     exe.root_module.addImport("plugin_dashboard", plugin_dashboard);
     exe.root_module.addImport("plugin_posts", plugin_posts);
+    exe.root_module.addImport("plugin_media", plugin_media);
     exe.root_module.addImport("plugin_users", plugin_users);
     exe.root_module.addImport("plugin_settings", plugin_settings);
     exe.root_module.addImport("plugin_components", plugin_components);
@@ -689,6 +720,8 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("zsx_admin_setup", zsx_admin_setup);
     exe_tests.root_module.addImport("zsx_admin_login", zsx_admin_login);
     exe_tests.root_module.addImport("zsx_admin_design_system", zsx_admin_design_system);
+    exe_tests.root_module.addImport("zsx_admin_media_list", zsx_admin_media_list);
+    exe_tests.root_module.addImport("zsx_admin_media_edit", zsx_admin_media_edit);
     exe_tests.root_module.addImport("zsx_error_404", zsx_error_404);
     exe_tests.root_module.addImport("zsx_error_500", zsx_error_500);
     exe_tests.root_module.addImport("zsx_error_500_dev", zsx_error_500_dev);

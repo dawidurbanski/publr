@@ -1,0 +1,169 @@
+// Media list template — grid/list view with upload zone
+
+const std = @import("std");
+
+const icon_image =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_file =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2.26946V6.4C14 6.96005 14 7.24008 14.109 7.45399C14.2049 7.64215 14.3578 7.79513 14.546 7.89101C14.7599 8 15.0399 8 15.6 8H19.7305M20 9.98822V17.2C20 18.8802 20 19.7202 19.673 20.362C19.3854 20.9265 18.9265 21.3854 18.362 21.673C17.7202 22 16.8802 22 15.2 22H8.8C7.11984 22 6.27976 22 5.63803 21.673C5.07354 21.3854 4.6146 20.9265 4.32698 20.362C4 19.7202 4 18.8802 4 17.2V6.8C4 5.11984 4 4.27976 4.32698 3.63803C4.6146 3.07354 5.07354 2.6146 5.63803 2.32698C6.27976 2 7.11984 2 8.8 2H12.0118C12.7455 2 13.1124 2 13.4577 2.08289C13.7638 2.15638 14.0564 2.27759 14.3249 2.44208C14.6276 2.6276 14.887 2.88703 15.4059 3.40589L18.5941 6.59411C19.113 7.11297 19.3724 7.3724 19.5579 7.67515C19.7224 7.94356 19.8436 8.2362 19.9171 8.5423C20 8.88757 20 9.25445 20 9.98822Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_more =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 13C12.5523 13 13 12.5523 13 12C13 11.4477 12.5523 11 12 11C11.4477 11 11 11.4477 11 12C11 12.5523 11.4477 13 12 13Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 6C12.5523 6 13 5.55228 13 5C13 4.44772 12.5523 4 12 4C11.4477 4 11 4.44772 11 5C11 5.55228 11.4477 6 12 6Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 20C12.5523 20 13 19.5523 13 19C13 18.4477 12.5523 18 12 18C11.4477 18 11 18.4477 11 19C11 19.5523 11.4477 20 12 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_upload =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 15V16.2C21 17.8802 21 18.7202 20.673 19.362C20.3854 19.9265 19.9265 20.3854 19.362 20.673C18.7202 21 17.8802 21 16.2 21H7.8C6.11984 21 5.27976 21 4.63803 20.673C4.07354 20.3854 3.6146 19.9265 3.32698 19.362C3 18.7202 3 17.8802 3 16.2V15M17 8L12 3M12 3L7 8M12 3V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_grid =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 3H10V10H3V3ZM14 3H21V10H14V3ZM14 14H21V21H14V14ZM3 14H10V21H3V14Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_list =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12L9 12M21 6L9 6M21 18L9 18M5 12C5 12.5523 4.55228 13 4 13C3.44772 13 3 12.5523 3 12C3 11.4477 3.44772 11 4 11C4.55228 11 5 11.4477 5 12ZM5 6C5 6.55228 4.55228 7 4 7C3.44772 7 3 6.55228 3 6C3 5.44772 3.44772 5 4 5C4.55228 5 5 5.44772 5 6ZM5 18C5 18.5523 4.55228 19 4 19C3.44772 19 3 18.5523 3 18C3 17.4477 3.44772 17 4 17C4.55228 17 5 17.4477 5 18Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_lock =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17 11V8C17 5.23858 14.7614 3 12 3C9.23858 3 7 5.23858 7 8V11M12 14.5V16.5M9.8 21H14.2C15.8802 21 16.7202 21 17.362 20.673C17.9265 20.3854 18.3854 19.9265 18.673 19.362C19 18.7202 19 17.8802 19 16.2V15.8C19 14.1198 19 13.2798 18.673 12.638C18.3854 12.0735 17.9265 11.6146 17.362 11.327C16.7202 11 15.8802 11 14.2 11H9.8C8.11984 11 7.27976 11 6.63803 11.327C6.07354 11.6146 5.6146 12.0735 5.32698 12.638C5 13.2798 5 14.1198 5 15.8V16.2C5 17.8802 5 18.7202 5.32698 19.362C5.6146 19.9265 6.07354 20.3854 6.63803 20.673C7.27976 21 8.11984 21 9.8 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
+const MediaItem = struct {
+    id: []const u8,
+    filename: []const u8,
+    mime_type: []const u8,
+    size_display: []const u8,
+    visibility: []const u8,
+    edit_url: []const u8,
+    delete_url: []const u8,
+    thumb_url: []const u8,
+    is_image: bool,
+    is_private: bool,
+};
+
+pub fn List(props: struct {
+    has_media: bool,
+    media: []const MediaItem,
+    csrf_token: []const u8,
+    view_mode: []const u8,
+    total_count: u32,
+}) {
+    <div class="media-upload-zone" id="media-upload-zone" data-publr-component="upload-zone">
+        <form method="POST" action="/admin/media" enctype="multipart/form-data" id="media-upload-form">
+            <input type="hidden" name="_csrf" value={props.csrf_token} />
+            <div class="upload-zone-content">
+                <div class="upload-zone-icon">{!icon_upload}</div>
+                <p class="upload-zone-text">
+                    <label for="media-file-input" class="upload-zone-link">Click to upload</label>
+                    {" or drag and drop"}
+                </p>
+                <p class="upload-zone-hint">Max file size: 1MB</p>
+                <input type="file" id="media-file-input" name="file" class="upload-zone-input" multiple="" />
+            </div>
+            <div class="upload-zone-progress" id="upload-progress" style="display:none">
+                <div class="upload-progress-bar" id="upload-progress-bar"></div>
+                <span class="upload-progress-text" id="upload-progress-text">Uploading...</span>
+            </div>
+        </form>
+    </div>
+
+    <div class="media-toolbar">
+        <div class="media-toolbar-left">
+            <span class="media-count">{props.total_count} files</span>
+        </div>
+        <div class="media-toolbar-right">
+            <div class="media-view-toggle">
+                <a href="?view=grid" class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active") else ("media-view-btn")} aria-label="Grid view">
+                    {!icon_grid}
+                </a>
+                <a href="?view=list" class={if (std.mem.eql(u8, props.view_mode, "list")) ("media-view-btn active") else ("media-view-btn")} aria-label="List view">
+                    {!icon_list}
+                </a>
+            </div>
+        </div>
+    </div>
+
+    {if (props.has_media) (
+        {if (std.mem.eql(u8, props.view_mode, "grid")) (
+            <div class="media-grid">
+                {for (props.media) |item| (
+                    <a href={item.edit_url} class="media-card">
+                        <div class="media-card-preview">
+                            {if (item.is_image) (
+                                <img src={item.thumb_url} alt={item.filename} loading="lazy" />
+                            ) else (
+                                <div class="media-card-icon">{!icon_file}</div>
+                            )}
+                            {if (item.is_private) (
+                                <span class="media-card-badge">{!icon_lock}</span>
+                            ) else (<span></span>)}
+                        </div>
+                        <div class="media-card-info">
+                            <span class="media-card-name">{item.filename}</span>
+                            <span class="media-card-meta">{item.size_display}</span>
+                        </div>
+                    </a>
+                )}
+            </div>
+        ) else (
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th class="table-col-check">
+                            <input type="checkbox" class="table-checkbox" aria-label="Select all" />
+                        </th>
+                        <th class="table-col-thumb"></th>
+                        <th>Filename</th>
+                        <th>Type</th>
+                        <th>Size</th>
+                        <th>Visibility</th>
+                        <th class="actions-col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {for (props.media) |item| (
+                        <tr>
+                            <td class="table-col-check">
+                                <input type="checkbox" class="table-checkbox" value={item.id} aria-label="Select media" />
+                            </td>
+                            <td class="table-col-thumb">
+                                {if (item.is_image) (
+                                    <div class="table-thumb">
+                                        <img src={item.thumb_url} alt={item.filename} />
+                                    </div>
+                                ) else (
+                                    <div class="table-thumb">{!icon_file}</div>
+                                )}
+                            </td>
+                            <td>
+                                <a href={item.edit_url}>{item.filename}</a>
+                            </td>
+                            <td>{item.mime_type}</td>
+                            <td>{item.size_display}</td>
+                            <td>
+                                <span class={if (item.is_private) ("badge badge-draft") else ("badge badge-published")}>{item.visibility}</span>
+                            </td>
+                            <td class="actions-col">
+                                <div data-publr-component="dropdown">
+                                    <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
+                                        {!icon_more}
+                                    </button>
+                                    <div class="dropdown-menu" data-publr-part="content">
+                                        <a href={item.edit_url} class="dropdown-item">Edit</a>
+                                        <hr class="dropdown-divider" />
+                                        <form method="POST" action={item.delete_url}>
+                                            <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                            <button type="submit" class="dropdown-item dropdown-item-danger" onclick="return confirm('Delete this file permanently?')">Delete</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+        )}
+    ) else (
+        <div class="empty-state">
+            <div class="empty-state-icon">{!icon_image}</div>
+            <p>No media files yet.</p>
+            <p class="empty-state-hint">Upload files by clicking the zone above or dragging files onto it.</p>
+        </div>
+    )}
+}

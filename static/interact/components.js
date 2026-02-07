@@ -386,6 +386,45 @@ register('radio-group', (el) => {
     });
 });
 
+// ── Focal Point ────────────────────────────────
+register('focal-point', (el) => {
+    const img = el.querySelector('[data-publr-part="image"]');
+    const marker = el.querySelector('[data-publr-part="marker"]');
+    const label = el.querySelector('[data-publr-part="label"]');
+    const inputId = el.dataset.publrInput;
+    const input = inputId ? document.getElementById(inputId) : null;
+    if (!img || !marker) return;
+
+    function set(x, y) {
+        x = Math.max(0, Math.min(100, Math.round(x)));
+        y = Math.max(0, Math.min(100, Math.round(y)));
+        marker.style.left = x + '%';
+        marker.style.top = y + '%';
+        marker.style.display = 'block';
+        if (label) {
+            label.textContent = x + ', ' + y;
+            label.style.display = 'block';
+        }
+        if (input) input.value = x + ',' + y;
+    }
+
+    // Initialize from data attribute
+    const initial = el.dataset.publrValue;
+    if (initial && initial.indexOf(',') !== -1) {
+        const parts = initial.split(',');
+        set(parseFloat(parts[0]), parseFloat(parts[1]));
+    } else {
+        set(50, 50);
+    }
+
+    el.addEventListener('click', (e) => {
+        const rect = img.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+        set(x, y);
+    });
+});
+
 // ── Nav Slider ─────────────────────────────────
 register('nav-slider', (el) => {
     const slider = el.querySelector('.nav-slider');

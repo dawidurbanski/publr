@@ -139,6 +139,40 @@ pub fn getMedia(
     return try parseMediaRow(allocator, &stmt);
 }
 
+pub const FocalPoint = struct { x: u8, y: u8 };
+
+/// Get the focal point for a media file by storage key.
+/// Returns parsed x,y percentages or null if not set.
+pub fn getFocalPoint(db: *Db, storage_key: []const u8) ?FocalPoint {
+    var stmt = db.prepare(
+        "SELECT data FROM media WHERE storage_key = ?1",
+    ) catch return null;
+    defer stmt.deinit();
+
+    stmt.bindText(1, storage_key) catch return null;
+
+    if (!(stmt.step() catch return null)) return null;
+
+    const data_json = stmt.columnText(0) orelse return null;
+    return parseFocalPointString(data_json);
+}
+
+/// Parse focal point from a JSON data string. Looks for "focal_point":"X,Y".
+fn parseFocalPointString(json: []const u8) ?FocalPoint {
+    // Find "focal_point":" in the JSON
+    const marker = "\"focal_point\":\"";
+    const start = std.mem.indexOf(u8, json, marker) orelse return null;
+    const val_start = start + marker.len;
+    const val_end = std.mem.indexOfPos(u8, json, val_start, "\"") orelse return null;
+    const val = json[val_start..val_end];
+
+    const comma = std.mem.indexOfScalar(u8, val, ',') orelse return null;
+    const x = std.fmt.parseInt(u8, val[0..comma], 10) catch return null;
+    const y = std.fmt.parseInt(u8, val[comma + 1 ..], 10) catch return null;
+    if (x > 100 or y > 100) return null;
+    return .{ .x = x, .y = y };
+}
+
 /// List media with optional filtering
 pub fn listMedia(
     allocator: Allocator,
@@ -488,6 +522,23 @@ fn initTestDb() !Db {
     var db = try Db.init(std.testing.allocator, ":memory:");
     try db.exec(schema_sql);
     return db;
+}
+
+test "parseFocalPointString: valid focal point" {
+    const fp = parseFocalPointString("{\"alt_text\":\"test\",\"focal_point\":\"34,25\"}");
+    try std.testing.expect(fp != null);
+    try std.testing.expectEqual(@as(u8, 34), fp.?.x);
+    try std.testing.expectEqual(@as(u8, 25), fp.?.y);
+}
+
+test "parseFocalPointString: missing focal point" {
+    try std.testing.expect(parseFocalPointString("{\"alt_text\":\"test\"}") == null);
+    try std.testing.expect(parseFocalPointString("{}") == null);
+}
+
+test "parseFocalPointString: invalid values" {
+    try std.testing.expect(parseFocalPointString("{\"focal_point\":\"abc\"}") == null);
+    try std.testing.expect(parseFocalPointString("{\"focal_point\":\"101,50\"}") == null);
 }
 
 test "generateMediaId produces valid IDs" {

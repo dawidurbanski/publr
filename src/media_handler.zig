@@ -19,8 +19,22 @@ const image = @import("image");
 /// Returns true if access should be granted.
 pub const AccessCheckFn = *const fn (storage_key: []const u8, user_id: ?[]const u8) bool;
 
+/// Focal point coordinates (0-100 percentages)
+pub const FocalPoint = struct { x: u8, y: u8 };
+
+/// Focal point lookup function type.
+/// Called when both w and h are specified to get the stored focal point.
+/// Returns x,y percentages (0-100) or null if not available.
+pub const FocalPointFn = *const fn (storage_key: []const u8) ?FocalPoint;
+
 // Module-level state
 var access_check: AccessCheckFn = defaultAccessCheck;
+var focal_point_fn: ?FocalPointFn = null;
+
+/// Set the focal point lookup function (for plugins).
+pub fn setFocalPointLookup(f: FocalPointFn) void {
+    focal_point_fn = f;
+}
 
 /// Override the access check function (for plugins).
 pub fn setAccessCheck(check_fn: AccessCheckFn) void {
@@ -93,23 +107,49 @@ pub fn handleMedia(ctx: *Context) !void {
 /// Parse image processing parameters from query string and Accept header.
 /// Returns null if no processing is needed.
 fn parseImageParams(ctx: *Context) ?image.ImageParams {
-    const width = parseWidthParam(ctx.query);
+    const width = parseDimensionParam(ctx.query, "w=");
+    const height = parseDimensionParam(ctx.query, "h=");
     const accept = ctx.getRequestHeader("Accept");
-    const mime_type = getMimeType(ctx.wildcard orelse return null);
+    const media_path = ctx.wildcard orelse return null;
+    const mime_type = getMimeType(media_path);
 
     if (!image.isProcessableImage(mime_type)) return null;
 
     const output_format = image.negotiateFormat(accept, mime_type);
 
     // Need processing if resize requested or format changes
-    const needs_resize = width != null;
+    const needs_resize = width != null or height != null;
     const needs_conversion = output_format != sourceFormat(mime_type);
 
     if (!needs_resize and !needs_conversion) return null;
 
+    // Parse fit mode and quality
+    const fit = parseFitParam(ctx.query);
+    const quality = parseQualityParam(ctx.query);
+
+    // Focal point: explicit fp= param takes priority, then DB fallback
+    var focal_x: u8 = 50;
+    var focal_y: u8 = 50;
+    if (width != null and height != null) {
+        if (parseFocalPointParam(ctx.query)) |fp| {
+            focal_x = fp.x;
+            focal_y = fp.y;
+        } else if (focal_point_fn) |lookup| {
+            if (lookup(media_path)) |fp| {
+                focal_x = fp.x;
+                focal_y = fp.y;
+            }
+        }
+    }
+
     return .{
         .width = width,
+        .height = height,
+        .focal_x = focal_x,
+        .focal_y = focal_y,
+        .fit = fit,
         .format = output_format,
+        .quality = quality,
     };
 }
 
@@ -118,15 +158,58 @@ fn sourceFormat(mime_type: []const u8) image.ImageFormat {
     return .jpeg;
 }
 
-fn parseWidthParam(query: ?[]const u8) ?u32 {
+fn parseDimensionParam(query: ?[]const u8, prefix: []const u8) ?u32 {
     const q = query orelse return null;
     var iter = std.mem.splitScalar(u8, q, '&');
     while (iter.next()) |pair| {
-        if (std.mem.startsWith(u8, pair, "w=")) {
-            return std.fmt.parseInt(u32, pair[2..], 10) catch null;
+        if (std.mem.startsWith(u8, pair, prefix)) {
+            return std.fmt.parseInt(u32, pair[prefix.len..], 10) catch null;
         }
     }
     return null;
+}
+
+/// Parse focal point from query string: fp=X,Y where X,Y are 0-100.
+fn parseFocalPointParam(query: ?[]const u8) ?FocalPoint {
+    const q = query orelse return null;
+    var iter = std.mem.splitScalar(u8, q, '&');
+    while (iter.next()) |pair| {
+        if (std.mem.startsWith(u8, pair, "fp=")) {
+            const val = pair[3..];
+            const comma = std.mem.indexOfScalar(u8, val, ',') orelse return null;
+            const x = std.fmt.parseInt(u8, val[0..comma], 10) catch return null;
+            const y = std.fmt.parseInt(u8, val[comma + 1 ..], 10) catch return null;
+            if (x > 100 or y > 100) return null;
+            return .{ .x = x, .y = y };
+        }
+    }
+    return null;
+}
+
+/// Parse fit mode from query string: fit=cover (default is crop).
+fn parseFitParam(query: ?[]const u8) image.FitMode {
+    const q = query orelse return .crop;
+    var iter = std.mem.splitScalar(u8, q, '&');
+    while (iter.next()) |pair| {
+        if (std.mem.startsWith(u8, pair, "fit=")) {
+            const val = pair[4..];
+            if (std.mem.eql(u8, val, "cover")) return .cover;
+        }
+    }
+    return .crop;
+}
+
+/// Parse quality from query string: q=N where N is 1-100 (default 90).
+fn parseQualityParam(query: ?[]const u8) u8 {
+    const q = query orelse return 90;
+    var iter = std.mem.splitScalar(u8, q, '&');
+    while (iter.next()) |pair| {
+        if (std.mem.startsWith(u8, pair, "q=")) {
+            const val = std.fmt.parseInt(u8, pair[2..], 10) catch return 90;
+            if (val >= 1 and val <= 100) return val;
+        }
+    }
+    return 90;
 }
 
 /// Serve a private file after verifying access.
@@ -433,17 +516,67 @@ test "getMimeType: unknown extension" {
     try std.testing.expectEqualStrings("application/octet-stream", getMimeType("noextension"));
 }
 
-test "parseWidthParam: extracts width" {
-    try std.testing.expectEqual(@as(?u32, 300), parseWidthParam("w=300"));
-    try std.testing.expectEqual(@as(?u32, 600), parseWidthParam("w=600&fmt=webp"));
-    try std.testing.expectEqual(@as(?u32, 150), parseWidthParam("quality=80&w=150"));
+test "parseDimensionParam: extracts width" {
+    try std.testing.expectEqual(@as(?u32, 300), parseDimensionParam("w=300", "w="));
+    try std.testing.expectEqual(@as(?u32, 600), parseDimensionParam("w=600&fmt=webp", "w="));
+    try std.testing.expectEqual(@as(?u32, 150), parseDimensionParam("quality=80&w=150", "w="));
 }
 
-test "parseWidthParam: returns null for invalid or missing" {
-    try std.testing.expect(parseWidthParam(null) == null);
-    try std.testing.expect(parseWidthParam("fmt=webp") == null);
-    try std.testing.expect(parseWidthParam("w=abc") == null);
-    try std.testing.expect(parseWidthParam("") == null);
+test "parseDimensionParam: extracts height" {
+    try std.testing.expectEqual(@as(?u32, 200), parseDimensionParam("h=200", "h="));
+    try std.testing.expectEqual(@as(?u32, 400), parseDimensionParam("w=300&h=400", "h="));
+}
+
+test "parseDimensionParam: returns null for invalid or missing" {
+    try std.testing.expect(parseDimensionParam(null, "w=") == null);
+    try std.testing.expect(parseDimensionParam("fmt=webp", "w=") == null);
+    try std.testing.expect(parseDimensionParam("w=abc", "w=") == null);
+    try std.testing.expect(parseDimensionParam("", "w=") == null);
+}
+
+test "parseFocalPointParam: extracts focal point" {
+    const fp1 = parseFocalPointParam("w=80&h=80&fp=34,25");
+    try std.testing.expect(fp1 != null);
+    try std.testing.expectEqual(@as(u8, 34), fp1.?.x);
+    try std.testing.expectEqual(@as(u8, 25), fp1.?.y);
+
+    const fp2 = parseFocalPointParam("fp=0,100&w=80");
+    try std.testing.expect(fp2 != null);
+    try std.testing.expectEqual(@as(u8, 0), fp2.?.x);
+    try std.testing.expectEqual(@as(u8, 100), fp2.?.y);
+}
+
+test "parseFocalPointParam: returns null for invalid" {
+    try std.testing.expect(parseFocalPointParam(null) == null);
+    try std.testing.expect(parseFocalPointParam("w=80&h=80") == null);
+    try std.testing.expect(parseFocalPointParam("fp=abc") == null);
+    try std.testing.expect(parseFocalPointParam("fp=50") == null);
+    try std.testing.expect(parseFocalPointParam("fp=101,50") == null);
+    try std.testing.expect(parseFocalPointParam("fp=50,101") == null);
+}
+
+test "parseFitParam: defaults to crop" {
+    try std.testing.expectEqual(image.FitMode.crop, parseFitParam(null));
+    try std.testing.expectEqual(image.FitMode.crop, parseFitParam("w=80&h=80"));
+    try std.testing.expectEqual(image.FitMode.crop, parseFitParam("fit=invalid"));
+}
+
+test "parseFitParam: parses cover" {
+    try std.testing.expectEqual(image.FitMode.cover, parseFitParam("w=80&h=80&fit=cover"));
+    try std.testing.expectEqual(image.FitMode.cover, parseFitParam("fit=cover"));
+}
+
+test "parseQualityParam: defaults to 90" {
+    try std.testing.expectEqual(@as(u8, 90), parseQualityParam(null));
+    try std.testing.expectEqual(@as(u8, 90), parseQualityParam("w=80"));
+    try std.testing.expectEqual(@as(u8, 90), parseQualityParam("q=0"));
+    try std.testing.expectEqual(@as(u8, 90), parseQualityParam("q=abc"));
+}
+
+test "parseQualityParam: parses valid values" {
+    try std.testing.expectEqual(@as(u8, 80), parseQualityParam("q=80"));
+    try std.testing.expectEqual(@as(u8, 100), parseQualityParam("w=200&q=100"));
+    try std.testing.expectEqual(@as(u8, 1), parseQualityParam("q=1&w=80"));
 }
 
 test "buildCachePathFull: same format uses standard path" {
