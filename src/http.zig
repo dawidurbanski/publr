@@ -14,6 +14,7 @@ const Auth = @import("auth").Auth;
 const auth_middleware = @import("auth_middleware");
 const csrf = @import("csrf");
 const admin_api = @import("admin_api");
+const media_handler = @import("media_handler");
 
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
@@ -108,6 +109,7 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     try router.post("/admin/login", handleLoginPost);
     try router.post("/admin/logout", handleLogout);
     try router.get("/static/*", handleStatic);
+    try router.get("/media/*", media_handler.handleMedia);
 
     // Register plugin routes
     registerPluginRoutes(&router, allocator);

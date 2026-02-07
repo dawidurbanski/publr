@@ -241,6 +241,60 @@ pub const UploadInput = struct {
     max_size: ?usize = null,
 };
 
+/// Toggle media visibility between public and private.
+/// Moves the file between public and .private/ paths, updates the companion
+/// file, and updates the visibility column in the database.
+pub fn toggleMediaVisibility(
+    allocator: Allocator,
+    db: *Db,
+    media_id: []const u8,
+) !void {
+    // Get the current record
+    const record = try getMedia(allocator, db, media_id) orelse return error.NotFound;
+    defer {
+        allocator.free(record.id);
+        allocator.free(record.filename);
+        allocator.free(record.mime_type);
+        allocator.free(record.storage_key);
+        allocator.free(record.visibility);
+        if (record.hash) |h| allocator.free(h);
+    }
+
+    const current = Visibility.fromString(record.visibility) orelse return error.InvalidData;
+    const new_vis: Visibility = if (current == .public) .private else .public;
+
+    // Move files on disk
+    const pub_path = try storage.buildPath(allocator, record.storage_key, .public);
+    defer allocator.free(pub_path);
+    const priv_path = try storage.buildPath(allocator, record.storage_key, .private);
+    defer allocator.free(priv_path);
+
+    switch (current) {
+        .public => {
+            // Ensure private directory exists
+            if (std.fs.path.dirname(priv_path)) |dir| {
+                std.fs.cwd().makePath(dir) catch {};
+            }
+            // Move real file to .private/
+            try std.fs.cwd().rename(pub_path, priv_path);
+            // Write zero-byte companion at the original public path
+            const companion = try std.fs.cwd().createFile(pub_path, .{});
+            companion.close();
+        },
+        .private => {
+            // Move real file from .private/ back to public (overwrites companion)
+            try std.fs.cwd().rename(priv_path, pub_path);
+        },
+    }
+
+    // Update DB visibility column
+    var stmt = try db.prepare("UPDATE media SET visibility = ?2, updated_at = unixepoch() WHERE id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, media_id);
+    try stmt.bindText(2, new_vis.toString());
+    _ = try stmt.step();
+}
+
 /// Delete a media record (DB only, no file cleanup)
 pub fn deleteMedia(db: *Db, media_id: []const u8) !void {
     var stmt = try db.prepare("DELETE FROM media WHERE id = ?1");

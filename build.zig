@@ -419,6 +419,15 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/admin_api.zig"),
         .imports = &.{.{ .name = "middleware", .module = middleware_module }},
     });
+    // Media serve handler
+    const media_handler_module = b.createModule(.{
+        .root_source_file = b.path("src/media_handler.zig"),
+        .imports = &.{
+            .{ .name = "storage", .module = storage_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "middleware", .module = middleware_module },
+        },
+    });
     const icons_module = b.createModule(.{
         .root_source_file = b.path("src/icons.zig"),
     });
@@ -582,6 +591,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("cms", cms_module);
     exe.root_module.addImport("storage", storage_module);
     exe.root_module.addImport("media", media_module);
+    exe.root_module.addImport("media_handler", media_handler_module);
 
     // Add plugin modules to main exe
     exe.root_module.addImport("plugin_dashboard", plugin_dashboard);
@@ -654,6 +664,7 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("schema_media", schema_media_module);
     exe_tests.root_module.addImport("storage", storage_module);
     exe_tests.root_module.addImport("media", media_module);
+    exe_tests.root_module.addImport("media_handler", media_handler_module);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
