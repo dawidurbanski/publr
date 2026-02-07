@@ -34,5 +34,5 @@ fn handleDashboard(ctx: *Context) !void {
         .recent_posts = posts,
     }});
 
-    ctx.html(registry.renderPage(page, ctx, content, ""));
+    ctx.html(registry.renderPage(page, ctx, content));
 }

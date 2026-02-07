@@ -9,7 +9,8 @@ document.addEventListener('mousedown', (e) => {
     if (!openStack.length) return;
     for (let i = openStack.length - 1; i >= 0; i--) {
         const root = openStack[i];
-        const content = root.querySelector('[data-publr-part="content"]');
+        // Use stored ref — querySelector fails when content is portaled out of root
+        const content = root._publrContent || root.querySelector('[data-publr-part="content"]');
         if (root.contains(e.target) || (content && content.contains(e.target))) continue;
         close(root);
     }

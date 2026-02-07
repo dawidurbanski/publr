@@ -70,8 +70,7 @@ fn handleList(ctx: *Context) !void {
             .has_posts = false,
             .posts = &[_]ViewPost{},
         }});
-        const actions = "<a href=\"/admin/posts/new\" class=\"btn btn-primary\">New Post</a>";
-        ctx.html(registry.renderPage(page, ctx, content, actions));
+        ctx.html(registry.renderPage(page, ctx, content));
         return;
     };
 
@@ -97,9 +96,8 @@ fn handleList(ctx: *Context) !void {
         .has_posts = posts.len > 0,
         .posts = posts,
     }});
-    const actions = "<a href=\"/admin/posts/new\" class=\"btn btn-primary\">New Post</a>";
 
-    ctx.html(registry.renderPage(page, ctx, content, actions));
+    ctx.html(registry.renderPage(page, ctx, content));
 }
 
 fn handleNew(ctx: *Context) !void {
@@ -127,7 +125,7 @@ fn handleNew(ctx: *Context) !void {
         .action = "/admin/posts",
     }});
 
-    ctx.html(registry.renderPage(page, ctx, content, ""));
+    ctx.html(registry.renderPage(page, ctx, content));
 }
 
 fn handleEdit(ctx: *Context) !void {
@@ -175,7 +173,7 @@ fn handleEdit(ctx: *Context) !void {
         .action = edit_url,
     }});
 
-    ctx.html(registry.renderPage(page, ctx, content, ""));
+    ctx.html(registry.renderPage(page, ctx, content));
 }
 
 fn handleCreate(ctx: *Context) !void {
@@ -342,13 +340,5 @@ fn redirect(ctx: *Context, location: []const u8) void {
 }
 
 fn formatDate(timestamp: i64, allocator: std.mem.Allocator) ![]const u8 {
-    // Convert unix timestamp to YYYY-MM-DD format
-    const epoch_seconds: std.posix.timeval = .{
-        .sec = timestamp,
-        .usec = 0,
-    };
-    _ = epoch_seconds;
-
-    // Simple format: just return the date part
     return std.fmt.allocPrint(allocator, "{d}", .{timestamp});
 }

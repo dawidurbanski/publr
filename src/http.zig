@@ -44,6 +44,7 @@ const InteractFocusTrap = static.Asset("focus-trap.js", @embedFile("static_inter
 const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_dismiss_js"));
 const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
 const InteractIndex = static.Asset("index.js", @embedFile("static_interact_index_js"));
+const MediaSelectionJs = static.Asset("media-selection.js", @embedFile("static_media_selection_js"));
 
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -189,11 +190,9 @@ const all_pages = [_]admin_api.Page{
     plugin_dashboard.page,
     plugin_posts.page,
     plugin_media.page,
-        // Users: register literal child routes before parent's /:id route
-    plugin_users.page_all, // noop
-    plugin_users.page_new, // /admin/users/new
+        // Users: only profile page remains, user management moved to Settings
     plugin_users.page_profile, // /admin/users/profile
-    plugin_users.page, // /admin/users and /admin/users/:id
+    plugin_users.page, // /admin/users (parent, no routes)
     plugin_settings.page,
     plugin_components.page,
     plugin_design_system.page,
@@ -473,6 +472,8 @@ fn handleStatic(ctx: *Context) !void {
         InteractComponents.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "interact/index.js")) {
         InteractIndex.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "media-selection.js")) {
+        MediaSelectionJs.serve(ctx, if_none_match);
     } else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");
@@ -503,6 +504,8 @@ fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
         "static/interact/components.js"
     else if (std.mem.eql(u8, file, "interact/index.js"))
         "static/interact/index.js"
+    else if (std.mem.eql(u8, file, "media-selection.js"))
+        "static/media-selection.js"
     else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");

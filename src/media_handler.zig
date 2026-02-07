@@ -62,7 +62,7 @@ const private_cache_header = "Cache-Control: private, no-store";
 
 /// Handle GET /media/* requests.
 pub fn handleMedia(ctx: *Context) !void {
-    const media_path = ctx.wildcard orelse return notFound(ctx);
+    const media_path = percentDecodePath(ctx.allocator, ctx.wildcard orelse return notFound(ctx));
 
     // Path security: reject dot-prefixed segments
     if (!validatePath(media_path)) return notFound(ctx);
@@ -452,6 +452,40 @@ fn serverError(ctx: *Context) void {
     ctx.response.setStatus("500 Internal Server Error");
     ctx.response.setContentType("text/plain");
     ctx.response.setBody("Internal Server Error");
+}
+
+/// Decode percent-encoded path segments (e.g. %20 → space).
+/// Does NOT decode '+' as space (path encoding, not form encoding).
+fn percentDecodePath(allocator: std.mem.Allocator, input: []const u8) []const u8 {
+    // Quick check: if no %, return as-is
+    if (std.mem.indexOfScalar(u8, input, '%') == null) return input;
+
+    var buf = allocator.alloc(u8, input.len) catch return input;
+    var out: usize = 0;
+    var i: usize = 0;
+    while (i < input.len) {
+        if (input[i] == '%' and i + 2 < input.len) {
+            const hi = hexVal(input[i + 1]);
+            const lo = hexVal(input[i + 2]);
+            if (hi != null and lo != null) {
+                buf[out] = (@as(u8, hi.?) << 4) | @as(u8, lo.?);
+                out += 1;
+                i += 3;
+                continue;
+            }
+        }
+        buf[out] = input[i];
+        out += 1;
+        i += 1;
+    }
+    return allocator.realloc(buf, out) catch buf[0..out];
+}
+
+fn hexVal(c: u8) ?u4 {
+    if (c >= '0' and c <= '9') return @intCast(c - '0');
+    if (c >= 'a' and c <= 'f') return @intCast(c - 'a' + 10);
+    if (c >= 'A' and c <= 'F') return @intCast(c - 'A' + 10);
+    return null;
 }
 
 // =============================================================================

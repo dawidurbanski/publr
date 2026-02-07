@@ -51,6 +51,7 @@ register('dropdown', (el) => {
     const trigger = el.querySelector('[data-publr-part="trigger"]');
     const content = el.querySelector('[data-publr-part="content"]');
     if (!trigger || !content) return;
+    el._publrContent = content;
 
     trigger.addEventListener('click', () => {
         if (isOpen(el)) {
@@ -105,6 +106,7 @@ register('select', (el) => {
     const hidden = el.querySelector('[data-publr-part="value"]');
     const label = el.querySelector('[data-publr-part="label"]');
     if (!trigger || !content) return;
+    el._publrContent = content;
 
     trigger.addEventListener('click', () => {
         if (isOpen(el)) {
@@ -176,6 +178,7 @@ register('popover', (el) => {
     const trigger = el.querySelector('[data-publr-part="trigger"]');
     const content = el.querySelector('[data-publr-part="content"]');
     if (!trigger || !content) return;
+    el._publrContent = content;
     const id = nextId('popover');
     content.id = id;
     trigger.setAttribute('aria-controls', id);
@@ -422,6 +425,182 @@ register('focal-point', (el) => {
         const x = ((e.clientX - rect.left) / rect.width) * 100;
         const y = ((e.clientY - rect.top) / rect.height) * 100;
         set(x, y);
+    });
+});
+
+// ── Inline Create ──────────────────────────────
+register('inline-create', (el) => {
+    const targetId = el.dataset.publrTarget;
+    if (!targetId) return;
+    const form = document.getElementById(targetId);
+    if (!form) return;
+
+    function showForm() {
+        form.style.display = '';
+        const input = form.querySelector('input[type="text"]');
+        if (input) input.focus();
+    }
+
+    function hideForm() {
+        form.style.display = 'none';
+    }
+
+    el.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (form.style.display === 'none') {
+            showForm();
+        } else {
+            hideForm();
+        }
+    });
+
+    form.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hideForm();
+            el.focus();
+        }
+    });
+});
+
+// ── Tag Picker ─────────────────────────────────
+register('tag-picker', (el) => {
+    const selectedContainer = el.querySelector('[data-publr-part="selected"]');
+    const searchInput = el.querySelector('[data-publr-part="search"]');
+    const dropdown = el.querySelector('[data-publr-part="dropdown"]');
+    const optionsContainer = el.querySelector('[data-publr-part="options"]');
+    const createBtn = el.querySelector('[data-publr-part="create"]');
+    const hidden = el.querySelector('[data-publr-part="hidden"]');
+    if (!searchInput || !dropdown || !hidden) return;
+
+    function syncHidden() {
+        const names = [];
+        selectedContainer.querySelectorAll('.tag-picker-chip').forEach(chip => {
+            names.push(chip.dataset.tagName);
+        });
+        hidden.value = names.join(', ');
+    }
+
+    function addChip(name, id) {
+        // Check if chip already exists
+        const existing = selectedContainer.querySelector('[data-tag-name="' + name + '"]');
+        if (existing) return;
+
+        const chip = document.createElement('span');
+        chip.className = 'tag-picker-chip';
+        chip.dataset.tagName = name;
+        if (id) chip.dataset.tagId = id;
+        else chip.dataset.tagCustom = 'true';
+        chip.textContent = name;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'tag-picker-chip-remove';
+        removeBtn.setAttribute('aria-label', 'Remove tag');
+        removeBtn.innerHTML = '&times;';
+        removeBtn.addEventListener('click', () => {
+            chip.remove();
+            // Uncheck matching option
+            const cb = optionsContainer.querySelector('input[value="' + name + '"]');
+            if (cb) cb.checked = false;
+            syncHidden();
+        });
+
+        chip.appendChild(removeBtn);
+        selectedContainer.appendChild(chip);
+    }
+
+    function removeChip(name) {
+        const chip = selectedContainer.querySelector('[data-tag-name="' + name + '"]');
+        if (chip) chip.remove();
+    }
+
+    // Wire existing remove buttons on server-rendered chips
+    selectedContainer.querySelectorAll('[data-publr-part="remove"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const chip = btn.closest('.tag-picker-chip');
+            const name = chip.dataset.tagName;
+            chip.remove();
+            const cb = optionsContainer.querySelector('input[value="' + name + '"]');
+            if (cb) cb.checked = false;
+            syncHidden();
+        });
+    });
+
+    // Checkbox changes
+    optionsContainer.querySelectorAll('[data-publr-part="option"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            if (cb.checked) {
+                addChip(cb.value, cb.dataset.tagId);
+            } else {
+                removeChip(cb.value);
+            }
+            syncHidden();
+        });
+    });
+
+    // Search input
+    searchInput.addEventListener('focus', () => {
+        dropdown.style.display = '';
+        filterOptions();
+    });
+
+    searchInput.addEventListener('input', () => {
+        filterOptions();
+    });
+
+    function filterOptions() {
+        const query = searchInput.value.trim().toLowerCase();
+        let hasExactMatch = false;
+        const options = optionsContainer.querySelectorAll('.tag-picker-option');
+        options.forEach(opt => {
+            const name = opt.querySelector('input').value.toLowerCase();
+            if (query.length === 0 || name.indexOf(query) !== -1) {
+                opt.style.display = '';
+            } else {
+                opt.style.display = 'none';
+            }
+            if (name === query) hasExactMatch = true;
+        });
+
+        if (query.length > 0 && !hasExactMatch) {
+            createBtn.textContent = 'Create tag: ' + searchInput.value.trim();
+            createBtn.style.display = '';
+        } else {
+            createBtn.style.display = 'none';
+        }
+    }
+
+    // Create button
+    if (createBtn) {
+        createBtn.addEventListener('click', () => {
+            const name = searchInput.value.trim();
+            if (name.length === 0) return;
+            addChip(name, null);
+            searchInput.value = '';
+            createBtn.style.display = 'none';
+            filterOptions();
+            syncHidden();
+        });
+    }
+
+    // Enter key triggers create
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (createBtn && createBtn.style.display !== 'none') {
+                createBtn.click();
+            }
+        } else if (e.key === 'Escape') {
+            dropdown.style.display = 'none';
+            searchInput.blur();
+        }
+    });
+
+    // Click outside closes dropdown
+    document.addEventListener('click', (e) => {
+        if (!el.contains(e.target)) {
+            dropdown.style.display = 'none';
+        }
     });
 });
 

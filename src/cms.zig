@@ -219,6 +219,7 @@ pub fn listWithMeta(
         status: ?[]const u8 = null,
         visibility: ?[]const u8 = null,
         mime_type: ?[]const u8 = null,
+        filename_search: ?[]const u8 = null,
         limit: ?u32 = null,
         offset: ?u32 = null,
         order_by: []const u8 = "created_at",
@@ -306,6 +307,18 @@ pub fn listWithMeta(
         bind_idx += 1;
     }
 
+    // Filename search filter (media)
+    const search_bind_idx = bind_idx;
+    if (config.filename_search != null) {
+        const clause = std.fmt.bufPrint(
+            sql_buf[sql_len..],
+            " AND t.filename LIKE ?{}",
+            .{bind_idx},
+        ) catch return error.OutOfMemory;
+        sql_len += clause.len;
+        bind_idx += 1;
+    }
+
     // Meta filter WHERE conditions
     // m0.value_text = ?N, m1.value_int > ?N, etc.
     var meta_value_bind_indices: [max_meta_filters]u32 = undefined;
@@ -377,6 +390,11 @@ pub fn listWithMeta(
     // Bind mime type
     if (config.mime_type) |mime| {
         try stmt.bindText(mime_bind_idx, mime);
+    }
+
+    // Bind filename search
+    if (config.filename_search) |search| {
+        try stmt.bindText(search_bind_idx, search);
     }
 
     // Bind meta filter values

@@ -294,6 +294,7 @@ fn randomSuffix(buf: *[6]u8) void {
 }
 
 fn pathExists(path: []const u8) bool {
+    if (@import("builtin").target.cpu.arch == .wasm32) return false;
     std.fs.cwd().access(path, .{}) catch return false;
     return true;
 }
@@ -397,19 +398,62 @@ pub fn validateSize(size: usize, max_bytes: usize) bool {
 /// Default max upload size: 1MB
 pub const default_max_size: usize = 1024 * 1024;
 
-/// Validate mime type against allowed types
-pub fn validateMimeType(mime_type: []const u8) bool {
-    const allowed_prefixes = [_][]const u8{
-        "image/",
-        "application/pdf",
-        "video/",
-        "audio/",
-        "text/",
-    };
-    for (allowed_prefixes) |prefix| {
-        if (std.mem.startsWith(u8, mime_type, prefix)) return true;
+/// Allowed file extensions (lowercase, with dot).
+pub const allowed_extensions = [_][]const u8{
+    // Images
+    ".jpg", ".jpeg", ".png",  ".gif",  ".webp", ".svg",
+    ".bmp", ".ico",  ".avif", ".tiff", ".tif",
+    // Documents
+     ".pdf",
+    // Video
+    ".mp4", ".webm", ".mov",  ".avi",
+    // Audio
+     ".mp3",  ".wav",
+    ".ogg", ".aac",  ".flac",
+};
+
+/// Check whether a filename has an allowed extension.
+pub fn isAllowedExtension(filename: []const u8) bool {
+    const ext = std.fs.path.extension(filename);
+    if (ext.len == 0) return false;
+    for (allowed_extensions) |allowed| {
+        if (eqlLower(ext, allowed)) return true;
     }
     return false;
+}
+
+/// Validate mime type against allowed types.
+pub fn validateMimeType(mime_type: []const u8) bool {
+    for (allowed_mime_types) |allowed| {
+        if (std.mem.eql(u8, mime_type, allowed)) return true;
+    }
+    return false;
+}
+
+const allowed_mime_types = [_][]const u8{
+    // Images
+    "image/jpeg",      "image/png",       "image/gif",
+    "image/webp",      "image/svg+xml",   "image/bmp",
+    "image/x-icon",    "image/avif",      "image/tiff",
+    // Documents
+    "application/pdf",
+    // Video
+    "video/mp4",       "video/webm",
+    "video/quicktime", "video/x-msvideo",
+    // Audio
+    "audio/mpeg",
+    "audio/wav",       "audio/ogg",       "audio/aac",
+    "audio/flac",
+};
+
+fn eqlLower(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |ac, bc| {
+        const al = if (ac >= 'A' and ac <= 'Z') ac + 32 else ac;
+        const bl = if (bc >= 'A' and bc <= 'Z') bc + 32 else bc;
+        if (al != bl) return false;
+    }
+    return true;
 }
 
 // =============================================================================

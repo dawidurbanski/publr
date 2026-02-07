@@ -32,6 +32,27 @@ const icon_sync =
 const icon_tag =
     \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 12L11.6422 2.35783C11.8405 2.15953 11.9396 2.06038 12.0558 1.98697C12.1588 1.92191 12.2711 1.87276 12.389 1.84115C12.5221 1.80544 12.6631 1.80078 12.945 1.79148L18.2889 1.61571C19.0558 1.59043 19.4392 1.57779 19.7301 1.72C19.9853 1.84519 20.1927 2.04907 20.3223 2.30189C20.4694 2.58969 20.4632 2.97309 20.4507 3.73989L20.3508 9.0844C20.3457 9.36634 20.3432 9.50731 20.3113 9.64061C20.283 9.75858 20.2371 9.87138 20.1751 9.97537C20.105 10.0929 20.0088 10.1946 19.8165 10.3982L10.5 20M2 12L10.5 20M2 12L5 9M10.5 20L13 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 ;
+const icon_folder_plus =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 7L11.8845 4.76892C11.5634 4.1268 11.4029 3.80573 11.1634 3.57116C10.9516 3.36373 10.6963 3.20597 10.4161 3.10931C10.0992 3 9.74021 3 9.02229 3H5.2C4.0799 3 3.51984 3 3.09202 3.21799C2.71569 3.40973 2.40973 3.71569 2.21799 4.09202C2 4.51984 2 5.0799 2 6.2V7M2 7H17.2C18.8802 7 19.7202 7 20.362 7.32698C20.9265 7.6146 21.3854 8.07354 21.673 8.63803C22 9.27976 22 10.1198 22 11.8V16.2C22 17.8802 22 18.7202 21.673 19.362C21.3854 19.9265 20.9265 20.3854 20.362 20.673C19.7202 21 18.8802 21 17.2 21H6.8C5.11984 21 4.27976 21 3.63803 20.673C3.07354 20.3854 2.6146 19.9265 2.32698 19.362C2 18.7202 2 17.8802 2 16.2V7ZM12 17V11M9 14H15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_plus_circle =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 8V16M8 12H16M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_check =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_chevron_left =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_chevron_right =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_search =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 21L17.5001 17.5M20 11.5C20 16.1944 16.1944 20 11.5 20C6.80558 20 3 16.1944 3 11.5C3 6.80558 6.80558 3 11.5 3C16.1944 3 20 6.80558 20 11.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_all_files =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2.26946V6.4C14 6.96005 14 7.24008 14.109 7.45399C14.2049 7.64215 14.3578 7.79513 14.546 7.89101C14.7599 8 15.0399 8 15.6 8H19.7305M20 9.98822V17.2C20 18.8802 20 19.7202 19.673 20.362C19.3854 20.9265 18.9265 21.3854 18.362 21.673C17.7202 22 16.8802 22 15.2 22H8.8C7.11984 22 6.27976 22 5.63803 21.673C5.07354 21.3854 4.6146 20.9265 4.32698 20.362C4 19.7202 4 18.8802 4 17.2V6.8C4 5.11984 4 4.27976 4.32698 3.63803C4.6146 3.07354 5.07354 2.6146 5.63803 2.32698C6.27976 2 7.11984 2 8.8 2H12.0118C12.7455 2 13.1124 2 13.4577 2.08289C13.7638 2.15638 14.0564 2.27759 14.3249 2.44208C14.6276 2.6276 14.887 2.88703 15.4059 3.40589L18.5941 6.59411C19.113 7.11297 19.3724 7.3724 19.5579 7.67515C19.7224 7.94356 19.8436 8.2362 19.9171 8.5423C20 8.88757 20 9.25445 20 9.98822Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
 
 const MediaItem = struct {
     id: []const u8,
@@ -51,17 +72,81 @@ const FolderItem = struct {
     name: []const u8,
     parent_id: []const u8,
     count: u32,
+    depth: u32,
     is_active: bool,
+    is_disabled: bool,
     url: []const u8,
 };
+
+const depth_styles = [_][]const u8{ "", "padding-left: 1.25rem", "padding-left: 2rem", "padding-left: 2.75rem", "padding-left: 3.5rem", "padding-left: 4.25rem" };
+const depth_strs = [_][]const u8{ "0", "1", "2", "3", "4", "5" };
+const max_depth = depth_styles.len - 1; // deepest renderable level
 
 const TagItem = struct {
     id: []const u8,
     name: []const u8,
     count: u32,
     is_active: bool,
+    is_disabled: bool,
     url: []const u8,
 };
+
+const ActiveTag = struct {
+    id: []const u8,
+    name: []const u8,
+    remove_url: []const u8,
+};
+
+const ActiveFilter = struct {
+    label: []const u8,
+    value: []const u8,
+    remove_url: []const u8,
+};
+
+const HiddenParam = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
+const YearOption = struct {
+    value: []const u8,
+    label: []const u8,
+    is_selected: bool,
+};
+
+const MonthOption = struct {
+    value: []const u8,
+    label: []const u8,
+    is_selected: bool,
+};
+
+const PageUrl = struct {
+    page_num: []const u8,
+    url: []const u8,
+    is_current: bool,
+};
+
+const BreadcrumbItem = struct {
+    name: []const u8,
+    url: []const u8,
+};
+
+pub fn Breadcrumbs(props: struct {
+    items: []const BreadcrumbItem,
+}) {
+    <nav class="media-breadcrumbs" aria-label="Folder path">
+        {for (props.items) |crumb| (
+            <span class="media-breadcrumb">
+                <span class="media-breadcrumb-sep">/</span>
+                {if (crumb.url.len > 0) (
+                    <a href={crumb.url} class="media-breadcrumb-link">{crumb.name}</a>
+                ) else (
+                    <span class="media-breadcrumb-current">{crumb.name}</span>
+                )}
+            </span>
+        )}
+    </nav>
+}
 
 pub fn List(props: struct {
     has_media: bool,
@@ -69,55 +154,64 @@ pub fn List(props: struct {
     csrf_token: []const u8,
     view_mode: []const u8,
     total_count: u32,
+    filtered_count: u32,
+    unsorted_count: u32,
     folders: []const FolderItem,
     tags: []const TagItem,
     active_folder: []const u8,
-    active_tag: []const u8,
+    active_folder_name: []const u8,
+    active_tags: []const ActiveTag,
     show_unreviewed: bool,
     unreviewed_count: u32,
     view_grid_url: []const u8,
     view_list_url: []const u8,
+    unsorted_url: []const u8,
+    reset_url: []const u8,
+    unreviewed_url: []const u8,
+    folder_remove_url: []const u8,
+    search_term: []const u8,
+    search_remove_url: []const u8,
+    active_filters: []const ActiveFilter,
+    search_hidden_params: []const HiddenParam,
+    date_hidden_params: []const HiddenParam,
+    year_options: []const YearOption,
+    month_options: []const MonthOption,
+    scan_result: ?u32,
+    current_page: u32,
+    total_pages: u32,
+    page_urls: []const PageUrl,
+    prev_page_url: []const u8,
+    next_page_url: []const u8,
+    items_per_page: u32,
+    filtered_count_str: []const u8,
+    items_per_page_str: []const u8,
 }) {
-    <div class="media-upload-zone" id="media-upload-zone" data-publr-component="upload-zone">
-        <form method="POST" action="/admin/media" enctype="multipart/form-data" id="media-upload-form">
-            <input type="hidden" name="_csrf" value={props.csrf_token} />
-            <div class="upload-zone-content">
-                <div class="upload-zone-icon">{!icon_upload}</div>
-                <p class="upload-zone-text">
-                    <label for="media-file-input" class="upload-zone-link">Click to upload</label>
-                    {" or drag and drop"}
-                </p>
-                <p class="upload-zone-hint">Max file size: 1MB</p>
-                <input type="file" id="media-file-input" name="file" class="upload-zone-input" multiple="" />
-            </div>
-            <div class="upload-zone-progress" id="upload-progress" style="display:none">
-                <div class="upload-progress-bar" id="upload-progress-bar"></div>
-                <span class="upload-progress-text" id="upload-progress-text">Uploading...</span>
-            </div>
-        </form>
-    </div>
+    <form method="POST" action="/admin/media" enctype="multipart/form-data" id="media-upload-form" style="display:none">
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="folder_id" id="upload-folder-id" value="" />
+        <input type="file" id="media-file-input" name="file" multiple="" />
+    </form>
 
     <div class="media-toolbar">
         <div class="media-toolbar-left">
-            <span class="media-count">{props.total_count} files</span>
-            <form method="POST" action="/admin/media/sync" class="media-sync-form">
-                <input type="hidden" name="_csrf" value={props.csrf_token} />
-                <button type="submit" class="btn btn-sm media-sync-btn" title="Sync filesystem">
-                    {!icon_sync}
-                    {" Sync"}
-                </button>
-            </form>
+            <input type="checkbox" class="media-select-all" id="media-select-all" aria-label="Select all" />
+            <span class="media-count" id="media-count-default">{props.filtered_count} files</span>
+            <span class="media-selection-info" id="media-selection-info" style="display:none">
+                <span id="media-selection-count">0</span> selected
+                <div data-publr-component="dropdown" class="media-bulk-actions">
+                    <button class="btn btn-sm" data-publr-part="trigger">Bulk Actions</button>
+                    <div class="dropdown-menu" data-publr-part="content">
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="delete">Delete</button>
+                        <hr class="dropdown-divider" />
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="add-tag">Add Tag...</button>
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="remove-tag">Remove Tag...</button>
+                        <hr class="dropdown-divider" />
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="move-folder">Move to Folder...</button>
+                    </div>
+                </div>
+            </span>
         </div>
         <div class="media-toolbar-right">
-            <div class="media-filters">
-                <a href="/admin/media" class={if (props.active_folder.len == 0 and props.active_tag.len == 0 and !props.show_unreviewed) ("media-filter-btn active") else ("media-filter-btn")}>All</a>
-                {if (props.unreviewed_count > 0) (
-                    <a href="?unreviewed=1" class={if (props.show_unreviewed) ("media-filter-btn active") else ("media-filter-btn")}>
-                        {"Unreviewed "}
-                        <span class="media-filter-count">{props.unreviewed_count}</span>
-                    </a>
-                ) else (<span></span>)}
-            </div>
             <div class="media-view-toggle">
                 <a href={props.view_grid_url} class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active") else ("media-view-btn")} aria-label="Grid view">
                     {!icon_grid}
@@ -129,45 +223,222 @@ pub fn List(props: struct {
         </div>
     </div>
 
+    <div class="media-select-all-banner" id="media-select-all-banner" style="display:none"
+         data-filtered-count={props.filtered_count_str}
+         data-items-per-page={props.items_per_page_str}
+         data-active-folder={props.active_folder}
+         data-show-unreviewed={if (props.show_unreviewed) ("1") else ("0")}
+         data-search-term={props.search_term}>
+        <span id="media-select-all-banner-text">
+            All {props.items_per_page} items on this page are selected.
+        </span>
+        <button type="button" class="media-select-all-link" id="media-select-all-pages-btn">
+            Select all {props.filtered_count} items
+        </button>
+        <span id="media-select-all-pages-text" style="display:none">
+            All {props.filtered_count} items are selected.
+        </span>
+        <button type="button" class="media-select-all-link" id="media-clear-selection-btn" style="display:none">
+            Clear selection
+        </button>
+    </div>
+
+    <div class="media-filter-bar">
+        {for (props.active_filters) |filter| (
+            <a href={filter.remove_url} class="refinement-chip">
+                <span class="refinement-chip-label">{filter.label}</span>
+                {filter.value}
+                <span class="refinement-chip-remove">&times;</span>
+            </a>
+        )}
+        <form method="GET" action="/admin/media" class="media-search-inline">
+            {for (props.search_hidden_params) |param| (
+                <input type="hidden" name={param.name} value={param.value} />
+            )}
+            <input type="text" name="search" value={props.search_term} placeholder="Search..." class="media-search-input" />
+        </form>
+        {if (props.active_filters.len > 0) (
+            <a href={props.reset_url} class="refinement-reset">Reset all</a>
+        ) else (<span></span>)}
+    </div>
+
     <div class="media-layout">
         <aside class="media-sidebar">
             <div class="media-sidebar-section">
                 <div class="media-sidebar-header">
                     <h3 class="media-sidebar-title">Folders</h3>
+                    <button type="button" class="btn-icon-sm" data-publr-action="create-toplevel" aria-label="New folder">
+                        {!icon_folder_plus}
+                    </button>
                 </div>
                 <ul class="media-folder-list">
-                    {for (props.folders) |folder| (
-                        <li class={if (folder.is_active) ("media-folder-item active") else ("media-folder-item")}>
-                            <a href={folder.url} class="media-folder-link">
+                    <li class={if (std.mem.eql(u8, props.active_folder, "default")) ("media-folder-item active") else ("media-folder-item")}>
+                        <div class="media-folder-row">
+                            <a href={props.unsorted_url} class="media-folder-link">
                                 {!icon_folder}
-                                <span class="media-folder-name">{folder.name}</span>
-                                <span class="media-folder-count">{folder.count}</span>
+                                <span class="media-folder-name">Default</span>
                             </a>
+                            <span class="media-folder-count">{props.unsorted_count}</span>
+                            <span class="media-folder-controls">
+                                <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id="" title="New folder">
+                                    {!icon_folder_plus}
+                                </button>
+                            </span>
+                        </div>
+                    </li>
+                    {for (props.folders) |folder| (
+                        <li class={if (folder.is_active) ("media-folder-item active") else if (folder.is_disabled) ("media-folder-item disabled") else ("media-folder-item")} style={depth_styles[@min(folder.depth, depth_styles.len - 1)]}>
+                            <div class="media-folder-row" data-folder-id={folder.id} data-folder-name={folder.name} data-folder-depth={depth_strs[@min(folder.depth, depth_strs.len - 1)]}>
+                                {if (folder.is_disabled) (
+                                    <span class="media-folder-link">
+                                        {!icon_folder}
+                                        <span class="media-folder-name">{folder.name}</span>
+                                    </span>
+                                ) else (
+                                    <a href={folder.url} class="media-folder-link">
+                                        {!icon_folder}
+                                        <span class="media-folder-name">{folder.name}</span>
+                                    </a>
+                                )}
+                                <span class="media-folder-count">{folder.count}</span>
+                                <span class="media-folder-controls">
+                                    {if (folder.depth < max_depth) (
+                                        <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id={folder.id} title="New subfolder">
+                                            {!icon_folder_plus}
+                                        </button>
+                                    ) else (<span></span>)}
+                                    <div data-publr-component="dropdown" class="media-folder-actions">
+                                        <button class="btn-icon-sm" data-publr-part="trigger" aria-label="Folder actions">
+                                            {!icon_more}
+                                        </button>
+                                        <div class="dropdown-menu" data-publr-part="content">
+                                            <button type="button" class="dropdown-item" data-publr-part="item" data-publr-action="rename-folder" data-folder-id={folder.id} data-folder-name={folder.name}>Rename</button>
+                                            <button type="button" class="dropdown-item" data-publr-part="item" data-publr-action="move-folder" data-folder-id={folder.id} data-folder-name={folder.name}>Move to...</button>
+                                            <hr class="dropdown-divider" />
+                                            <button type="button" class="dropdown-item dropdown-item-danger" data-publr-part="item" data-publr-action="delete-folder" data-folder-id={folder.id}>Delete</button>
+                                        </div>
+                                    </div>
+                                </span>
+                            </div>
                         </li>
                     )}
                 </ul>
-                <form method="POST" action="/admin/media/folders" class="media-sidebar-form">
-                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    <input type="text" name="folder_name" placeholder="New folder..." class="form-control form-control-sm" />
-                </form>
+                <div data-publr-component="dialog" data-publr-state="closed" id="folder-delete-dialog">
+                    <button data-publr-part="trigger" hidden=""></button>
+                    <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
+                        <div class="dialog-content">
+                            <h3>Delete folder?</h3>
+                            <p>Files will move to the parent folder.</p>
+                            <div class="dialog-actions">
+                                <button data-publr-part="close" class="btn btn-sm">Cancel</button>
+                                <form method="POST" action="/admin/media/folders/delete">
+                                    <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                    <input type="hidden" name="term_id" id="folder-delete-id" value="" />
+                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="media-sidebar-section">
                 <div class="media-sidebar-header">
                     <h3 class="media-sidebar-title">Tags</h3>
+                    <button type="button" class="btn-icon-sm" data-publr-component="inline-create" data-publr-part="trigger" data-publr-target="tag-create-form" aria-label="New tag">
+                        {!icon_plus_circle}
+                    </button>
                 </div>
                 <div class="media-tag-list">
                     {for (props.tags) |tag| (
-                        <a href={tag.url} class={if (tag.is_active) ("media-tag-chip active") else ("media-tag-chip")}>
-                            {tag.name}
-                            <span class="media-tag-count">{tag.count}</span>
-                        </a>
+                        {if (tag.is_disabled) (
+                            <span class="media-tag-chip disabled">
+                                {tag.name}
+                                <span class="media-tag-count">{tag.count}</span>
+                            </span>
+                        ) else (
+                            <a href={tag.url} class={if (tag.is_active) ("media-tag-chip active") else ("media-tag-chip")}>
+                                {tag.name}
+                                <span class="media-tag-count">{tag.count}</span>
+                            </a>
+                        )}
                     )}
                 </div>
-                <form method="POST" action="/admin/media/tags" class="media-sidebar-form">
+                {if (props.tags.len == 0) (
+                    <span class="media-empty-hint" data-publr-component="inline-create" data-publr-part="empty-trigger" data-publr-target="tag-create-form">No tags yet</span>
+                ) else (<span></span>)}
+                <form method="POST" action="/admin/media/tags" class="inline-create-form" id="tag-create-form" style="display:none">
                     <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    <input type="text" name="tag_name" placeholder="New tag..." class="form-control form-control-sm" />
+                    <div class="inline-create-row">
+                        <input type="text" name="tag_name" placeholder="Tag name..." class="form-control form-control-sm" />
+                        <button type="submit" class="btn-icon-sm btn-icon-confirm" aria-label="Create tag">
+                            {!icon_check}
+                        </button>
+                    </div>
                 </form>
+            </div>
+
+            {if (props.year_options.len > 0) (
+                <div class="media-sidebar-section">
+                    <h3 class="media-sidebar-title">Date</h3>
+                    <form method="GET" action="/admin/media" class="media-date-filter">
+                        {for (props.date_hidden_params) |param| (
+                            <input type="hidden" name={param.name} value={param.value} />
+                        )}
+                        <select name="year" class="media-date-select" onchange="this.form.querySelector('[name=month]').value='';this.form.submit()">
+                            <option value="">Year</option>
+                            {for (props.year_options) |yr| (
+                                {if (yr.is_selected) (
+                                    <option value={yr.value} selected="selected">{yr.label}</option>
+                                ) else (
+                                    <option value={yr.value}>{yr.label}</option>
+                                )}
+                            )}
+                        </select>
+                        <select name="month" class="media-date-select" onchange="this.form.submit()">
+                            <option value="">Month</option>
+                            {for (props.month_options) |mo| (
+                                {if (mo.is_selected) (
+                                    <option value={mo.value} selected="selected">{mo.label}</option>
+                                ) else (
+                                    <option value={mo.value}>{mo.label}</option>
+                                )}
+                            )}
+                        </select>
+                    </form>
+                </div>
+            ) else (<span></span>)}
+
+            <div class="media-sidebar-section media-sidebar-filesystem">
+                <h3 class="media-sidebar-title">Filesystem</h3>
+                {if (props.scan_result != null) (
+                    {if (props.scan_result.? > 0) (
+                        <div class="media-sync-notice">
+                            <span class="media-sync-notice-text">{props.scan_result.?}{" new files found"}</span>
+                            <form method="POST" action="/admin/media/sync" class="media-sync-inline">
+                                <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                <button type="submit" class="btn btn-sm btn-primary">Sync now</button>
+                            </form>
+                        </div>
+                    ) else (
+                        <span class="media-sync-status">Up to date</span>
+                    )}
+                    <form method="POST" action="/admin/media/scan" class="media-sync-check">
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <button type="submit" class="media-sync-check-link">Check again</button>
+                    </form>
+                ) else (
+                    <form method="POST" action="/admin/media/scan" class="media-sync-check">
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <button type="submit" class="media-sync-check-link">Check for changes</button>
+                    </form>
+                )}
+                {if (props.unreviewed_count > 0) (
+                    <a href={props.unreviewed_url} class={if (props.show_unreviewed) ("media-unreviewed-link active") else ("media-unreviewed-link")}>
+                        {"Unreviewed "}
+                        <span class="media-tag-count">{props.unreviewed_count}</span>
+                    </a>
+                ) else (<span></span>)}
             </div>
         </aside>
 
@@ -176,22 +447,27 @@ pub fn List(props: struct {
                 {if (std.mem.eql(u8, props.view_mode, "grid")) (
                     <div class="media-grid">
                         {for (props.media) |item| (
-                            <a href={item.edit_url} class="media-card">
-                                <div class="media-card-preview">
-                                    {if (item.is_image) (
-                                        <img src={item.thumb_url} alt={item.filename} loading="lazy" />
-                                    ) else (
-                                        <div class="media-card-icon">{!icon_file}</div>
-                                    )}
-                                    {if (item.is_private) (
-                                        <span class="media-card-badge">{!icon_lock}</span>
-                                    ) else (<span></span>)}
-                                </div>
-                                <div class="media-card-info">
-                                    <span class="media-card-name">{item.filename}</span>
-                                    <span class="media-card-meta">{item.size_display}</span>
-                                </div>
-                            </a>
+                            <div class="media-card" data-media-id={item.id}>
+                                <label class="media-card-check">
+                                    <input type="checkbox" class="media-checkbox" value={item.id} aria-label="Select" />
+                                </label>
+                                <a href={item.edit_url} class="media-card-link">
+                                    <div class="media-card-preview">
+                                        {if (item.is_image) (
+                                            <img src={item.thumb_url} alt={item.filename} loading="lazy" />
+                                        ) else (
+                                            <div class="media-card-icon">{!icon_file}</div>
+                                        )}
+                                        {if (item.is_private) (
+                                            <span class="media-card-badge">{!icon_lock}</span>
+                                        ) else (<span></span>)}
+                                    </div>
+                                    <div class="media-card-info">
+                                        <span class="media-card-name">{item.filename}</span>
+                                        <span class="media-card-meta">{item.size_display}</span>
+                                    </div>
+                                </a>
+                            </div>
                         )}
                     </div>
                 ) else (
@@ -253,13 +529,169 @@ pub fn List(props: struct {
                     </table>
                 )}
             ) else (
-                <div class="empty-state">
-                    <div class="empty-state-icon">{!icon_image}</div>
-                    <p>No media files yet.</p>
-                    <p class="empty-state-hint">Upload files by clicking the zone above or dragging files onto it.</p>
-                </div>
+                {if (props.active_folder.len > 0 or props.active_tags.len > 0 or props.search_term.len > 0) (
+                    <div class="empty-state media-upload-zone" id="media-upload-zone">
+                        <div class="empty-state-icon">{!icon_upload}</div>
+                        <p>No files match your current filters.</p>
+                        <p class="empty-state-hint">Drop files here to upload, or <a href={props.reset_url}>reset all</a>.</p>
+                    </div>
+                ) else (
+                    <div class="empty-state media-upload-zone" id="media-upload-zone">
+                        <div class="empty-state-icon">{!icon_upload}</div>
+                        <p>No media files yet.</p>
+                        <p class="empty-state-hint">Drop files here or use the upload button below.</p>
+                    </div>
+                )}
             )}
         </div>
     </div>
-}
 
+    <div class="media-bottom-bar" data-active-folder={props.active_folder}>
+        <div class="media-bottom-bar-left">
+            {if (props.total_pages > 1) (
+                <nav class="pagination" aria-label="Media pagination">
+                    <span class="pagination-label">Page:</span>
+                    {if (props.prev_page_url.len > 0) (
+                        <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page">{!icon_chevron_left}</a>
+                    ) else (
+                        <span class="pagination-btn disabled" aria-label="Previous page">{!icon_chevron_left}</span>
+                    )}
+                    {for (props.page_urls) |pg| (
+                        {if (pg.is_current) (
+                            <span class="pagination-page active">{pg.page_num}</span>
+                        ) else (
+                            <a href={pg.url} class="pagination-page">{pg.page_num}</a>
+                        )}
+                    )}
+                    {if (props.next_page_url.len > 0) (
+                        <a href={props.next_page_url} class="pagination-btn" aria-label="Next page">{!icon_chevron_right}</a>
+                    ) else (
+                        <span class="pagination-btn disabled" aria-label="Next page">{!icon_chevron_right}</span>
+                    )}
+                </nav>
+            ) else (<span></span>)}
+        </div>
+        <div class="media-bottom-bar-right">
+            <div class="media-upload-progress" id="upload-progress" style="display:none">
+                <div class="upload-progress-bar" id="upload-progress-bar"></div>
+                <span class="upload-progress-text" id="upload-progress-text">Uploading...</span>
+            </div>
+            {if (props.active_folder.len > 0 and !std.mem.eql(u8, props.active_folder, "default")) (
+                <button type="button" class="btn btn-sm" id="upload-default-btn">Upload to default</button>
+                <button type="button" class="btn btn-sm btn-primary" id="upload-here-btn">
+                    {!icon_upload} Upload here
+                </button>
+            ) else (
+                <button type="button" class="btn btn-sm btn-primary" id="upload-default-btn">
+                    {!icon_upload} Upload
+                </button>
+            )}
+        </div>
+    </div>
+
+    <div data-publr-component="dialog" data-publr-state="closed" id="bulk-add-tag-dialog">
+        <button data-publr-part="trigger" hidden=""></button>
+        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
+            <div class="dialog-content">
+                <h3>Add Tag</h3>
+                <p>Select a tag to add to the selected items.</p>
+                <form method="POST" action="/admin/media/bulk/add-tag" id="bulk-add-tag-form">
+                    <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="ids" id="bulk-add-tag-ids" value="" />
+                    <input type="hidden" name="select_all" id="bulk-add-tag-select-all" value="" />
+                    <input type="hidden" name="filter_folder" id="bulk-add-tag-filter-folder" value="" />
+                    <input type="hidden" name="filter_tags" id="bulk-add-tag-filter-tags" value="" />
+                    <input type="hidden" name="filter_search" id="bulk-add-tag-filter-search" value="" />
+                    <input type="hidden" name="filter_unreviewed" id="bulk-add-tag-filter-unreviewed" value="" />
+                    <input type="hidden" name="filter_year" id="bulk-add-tag-filter-year" value="" />
+                    <input type="hidden" name="filter_month" id="bulk-add-tag-filter-month" value="" />
+                    <select name="term_id" class="form-control" required="">
+                        <option value="">Choose a tag...</option>
+                        {for (props.tags) |tag| (
+                            <option value={tag.id}>{tag.name}</option>
+                        )}
+                    </select>
+                    <div class="dialog-actions">
+                        <button type="button" data-publr-part="close" class="btn btn-sm">Cancel</button>
+                        <button type="submit" class="btn btn-sm btn-primary">Add Tag</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div data-publr-component="dialog" data-publr-state="closed" id="bulk-remove-tag-dialog">
+        <button data-publr-part="trigger" hidden=""></button>
+        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
+            <div class="dialog-content">
+                <h3>Remove Tag</h3>
+                <p>Select a tag to remove from the selected items.</p>
+                <form method="POST" action="/admin/media/bulk/remove-tag" id="bulk-remove-tag-form">
+                    <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="ids" id="bulk-remove-tag-ids" value="" />
+                    <input type="hidden" name="select_all" id="bulk-remove-tag-select-all" value="" />
+                    <input type="hidden" name="filter_folder" id="bulk-remove-tag-filter-folder" value="" />
+                    <input type="hidden" name="filter_tags" id="bulk-remove-tag-filter-tags" value="" />
+                    <input type="hidden" name="filter_search" id="bulk-remove-tag-filter-search" value="" />
+                    <input type="hidden" name="filter_unreviewed" id="bulk-remove-tag-filter-unreviewed" value="" />
+                    <input type="hidden" name="filter_year" id="bulk-remove-tag-filter-year" value="" />
+                    <input type="hidden" name="filter_month" id="bulk-remove-tag-filter-month" value="" />
+                    <select name="term_id" class="form-control" required="">
+                        <option value="">Choose a tag...</option>
+                        {for (props.tags) |tag| (
+                            <option value={tag.id}>{tag.name}</option>
+                        )}
+                    </select>
+                    <div class="dialog-actions">
+                        <button type="button" data-publr-part="close" class="btn btn-sm">Cancel</button>
+                        <button type="submit" class="btn btn-sm btn-danger">Remove Tag</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div data-publr-component="dialog" data-publr-state="closed" id="bulk-move-folder-dialog">
+        <button data-publr-part="trigger" hidden=""></button>
+        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
+            <div class="dialog-content">
+                <h3>Move to Folder</h3>
+                <p>Select a folder to move the selected items to.</p>
+                <form method="POST" action="/admin/media/bulk/move-folder" id="bulk-move-folder-form">
+                    <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="ids" id="bulk-move-folder-ids" value="" />
+                    <input type="hidden" name="select_all" id="bulk-move-folder-select-all" value="" />
+                    <input type="hidden" name="filter_folder" id="bulk-move-folder-filter-folder" value="" />
+                    <input type="hidden" name="filter_tags" id="bulk-move-folder-filter-tags" value="" />
+                    <input type="hidden" name="filter_search" id="bulk-move-folder-filter-search" value="" />
+                    <input type="hidden" name="filter_unreviewed" id="bulk-move-folder-filter-unreviewed" value="" />
+                    <input type="hidden" name="filter_year" id="bulk-move-folder-filter-year" value="" />
+                    <input type="hidden" name="filter_month" id="bulk-move-folder-filter-month" value="" />
+                    <select name="term_id" class="form-control" required="">
+                        <option value="">Choose a folder...</option>
+                        {for (props.folders) |folder| (
+                            <option value={folder.id}>{folder.name}</option>
+                        )}
+                    </select>
+                    <div class="dialog-actions">
+                        <button type="button" data-publr-part="close" class="btn btn-sm">Cancel</button>
+                        <button type="submit" class="btn btn-sm btn-primary">Move</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <form method="POST" id="bulk-delete-form" action="/admin/media/bulk/delete" style="display:none">
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="ids" id="bulk-delete-ids" value="" />
+        <input type="hidden" name="select_all" id="bulk-delete-select-all" value="" />
+        <input type="hidden" name="filter_folder" id="bulk-delete-filter-folder" value="" />
+        <input type="hidden" name="filter_tags" id="bulk-delete-filter-tags" value="" />
+        <input type="hidden" name="filter_search" id="bulk-delete-filter-search" value="" />
+        <input type="hidden" name="filter_unreviewed" id="bulk-delete-filter-unreviewed" value="" />
+        <input type="hidden" name="filter_year" id="bulk-delete-filter-year" value="" />
+        <input type="hidden" name="filter_month" id="bulk-delete-filter-month" value="" />
+    </form>
+
+}

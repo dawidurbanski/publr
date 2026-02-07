@@ -11,6 +11,7 @@ const Statement = db_mod.Statement;
 const cms = @import("cms");
 const media_schema = @import("schema_media");
 const storage = @import("storage");
+const svg_sanitize = @import("svg_sanitize");
 
 const Allocator = std.mem.Allocator;
 
@@ -50,6 +51,12 @@ pub const MediaListOptions = struct {
     order_dir: cms.OrderDir = .desc,
     /// Meta field filters
     meta_filters: []const cms.MetaFilter = &.{},
+    /// Filter by filename substring (case-insensitive LIKE %search%)
+    search: ?[]const u8 = null,
+    /// Filter by year (created_at)
+    year: ?u16 = null,
+    /// Filter by month (created_at), 1-12
+    month: ?u8 = null,
 };
 
 /// Input for creating a media record
@@ -187,6 +194,7 @@ pub fn listMedia(
         .select_cols = "id, filename, mime_type, size, width, height, storage_key, visibility, hash, data, created_at, updated_at",
         .visibility = opts.visibility,
         .mime_type = opts.mime_type,
+        .filename_search = opts.search,
         .limit = opts.limit,
         .offset = opts.offset,
         .order_by = opts.order_by,
@@ -232,6 +240,11 @@ pub fn uploadMedia(
     backend: StorageBackend,
     input: UploadInput,
 ) !MediaRecord {
+    // Validate file extension
+    if (!storage.isAllowedExtension(input.filename)) {
+        return error.InvalidFileType;
+    }
+
     // Validate size
     const max_size = input.max_size orelse storage.default_max_size;
     if (!storage.validateSize(input.data.len, max_size)) {
@@ -243,11 +256,18 @@ pub fn uploadMedia(
         return error.InvalidMimeType;
     }
 
+    // Sanitize SVG files
+    const data = if (std.mem.eql(u8, input.mime_type, "image/svg+xml"))
+        try svg_sanitize.sanitize(allocator, input.data)
+    else
+        input.data;
+    defer if (std.mem.eql(u8, input.mime_type, "image/svg+xml")) allocator.free(data);
+
     // Compute SHA-256 hash
-    const hash = try storage.computeHash(allocator, input.data);
+    const hash = try storage.computeHash(allocator, data);
 
     // Save to storage backend
-    const storage_key = try backend.save(allocator, input.filename, input.data, input.visibility);
+    const storage_key = try backend.save(allocator, input.filename, data, input.visibility);
 
     // Create DB record
     return createMedia(allocator, db, .{
@@ -297,28 +317,36 @@ pub fn toggleMediaVisibility(
     const current = Visibility.fromString(record.visibility) orelse return error.InvalidData;
     const new_vis: Visibility = if (current == .public) .private else .public;
 
-    // Move files on disk
-    const pub_path = try storage.buildPath(allocator, record.storage_key, .public);
-    defer allocator.free(pub_path);
-    const priv_path = try storage.buildPath(allocator, record.storage_key, .private);
-    defer allocator.free(priv_path);
+    const is_wasm = @import("builtin").target.cpu.arch == .wasm32;
 
-    switch (current) {
-        .public => {
-            // Ensure private directory exists
-            if (std.fs.path.dirname(priv_path)) |dir| {
-                std.fs.cwd().makePath(dir) catch {};
-            }
-            // Move real file to .private/
-            try std.fs.cwd().rename(pub_path, priv_path);
-            // Write zero-byte companion at the original public path
-            const companion = try std.fs.cwd().createFile(pub_path, .{});
-            companion.close();
-        },
-        .private => {
-            // Move real file from .private/ back to public (overwrites companion)
-            try std.fs.cwd().rename(priv_path, pub_path);
-        },
+    if (is_wasm) {
+        // WASM: update visibility in media_files table (no filesystem)
+        const wasm_storage = @import("wasm_storage");
+        wasm_storage.updateVisibility(record.storage_key, new_vis) catch {};
+    } else {
+        // Move files on disk
+        const pub_path = try storage.buildPath(allocator, record.storage_key, .public);
+        defer allocator.free(pub_path);
+        const priv_path = try storage.buildPath(allocator, record.storage_key, .private);
+        defer allocator.free(priv_path);
+
+        switch (current) {
+            .public => {
+                // Ensure private directory exists
+                if (std.fs.path.dirname(priv_path)) |dir| {
+                    std.fs.cwd().makePath(dir) catch {};
+                }
+                // Move real file to .private/
+                try std.fs.cwd().rename(pub_path, priv_path);
+                // Write zero-byte companion at the original public path
+                const companion = try std.fs.cwd().createFile(pub_path, .{});
+                companion.close();
+            },
+            .private => {
+                // Move real file from .private/ back to public (overwrites companion)
+                try std.fs.cwd().rename(priv_path, pub_path);
+            },
+        }
     }
 
     // Update DB visibility column
@@ -370,31 +398,68 @@ pub fn fullDeleteMedia(
 pub fn countMedia(db: *Db, opts: struct {
     visibility: ?[]const u8 = null,
     mime_type: ?[]const u8 = null,
+    search: ?[]const u8 = null,
 }) !u32 {
     if (opts.visibility != null and opts.mime_type != null) {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE visibility = ?1 AND mime_type = ?2");
-        defer stmt.deinit();
-        try stmt.bindText(1, opts.visibility.?);
-        try stmt.bindText(2, opts.mime_type.?);
-        _ = try stmt.step();
-        return @intCast(stmt.columnInt(0));
+        if (opts.search) |_| {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE visibility = ?1 AND mime_type = ?2 AND filename LIKE ?3");
+            defer stmt.deinit();
+            try stmt.bindText(1, opts.visibility.?);
+            try stmt.bindText(2, opts.mime_type.?);
+            try stmt.bindText(3, opts.search.?);
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        } else {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE visibility = ?1 AND mime_type = ?2");
+            defer stmt.deinit();
+            try stmt.bindText(1, opts.visibility.?);
+            try stmt.bindText(2, opts.mime_type.?);
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        }
     } else if (opts.visibility != null) {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE visibility = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, opts.visibility.?);
-        _ = try stmt.step();
-        return @intCast(stmt.columnInt(0));
+        if (opts.search) |_| {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE visibility = ?1 AND filename LIKE ?2");
+            defer stmt.deinit();
+            try stmt.bindText(1, opts.visibility.?);
+            try stmt.bindText(2, opts.search.?);
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        } else {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE visibility = ?1");
+            defer stmt.deinit();
+            try stmt.bindText(1, opts.visibility.?);
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        }
     } else if (opts.mime_type != null) {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE mime_type = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, opts.mime_type.?);
-        _ = try stmt.step();
-        return @intCast(stmt.columnInt(0));
+        if (opts.search) |_| {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE mime_type = ?1 AND filename LIKE ?2");
+            defer stmt.deinit();
+            try stmt.bindText(1, opts.mime_type.?);
+            try stmt.bindText(2, opts.search.?);
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        } else {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE mime_type = ?1");
+            defer stmt.deinit();
+            try stmt.bindText(1, opts.mime_type.?);
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        }
     } else {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM media");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        return @intCast(stmt.columnInt(0));
+        if (opts.search) |_| {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media WHERE filename LIKE ?1");
+            defer stmt.deinit();
+            try stmt.bindText(1, opts.search.?);
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        } else {
+            var stmt = try db.prepare("SELECT COUNT(*) FROM media");
+            defer stmt.deinit();
+            _ = try stmt.step();
+            return @intCast(stmt.columnInt(0));
+        }
     }
 }
 
@@ -477,6 +542,52 @@ pub fn syncMediaTerms(db: *Db, media_id: []const u8, term_ids: []const []const u
         _ = try stmt.step();
         stmt.reset();
     }
+}
+
+/// Add a single term to a media item (INSERT OR IGNORE — safe if already exists)
+pub fn addTermToMedia(db: *Db, media_id: []const u8, term_id: []const u8) !void {
+    var stmt = try db.prepare(
+        "INSERT OR IGNORE INTO media_terms (media_id, term_id) VALUES (?1, ?2)",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, media_id);
+    try stmt.bindText(2, term_id);
+    _ = try stmt.step();
+}
+
+/// Remove a single term from a media item
+pub fn removeTermFromMedia(db: *Db, media_id: []const u8, term_id: []const u8) !void {
+    var stmt = try db.prepare(
+        "DELETE FROM media_terms WHERE media_id = ?1 AND term_id = ?2",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, media_id);
+    try stmt.bindText(2, term_id);
+    _ = try stmt.step();
+}
+
+/// Replace a media item's folder assignment. Removes existing folder terms
+/// (terms in the media_folders taxonomy) and assigns the new folder.
+pub fn replaceMediaFolder(db: *Db, media_id: []const u8, new_folder_id: []const u8) !void {
+    // Delete existing folder associations for this media
+    var del_stmt = try db.prepare(
+        \\DELETE FROM media_terms WHERE media_id = ?1 AND term_id IN (
+        \\  SELECT id FROM terms WHERE taxonomy_id = ?2
+        \\)
+    );
+    defer del_stmt.deinit();
+    try del_stmt.bindText(1, media_id);
+    try del_stmt.bindText(2, tax_media_folders);
+    _ = try del_stmt.step();
+
+    // Insert new folder association
+    var ins_stmt = try db.prepare(
+        "INSERT OR IGNORE INTO media_terms (media_id, term_id) VALUES (?1, ?2)",
+    );
+    defer ins_stmt.deinit();
+    try ins_stmt.bindText(1, media_id);
+    try ins_stmt.bindText(2, new_folder_id);
+    _ = try ins_stmt.step();
 }
 
 /// Parse a media record from a database row
@@ -638,6 +749,59 @@ pub fn deleteTerm(db: *Db, term_id: []const u8) !void {
     _ = try stmt.step();
 }
 
+/// Move a term to a new parent (or root if new_parent_id is null)
+pub fn moveTermParent(db: *Db, term_id: []const u8, new_parent_id: ?[]const u8) !void {
+    var stmt = try db.prepare("UPDATE terms SET parent_id = ?2 WHERE id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, term_id);
+    if (new_parent_id) |pid| try stmt.bindText(2, pid) else try stmt.bindNull(2);
+    _ = try stmt.step();
+}
+
+/// Delete a term with filesystem-like reparenting:
+/// - Children inherit the deleted folder's parent
+/// - Files move to the parent folder (or become uncategorized if root)
+pub fn deleteTermWithReparent(db: *Db, term_id: []const u8) !void {
+    // 1. Get this term's parent_id
+    var get_parent = try db.prepare("SELECT parent_id FROM terms WHERE id = ?1");
+    defer get_parent.deinit();
+    try get_parent.bindText(1, term_id);
+    if (!try get_parent.step()) return; // term doesn't exist
+    const has_parent = !get_parent.columnIsNull(0);
+    const parent_id_raw = get_parent.columnText(0);
+
+    // 2. Children inherit this term's parent
+    {
+        var stmt = try db.prepare("UPDATE terms SET parent_id = ?2 WHERE parent_id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, term_id);
+        if (has_parent) {
+            try stmt.bindText(2, parent_id_raw.?);
+        } else {
+            try stmt.bindNull(2);
+        }
+        _ = try stmt.step();
+    }
+
+    // 3. Files move to parent folder (if parent exists)
+    if (has_parent) {
+        var stmt = try db.prepare("UPDATE media_terms SET term_id = ?2 WHERE term_id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, term_id);
+        try stmt.bindText(2, parent_id_raw.?);
+        _ = try stmt.step();
+    }
+    // If no parent, CASCADE will clean up media_terms when term is deleted
+
+    // 4. Delete the term
+    {
+        var stmt = try db.prepare("DELETE FROM terms WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, term_id);
+        _ = try stmt.step();
+    }
+}
+
 /// Get term IDs assigned to a media item, optionally filtered by taxonomy
 pub fn getMediaTermIds(
     allocator: Allocator,
@@ -705,6 +869,202 @@ pub fn countMediaInTerm(db: *Db, term_id: []const u8) !u32 {
     return @intCast(stmt.columnInt(0));
 }
 
+/// Get a folder ID plus all its descendant folder IDs using a recursive CTE.
+/// Returns the folder itself + all children, grandchildren, etc.
+pub fn getDescendantFolderIds(
+    allocator: Allocator,
+    db: *Db,
+    folder_id: []const u8,
+) ![]const []const u8 {
+    var stmt = try db.prepare(
+        \\WITH RECURSIVE folder_tree(id) AS (
+        \\  SELECT id FROM terms WHERE id = ?1
+        \\  UNION ALL
+        \\  SELECT t.id FROM terms t JOIN folder_tree ft ON t.parent_id = ft.id
+        \\)
+        \\SELECT id FROM folder_tree
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, folder_id);
+
+    var items: std.ArrayListUnmanaged([]const u8) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try allocator.dupe(u8, stmt.columnText(0) orelse ""));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Count media in a folder and all its descendant folders using a recursive CTE.
+pub fn countMediaInFolderRecursive(db: *Db, folder_id: []const u8) !u32 {
+    var stmt = try db.prepare(
+        \\WITH RECURSIVE folder_tree(id) AS (
+        \\  SELECT id FROM terms WHERE id = ?1
+        \\  UNION ALL
+        \\  SELECT t.id FROM terms t JOIN folder_tree ft ON t.parent_id = ft.id
+        \\)
+        \\SELECT COUNT(*) FROM media_terms WHERE term_id IN (SELECT id FROM folder_tree)
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, folder_id);
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// List media filtered by folder IDs (OR — in any folder) and tag IDs (AND — must have all tags).
+/// folder_ids use OR semantics: media in ANY of the given folders.
+/// tag_ids use AND semantics: media must have ALL given tags.
+pub fn listMediaByFolderAndTags(
+    allocator: Allocator,
+    db: *Db,
+    folder_ids: []const []const u8,
+    tag_ids: []const []const u8,
+    opts: MediaListOptions,
+) ![]MediaRecord {
+    // Degenerate cases
+    if (folder_ids.len == 0 and tag_ids.len == 0) return listMedia(allocator, db, opts);
+    if (folder_ids.len == 0) return listMediaByTerms(allocator, db, tag_ids, opts);
+    if (folder_ids.len == 1 and tag_ids.len == 0) return listMediaByTerm(allocator, db, folder_ids[0], opts);
+
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
+        \\SELECT m.id, m.filename, m.mime_type, m.size, m.width, m.height,
+        \\m.storage_key, m.visibility, m.hash, m.data, m.created_at, m.updated_at
+        \\FROM media m WHERE m.id IN (
+        \\SELECT media_id FROM media_terms WHERE term_id IN (
+    );
+
+    // Folder placeholders: ?1, ?2, ... (OR semantics)
+    var bind_idx: u32 = 1;
+    for (0..folder_ids.len) |i| {
+        if (i > 0) try sql_buf.appendSlice(allocator, ", ");
+        var num_buf: [16]u8 = undefined;
+        const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, num);
+        bind_idx += 1;
+    }
+    try sql_buf.appendSlice(allocator, "))");
+
+    // Tag filter: AND semantics — media must have ALL tags
+    if (tag_ids.len > 0) {
+        try sql_buf.appendSlice(allocator, " AND m.id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        for (0..tag_ids.len) |i| {
+            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
+            var num_buf: [16]u8 = undefined;
+            const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
+            try sql_buf.appendSlice(allocator, num);
+            bind_idx += 1;
+        }
+        var having_buf: [64]u8 = undefined;
+        const having = std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, having);
+        bind_idx += 1;
+    }
+
+    // Search filter
+    if (opts.search != null) {
+        var search_buf: [48]u8 = undefined;
+        const search_clause = std.fmt.bufPrint(&search_buf, " AND m.filename LIKE ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, search_clause);
+        bind_idx += 1;
+    }
+
+    // Date filters
+    if (opts.year != null) {
+        var yr_buf: [80]u8 = undefined;
+        const yr_clause = std.fmt.bufPrint(&yr_buf, " AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, yr_clause);
+        bind_idx += 1;
+    }
+    if (opts.month != null) {
+        var mo_buf: [80]u8 = undefined;
+        const mo_clause = std.fmt.bufPrint(&mo_buf, " AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, mo_clause);
+        bind_idx += 1;
+    }
+
+    // ORDER BY
+    var order_buf: [128]u8 = undefined;
+    const order = std.fmt.bufPrint(&order_buf, " ORDER BY m.{s} {s}", .{
+        opts.order_by,
+        if (opts.order_dir == .asc) "ASC" else "DESC",
+    }) catch unreachable;
+    try sql_buf.appendSlice(allocator, order);
+
+    // LIMIT
+    if (opts.limit != null) {
+        var lim_buf: [32]u8 = undefined;
+        const lim = std.fmt.bufPrint(&lim_buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, lim);
+        bind_idx += 1;
+    }
+
+    // OFFSET
+    if (opts.offset != null) {
+        var off_buf: [32]u8 = undefined;
+        const off = std.fmt.bufPrint(&off_buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, off);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    // Bind folder IDs
+    var b: u32 = 1;
+    for (folder_ids) |fid| {
+        try stmt.bindText(@intCast(b), fid);
+        b += 1;
+    }
+    // Bind tag IDs
+    for (tag_ids) |tid| {
+        try stmt.bindText(@intCast(b), tid);
+        b += 1;
+    }
+    // Bind tag count
+    if (tag_ids.len > 0) {
+        try stmt.bindInt(@intCast(b), @intCast(tag_ids.len));
+        b += 1;
+    }
+    // Bind search
+    if (opts.search) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    // Bind date filters
+    if (opts.year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (opts.month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+    // Bind limit
+    if (opts.limit) |l| {
+        try stmt.bindInt(@intCast(b), @intCast(l));
+        b += 1;
+    }
+    // Bind offset
+    if (opts.offset) |off| {
+        try stmt.bindInt(@intCast(b), @intCast(off));
+    }
+
+    var items: std.ArrayListUnmanaged(MediaRecord) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try parseMediaRow(allocator, &stmt));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
 /// List media filtered by term_id. Returns media IDs in that term.
 pub fn listMediaByTerm(
     allocator: Allocator,
@@ -712,28 +1072,74 @@ pub fn listMediaByTerm(
     term_id: []const u8,
     opts: MediaListOptions,
 ) ![]MediaRecord {
-    // Build query with term join
-    var sql_buf: [1024]u8 = undefined;
-    const sql = std.fmt.bufPrint(&sql_buf,
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
         \\SELECT m.id, m.filename, m.mime_type, m.size, m.width, m.height,
         \\m.storage_key, m.visibility, m.hash, m.data, m.created_at, m.updated_at
         \\FROM media m
         \\JOIN media_terms mt ON mt.media_id = m.id
         \\WHERE mt.term_id = ?1
-        \\ORDER BY m.{s} {s}
-        \\{s}{s}
-    , .{
-        opts.order_by,
-        if (opts.order_dir == .asc) "ASC" else "DESC",
-        if (opts.limit != null) "LIMIT " else "",
-        if (opts.limit != null) "?" else "",
-    }) catch return error.OutOfMemory;
+    );
 
+    var bind_idx: u32 = 2;
+    if (opts.search != null) {
+        var buf: [48]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND m.filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.year != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.month != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    var order_buf: [128]u8 = undefined;
+    try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&order_buf, " ORDER BY m.{s} {s}", .{
+        opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC",
+    }) catch unreachable);
+
+    if (opts.limit != null) {
+        var buf: [32]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.offset != null) {
+        var buf: [32]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
     var stmt = try db.prepare(sql);
     defer stmt.deinit();
+
     try stmt.bindText(1, term_id);
+    var b: u32 = 2;
+    if (opts.search) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (opts.year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (opts.month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
     if (opts.limit) |l| {
-        try stmt.bindInt(2, @intCast(l));
+        try stmt.bindInt(@intCast(b), @intCast(l));
+        b += 1;
+    }
+    if (opts.offset) |off| {
+        try stmt.bindInt(@intCast(b), @intCast(off));
     }
 
     var items: std.ArrayListUnmanaged(MediaRecord) = .{};
@@ -752,6 +1158,14 @@ pub fn mediaExistsByStorageKey(db: *Db, storage_key: []const u8) !bool {
     defer stmt.deinit();
     try stmt.bindText(1, storage_key);
     return try stmt.step();
+}
+
+/// Check if a term exists in the terms table
+pub fn termExists(db: *Db, term_id: []const u8) bool {
+    var stmt = db.prepare("SELECT 1 FROM terms WHERE id = ?1 LIMIT 1") catch return false;
+    defer stmt.deinit();
+    stmt.bindText(1, term_id) catch return false;
+    return stmt.step() catch false;
 }
 
 /// Flag a media record as missing (file no longer on disk)
@@ -776,11 +1190,46 @@ pub fn markMediaSynced(db: *Db, media_id: []const u8) !void {
 }
 
 /// Count unreviewed (synced) media
-pub fn countUnreviewedMedia(db: *Db) !u32 {
-    var stmt = try db.prepare(
-        "SELECT COUNT(*) FROM media WHERE json_extract(data, '$.synced') = 1",
-    );
+pub fn countUnreviewedMedia(allocator: Allocator, db: *Db, search_term: ?[]const u8, year: ?u16, month: ?u8) !u32 {
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+    try sql_buf.appendSlice(allocator, "SELECT COUNT(*) FROM media WHERE json_extract(data, '$.synced') = 1");
+
+    var bind_idx: u32 = 1;
+    if (search_term != null) {
+        var buf: [48]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (year != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (month != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
     defer stmt.deinit();
+
+    var b: u32 = 1;
+    if (search_term) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+
     _ = try stmt.step();
     return @intCast(stmt.columnInt(0));
 }
@@ -791,24 +1240,745 @@ pub fn listUnreviewedMedia(
     db: *Db,
     opts: MediaListOptions,
 ) ![]MediaRecord {
-    var sql_buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrint(&sql_buf,
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
         \\SELECT id, filename, mime_type, size, width, height,
         \\storage_key, visibility, hash, data, created_at, updated_at
         \\FROM media WHERE json_extract(data, '$.synced') = 1
-        \\ORDER BY {s} {s}
-        \\{s}{s}
-    , .{
-        opts.order_by,
-        if (opts.order_dir == .asc) "ASC" else "DESC",
-        if (opts.limit != null) "LIMIT " else "",
-        if (opts.limit != null) "?" else "",
-    }) catch return error.OutOfMemory;
+    );
 
+    var bind_idx: u32 = 1;
+    if (opts.search != null) {
+        var buf: [48]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.year != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.month != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    var order_buf: [128]u8 = undefined;
+    try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&order_buf, " ORDER BY {s} {s}", .{
+        opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC",
+    }) catch unreachable);
+
+    if (opts.limit != null) {
+        var buf: [32]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.offset != null) {
+        var buf: [32]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
     var stmt = try db.prepare(sql);
     defer stmt.deinit();
+
+    var b: u32 = 1;
+    if (opts.search) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (opts.year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (opts.month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
     if (opts.limit) |l| {
-        try stmt.bindInt(1, @intCast(l));
+        try stmt.bindInt(@intCast(b), @intCast(l));
+        b += 1;
+    }
+    if (opts.offset) |off| {
+        try stmt.bindInt(@intCast(b), @intCast(off));
+    }
+
+    var items: std.ArrayListUnmanaged(MediaRecord) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try parseMediaRow(allocator, &stmt));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// List media filtered by multiple term IDs (AND — media must have ALL terms).
+/// Combines folder + tag filtering in a single query.
+pub fn listMediaByTerms(
+    allocator: Allocator,
+    db: *Db,
+    term_ids: []const []const u8,
+    opts: MediaListOptions,
+) ![]MediaRecord {
+    if (term_ids.len == 0) return listMedia(allocator, db, opts);
+    if (term_ids.len == 1) return listMediaByTerm(allocator, db, term_ids[0], opts);
+
+    // Build: SELECT ... FROM media m WHERE m.id IN (
+    //   SELECT media_id FROM media_terms WHERE term_id IN (?1, ?2, ...)
+    //   GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?N
+    // ) ORDER BY ... LIMIT ...
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
+        \\SELECT m.id, m.filename, m.mime_type, m.size, m.width, m.height,
+        \\m.storage_key, m.visibility, m.hash, m.data, m.created_at, m.updated_at
+        \\FROM media m WHERE m.id IN (
+        \\SELECT media_id FROM media_terms WHERE term_id IN (
+    );
+
+    // Append ?1, ?2, ... for each term
+    for (0..term_ids.len) |i| {
+        if (i > 0) try sql_buf.appendSlice(allocator, ", ");
+        var num_buf: [16]u8 = undefined;
+        const num = std.fmt.bufPrint(&num_buf, "?{d}", .{i + 1}) catch unreachable;
+        try sql_buf.appendSlice(allocator, num);
+    }
+
+    // HAVING COUNT = N
+    var bind_idx: u32 = @intCast(term_ids.len + 1);
+    var having_buf: [64]u8 = undefined;
+    const having = std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable;
+    try sql_buf.appendSlice(allocator, having);
+    bind_idx += 1;
+
+    // Search filter
+    if (opts.search != null) {
+        var search_buf: [48]u8 = undefined;
+        const search_clause = std.fmt.bufPrint(&search_buf, " AND m.filename LIKE ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, search_clause);
+        bind_idx += 1;
+    }
+
+    // Date filters
+    if (opts.year != null) {
+        var yr_buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&yr_buf, " AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.month != null) {
+        var mo_buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&mo_buf, " AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    // ORDER BY
+    var order_buf: [128]u8 = undefined;
+    const order = std.fmt.bufPrint(&order_buf, " ORDER BY m.{s} {s}", .{
+        opts.order_by,
+        if (opts.order_dir == .asc) "ASC" else "DESC",
+    }) catch unreachable;
+    try sql_buf.appendSlice(allocator, order);
+
+    // LIMIT
+    if (opts.limit != null) {
+        var lim_buf: [32]u8 = undefined;
+        const lim = std.fmt.bufPrint(&lim_buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, lim);
+        bind_idx += 1;
+    }
+
+    // OFFSET
+    if (opts.offset != null) {
+        var off_buf: [32]u8 = undefined;
+        const off = std.fmt.bufPrint(&off_buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, off);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    // Bind term IDs
+    var b: u32 = 1;
+    for (term_ids) |tid| {
+        try stmt.bindText(@intCast(b), tid);
+        b += 1;
+    }
+    // Bind count
+    try stmt.bindInt(@intCast(b), @intCast(term_ids.len));
+    b += 1;
+    // Bind search
+    if (opts.search) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    // Bind date filters
+    if (opts.year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (opts.month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+    // Bind limit
+    if (opts.limit) |l| {
+        try stmt.bindInt(@intCast(b), @intCast(l));
+        b += 1;
+    }
+    // Bind offset
+    if (opts.offset) |off| {
+        try stmt.bindInt(@intCast(b), @intCast(off));
+    }
+
+    var items: std.ArrayListUnmanaged(MediaRecord) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try parseMediaRow(allocator, &stmt));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Count media not in any term of a given taxonomy (e.g. unsorted — no folder)
+pub fn countUnsortedMedia(db: *Db, taxonomy_id: []const u8) !u32 {
+    var stmt = try db.prepare(
+        \\SELECT COUNT(*) FROM media WHERE id NOT IN (
+        \\  SELECT mt.media_id FROM media_terms mt
+        \\  JOIN terms t ON t.id = mt.term_id
+        \\  WHERE t.taxonomy_id = ?1
+        \\)
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, taxonomy_id);
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// Count media with a specific tag, filtered by active folder and other active tags.
+/// Used for contextual sidebar counts that respond to the current filter state.
+pub fn countTagInContext(
+    allocator: Allocator,
+    db: *Db,
+    tag_id: []const u8,
+    folder_id: ?[]const u8,
+    required_tag_ids: []const []const u8,
+    search_term: ?[]const u8,
+    year: ?u16,
+    month: ?u8,
+) !u32 {
+    // No context filters → simple count
+    if (folder_id == null and required_tag_ids.len == 0 and search_term == null and year == null and month == null) {
+        return countMediaInTerm(db, tag_id);
+    }
+
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    var bind_idx: u32 = 1;
+
+    // CTE for folder tree if folder is active
+    if (folder_id != null) {
+        var cte_buf: [16]u8 = undefined;
+        const cte = std.fmt.bufPrint(&cte_buf, "?{d}", .{bind_idx}) catch unreachable;
+        bind_idx += 1;
+        try sql_buf.appendSlice(allocator, "WITH RECURSIVE folder_tree(id) AS (SELECT id FROM terms WHERE id = ");
+        try sql_buf.appendSlice(allocator, cte);
+        try sql_buf.appendSlice(allocator, " UNION ALL SELECT t.id FROM terms t JOIN folder_tree ft ON t.parent_id = ft.id) ");
+    }
+
+    {
+        var num_buf: [8]u8 = undefined;
+        const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
+        bind_idx += 1;
+        try sql_buf.appendSlice(allocator, "SELECT COUNT(DISTINCT mt.media_id) FROM media_terms mt WHERE mt.term_id = ");
+        try sql_buf.appendSlice(allocator, num);
+    }
+
+    // Folder constraint
+    if (folder_id != null) {
+        try sql_buf.appendSlice(allocator, " AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (SELECT id FROM folder_tree))");
+    }
+
+    // Tag constraint
+    if (required_tag_ids.len > 0) {
+        try sql_buf.appendSlice(allocator, " AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        for (0..required_tag_ids.len) |i| {
+            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
+            var num_buf: [8]u8 = undefined;
+            const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
+            try sql_buf.appendSlice(allocator, num);
+            bind_idx += 1;
+        }
+        var having_buf: [64]u8 = undefined;
+        const having = std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, having);
+        bind_idx += 1;
+    }
+
+    // Search constraint
+    if (search_term != null) {
+        var search_buf: [64]u8 = undefined;
+        const search_clause = std.fmt.bufPrint(&search_buf, " AND mt.media_id IN (SELECT id FROM media WHERE filename LIKE ?{d})", .{bind_idx}) catch unreachable;
+        try sql_buf.appendSlice(allocator, search_clause);
+        bind_idx += 1;
+    }
+
+    // Date constraints
+    if (year != null) {
+        var buf: [192]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (month != null) {
+        var buf: [192]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    var b: u32 = 1;
+    if (folder_id) |fid| {
+        try stmt.bindText(@intCast(b), fid);
+        b += 1;
+    }
+    try stmt.bindText(@intCast(b), tag_id);
+    b += 1;
+    for (required_tag_ids) |tid| {
+        try stmt.bindText(@intCast(b), tid);
+        b += 1;
+    }
+    if (required_tag_ids.len > 0) {
+        try stmt.bindInt(@intCast(b), @intCast(required_tag_ids.len));
+        b += 1;
+    }
+    if (search_term) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// Count media in a folder's subtree, filtered by active tags (AND).
+/// Used for contextual folder counts in the sidebar.
+pub fn countFolderInContext(
+    allocator: Allocator,
+    db: *Db,
+    folder_id: []const u8,
+    tag_ids: []const []const u8,
+    search_term: ?[]const u8,
+    year: ?u16,
+    month: ?u8,
+) !u32 {
+    if (tag_ids.len == 0 and search_term == null and year == null and month == null) {
+        return countMediaInFolderRecursive(db, folder_id);
+    }
+
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
+        \\WITH RECURSIVE folder_tree(id) AS (
+        \\  SELECT id FROM terms WHERE id = ?1
+        \\  UNION ALL
+        \\  SELECT t.id FROM terms t JOIN folder_tree ft ON t.parent_id = ft.id
+        \\)
+        \\SELECT COUNT(DISTINCT mt.media_id) FROM media_terms mt
+        \\WHERE mt.term_id IN (SELECT id FROM folder_tree)
+    );
+
+    var bind_idx: u32 = 2;
+
+    if (tag_ids.len > 0) {
+        try sql_buf.appendSlice(allocator, " AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        for (0..tag_ids.len) |i| {
+            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
+            var num_buf: [8]u8 = undefined;
+            try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable);
+            bind_idx += 1;
+        }
+        var having_buf: [64]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (search_term != null) {
+        var buf: [64]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE filename LIKE ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (year != null) {
+        var buf: [192]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (month != null) {
+        var buf: [192]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    var b: u32 = 1;
+    try stmt.bindText(@intCast(b), folder_id);
+    b += 1;
+    for (tag_ids) |tid| {
+        try stmt.bindText(@intCast(b), tid);
+        b += 1;
+    }
+    if (tag_ids.len > 0) {
+        try stmt.bindInt(@intCast(b), @intCast(tag_ids.len));
+        b += 1;
+    }
+    if (search_term) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// Count all media matching given tags (AND) and search term.
+/// Used for contextual "All Files" count in the sidebar.
+pub fn countAllInContext(
+    allocator: Allocator,
+    db: *Db,
+    tag_ids: []const []const u8,
+    search_term: ?[]const u8,
+    year: ?u16,
+    month: ?u8,
+) !u32 {
+    if (tag_ids.len == 0 and search_term == null and year == null and month == null) {
+        return countMedia(db, .{});
+    }
+
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+    try sql_buf.appendSlice(allocator, "SELECT COUNT(*) FROM media WHERE 1=1");
+    var bind_idx: u32 = 1;
+
+    if (tag_ids.len > 0) {
+        try sql_buf.appendSlice(allocator, " AND id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        for (0..tag_ids.len) |i| {
+            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
+            var num_buf: [8]u8 = undefined;
+            try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable);
+            bind_idx += 1;
+        }
+        var having_buf: [64]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (search_term != null) {
+        var buf: [48]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (year != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (month != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    var b: u32 = 1;
+    for (tag_ids) |tid| {
+        try stmt.bindText(@intCast(b), tid);
+        b += 1;
+    }
+    if (tag_ids.len > 0) {
+        try stmt.bindInt(@intCast(b), @intCast(tag_ids.len));
+        b += 1;
+    }
+    if (search_term) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// Count media not in any folder that also match all given tags (AND).
+/// Used for contextual "unsorted/default" count in the sidebar.
+pub fn countUnsortedInContext(
+    allocator: Allocator,
+    db: *Db,
+    taxonomy_id: []const u8,
+    tag_ids: []const []const u8,
+    search_term: ?[]const u8,
+    year: ?u16,
+    month: ?u8,
+) !u32 {
+    if (tag_ids.len == 0 and search_term == null and year == null and month == null) {
+        return countUnsortedMedia(db, taxonomy_id);
+    }
+
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
+        \\SELECT COUNT(*) FROM media WHERE id NOT IN (
+        \\  SELECT mt.media_id FROM media_terms mt
+        \\  JOIN terms t ON t.id = mt.term_id
+        \\  WHERE t.taxonomy_id = ?1
+        \\)
+    );
+
+    var bind_idx: u32 = 2;
+
+    if (tag_ids.len > 0) {
+        try sql_buf.appendSlice(allocator, " AND id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        for (0..tag_ids.len) |i| {
+            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
+            var num_buf: [8]u8 = undefined;
+            try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable);
+            bind_idx += 1;
+        }
+        var having_buf: [64]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (search_term != null) {
+        var buf: [48]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (year != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (month != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    var b: u32 = 1;
+    try stmt.bindText(@intCast(b), taxonomy_id);
+    b += 1;
+    for (tag_ids) |tid| {
+        try stmt.bindText(@intCast(b), tid);
+        b += 1;
+    }
+    if (tag_ids.len > 0) {
+        try stmt.bindInt(@intCast(b), @intCast(tag_ids.len));
+        b += 1;
+    }
+    if (search_term) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+
+    _ = try stmt.step();
+    return @intCast(stmt.columnInt(0));
+}
+
+/// A distinct year/month period found in media created_at timestamps
+pub const DatePeriod = struct { year: u16, month: u8 };
+
+/// Get distinct year/month periods from media created_at, ordered newest first.
+pub fn getDistinctDatePeriods(allocator: Allocator, db: *Db) ![]DatePeriod {
+    var stmt = try db.prepare(
+        \\SELECT DISTINCT
+        \\  CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER),
+        \\  CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER)
+        \\FROM media ORDER BY 1 DESC, 2 DESC
+    );
+    defer stmt.deinit();
+
+    var items: std.ArrayListUnmanaged(DatePeriod) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        const y = stmt.columnInt(0);
+        const m = stmt.columnInt(1);
+        if (y > 0 and m > 0 and m <= 12) {
+            try items.append(allocator, .{
+                .year = @intCast(y),
+                .month = @intCast(m),
+            });
+        }
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Get distinct years from media (deduplicated from periods)
+pub fn getDistinctYears(allocator: Allocator, db: *Db) ![]u16 {
+    var stmt = try db.prepare(
+        "SELECT DISTINCT CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) FROM media ORDER BY 1 DESC",
+    );
+    defer stmt.deinit();
+
+    var items: std.ArrayListUnmanaged(u16) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        const y = stmt.columnInt(0);
+        if (y > 0) try items.append(allocator, @intCast(y));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Get months available in a given year
+pub fn getMonthsForYear(allocator: Allocator, db: *Db, year: u16) ![]u8 {
+    var stmt = try db.prepare(
+        "SELECT DISTINCT CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) FROM media WHERE CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?1 ORDER BY 1 DESC",
+    );
+    defer stmt.deinit();
+    try stmt.bindInt(1, @intCast(year));
+
+    var items: std.ArrayListUnmanaged(u8) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        const m = stmt.columnInt(0);
+        if (m > 0 and m <= 12) try items.append(allocator, @intCast(m));
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// List media not in any term of a given taxonomy (unsorted)
+pub fn listUnsortedMedia(
+    allocator: Allocator,
+    db: *Db,
+    taxonomy_id: []const u8,
+    opts: MediaListOptions,
+) ![]MediaRecord {
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
+        \\SELECT id, filename, mime_type, size, width, height,
+        \\storage_key, visibility, hash, data, created_at, updated_at
+        \\FROM media WHERE id NOT IN (
+        \\  SELECT mt.media_id FROM media_terms mt
+        \\  JOIN terms t ON t.id = mt.term_id
+        \\  WHERE t.taxonomy_id = ?1
+        \\)
+    );
+
+    var bind_idx: u32 = 2;
+    if (opts.search != null) {
+        var buf: [48]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.year != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.month != null) {
+        var buf: [80]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    var order_buf: [128]u8 = undefined;
+    try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&order_buf, " ORDER BY {s} {s}", .{
+        opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC",
+    }) catch unreachable);
+
+    if (opts.limit != null) {
+        var buf: [32]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+    if (opts.offset != null) {
+        var buf: [32]u8 = undefined;
+        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable);
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    try stmt.bindText(1, taxonomy_id);
+    var b: u32 = 2;
+    if (opts.search) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    if (opts.year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (opts.month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+    if (opts.limit) |l| {
+        try stmt.bindInt(@intCast(b), @intCast(l));
+        b += 1;
+    }
+    if (opts.offset) |off| {
+        try stmt.bindInt(@intCast(b), @intCast(off));
     }
 
     var items: std.ArrayListUnmanaged(MediaRecord) = .{};
@@ -1327,4 +2497,204 @@ test "mediaExistsByStorageKey" {
 
     try std.testing.expect(try mediaExistsByStorageKey(&db, "2026/02/exists.jpg"));
     try std.testing.expect(!try mediaExistsByStorageKey(&db, "2026/02/missing.jpg"));
+}
+
+test "getDescendantFolderIds returns folder and all descendants" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    defer std.testing.allocator.free(parent.id);
+    defer std.testing.allocator.free(parent.taxonomy_id);
+    defer std.testing.allocator.free(parent.slug);
+    defer std.testing.allocator.free(parent.name);
+    defer std.testing.allocator.free(parent.description);
+
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    defer std.testing.allocator.free(child.id);
+    defer std.testing.allocator.free(child.taxonomy_id);
+    defer std.testing.allocator.free(child.slug);
+    defer std.testing.allocator.free(child.name);
+    defer std.testing.allocator.free(child.description);
+    defer if (child.parent_id) |p| std.testing.allocator.free(p);
+
+    const grandchild = try createTerm(std.testing.allocator, &db, tax_media_folders, "Grandchild", child.id);
+    defer std.testing.allocator.free(grandchild.id);
+    defer std.testing.allocator.free(grandchild.taxonomy_id);
+    defer std.testing.allocator.free(grandchild.slug);
+    defer std.testing.allocator.free(grandchild.name);
+    defer std.testing.allocator.free(grandchild.description);
+    defer if (grandchild.parent_id) |p| std.testing.allocator.free(p);
+
+    // From parent: should get parent + child + grandchild
+    const ids = try getDescendantFolderIds(std.testing.allocator, &db, parent.id);
+    defer {
+        for (ids) |id| std.testing.allocator.free(id);
+        std.testing.allocator.free(ids);
+    }
+    try std.testing.expectEqual(@as(usize, 3), ids.len);
+
+    // From child: should get child + grandchild
+    const child_ids = try getDescendantFolderIds(std.testing.allocator, &db, child.id);
+    defer {
+        for (child_ids) |id| std.testing.allocator.free(id);
+        std.testing.allocator.free(child_ids);
+    }
+    try std.testing.expectEqual(@as(usize, 2), child_ids.len);
+
+    // From grandchild: just itself
+    const gc_ids = try getDescendantFolderIds(std.testing.allocator, &db, grandchild.id);
+    defer {
+        for (gc_ids) |id| std.testing.allocator.free(id);
+        std.testing.allocator.free(gc_ids);
+    }
+    try std.testing.expectEqual(@as(usize, 1), gc_ids.len);
+}
+
+test "countMediaInFolderRecursive counts across descendants" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    defer std.testing.allocator.free(parent.id);
+    defer std.testing.allocator.free(parent.taxonomy_id);
+    defer std.testing.allocator.free(parent.slug);
+    defer std.testing.allocator.free(parent.name);
+    defer std.testing.allocator.free(parent.description);
+
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    defer std.testing.allocator.free(child.id);
+    defer std.testing.allocator.free(child.taxonomy_id);
+    defer std.testing.allocator.free(child.slug);
+    defer std.testing.allocator.free(child.name);
+    defer std.testing.allocator.free(child.description);
+    defer if (child.parent_id) |p| std.testing.allocator.free(p);
+
+    // Media in parent
+    const m1 = try createMedia(std.testing.allocator, &db, .{
+        .filename = "in-parent.jpg",
+        .mime_type = "image/jpeg",
+        .size = 100,
+        .storage_key = "2026/02/in-parent.jpg",
+    });
+    defer std.testing.allocator.free(m1.id);
+    defer std.testing.allocator.free(m1.filename);
+    defer std.testing.allocator.free(m1.mime_type);
+    defer std.testing.allocator.free(m1.storage_key);
+    defer std.testing.allocator.free(m1.visibility);
+    try syncMediaTerms(&db, m1.id, &.{parent.id});
+
+    // Media in child
+    const m2 = try createMedia(std.testing.allocator, &db, .{
+        .filename = "in-child.jpg",
+        .mime_type = "image/jpeg",
+        .size = 200,
+        .storage_key = "2026/02/in-child.jpg",
+    });
+    defer std.testing.allocator.free(m2.id);
+    defer std.testing.allocator.free(m2.filename);
+    defer std.testing.allocator.free(m2.mime_type);
+    defer std.testing.allocator.free(m2.storage_key);
+    defer std.testing.allocator.free(m2.visibility);
+    try syncMediaTerms(&db, m2.id, &.{child.id});
+
+    // Parent recursive count: 2 (parent + child)
+    const parent_count = try countMediaInFolderRecursive(&db, parent.id);
+    try std.testing.expectEqual(@as(u32, 2), parent_count);
+
+    // Child recursive count: 1 (just child)
+    const child_count = try countMediaInFolderRecursive(&db, child.id);
+    try std.testing.expectEqual(@as(u32, 1), child_count);
+
+    // Non-recursive (direct) count for parent should still be 1
+    const direct_count = try countMediaInTerm(&db, parent.id);
+    try std.testing.expectEqual(@as(u32, 1), direct_count);
+}
+
+test "listMediaByFolderAndTags with folder descendants and tags" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    // Create folder hierarchy: parent > child
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    defer std.testing.allocator.free(parent.id);
+    defer std.testing.allocator.free(parent.taxonomy_id);
+    defer std.testing.allocator.free(parent.slug);
+    defer std.testing.allocator.free(parent.name);
+    defer std.testing.allocator.free(parent.description);
+
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    defer std.testing.allocator.free(child.id);
+    defer std.testing.allocator.free(child.taxonomy_id);
+    defer std.testing.allocator.free(child.slug);
+    defer std.testing.allocator.free(child.name);
+    defer std.testing.allocator.free(child.description);
+    defer if (child.parent_id) |p| std.testing.allocator.free(p);
+
+    // Create a tag
+    const tag = try createTerm(std.testing.allocator, &db, tax_media_tags, "Nature", null);
+    defer std.testing.allocator.free(tag.id);
+    defer std.testing.allocator.free(tag.taxonomy_id);
+    defer std.testing.allocator.free(tag.slug);
+    defer std.testing.allocator.free(tag.name);
+    defer std.testing.allocator.free(tag.description);
+
+    // m1: in parent folder, tagged Nature
+    const m1 = try createMedia(std.testing.allocator, &db, .{
+        .filename = "parent-tagged.jpg",
+        .mime_type = "image/jpeg",
+        .size = 100,
+        .storage_key = "2026/02/parent-tagged.jpg",
+    });
+    defer std.testing.allocator.free(m1.id);
+    defer std.testing.allocator.free(m1.filename);
+    defer std.testing.allocator.free(m1.mime_type);
+    defer std.testing.allocator.free(m1.storage_key);
+    defer std.testing.allocator.free(m1.visibility);
+    try syncMediaTerms(&db, m1.id, &.{ parent.id, tag.id });
+
+    // m2: in child folder, not tagged
+    const m2 = try createMedia(std.testing.allocator, &db, .{
+        .filename = "child-untagged.jpg",
+        .mime_type = "image/jpeg",
+        .size = 200,
+        .storage_key = "2026/02/child-untagged.jpg",
+    });
+    defer std.testing.allocator.free(m2.id);
+    defer std.testing.allocator.free(m2.filename);
+    defer std.testing.allocator.free(m2.mime_type);
+    defer std.testing.allocator.free(m2.storage_key);
+    defer std.testing.allocator.free(m2.visibility);
+    try syncMediaTerms(&db, m2.id, &.{child.id});
+
+    // Folders only (both parent + child), no tags → should get 2 results
+    const folder_only = try listMediaByFolderAndTags(std.testing.allocator, &db, &.{ parent.id, child.id }, &.{}, .{ .limit = 50 });
+    defer {
+        for (folder_only) |item| {
+            std.testing.allocator.free(item.id);
+            std.testing.allocator.free(item.filename);
+            std.testing.allocator.free(item.mime_type);
+            std.testing.allocator.free(item.storage_key);
+            std.testing.allocator.free(item.visibility);
+            if (item.hash) |h| std.testing.allocator.free(h);
+        }
+        std.testing.allocator.free(folder_only);
+    }
+    try std.testing.expectEqual(@as(usize, 2), folder_only.len);
+
+    // Folders + tag → only m1 (in parent, tagged Nature)
+    const folder_and_tag = try listMediaByFolderAndTags(std.testing.allocator, &db, &.{ parent.id, child.id }, &.{tag.id}, .{ .limit = 50 });
+    defer {
+        for (folder_and_tag) |item| {
+            std.testing.allocator.free(item.id);
+            std.testing.allocator.free(item.filename);
+            std.testing.allocator.free(item.mime_type);
+            std.testing.allocator.free(item.storage_key);
+            std.testing.allocator.free(item.visibility);
+            if (item.hash) |h| std.testing.allocator.free(h);
+        }
+        std.testing.allocator.free(folder_and_tag);
+    }
+    try std.testing.expectEqual(@as(usize, 1), folder_and_tag.len);
+    try std.testing.expectEqualStrings("parent-tagged.jpg", folder_and_tag[0].filename);
 }

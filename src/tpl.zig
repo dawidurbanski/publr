@@ -10,7 +10,7 @@ pub fn init(is_dev_mode: bool) void {
 
 /// Thread-local rotating buffers for template rendering
 /// Uses 4 buffers in round-robin to avoid aliasing when composing templates
-threadlocal var render_buffers: [4][65536]u8 = undefined;
+threadlocal var render_buffers: [4][131072]u8 = undefined;
 threadlocal var render_index: usize = 0;
 
 /// Render a ZSX function to a slice.
@@ -22,7 +22,14 @@ pub fn render(comptime func: anytype, args: anytype) []const u8 {
     render_index +%= 1;
 
     var fbs = std.io.fixedBufferStream(buf);
-    @call(.auto, func, .{fbs.writer()} ++ args) catch return "";
+    @call(.auto, func, .{fbs.writer()} ++ args) catch |err| {
+        std.log.err("template render failed: {s} (buffer: {d}/{d} bytes used)", .{
+            @errorName(err),
+            fbs.pos,
+            buf.len,
+        });
+        return "";
+    };
     return fbs.getWritten();
 }
 
