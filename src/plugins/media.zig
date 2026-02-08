@@ -137,9 +137,9 @@ fn handleList(ctx: *Context) !void {
         }
     };
 
-    // Get counts
+    // Get counts (no mime_patterns filter in main media list)
     const total_count = media.countMedia(db, .{ .search = search_pattern }) catch 0;
-    const unsorted_count = media.countUnsortedInContext(ctx.allocator, db, media.tax_media_folders, active_tag_ids, search_pattern, year_filter, month_filter) catch total_count;
+    const unsorted_count = media.countUnsortedInContext(ctx.allocator, db, media.tax_media_folders, active_tag_ids, search_pattern, year_filter, month_filter, null) catch total_count;
     const unreviewed_count = media.countUnreviewedMedia(ctx.allocator, db, search_pattern, year_filter, month_filter) catch 0;
 
     // Compute filtered count for pagination (matches the list query dispatch)
@@ -149,7 +149,7 @@ fn handleList(ctx: *Context) !void {
             if (std.mem.eql(u8, fid, "default")) {
                 break :blk unsorted_count;
             } else {
-                break :blk media.countFolderInContext(ctx.allocator, db, fid, active_tag_ids, search_pattern, year_filter, month_filter) catch 0;
+                break :blk media.countFolderInContext(ctx.allocator, db, fid, active_tag_ids, search_pattern, year_filter, month_filter, null) catch 0;
             }
         } else if (active_tag_ids.len > 0) {
             break :blk media.countAllInContext(ctx.allocator, db, active_tag_ids, search_pattern, year_filter, month_filter) catch 0;
@@ -207,7 +207,7 @@ fn handleList(ctx: *Context) !void {
     for (tags, 0..) |t, i| {
         const is_active = isIdInList(t.id, active_tag_ids);
         const other_tags = removeFromList(ctx.allocator, active_tag_ids, t.id);
-        const count = media.countTagInContext(ctx.allocator, db, t.id, folder_filter, other_tags, search_pattern, year_filter, month_filter) catch 0;
+        const count = media.countTagInContext(ctx.allocator, db, t.id, folder_filter, other_tags, search_pattern, year_filter, month_filter, null) catch 0;
         tag_items[i] = .{
             .id = t.id,
             .name = t.name,
@@ -562,15 +562,21 @@ fn handlePickerList(ctx: *Context) !void {
     const folder_filter = parseQueryParam(ctx.query, "folder");
     const active_tag_ids = parseQueryParamAll(ctx.allocator, ctx.query, "tag");
 
+    // Parse accept filter (e.g., "image/*" or "image/*,image/svg+xml")
+    const raw_accept = parseQueryParam(ctx.query, "accept");
+    const accept_filter: ?[]const u8 = if (raw_accept) |a| if (a.len > 0) percentDecode(ctx.allocator, a) else null else null;
+
+    // Database-level mime type filtering via mime_patterns
     const list_opts: media.MediaListOptions = .{
-        .limit = 50,
+        .limit = 50, // Only fetch what we display
         .offset = 0,
         .order_by = "created_at",
         .order_dir = .desc,
         .search = search_pattern,
+        .mime_patterns = accept_filter,
     };
 
-    // Fetch media based on folder/tag filters
+    // Fetch media matching folder/tag/search/mime filters at database level
     const entries = blk: {
         if (folder_filter) |fid| {
             if (std.mem.eql(u8, fid, "default")) {
@@ -590,9 +596,6 @@ fn handlePickerList(ctx: *Context) !void {
     const folders = media.listTerms(ctx.allocator, db, media.tax_media_folders) catch &[_]media.TermRecord{};
     const tags = media.listTerms(ctx.allocator, db, media.tax_media_tags) catch &[_]media.TermRecord{};
 
-    // Get counts for sidebar
-    const unsorted_count = media.countUnsortedInContext(ctx.allocator, db, media.tax_media_folders, active_tag_ids, search_pattern, null, null) catch 0;
-
     // Build JSON response using ArrayListUnmanaged
     var json: std.ArrayListUnmanaged(u8) = .{};
     var writer = json.writer(ctx.allocator);
@@ -600,9 +603,10 @@ fn handlePickerList(ctx: *Context) !void {
     // Start JSON object
     writer.writeAll("{") catch {};
 
-    // Items array
+    // Items array (limited to 50 for display)
     writer.writeAll("\"items\":[") catch {};
-    for (entries, 0..) |entry, i| {
+    const display_limit: usize = @min(entries.len, 50);
+    for (entries[0..display_limit], 0..) |entry, i| {
         if (i > 0) writer.writeAll(",") catch {};
 
         const is_image = std.mem.startsWith(u8, entry.mime_type, "image/");
@@ -625,12 +629,13 @@ fn handlePickerList(ctx: *Context) !void {
     }
     writer.writeAll("],") catch {};
 
-    // Folders array (flat list with parent_id for nesting)
+    // Folders array with counts (filtered at database level with mime_patterns)
     writer.writeAll("\"folders\":[") catch {};
+    const unsorted_count = media.countUnsortedInContext(ctx.allocator, db, media.tax_media_folders, active_tag_ids, search_pattern, null, null, accept_filter) catch 0;
     writer.print("{{\"id\":\"default\",\"name\":\"Default\",\"parent_id\":\"\",\"count\":{d}}}", .{unsorted_count}) catch {};
     for (folders) |folder| {
         writer.writeAll(",") catch {};
-        const count = media.countFolderInContext(ctx.allocator, db, folder.id, active_tag_ids, search_pattern, null, null) catch 0;
+        const count = media.countFolderInContext(ctx.allocator, db, folder.id, active_tag_ids, search_pattern, null, null, accept_filter) catch 0;
         writer.print("{{\"id\":\"{s}\",\"name\":\"{s}\",\"parent_id\":\"{s}\",\"count\":{d}}}", .{
             folder.id,
             folder.name,
@@ -640,11 +645,11 @@ fn handlePickerList(ctx: *Context) !void {
     }
     writer.writeAll("],") catch {};
 
-    // Tags array
+    // Tags array with counts (filtered at database level with mime_patterns)
     writer.writeAll("\"tags\":[") catch {};
     for (tags, 0..) |tag, i| {
         if (i > 0) writer.writeAll(",") catch {};
-        const count = media.countTagInContext(ctx.allocator, db, tag.id, folder_filter, active_tag_ids, search_pattern, null, null) catch 0;
+        const count = media.countTagInContext(ctx.allocator, db, tag.id, folder_filter, active_tag_ids, search_pattern, null, null, accept_filter) catch 0;
         writer.print("{{\"id\":\"{s}\",\"name\":\"{s}\",\"count\":{d}}}", .{
             tag.id,
             tag.name,
@@ -725,7 +730,7 @@ fn handleUpload(ctx: *Context) !void {
     };
 
     // Parse file from multipart form data
-    const file_data = parseMultipartFile(body_content, boundary) orelse {
+    const file_data = parseMultipartFile(ctx.allocator, body_content, boundary) orelse {
         redirect(ctx, "/admin/media");
         return;
     };
@@ -752,7 +757,7 @@ fn handleUpload(ctx: *Context) !void {
     };
 
     // Assign to folder if specified
-    const folder_id = parseMultipartField(body_content, boundary, "folder_id");
+    const folder_id = parseMultipartField(ctx.allocator, body_content, boundary, "folder_id");
     if (folder_id) |fid| {
         if (fid.len > 0) {
             media.addTermToMedia(db, record.id, fid) catch {};
@@ -1530,7 +1535,7 @@ fn appendFolderChildren(
     for (folders) |f| {
         const pid = f.parent_id orelse "";
         if (std.mem.eql(u8, pid, parent_match_id)) {
-            const count = media.countFolderInContext(allocator, db, f.id, active_tag_ids, search_pattern, year, month) catch 0;
+            const count = media.countFolderInContext(allocator, db, f.id, active_tag_ids, search_pattern, year, month, null) catch 0;
             const is_active = if (folder_filter) |ff| std.mem.eql(u8, ff, f.id) else false;
             const has_context = active_tag_ids.len > 0 or search_pattern != null or year != null;
             items.append(allocator, .{
@@ -1747,17 +1752,17 @@ const MultipartFile = struct {
 };
 
 /// Parse a file field from multipart form data
-fn parseMultipartFile(body: []const u8, boundary: []const u8) ?MultipartFile {
+fn parseMultipartFile(allocator: std.mem.Allocator, body: []const u8, boundary: []const u8) ?MultipartFile {
     // Multipart format: --boundary\r\nHeaders\r\n\r\nData\r\n--boundary--
     // Iterate parts to find one with a filename
 
-    // Build delimiter: "\r\n--" + boundary
-    var delim_buf: [256]u8 = undefined;
-    const delim = std.fmt.bufPrint(&delim_buf, "\r\n--{s}", .{boundary}) catch return null;
+    // Build delimiter: "\r\n--" + boundary (dynamic allocation for any boundary length)
+    const delim = std.fmt.allocPrint(allocator, "\r\n--{s}", .{boundary}) catch return null;
+    defer allocator.free(delim);
 
     // Find first part boundary (starts with --boundary\r\n)
-    var start_marker_buf: [256]u8 = undefined;
-    const start_marker = std.fmt.bufPrint(&start_marker_buf, "--{s}\r\n", .{boundary}) catch return null;
+    const start_marker = std.fmt.allocPrint(allocator, "--{s}\r\n", .{boundary}) catch return null;
+    defer allocator.free(start_marker);
 
     var pos = std.mem.indexOf(u8, body, start_marker) orelse return null;
     pos += start_marker.len;
@@ -1819,17 +1824,17 @@ fn parseMultipartFile(body: []const u8, boundary: []const u8) ?MultipartFile {
 }
 
 /// Extract a named text field value from multipart form data
-fn parseMultipartField(body: []const u8, boundary: []const u8, field_name: []const u8) ?[]const u8 {
-    var delim_buf: [256]u8 = undefined;
-    const delim = std.fmt.bufPrint(&delim_buf, "\r\n--{s}", .{boundary}) catch return null;
+fn parseMultipartField(allocator: std.mem.Allocator, body: []const u8, boundary: []const u8, field_name: []const u8) ?[]const u8 {
+    const delim = std.fmt.allocPrint(allocator, "\r\n--{s}", .{boundary}) catch return null;
+    defer allocator.free(delim);
 
-    var start_buf: [256]u8 = undefined;
-    const start_marker = std.fmt.bufPrint(&start_buf, "--{s}\r\n", .{boundary}) catch return null;
+    const start_marker = std.fmt.allocPrint(allocator, "--{s}\r\n", .{boundary}) catch return null;
+    defer allocator.free(start_marker);
 
     var pos = (std.mem.indexOf(u8, body, start_marker) orelse return null) + start_marker.len;
 
-    var name_buf: [128]u8 = undefined;
-    const name_match = std.fmt.bufPrint(&name_buf, "name=\"{s}\"", .{field_name}) catch return null;
+    const name_match = std.fmt.allocPrint(allocator, "name=\"{s}\"", .{field_name}) catch return null;
+    defer allocator.free(name_match);
 
     while (pos < body.len) {
         const headers_end = std.mem.indexOf(u8, body[pos..], "\r\n\r\n") orelse return null;

@@ -797,6 +797,9 @@ function getImagePickerModal() {
     return modal;
 }
 
+// Accept filter for file type restrictions (e.g., "image/*")
+let pickerAcceptFilter = '';
+
 function openImagePickerModal(picker) {
     currentImagePicker = picker;
     pickerActiveFolder = '';
@@ -804,6 +807,8 @@ function openImagePickerModal(picker) {
     pickerActiveTags = [];
     pickerActiveTagNames = {};
     pickerSearchTerm = '';
+    // Read accept filter from the picker component (e.g., data-publr-accept="image/*")
+    pickerAcceptFilter = picker.dataset.publrAccept || '';
     const modal = getImagePickerModal();
     modal.classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -886,6 +891,7 @@ function loadMediaItems(search) {
     if (search) params.set('search', search);
     if (pickerActiveFolder) params.set('folder', pickerActiveFolder);
     pickerActiveTags.forEach(t => params.append('tag', t));
+    if (pickerAcceptFilter) params.set('accept', pickerAcceptFilter);
 
     let url = '/admin/media/picker/list';
     if (params.toString()) url += '?' + params.toString();

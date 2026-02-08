@@ -52,7 +52,7 @@ pub fn Edit(props: struct {
         <div class="form-group">
             <label class="form-label">Featured Image</label>
             {if (props.post.featured_image.len > 0) (
-                <div class="image-picker" data-publr-component="image-picker" data-publr-state="selected">
+                <div class="image-picker" data-publr-component="image-picker" data-publr-state="selected" data-publr-accept="image/*">
                     <input type="hidden" name="featured_image" value={props.post.featured_image} data-publr-part="value" />
                     <div class="image-picker-preview" data-publr-part="preview">
                         <img src={props.post.featured_image_url} alt="" class="image-picker-thumb" />
@@ -64,7 +64,7 @@ pub fn Edit(props: struct {
                     <div class="image-picker-alt" data-publr-part="alt"></div>
                 </div>
             ) else (
-                <div class="image-picker" data-publr-component="image-picker" data-publr-state="empty">
+                <div class="image-picker" data-publr-component="image-picker" data-publr-state="empty" data-publr-accept="image/*">
                     <input type="hidden" name="featured_image" value="" data-publr-part="value" />
                     <div class="image-picker-preview" data-publr-part="preview">
                         <div class="image-picker-placeholder">

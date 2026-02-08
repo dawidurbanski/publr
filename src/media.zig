@@ -41,6 +41,9 @@ pub const MediaListOptions = struct {
     visibility: ?[]const u8 = null,
     /// Filter by mime type
     mime_type: ?[]const u8 = null,
+    /// Filter by mime type patterns (e.g., "image/*" or "image/*,application/pdf")
+    /// Supports wildcards: "image/*" matches all image types
+    mime_patterns: ?[]const u8 = null,
     /// Maximum number of results
     limit: ?u32 = null,
     /// Offset for pagination
@@ -57,6 +60,33 @@ pub const MediaListOptions = struct {
     year: ?u16 = null,
     /// Filter by month (created_at), 1-12
     month: ?u8 = null,
+
+    /// Convert mime_patterns to SQL LIKE patterns for binding
+    /// Returns slice of patterns like ["image/%", "application/pdf"]
+    pub fn getMimePatterns(self: MediaListOptions, allocator: Allocator) ![][]const u8 {
+        const patterns_str = self.mime_patterns orelse return &[_][]const u8{};
+        if (patterns_str.len == 0) return &[_][]const u8{};
+
+        var result: std.ArrayListUnmanaged([]const u8) = .{};
+        errdefer result.deinit(allocator);
+
+        var it = std.mem.splitSequence(u8, patterns_str, ",");
+        while (it.next()) |pattern| {
+            const trimmed = std.mem.trim(u8, pattern, " ");
+            if (trimmed.len == 0) continue;
+
+            // Convert "image/*" to "image/%" for SQL LIKE
+            if (std.mem.endsWith(u8, trimmed, "/*")) {
+                const sql_pattern = try std.fmt.allocPrint(allocator, "{s}%", .{trimmed[0 .. trimmed.len - 1]});
+                try result.append(allocator, sql_pattern);
+            } else {
+                // Exact match - still use LIKE but no wildcard
+                try result.append(allocator, try allocator.dupe(u8, trimmed));
+            }
+        }
+
+        return result.toOwnedSlice(allocator);
+    }
 };
 
 /// Input for creating a media record
@@ -180,28 +210,143 @@ fn parseFocalPointString(json: []const u8) ?FocalPoint {
     return .{ .x = x, .y = y };
 }
 
-/// List media with optional filtering
+/// List media with optional filtering (supports mime_patterns for wildcard mime type matching)
 pub fn listMedia(
     allocator: Allocator,
     db: *Db,
     opts: MediaListOptions,
 ) ![]MediaRecord {
-    return cms.listWithMeta(MediaRecord, allocator, db, .{
-        .table = "media",
-        .id_column = "id",
-        .meta_table = "media_meta",
-        .meta_fk = "media_id",
-        .select_cols = "id, filename, mime_type, size, width, height, storage_key, visibility, hash, data, created_at, updated_at",
-        .visibility = opts.visibility,
-        .mime_type = opts.mime_type,
-        .filename_search = opts.search,
-        .limit = opts.limit,
-        .offset = opts.offset,
-        .order_by = opts.order_by,
-        .order_dir = opts.order_dir,
-        .meta_filters = opts.meta_filters,
-        .parse_row = parseMediaRowFn,
+    // Get mime patterns for filtering
+    const mime_patterns = try opts.getMimePatterns(allocator);
+
+    // If no mime_patterns, use the simpler cms.listWithMeta
+    if (mime_patterns.len == 0) {
+        return cms.listWithMeta(MediaRecord, allocator, db, .{
+            .table = "media",
+            .id_column = "id",
+            .meta_table = "media_meta",
+            .meta_fk = "media_id",
+            .select_cols = "id, filename, mime_type, size, width, height, storage_key, visibility, hash, data, created_at, updated_at",
+            .visibility = opts.visibility,
+            .mime_type = opts.mime_type,
+            .filename_search = opts.search,
+            .limit = opts.limit,
+            .offset = opts.offset,
+            .order_by = opts.order_by,
+            .order_dir = opts.order_dir,
+            .meta_filters = opts.meta_filters,
+            .parse_row = parseMediaRowFn,
+        });
+    }
+
+    // Build custom query with mime_patterns support
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+
+    try sql_buf.appendSlice(allocator,
+        \\SELECT id, filename, mime_type, size, width, height,
+        \\storage_key, visibility, hash, data, created_at, updated_at
+        \\FROM media WHERE 1=1
+    );
+
+    var bind_idx: u32 = 1;
+
+    const w = sql_buf.writer(allocator);
+
+    // Visibility filter
+    if (opts.visibility != null) {
+        try w.print(" AND visibility = ?{d}", .{bind_idx});
+        bind_idx += 1;
+    }
+
+    // Search filter
+    if (opts.search != null) {
+        try w.print(" AND filename LIKE ?{d}", .{bind_idx});
+        bind_idx += 1;
+    }
+
+    // Mime patterns filter (OR)
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll(")");
+    }
+
+    // Year filter
+    if (opts.year != null) {
+        try w.print(" AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
+        bind_idx += 1;
+    }
+
+    // Month filter
+    if (opts.month != null) {
+        try w.print(" AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
+        bind_idx += 1;
+    }
+
+    // ORDER BY
+    try w.print(" ORDER BY {s} {s}", .{
+        opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC",
     });
+
+    // LIMIT
+    if (opts.limit != null) {
+        try w.print(" LIMIT ?{d}", .{bind_idx});
+        bind_idx += 1;
+    }
+
+    // OFFSET
+    if (opts.offset != null) {
+        try w.print(" OFFSET ?{d}", .{bind_idx});
+        bind_idx += 1;
+    }
+
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    // Bind parameters
+    var b: u32 = 1;
+    if (opts.visibility) |v| {
+        try stmt.bindText(@intCast(b), v);
+        b += 1;
+    }
+    if (opts.search) |s| {
+        try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
+        b += 1;
+    }
+    if (opts.year) |y| {
+        try stmt.bindInt(@intCast(b), @intCast(y));
+        b += 1;
+    }
+    if (opts.month) |m| {
+        try stmt.bindInt(@intCast(b), @intCast(m));
+        b += 1;
+    }
+    if (opts.limit) |l| {
+        try stmt.bindInt(@intCast(b), @intCast(l));
+        b += 1;
+    }
+    if (opts.offset) |off| {
+        try stmt.bindInt(@intCast(b), @intCast(off));
+    }
+
+    var items: std.ArrayListUnmanaged(MediaRecord) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, try parseMediaRow(allocator, &stmt));
+    }
+
+    return items.toOwnedSlice(allocator);
 }
 
 fn parseMediaRowFn(allocator: Allocator, stmt: *Statement) !MediaRecord {
@@ -930,8 +1075,9 @@ pub fn listMediaByFolderAndTags(
 
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
-    try sql_buf.appendSlice(allocator,
+    try w.writeAll(
         \\SELECT m.id, m.filename, m.mime_type, m.size, m.width, m.height,
         \\m.storage_key, m.visibility, m.hash, m.data, m.created_at, m.updated_at
         \\FROM media m WHERE m.id IN (
@@ -941,73 +1087,69 @@ pub fn listMediaByFolderAndTags(
     // Folder placeholders: ?1, ?2, ... (OR semantics)
     var bind_idx: u32 = 1;
     for (0..folder_ids.len) |i| {
-        if (i > 0) try sql_buf.appendSlice(allocator, ", ");
-        var num_buf: [16]u8 = undefined;
-        const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, num);
+        if (i > 0) try w.writeAll(", ");
+        try w.print("?{d}", .{bind_idx});
         bind_idx += 1;
     }
-    try sql_buf.appendSlice(allocator, "))");
+    try w.writeAll("))");
 
     // Tag filter: AND semantics — media must have ALL tags
     if (tag_ids.len > 0) {
-        try sql_buf.appendSlice(allocator, " AND m.id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        try w.writeAll(" AND m.id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
         for (0..tag_ids.len) |i| {
-            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
-            var num_buf: [16]u8 = undefined;
-            const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
-            try sql_buf.appendSlice(allocator, num);
+            if (i > 0) try w.writeAll(", ");
+            try w.print("?{d}", .{bind_idx});
             bind_idx += 1;
         }
-        var having_buf: [64]u8 = undefined;
-        const having = std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, having);
+        try w.print(") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
 
+    // Get mime patterns for filtering
+    const mime_patterns = try opts.getMimePatterns(allocator);
+
     // Search filter
     if (opts.search != null) {
-        var search_buf: [48]u8 = undefined;
-        const search_clause = std.fmt.bufPrint(&search_buf, " AND m.filename LIKE ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, search_clause);
+        try w.print(" AND m.filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
+    }
+
+    // Mime patterns filter (OR)
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("m.mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll(")");
     }
 
     // Date filters
     if (opts.year != null) {
-        var yr_buf: [80]u8 = undefined;
-        const yr_clause = std.fmt.bufPrint(&yr_buf, " AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, yr_clause);
+        try w.print(" AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.month != null) {
-        var mo_buf: [80]u8 = undefined;
-        const mo_clause = std.fmt.bufPrint(&mo_buf, " AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, mo_clause);
+        try w.print(" AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
     // ORDER BY
-    var order_buf: [128]u8 = undefined;
-    const order = std.fmt.bufPrint(&order_buf, " ORDER BY m.{s} {s}", .{
+    try w.print(" ORDER BY m.{s} {s}", .{
         opts.order_by,
         if (opts.order_dir == .asc) "ASC" else "DESC",
-    }) catch unreachable;
-    try sql_buf.appendSlice(allocator, order);
+    });
 
     // LIMIT
     if (opts.limit != null) {
-        var lim_buf: [32]u8 = undefined;
-        const lim = std.fmt.bufPrint(&lim_buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, lim);
+        try w.print(" LIMIT ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
     // OFFSET
     if (opts.offset != null) {
-        var off_buf: [32]u8 = undefined;
-        const off = std.fmt.bufPrint(&off_buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, off);
+        try w.print(" OFFSET ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1034,6 +1176,11 @@ pub fn listMediaByFolderAndTags(
     // Bind search
     if (opts.search) |s| {
         try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    // Bind mime patterns
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
         b += 1;
     }
     // Bind date filters
@@ -1074,8 +1221,9 @@ pub fn listMediaByTerm(
 ) ![]MediaRecord {
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
-    try sql_buf.appendSlice(allocator,
+    try w.writeAll(
         \\SELECT m.id, m.filename, m.mime_type, m.size, m.width, m.height,
         \\m.storage_key, m.visibility, m.hash, m.data, m.created_at, m.updated_at
         \\FROM media m
@@ -1083,36 +1231,42 @@ pub fn listMediaByTerm(
         \\WHERE mt.term_id = ?1
     );
 
+    // Get mime patterns for filtering
+    const mime_patterns = try opts.getMimePatterns(allocator);
+
     var bind_idx: u32 = 2;
     if (opts.search != null) {
-        var buf: [48]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND m.filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND m.filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
     }
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("m.mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll(")");
+    }
     if (opts.year != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.month != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
-    var order_buf: [128]u8 = undefined;
-    try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&order_buf, " ORDER BY m.{s} {s}", .{
+    try w.print(" ORDER BY m.{s} {s}", .{
         opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC",
-    }) catch unreachable);
+    });
 
     if (opts.limit != null) {
-        var buf: [32]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" LIMIT ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.offset != null) {
-        var buf: [32]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" OFFSET ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1124,6 +1278,10 @@ pub fn listMediaByTerm(
     var b: u32 = 2;
     if (opts.search) |s| {
         try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
         b += 1;
     }
     if (opts.year) |y| {
@@ -1193,22 +1351,20 @@ pub fn markMediaSynced(db: *Db, media_id: []const u8) !void {
 pub fn countUnreviewedMedia(allocator: Allocator, db: *Db, search_term: ?[]const u8, year: ?u16, month: ?u8) !u32 {
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
-    try sql_buf.appendSlice(allocator, "SELECT COUNT(*) FROM media WHERE json_extract(data, '$.synced') = 1");
+    const w = sql_buf.writer(allocator);
+    try w.writeAll("SELECT COUNT(*) FROM media WHERE json_extract(data, '$.synced') = 1");
 
     var bind_idx: u32 = 1;
     if (search_term != null) {
-        var buf: [48]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (year != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (month != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1242,8 +1398,9 @@ pub fn listUnreviewedMedia(
 ) ![]MediaRecord {
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
-    try sql_buf.appendSlice(allocator,
+    try w.writeAll(
         \\SELECT id, filename, mime_type, size, width, height,
         \\storage_key, visibility, hash, data, created_at, updated_at
         \\FROM media WHERE json_extract(data, '$.synced') = 1
@@ -1251,34 +1408,28 @@ pub fn listUnreviewedMedia(
 
     var bind_idx: u32 = 1;
     if (opts.search != null) {
-        var buf: [48]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.year != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.month != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
-    var order_buf: [128]u8 = undefined;
-    try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&order_buf, " ORDER BY {s} {s}", .{
+    try w.print(" ORDER BY {s} {s}", .{
         opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC",
-    }) catch unreachable);
+    });
 
     if (opts.limit != null) {
-        var buf: [32]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" LIMIT ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.offset != null) {
-        var buf: [32]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" OFFSET ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1334,8 +1485,9 @@ pub fn listMediaByTerms(
     // ) ORDER BY ... LIMIT ...
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
-    try sql_buf.appendSlice(allocator,
+    try w.writeAll(
         \\SELECT m.id, m.filename, m.mime_type, m.size, m.width, m.height,
         \\m.storage_key, m.visibility, m.hash, m.data, m.created_at, m.updated_at
         \\FROM media m WHERE m.id IN (
@@ -1344,60 +1496,60 @@ pub fn listMediaByTerms(
 
     // Append ?1, ?2, ... for each term
     for (0..term_ids.len) |i| {
-        if (i > 0) try sql_buf.appendSlice(allocator, ", ");
-        var num_buf: [16]u8 = undefined;
-        const num = std.fmt.bufPrint(&num_buf, "?{d}", .{i + 1}) catch unreachable;
-        try sql_buf.appendSlice(allocator, num);
+        if (i > 0) try w.writeAll(", ");
+        try w.print("?{d}", .{i + 1});
     }
 
     // HAVING COUNT = N
     var bind_idx: u32 = @intCast(term_ids.len + 1);
-    var having_buf: [64]u8 = undefined;
-    const having = std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable;
-    try sql_buf.appendSlice(allocator, having);
+    try w.print(") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx});
     bind_idx += 1;
+
+    // Get mime patterns for filtering
+    const mime_patterns = try opts.getMimePatterns(allocator);
 
     // Search filter
     if (opts.search != null) {
-        var search_buf: [48]u8 = undefined;
-        const search_clause = std.fmt.bufPrint(&search_buf, " AND m.filename LIKE ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, search_clause);
+        try w.print(" AND m.filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
+    }
+
+    // Mime patterns filter (OR)
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("m.mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll(")");
     }
 
     // Date filters
     if (opts.year != null) {
-        var yr_buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&yr_buf, " AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%Y', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.month != null) {
-        var mo_buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&mo_buf, " AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%m', m.created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
     // ORDER BY
-    var order_buf: [128]u8 = undefined;
-    const order = std.fmt.bufPrint(&order_buf, " ORDER BY m.{s} {s}", .{
+    try w.print(" ORDER BY m.{s} {s}", .{
         opts.order_by,
         if (opts.order_dir == .asc) "ASC" else "DESC",
-    }) catch unreachable;
-    try sql_buf.appendSlice(allocator, order);
+    });
 
     // LIMIT
     if (opts.limit != null) {
-        var lim_buf: [32]u8 = undefined;
-        const lim = std.fmt.bufPrint(&lim_buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, lim);
+        try w.print(" LIMIT ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
     // OFFSET
     if (opts.offset != null) {
-        var off_buf: [32]u8 = undefined;
-        const off = std.fmt.bufPrint(&off_buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, off);
+        try w.print(" OFFSET ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1417,6 +1569,11 @@ pub fn listMediaByTerms(
     // Bind search
     if (opts.search) |s| {
         try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    // Bind mime patterns
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
         b += 1;
     }
     // Bind date filters
@@ -1463,7 +1620,7 @@ pub fn countUnsortedMedia(db: *Db, taxonomy_id: []const u8) !u32 {
     return @intCast(stmt.columnInt(0));
 }
 
-/// Count media with a specific tag, filtered by active folder and other active tags.
+/// Count media with a specific tag, filtered by active folder, other tags, and mime patterns.
 /// Used for contextual sidebar counts that respond to the current filter state.
 pub fn countTagInContext(
     allocator: Allocator,
@@ -1474,73 +1631,74 @@ pub fn countTagInContext(
     search_term: ?[]const u8,
     year: ?u16,
     month: ?u8,
+    mime_patterns_str: ?[]const u8,
 ) !u32 {
+    // Get mime patterns for filtering
+    const opts: MediaListOptions = .{ .mime_patterns = mime_patterns_str };
+    const mime_patterns = try opts.getMimePatterns(allocator);
+
     // No context filters → simple count
-    if (folder_id == null and required_tag_ids.len == 0 and search_term == null and year == null and month == null) {
+    if (folder_id == null and required_tag_ids.len == 0 and search_term == null and year == null and month == null and mime_patterns.len == 0) {
         return countMediaInTerm(db, tag_id);
     }
 
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
     var bind_idx: u32 = 1;
 
     // CTE for folder tree if folder is active
     if (folder_id != null) {
-        var cte_buf: [16]u8 = undefined;
-        const cte = std.fmt.bufPrint(&cte_buf, "?{d}", .{bind_idx}) catch unreachable;
+        try w.print("WITH RECURSIVE folder_tree(id) AS (SELECT id FROM terms WHERE id = ?{d}", .{bind_idx});
         bind_idx += 1;
-        try sql_buf.appendSlice(allocator, "WITH RECURSIVE folder_tree(id) AS (SELECT id FROM terms WHERE id = ");
-        try sql_buf.appendSlice(allocator, cte);
-        try sql_buf.appendSlice(allocator, " UNION ALL SELECT t.id FROM terms t JOIN folder_tree ft ON t.parent_id = ft.id) ");
+        try w.writeAll(" UNION ALL SELECT t.id FROM terms t JOIN folder_tree ft ON t.parent_id = ft.id) ");
     }
 
-    {
-        var num_buf: [8]u8 = undefined;
-        const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
-        bind_idx += 1;
-        try sql_buf.appendSlice(allocator, "SELECT COUNT(DISTINCT mt.media_id) FROM media_terms mt WHERE mt.term_id = ");
-        try sql_buf.appendSlice(allocator, num);
-    }
+    try w.print("SELECT COUNT(DISTINCT mt.media_id) FROM media_terms mt WHERE mt.term_id = ?{d}", .{bind_idx});
+    bind_idx += 1;
 
     // Folder constraint
     if (folder_id != null) {
-        try sql_buf.appendSlice(allocator, " AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (SELECT id FROM folder_tree))");
+        try w.writeAll(" AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (SELECT id FROM folder_tree))");
     }
 
     // Tag constraint
     if (required_tag_ids.len > 0) {
-        try sql_buf.appendSlice(allocator, " AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        try w.writeAll(" AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
         for (0..required_tag_ids.len) |i| {
-            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
-            var num_buf: [8]u8 = undefined;
-            const num = std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable;
-            try sql_buf.appendSlice(allocator, num);
+            if (i > 0) try w.writeAll(", ");
+            try w.print("?{d}", .{bind_idx});
             bind_idx += 1;
         }
-        var having_buf: [64]u8 = undefined;
-        const having = std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, having);
+        try w.print(") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
 
     // Search constraint
     if (search_term != null) {
-        var search_buf: [64]u8 = undefined;
-        const search_clause = std.fmt.bufPrint(&search_buf, " AND mt.media_id IN (SELECT id FROM media WHERE filename LIKE ?{d})", .{bind_idx}) catch unreachable;
-        try sql_buf.appendSlice(allocator, search_clause);
+        try w.print(" AND mt.media_id IN (SELECT id FROM media WHERE filename LIKE ?{d})", .{bind_idx});
         bind_idx += 1;
+    }
+
+    // Mime patterns filter (OR)
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND mt.media_id IN (SELECT id FROM media WHERE (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll("))");
     }
 
     // Date constraints
     if (year != null) {
-        var buf: [192]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(" AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
     if (month != null) {
-        var buf: [192]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(" AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1567,6 +1725,11 @@ pub fn countTagInContext(
         try stmt.bindText(@intCast(b), s);
         b += 1;
     }
+    // Bind mime patterns
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
+        b += 1;
+    }
     if (year) |y| {
         try stmt.bindInt(@intCast(b), @intCast(y));
         b += 1;
@@ -1580,7 +1743,7 @@ pub fn countTagInContext(
     return @intCast(stmt.columnInt(0));
 }
 
-/// Count media in a folder's subtree, filtered by active tags (AND).
+/// Count media in a folder's subtree, filtered by active tags (AND) and mime patterns.
 /// Used for contextual folder counts in the sidebar.
 pub fn countFolderInContext(
     allocator: Allocator,
@@ -1590,15 +1753,21 @@ pub fn countFolderInContext(
     search_term: ?[]const u8,
     year: ?u16,
     month: ?u8,
+    mime_patterns_str: ?[]const u8,
 ) !u32 {
-    if (tag_ids.len == 0 and search_term == null and year == null and month == null) {
+    // Get mime patterns for filtering
+    const opts: MediaListOptions = .{ .mime_patterns = mime_patterns_str };
+    const mime_patterns = try opts.getMimePatterns(allocator);
+
+    if (tag_ids.len == 0 and search_term == null and year == null and month == null and mime_patterns.len == 0) {
         return countMediaInFolderRecursive(db, folder_id);
     }
 
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
-    try sql_buf.appendSlice(allocator,
+    try w.writeAll(
         \\WITH RECURSIVE folder_tree(id) AS (
         \\  SELECT id FROM terms WHERE id = ?1
         \\  UNION ALL
@@ -1611,30 +1780,35 @@ pub fn countFolderInContext(
     var bind_idx: u32 = 2;
 
     if (tag_ids.len > 0) {
-        try sql_buf.appendSlice(allocator, " AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        try w.writeAll(" AND mt.media_id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
         for (0..tag_ids.len) |i| {
-            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
-            var num_buf: [8]u8 = undefined;
-            try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable);
+            if (i > 0) try w.writeAll(", ");
+            try w.print("?{d}", .{bind_idx});
             bind_idx += 1;
         }
-        var having_buf: [64]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
     if (search_term != null) {
-        var buf: [64]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE filename LIKE ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(" AND mt.media_id IN (SELECT id FROM media WHERE filename LIKE ?{d})", .{bind_idx});
         bind_idx += 1;
     }
+    // Mime patterns filter (OR)
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND mt.media_id IN (SELECT id FROM media WHERE (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll("))");
+    }
     if (year != null) {
-        var buf: [192]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(" AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
     if (month != null) {
-        var buf: [192]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(" AND mt.media_id IN (SELECT id FROM media WHERE CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1655,6 +1829,11 @@ pub fn countFolderInContext(
     }
     if (search_term) |s| {
         try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    // Bind mime patterns
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
         b += 1;
     }
     if (year) |y| {
@@ -1686,34 +1865,30 @@ pub fn countAllInContext(
 
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
-    try sql_buf.appendSlice(allocator, "SELECT COUNT(*) FROM media WHERE 1=1");
+    const w = sql_buf.writer(allocator);
+    try w.writeAll("SELECT COUNT(*) FROM media WHERE 1=1");
     var bind_idx: u32 = 1;
 
     if (tag_ids.len > 0) {
-        try sql_buf.appendSlice(allocator, " AND id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        try w.writeAll(" AND id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
         for (0..tag_ids.len) |i| {
-            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
-            var num_buf: [8]u8 = undefined;
-            try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable);
+            if (i > 0) try w.writeAll(", ");
+            try w.print("?{d}", .{bind_idx});
             bind_idx += 1;
         }
-        var having_buf: [64]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
     if (search_term != null) {
-        var buf: [48]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (year != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (month != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1747,7 +1922,7 @@ pub fn countAllInContext(
     return @intCast(stmt.columnInt(0));
 }
 
-/// Count media not in any folder that also match all given tags (AND).
+/// Count media not in any folder that also match all given tags (AND) and mime patterns.
 /// Used for contextual "unsorted/default" count in the sidebar.
 pub fn countUnsortedInContext(
     allocator: Allocator,
@@ -1757,15 +1932,21 @@ pub fn countUnsortedInContext(
     search_term: ?[]const u8,
     year: ?u16,
     month: ?u8,
+    mime_patterns_str: ?[]const u8,
 ) !u32 {
-    if (tag_ids.len == 0 and search_term == null and year == null and month == null) {
+    // Get mime patterns for filtering
+    const opts: MediaListOptions = .{ .mime_patterns = mime_patterns_str };
+    const mime_patterns = try opts.getMimePatterns(allocator);
+
+    if (tag_ids.len == 0 and search_term == null and year == null and month == null and mime_patterns.len == 0) {
         return countUnsortedMedia(db, taxonomy_id);
     }
 
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
-    try sql_buf.appendSlice(allocator,
+    try w.writeAll(
         \\SELECT COUNT(*) FROM media WHERE id NOT IN (
         \\  SELECT mt.media_id FROM media_terms mt
         \\  JOIN terms t ON t.id = mt.term_id
@@ -1776,30 +1957,35 @@ pub fn countUnsortedInContext(
     var bind_idx: u32 = 2;
 
     if (tag_ids.len > 0) {
-        try sql_buf.appendSlice(allocator, " AND id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
+        try w.writeAll(" AND id IN (SELECT media_id FROM media_terms WHERE term_id IN (");
         for (0..tag_ids.len) |i| {
-            if (i > 0) try sql_buf.appendSlice(allocator, ", ");
-            var num_buf: [8]u8 = undefined;
-            try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&num_buf, "?{d}", .{bind_idx}) catch unreachable);
+            if (i > 0) try w.writeAll(", ");
+            try w.print("?{d}", .{bind_idx});
             bind_idx += 1;
         }
-        var having_buf: [64]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&having_buf, ") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx}) catch unreachable);
+        try w.print(") GROUP BY media_id HAVING COUNT(DISTINCT term_id) = ?{d})", .{bind_idx});
         bind_idx += 1;
     }
     if (search_term != null) {
-        var buf: [48]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
     }
+    // Mime patterns filter (OR)
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll(")");
+    }
     if (year != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (month != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1820,6 +2006,11 @@ pub fn countUnsortedInContext(
     }
     if (search_term) |s| {
         try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    // Bind mime patterns
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
         b += 1;
     }
     if (year) |y| {
@@ -1911,8 +2102,9 @@ pub fn listUnsortedMedia(
 ) ![]MediaRecord {
     var sql_buf: std.ArrayList(u8) = .{};
     defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
-    try sql_buf.appendSlice(allocator,
+    try w.writeAll(
         \\SELECT id, filename, mime_type, size, width, height,
         \\storage_key, visibility, hash, data, created_at, updated_at
         \\FROM media WHERE id NOT IN (
@@ -1922,36 +2114,43 @@ pub fn listUnsortedMedia(
         \\)
     );
 
+    // Get mime patterns for filtering
+    const mime_patterns = try opts.getMimePatterns(allocator);
+
     var bind_idx: u32 = 2;
     if (opts.search != null) {
-        var buf: [48]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND filename LIKE ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND filename LIKE ?{d}", .{bind_idx});
         bind_idx += 1;
     }
+    // Mime patterns filter (OR)
+    if (mime_patterns.len > 0) {
+        try w.writeAll(" AND (");
+        for (mime_patterns, 0..) |_, i| {
+            if (i > 0) try w.writeAll(" OR ");
+            try w.print("mime_type LIKE ?{d}", .{bind_idx});
+            bind_idx += 1;
+        }
+        try w.writeAll(")");
+    }
     if (opts.year != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.month != null) {
-        var buf: [80]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" AND CAST(strftime('%m', created_at, 'unixepoch') AS INTEGER) = ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
-    var order_buf: [128]u8 = undefined;
-    try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&order_buf, " ORDER BY {s} {s}", .{
+    try w.print(" ORDER BY {s} {s}", .{
         opts.order_by, if (opts.order_dir == .asc) "ASC" else "DESC",
-    }) catch unreachable);
+    });
 
     if (opts.limit != null) {
-        var buf: [32]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " LIMIT ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" LIMIT ?{d}", .{bind_idx});
         bind_idx += 1;
     }
     if (opts.offset != null) {
-        var buf: [32]u8 = undefined;
-        try sql_buf.appendSlice(allocator, std.fmt.bufPrint(&buf, " OFFSET ?{d}", .{bind_idx}) catch unreachable);
+        try w.print(" OFFSET ?{d}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -1963,6 +2162,11 @@ pub fn listUnsortedMedia(
     var b: u32 = 2;
     if (opts.search) |s| {
         try stmt.bindText(@intCast(b), s);
+        b += 1;
+    }
+    // Bind mime patterns
+    for (mime_patterns) |pattern| {
+        try stmt.bindText(@intCast(b), pattern);
         b += 1;
     }
     if (opts.year) |y| {
