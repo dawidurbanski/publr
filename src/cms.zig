@@ -228,94 +228,60 @@ pub fn listWithMeta(
         parse_row: *const fn (Allocator, *Statement) anyerror!T,
     },
 ) ![]T {
-    if (config.meta_filters.len > max_meta_filters) return error.OutOfMemory;
+    if (config.meta_filters.len > max_meta_filters) return error.TooManyFilters;
 
-    var sql_buf: [2048]u8 = undefined;
-    var sql_len: usize = 0;
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
 
     // SELECT ... FROM table t
-    const select_part = std.fmt.bufPrint(
-        &sql_buf,
-        "SELECT t.{s} FROM {s} t",
-        .{ config.select_cols, config.table },
-    ) catch return error.OutOfMemory;
-    sql_len = select_part.len;
+    try w.print("SELECT t.{s} FROM {s} t", .{ config.select_cols, config.table });
 
     // Add meta filter JOINs
     // Each filter becomes: JOIN meta_table m0 ON m0.fk = t.id AND m0.key = ?N
     var bind_idx: u32 = 1;
     for (config.meta_filters, 0..) |_, i| {
-        const join = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " JOIN {s} m{} ON m{}.{s} = t.{s} AND m{}.key = ?{}",
-            .{ config.meta_table, i, i, config.meta_fk, config.id_column, i, bind_idx },
-        ) catch return error.OutOfMemory;
-        sql_len += join.len;
+        try w.print(" JOIN {s} m{} ON m{}.{s} = t.{s} AND m{}.key = ?{}", .{
+            config.meta_table, i, i, config.meta_fk, config.id_column, i, bind_idx,
+        });
         bind_idx += 1;
     }
 
     // WHERE 1=1
-    const where = " WHERE 1=1";
-    @memcpy(sql_buf[sql_len..][0..where.len], where);
-    sql_len += where.len;
+    try w.writeAll(" WHERE 1=1");
 
     // Type filter (entries have content_type_id)
     const type_bind_idx = bind_idx;
     if (config.type_filter != null) {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " AND t.{s} = ?{}",
-            .{ config.type_filter.?.column, bind_idx },
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" AND t.{s} = ?{}", .{ config.type_filter.?.column, bind_idx });
         bind_idx += 1;
     }
 
     // Status filter
     const status_bind_idx = bind_idx;
     if (config.status != null) {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " AND t.status = ?{}",
-            .{bind_idx},
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" AND t.status = ?{}", .{bind_idx});
         bind_idx += 1;
     }
 
     // Visibility filter (media)
     const visibility_bind_idx = bind_idx;
     if (config.visibility != null) {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " AND t.visibility = ?{}",
-            .{bind_idx},
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" AND t.visibility = ?{}", .{bind_idx});
         bind_idx += 1;
     }
 
     // Mime type filter (media)
     const mime_bind_idx = bind_idx;
     if (config.mime_type != null) {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " AND t.mime_type = ?{}",
-            .{bind_idx},
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" AND t.mime_type = ?{}", .{bind_idx});
         bind_idx += 1;
     }
 
     // Filename search filter (media)
     const search_bind_idx = bind_idx;
     if (config.filename_search != null) {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " AND t.filename LIKE ?{}",
-            .{bind_idx},
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" AND t.filename LIKE ?{}", .{bind_idx});
         bind_idx += 1;
     }
 
@@ -323,46 +289,31 @@ pub fn listWithMeta(
     // m0.value_text = ?N, m1.value_int > ?N, etc.
     var meta_value_bind_indices: [max_meta_filters]u32 = undefined;
     for (config.meta_filters, 0..) |mf, i| {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " AND m{}.{s} {s} ?{}",
-            .{ i, mf.value.columnName(), mf.op.toSql(), bind_idx },
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" AND m{}.{s} {s} ?{}", .{ i, mf.value.columnName(), mf.op.toSql(), bind_idx });
         meta_value_bind_indices[i] = bind_idx;
         bind_idx += 1;
     }
 
     // ORDER BY
-    const order_clause = std.fmt.bufPrint(
-        sql_buf[sql_len..],
-        " ORDER BY t.{s} {s}",
-        .{ config.order_by, if (config.order_dir == .asc) "ASC" else "DESC" },
-    ) catch return error.OutOfMemory;
-    sql_len += order_clause.len;
+    try w.print(" ORDER BY t.{s} {s}", .{
+        config.order_by,
+        if (config.order_dir == .asc) "ASC" else "DESC",
+    });
 
     // LIMIT
     if (config.limit) |limit| {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " LIMIT {}",
-            .{limit},
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" LIMIT {}", .{limit});
     }
 
     // OFFSET
     if (config.offset) |offset| {
-        const clause = std.fmt.bufPrint(
-            sql_buf[sql_len..],
-            " OFFSET {}",
-            .{offset},
-        ) catch return error.OutOfMemory;
-        sql_len += clause.len;
+        try w.print(" OFFSET {}", .{offset});
     }
 
     // Prepare and bind
-    var stmt = try db.prepare(sql_buf[0..sql_len]);
+    const sql = try sql_buf.toOwnedSlice(allocator);
+    defer allocator.free(sql);
+    var stmt = try db.prepare(sql);
     defer stmt.deinit();
 
     // Bind meta filter keys

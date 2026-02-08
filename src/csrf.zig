@@ -60,8 +60,12 @@ fn multipartFormValue(ctx: *Context, name: []const u8) ?[]const u8 {
     const body_content = ctx.body orelse return null;
 
     // Build the needle: Content-Disposition: form-data; name="<name>"
-    var needle_buf: [128]u8 = undefined;
-    const needle = std.fmt.bufPrint(&needle_buf, "name=\"{s}\"", .{name}) catch return null;
+    const needle = std.fmt.allocPrint(ctx.allocator, "name=\"{s}\"", .{name}) catch return null;
+    defer ctx.allocator.free(needle);
+
+    // Build delimiter for boundary
+    const delim = std.fmt.allocPrint(ctx.allocator, "\r\n--{s}", .{boundary}) catch return null;
+    defer ctx.allocator.free(delim);
 
     // Find the part containing this field name
     var search_pos: usize = 0;
@@ -84,9 +88,6 @@ fn multipartFormValue(ctx: *Context, name: []const u8) ?[]const u8 {
         const remaining = body_content[value_start..];
 
         // Value ends at next boundary
-        var delim_buf: [256]u8 = undefined;
-        const delim = std.fmt.bufPrint(&delim_buf, "\r\n--{s}", .{boundary}) catch return null;
-
         const value_end = std.mem.indexOf(u8, remaining, delim) orelse remaining.len;
         return remaining[0..value_end];
     }
