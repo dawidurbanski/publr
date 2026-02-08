@@ -780,6 +780,10 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
 
+    // Verify step: runs tests + WASM build (use before completing tasks)
+    const verify_step = b.step("verify", "Run tests and verify WASM build");
+    verify_step.dependOn(&run_exe_tests.step);
+
     // =========================================================================
     // Browser WASM Build (full CMS with embedded SQLite)
     // =========================================================================
@@ -918,4 +922,7 @@ pub fn build(b: *std.Build) void {
         .dest_dir = .{ .override = .{ .custom = "browser" } },
     });
     browser_step.dependOn(&browser_install.step);
+
+    // Wire verify step to also check WASM build
+    verify_step.dependOn(&browser_install.step);
 }
