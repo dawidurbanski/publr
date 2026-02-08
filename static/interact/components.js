@@ -927,14 +927,16 @@ function loadMediaItems(search) {
             }
 
             // Render tags sidebar (and build name map)
-            if (data.tags && data.tags.length > 0) {
+            // Filter out tags with no images (keep active tags visible)
+            const tagsWithImages = (data.tags || []).filter(t => t.count > 0 || pickerActiveTags.includes(t.id));
+            if (tagsWithImages.length > 0) {
                 // Update tag names map for any active tags
-                data.tags.forEach(tag => {
+                tagsWithImages.forEach(tag => {
                     if (pickerActiveTags.includes(tag.id)) {
                         pickerActiveTagNames[tag.id] = tag.name;
                     }
                 });
-                tagsContainer.innerHTML = data.tags.map(tag => {
+                tagsContainer.innerHTML = tagsWithImages.map(tag => {
                     const isActive = pickerActiveTags.includes(tag.id);
                     return `<button type="button" class="image-picker-modal-tag${isActive ? ' active' : ''}" data-tag-id="${tag.id}" data-tag-name="${tag.name}">
                         ${tag.name}
