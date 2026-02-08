@@ -627,11 +627,13 @@ register('nav-slider', (el) => {
 // ── Image Picker ───────────────────────────────
 let imagePickerModal = null;
 let currentImagePicker = null;
+let pickerActiveFolder = '';
+let pickerActiveTags = [];
 
 function getImagePickerModal() {
     if (imagePickerModal) return imagePickerModal;
 
-    // Create modal HTML
+    // Create modal HTML with sidebar layout
     const modal = document.createElement('div');
     modal.className = 'image-picker-modal';
     modal.innerHTML = `
@@ -640,16 +642,31 @@ function getImagePickerModal() {
                 <h3>Select Image</h3>
                 <button type="button" class="image-picker-modal-close" aria-label="Close">&times;</button>
             </div>
-            <div class="image-picker-modal-toolbar">
-                <div class="image-picker-modal-search">
-                    <input type="text" placeholder="Search media..." />
+            <div class="image-picker-modal-layout">
+                <aside class="image-picker-modal-sidebar">
+                    <div class="image-picker-modal-section">
+                        <h4 class="image-picker-modal-section-title">Folders</h4>
+                        <ul class="image-picker-modal-folders"></ul>
+                    </div>
+                    <div class="image-picker-modal-section">
+                        <h4 class="image-picker-modal-section-title">Tags</h4>
+                        <div class="image-picker-modal-tags"></div>
+                    </div>
+                </aside>
+                <div class="image-picker-modal-main">
+                    <div class="image-picker-modal-toolbar">
+                        <div class="image-picker-modal-search">
+                            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none"><path d="M21 21L17.5001 17.5M20 11.5C20 16.1944 16.1944 20 11.5 20C6.80558 20 3 16.1944 3 11.5C3 6.80558 6.80558 3 11.5 3C16.1944 3 20 6.80558 20 11.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <input type="text" placeholder="Search media..." />
+                        </div>
+                    </div>
+                    <div class="image-picker-modal-body">
+                        <div class="image-picker-modal-grid"></div>
+                    </div>
                 </div>
             </div>
-            <div class="image-picker-modal-body">
-                <div class="image-picker-modal-grid"></div>
-            </div>
             <div class="image-picker-modal-footer">
-                <div class="image-picker-modal-pagination"></div>
+                <div class="image-picker-modal-info"></div>
                 <div class="image-picker-modal-actions">
                     <button type="button" class="btn btn-sm" data-action="cancel">Cancel</button>
                     <button type="button" class="btn btn-sm btn-primary" data-action="select" disabled>Select</button>
@@ -666,6 +683,8 @@ function getImagePickerModal() {
     const selectBtn = modal.querySelector('[data-action="select"]');
     const searchInput = modal.querySelector('.image-picker-modal-search input');
     const grid = modal.querySelector('.image-picker-modal-grid');
+    const foldersContainer = modal.querySelector('.image-picker-modal-folders');
+    const tagsContainer = modal.querySelector('.image-picker-modal-tags');
 
     closeBtn.addEventListener('click', closeImagePickerModal);
     cancelBtn.addEventListener('click', closeImagePickerModal);
@@ -699,6 +718,29 @@ function getImagePickerModal() {
         }, 300);
     });
 
+    // Folder click handler
+    foldersContainer.addEventListener('click', (e) => {
+        const item = e.target.closest('.image-picker-modal-folder');
+        if (!item) return;
+        e.preventDefault();
+        pickerActiveFolder = item.dataset.folderId || '';
+        loadMediaItems(searchInput.value);
+    });
+
+    // Tag click handler
+    tagsContainer.addEventListener('click', (e) => {
+        const chip = e.target.closest('.image-picker-modal-tag');
+        if (!chip) return;
+        e.preventDefault();
+        const tagId = chip.dataset.tagId;
+        if (pickerActiveTags.includes(tagId)) {
+            pickerActiveTags = pickerActiveTags.filter(t => t !== tagId);
+        } else {
+            pickerActiveTags.push(tagId);
+        }
+        loadMediaItems(searchInput.value);
+    });
+
     // Grid item selection
     grid.addEventListener('click', (e) => {
         const item = e.target.closest('.image-picker-modal-item');
@@ -728,6 +770,8 @@ function getImagePickerModal() {
 
 function openImagePickerModal(picker) {
     currentImagePicker = picker;
+    pickerActiveFolder = '';
+    pickerActiveTags = [];
     const modal = getImagePickerModal();
     modal.classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -758,23 +802,82 @@ function closeImagePickerModal() {
     }
 }
 
+function buildFolderTree(folders) {
+    // Build parent-child map
+    const byParent = {};
+    folders.forEach(f => {
+        const pid = f.parent_id || '';
+        if (!byParent[pid]) byParent[pid] = [];
+        byParent[pid].push(f);
+    });
+
+    function renderLevel(parentId, depth) {
+        const children = byParent[parentId] || [];
+        return children.map(f => {
+            const isActive = f.id === pickerActiveFolder;
+            const indent = depth > 0 ? ` style="padding-left: ${depth * 1.25}rem"` : '';
+            const subfolders = renderLevel(f.id, depth + 1);
+            return `
+                <li class="image-picker-modal-folder${isActive ? ' active' : ''}"${indent} data-folder-id="${f.id}">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none"><path d="M13 7L11.8845 4.76892C11.5634 4.1268 11.4029 3.80573 11.1634 3.57116C10.9516 3.36373 10.6963 3.20597 10.4161 3.10931C10.0992 3 9.74021 3 9.02229 3H5.2C4.0799 3 3.51984 3 3.09202 3.21799C2.71569 3.40973 2.40973 3.71569 2.21799 4.09202C2 4.51984 2 5.0799 2 6.2V7M2 7H17.2C18.8802 7 19.7202 7 20.362 7.32698C20.9265 7.6146 21.3854 8.07354 21.673 8.63803C22 9.27976 22 10.1198 22 11.8V16.2C22 17.8802 22 18.7202 21.673 19.362C21.3854 19.9265 20.9265 20.3854 20.362 20.673C19.7202 21 18.8802 21 17.2 21H6.8C5.11984 21 4.27976 21 3.63803 20.673C3.07354 20.3854 2.6146 19.9265 2.32698 19.362C2 18.7202 2 17.8802 2 16.2V7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span class="image-picker-modal-folder-name">${f.name}</span>
+                    <span class="image-picker-modal-folder-count">${f.count}</span>
+                </li>
+                ${subfolders}
+            `;
+        }).join('');
+    }
+
+    return renderLevel('', 0);
+}
+
 function loadMediaItems(search) {
     const modal = getImagePickerModal();
     const grid = modal.querySelector('.image-picker-modal-grid');
     const selectBtn = modal.querySelector('[data-action="select"]');
+    const foldersContainer = modal.querySelector('.image-picker-modal-folders');
+    const tagsContainer = modal.querySelector('.image-picker-modal-tags');
+    const infoContainer = modal.querySelector('.image-picker-modal-info');
 
     grid.innerHTML = '<div class="image-picker-modal-loading">Loading...</div>';
     selectBtn.disabled = true;
 
-    // Build URL with search param
+    // Build URL with filters
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (pickerActiveFolder) params.set('folder', pickerActiveFolder);
+    pickerActiveTags.forEach(t => params.append('tag', t));
+
     let url = '/admin/media/picker/list';
-    if (search) {
-        url += '?search=' + encodeURIComponent(search);
-    }
+    if (params.toString()) url += '?' + params.toString();
 
     fetch(url)
         .then(res => res.json())
         .then(data => {
+            // Render folders sidebar
+            if (data.folders && data.folders.length > 0) {
+                foldersContainer.innerHTML = buildFolderTree(data.folders);
+            } else {
+                foldersContainer.innerHTML = '<li class="image-picker-modal-empty-hint">No folders</li>';
+            }
+
+            // Render tags sidebar
+            if (data.tags && data.tags.length > 0) {
+                tagsContainer.innerHTML = data.tags.map(tag => {
+                    const isActive = pickerActiveTags.includes(tag.id);
+                    return `<button type="button" class="image-picker-modal-tag${isActive ? ' active' : ''}" data-tag-id="${tag.id}">
+                        ${tag.name}
+                        <span class="image-picker-modal-tag-count">${tag.count}</span>
+                    </button>`;
+                }).join('');
+            } else {
+                tagsContainer.innerHTML = '<span class="image-picker-modal-empty-hint">No tags</span>';
+            }
+
+            // Update info
+            infoContainer.textContent = data.items ? `${data.items.length} items` : '';
+
+            // Render grid
             if (!data.items || data.items.length === 0) {
                 grid.innerHTML = `
                     <div class="image-picker-modal-empty">

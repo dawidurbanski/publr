@@ -551,13 +551,16 @@ fn handleEdit(ctx: *Context) !void {
 fn handlePickerList(ctx: *Context) !void {
     const db = if (auth_middleware.auth) |a| a.db else {
         ctx.response.setHeader("Content-Type", "application/json");
-        ctx.response.setBody("{\"items\":[]}");
+        ctx.response.setBody("{\"items\":[],\"folders\":[],\"tags\":[]}");
         return;
     };
 
+    // Parse filters
     const raw_search = parseQueryParam(ctx.query, "search");
     const search_term: ?[]const u8 = if (raw_search) |s| if (s.len > 0) percentDecode(ctx.allocator, s) else null else null;
     const search_pattern: ?[]const u8 = if (search_term) |s| std.fmt.allocPrint(ctx.allocator, "%{s}%", .{s}) catch null else null;
+    const folder_filter = parseQueryParam(ctx.query, "folder");
+    const active_tag_ids = parseQueryParamAll(ctx.allocator, ctx.query, "tag");
 
     const list_opts: media.MediaListOptions = .{
         .limit = 50,
@@ -567,22 +570,43 @@ fn handlePickerList(ctx: *Context) !void {
         .search = search_pattern,
     };
 
-    const entries = media.listMedia(ctx.allocator, db, list_opts) catch &[_]media.MediaRecord{};
+    // Fetch media based on folder/tag filters
+    const entries = blk: {
+        if (folder_filter) |fid| {
+            if (std.mem.eql(u8, fid, "default")) {
+                break :blk media.listUnsortedMedia(ctx.allocator, db, media.tax_media_folders, list_opts) catch &[_]media.MediaRecord{};
+            } else {
+                const folder_ids = media.getDescendantFolderIds(ctx.allocator, db, fid) catch &[_][]const u8{};
+                break :blk media.listMediaByFolderAndTags(ctx.allocator, db, folder_ids, active_tag_ids, list_opts) catch &[_]media.MediaRecord{};
+            }
+        } else if (active_tag_ids.len > 0) {
+            break :blk media.listMediaByTerms(ctx.allocator, db, active_tag_ids, list_opts) catch &[_]media.MediaRecord{};
+        } else {
+            break :blk media.listMedia(ctx.allocator, db, list_opts) catch &[_]media.MediaRecord{};
+        }
+    };
+
+    // Fetch folders and tags for sidebar
+    const folders = media.listTerms(ctx.allocator, db, media.tax_media_folders) catch &[_]media.TermRecord{};
+    const tags = media.listTerms(ctx.allocator, db, media.tax_media_tags) catch &[_]media.TermRecord{};
+
+    // Get counts for sidebar
+    const unsorted_count = media.countUnsortedInContext(ctx.allocator, db, media.tax_media_folders, active_tag_ids, search_pattern, null, null) catch 0;
 
     // Build JSON response using ArrayListUnmanaged
     var json: std.ArrayListUnmanaged(u8) = .{};
     var writer = json.writer(ctx.allocator);
 
-    writer.writeAll("{\"items\":[") catch {};
+    // Start JSON object
+    writer.writeAll("{") catch {};
+
+    // Items array
+    writer.writeAll("\"items\":[") catch {};
     for (entries, 0..) |entry, i| {
         if (i > 0) writer.writeAll(",") catch {};
 
         const is_image = std.mem.startsWith(u8, entry.mime_type, "image/");
-
-        // Get alt_text from data struct
         const alt_text = entry.data.alt_text orelse "";
-
-        // Build thumb URL
         const thumb_url = if (is_image)
             std.fmt.allocPrint(ctx.allocator, "/media/{s}?w=150", .{entry.storage_key}) catch ""
         else
@@ -599,7 +623,46 @@ fn handlePickerList(ctx: *Context) !void {
             alt_text,
         }) catch {};
     }
-    writer.writeAll("]}") catch {};
+    writer.writeAll("],") catch {};
+
+    // Folders array (flat list with parent_id for nesting)
+    writer.writeAll("\"folders\":[") catch {};
+    writer.print("{{\"id\":\"default\",\"name\":\"Default\",\"parent_id\":\"\",\"count\":{d}}}", .{unsorted_count}) catch {};
+    for (folders) |folder| {
+        writer.writeAll(",") catch {};
+        const count = media.countFolderInContext(ctx.allocator, db, folder.id, active_tag_ids, search_pattern, null, null) catch 0;
+        writer.print("{{\"id\":\"{s}\",\"name\":\"{s}\",\"parent_id\":\"{s}\",\"count\":{d}}}", .{
+            folder.id,
+            folder.name,
+            folder.parent_id orelse "",
+            count,
+        }) catch {};
+    }
+    writer.writeAll("],") catch {};
+
+    // Tags array
+    writer.writeAll("\"tags\":[") catch {};
+    for (tags, 0..) |tag, i| {
+        if (i > 0) writer.writeAll(",") catch {};
+        const count = media.countTagInContext(ctx.allocator, db, tag.id, folder_filter, active_tag_ids, search_pattern, null, null) catch 0;
+        writer.print("{{\"id\":\"{s}\",\"name\":\"{s}\",\"count\":{d}}}", .{
+            tag.id,
+            tag.name,
+            count,
+        }) catch {};
+    }
+    writer.writeAll("],") catch {};
+
+    // Active filters for state
+    writer.print("\"active_folder\":\"{s}\",", .{folder_filter orelse ""}) catch {};
+    writer.writeAll("\"active_tags\":[") catch {};
+    for (active_tag_ids, 0..) |tid, i| {
+        if (i > 0) writer.writeAll(",") catch {};
+        writer.print("\"{s}\"", .{tid}) catch {};
+    }
+    writer.writeAll("]") catch {};
+
+    writer.writeAll("}") catch {};
 
     ctx.response.setHeader("Content-Type", "application/json");
     ctx.response.setBody(json.items);
