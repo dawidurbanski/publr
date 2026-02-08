@@ -3984,7 +3984,8 @@ select.form-control {
     box-shadow: var(--shadow-lg);
     width: 90%;
     max-width: 1000px;
-    max-height: 85vh;
+    height: 85vh;
+    min-height: 500px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -4154,10 +4155,47 @@ select.form-control {
 
 .image-picker-modal-toolbar {
     display: flex;
-    gap: var(--space-3);
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--border-default);
     background: var(--bg-primary);
+}
+
+.image-picker-modal-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: var(--text-xs);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.1s;
+}
+
+.image-picker-modal-filter-chip:hover {
+    background: var(--bg-control-hover);
+    border-color: var(--border-strong);
+}
+
+.image-picker-modal-filter-chip-label {
+    color: var(--text-tertiary);
+    margin-right: 2px;
+}
+
+.image-picker-modal-filter-chip-remove {
+    font-size: 14px;
+    line-height: 1;
+    margin-left: 2px;
+    opacity: 0.6;
+}
+
+.image-picker-modal-filter-chip:hover .image-picker-modal-filter-chip-remove {
+    opacity: 1;
 }
 
 .image-picker-modal-search {

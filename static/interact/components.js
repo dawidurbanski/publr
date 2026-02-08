@@ -628,7 +628,10 @@ register('nav-slider', (el) => {
 let imagePickerModal = null;
 let currentImagePicker = null;
 let pickerActiveFolder = '';
+let pickerActiveFolderName = '';
 let pickerActiveTags = [];
+let pickerActiveTagNames = {}; // id -> name mapping
+let pickerSearchTerm = '';
 
 function getImagePickerModal() {
     if (imagePickerModal) return imagePickerModal;
@@ -655,6 +658,7 @@ function getImagePickerModal() {
                 </aside>
                 <div class="image-picker-modal-main">
                     <div class="image-picker-modal-toolbar">
+                        <div class="image-picker-modal-filters"></div>
                         <div class="image-picker-modal-search">
                             <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none"><path d="M21 21L17.5001 17.5M20 11.5C20 16.1944 16.1944 20 11.5 20C6.80558 20 3 16.1944 3 11.5C3 6.80558 6.80558 3 11.5 3C16.1944 3 20 6.80558 20 11.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             <input type="text" placeholder="Search media..." />
@@ -724,6 +728,28 @@ function getImagePickerModal() {
         if (!item) return;
         e.preventDefault();
         pickerActiveFolder = item.dataset.folderId || '';
+        pickerActiveFolderName = item.querySelector('.image-picker-modal-folder-name')?.textContent || '';
+        loadMediaItems(searchInput.value);
+    });
+
+    // Filter chip click handler (for removing filters)
+    const filtersContainer = modal.querySelector('.image-picker-modal-filters');
+    filtersContainer.addEventListener('click', (e) => {
+        const chip = e.target.closest('.image-picker-modal-filter-chip');
+        if (!chip) return;
+        e.preventDefault();
+        const filterType = chip.dataset.filterType;
+        if (filterType === 'folder') {
+            pickerActiveFolder = '';
+            pickerActiveFolderName = '';
+        } else if (filterType === 'tag') {
+            const tagId = chip.dataset.tagId;
+            pickerActiveTags = pickerActiveTags.filter(t => t !== tagId);
+            delete pickerActiveTagNames[tagId];
+        } else if (filterType === 'search') {
+            searchInput.value = '';
+            pickerSearchTerm = '';
+        }
         loadMediaItems(searchInput.value);
     });
 
@@ -733,10 +759,13 @@ function getImagePickerModal() {
         if (!chip) return;
         e.preventDefault();
         const tagId = chip.dataset.tagId;
+        const tagName = chip.dataset.tagName || chip.textContent.trim().replace(/\d+$/, '').trim();
         if (pickerActiveTags.includes(tagId)) {
             pickerActiveTags = pickerActiveTags.filter(t => t !== tagId);
+            delete pickerActiveTagNames[tagId];
         } else {
             pickerActiveTags.push(tagId);
+            pickerActiveTagNames[tagId] = tagName;
         }
         loadMediaItems(searchInput.value);
     });
@@ -771,7 +800,10 @@ function getImagePickerModal() {
 function openImagePickerModal(picker) {
     currentImagePicker = picker;
     pickerActiveFolder = '';
+    pickerActiveFolderName = '';
     pickerActiveTags = [];
+    pickerActiveTagNames = {};
+    pickerSearchTerm = '';
     const modal = getImagePickerModal();
     modal.classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -803,9 +835,12 @@ function closeImagePickerModal() {
 }
 
 function buildFolderTree(folders) {
+    // Filter out folders with no images (count === 0), except keep active folder
+    const foldersWithImages = folders.filter(f => f.count > 0 || f.id === pickerActiveFolder);
+
     // Build parent-child map
     const byParent = {};
-    folders.forEach(f => {
+    foldersWithImages.forEach(f => {
         const pid = f.parent_id || '';
         if (!byParent[pid]) byParent[pid] = [];
         byParent[pid].push(f);
@@ -837,7 +872,11 @@ function loadMediaItems(search) {
     const selectBtn = modal.querySelector('[data-action="select"]');
     const foldersContainer = modal.querySelector('.image-picker-modal-folders');
     const tagsContainer = modal.querySelector('.image-picker-modal-tags');
+    const filtersContainer = modal.querySelector('.image-picker-modal-filters');
     const infoContainer = modal.querySelector('.image-picker-modal-info');
+
+    // Store search term
+    pickerSearchTerm = search || '';
 
     grid.innerHTML = '<div class="image-picker-modal-loading">Loading...</div>';
     selectBtn.disabled = true;
@@ -854,6 +893,32 @@ function loadMediaItems(search) {
     fetch(url)
         .then(res => res.json())
         .then(data => {
+            // Render filter chips
+            let filterChips = '';
+            if (pickerActiveFolder && pickerActiveFolderName) {
+                filterChips += `<button type="button" class="image-picker-modal-filter-chip" data-filter-type="folder">
+                    <span class="image-picker-modal-filter-chip-label">Folder:</span>
+                    ${pickerActiveFolderName}
+                    <span class="image-picker-modal-filter-chip-remove">&times;</span>
+                </button>`;
+            }
+            pickerActiveTags.forEach(tagId => {
+                const tagName = pickerActiveTagNames[tagId] || tagId;
+                filterChips += `<button type="button" class="image-picker-modal-filter-chip" data-filter-type="tag" data-tag-id="${tagId}">
+                    <span class="image-picker-modal-filter-chip-label">Tag:</span>
+                    ${tagName}
+                    <span class="image-picker-modal-filter-chip-remove">&times;</span>
+                </button>`;
+            });
+            if (pickerSearchTerm) {
+                filterChips += `<button type="button" class="image-picker-modal-filter-chip" data-filter-type="search">
+                    <span class="image-picker-modal-filter-chip-label">Search:</span>
+                    ${pickerSearchTerm}
+                    <span class="image-picker-modal-filter-chip-remove">&times;</span>
+                </button>`;
+            }
+            filtersContainer.innerHTML = filterChips;
+
             // Render folders sidebar
             if (data.folders && data.folders.length > 0) {
                 foldersContainer.innerHTML = buildFolderTree(data.folders);
@@ -861,11 +926,17 @@ function loadMediaItems(search) {
                 foldersContainer.innerHTML = '<li class="image-picker-modal-empty-hint">No folders</li>';
             }
 
-            // Render tags sidebar
+            // Render tags sidebar (and build name map)
             if (data.tags && data.tags.length > 0) {
+                // Update tag names map for any active tags
+                data.tags.forEach(tag => {
+                    if (pickerActiveTags.includes(tag.id)) {
+                        pickerActiveTagNames[tag.id] = tag.name;
+                    }
+                });
                 tagsContainer.innerHTML = data.tags.map(tag => {
                     const isActive = pickerActiveTags.includes(tag.id);
-                    return `<button type="button" class="image-picker-modal-tag${isActive ? ' active' : ''}" data-tag-id="${tag.id}">
+                    return `<button type="button" class="image-picker-modal-tag${isActive ? ' active' : ''}" data-tag-id="${tag.id}" data-tag-name="${tag.name}">
                         ${tag.name}
                         <span class="image-picker-modal-tag-count">${tag.count}</span>
                     </button>`;
