@@ -47,9 +47,7 @@ pub fn Edit(props: struct {
                 name="content"
                 class="form-control"
                 rows="12"
-            >
-                {props.post.content}
-            </textarea>
+            >{props.post.content}</textarea>
         </div>
     </form>
 }

@@ -514,11 +514,12 @@ pub fn saveEntry(
     const data_json = try CT.stringifyData(allocator, data);
     defer allocator.free(data_json);
 
-    // Get previous current_version_id (parent for new version)
+    // Get previous version id and data (for change detection)
     var prev_version_id: ?[]const u8 = null;
+    var prev_data: ?[]const u8 = null;
     if (is_update) {
         var pv_stmt = try db.prepare(
-            "SELECT current_version_id FROM entries WHERE id = ?1",
+            "SELECT current_version_id, data FROM entries WHERE id = ?1",
         );
         defer pv_stmt.deinit();
         try pv_stmt.bindText(1, entry_id);
@@ -526,15 +527,22 @@ pub fn saveEntry(
             if (pv_stmt.columnText(0)) |v| {
                 prev_version_id = try allocator.dupe(u8, v);
             }
+            if (pv_stmt.columnText(1)) |d| {
+                prev_data = try allocator.dupe(u8, d);
+            }
         }
     }
     defer if (prev_version_id) |v| allocator.free(v);
+    defer if (prev_data) |d| allocator.free(d);
+
+    // Skip version creation if data hasn't changed
+    const data_changed = if (prev_data) |pd| !std.mem.eql(u8, pd, data_json) else true;
 
     const version_id = generateVersionId();
 
     if (is_update) {
-        // Create version first (entry already exists, FK is satisfied)
-        {
+        if (data_changed) {
+            // Create version (entry already exists, FK is satisfied)
             var v_stmt = try db.prepare(
                 \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
                 \\VALUES (?1, ?2, ?3, ?4, ?5, 'updated')
@@ -551,26 +559,35 @@ pub fn saveEntry(
         }
 
         // Update entry
-        var stmt = try db.prepare(
-            \\UPDATE entries SET
-            \\    slug = ?2,
-            \\    title = ?3,
-            \\    data = ?4,
-            \\    status = ?5,
-            \\    current_version_id = ?6,
-            \\    updated_at = unixepoch()
-            \\WHERE id = ?1
-        );
-        defer stmt.deinit();
+        {
+            var stmt = try db.prepare(
+                \\UPDATE entries SET slug = ?2, title = ?3, data = ?4,
+                \\    status = ?5, updated_at = unixepoch()
+                \\WHERE id = ?1
+            );
+            defer stmt.deinit();
 
-        try stmt.bindText(1, entry_id);
-        if (slug) |s| try stmt.bindText(2, s) else try stmt.bindNull(2);
-        try stmt.bindText(3, title);
-        try stmt.bindText(4, data_json);
-        try stmt.bindText(5, status);
-        try stmt.bindText(6, &version_id);
+            try stmt.bindText(1, entry_id);
+            if (slug) |s| try stmt.bindText(2, s) else try stmt.bindNull(2);
+            try stmt.bindText(3, title);
+            try stmt.bindText(4, data_json);
+            try stmt.bindText(5, status);
 
-        _ = try stmt.step();
+            _ = try stmt.step();
+        }
+
+        // Point to new version if data changed
+        if (data_changed) {
+            var cv_stmt = try db.prepare(
+                "UPDATE entries SET current_version_id = ?1 WHERE id = ?2",
+            );
+            defer cv_stmt.deinit();
+
+            try cv_stmt.bindText(1, &version_id);
+            try cv_stmt.bindText(2, entry_id);
+
+            _ = try cv_stmt.step();
+        }
     } else {
         // Create entry first (so FK on entry_versions.entry_id is satisfied)
         {
