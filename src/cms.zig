@@ -374,7 +374,7 @@ fn parseEntryRow(comptime CT: type, allocator: Allocator, stmt: *Statement) !Ent
     const id = try allocator.dupe(u8, stmt.columnText(0) orelse "");
     const slug = if (stmt.columnText(1)) |s| try allocator.dupe(u8, s) else null;
     const title = try allocator.dupe(u8, stmt.columnText(2) orelse "");
-    const data_json = stmt.columnText(3) orelse "{}";
+    const data_json = try allocator.dupe(u8, stmt.columnText(3) orelse "{}");
     const status = try allocator.dupe(u8, stmt.columnText(4) orelse "draft");
     const published_at: ?i64 = if (stmt.columnIsNull(5)) null else stmt.columnInt(5);
     const created_at = stmt.columnInt(6);

@@ -746,7 +746,7 @@ fn parseMediaRow(allocator: Allocator, stmt: *Statement) !MediaRecord {
     const storage_key = try allocator.dupe(u8, stmt.columnText(6) orelse "");
     const visibility = try allocator.dupe(u8, stmt.columnText(7) orelse "public");
     const hash: ?[]const u8 = if (stmt.columnText(8)) |h| try allocator.dupe(u8, h) else null;
-    const data_json = stmt.columnText(9) orelse "{}";
+    const data_json = try allocator.dupe(u8, stmt.columnText(9) orelse "{}");
     const created_at = stmt.columnInt(10);
     const updated_at = stmt.columnInt(11);
 
