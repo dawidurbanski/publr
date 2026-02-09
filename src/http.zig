@@ -25,11 +25,8 @@ const plugin_settings = @import("plugin_settings");
 const plugin_components = @import("plugin_components");
 const plugin_design_system = @import("plugin_design_system");
 
-// Generated ZSX templates
-const zsx_base = @import("zsx_base");
-const zsx_index = @import("zsx_index");
-const zsx_admin_setup = @import("zsx_admin_setup");
-const zsx_admin_login = @import("zsx_admin_login");
+// Generated ZSX views
+const views = @import("views");
 
 // Embedded static assets with compile-time metadata
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
@@ -45,6 +42,13 @@ const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_d
 const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
 const InteractIndex = static.Asset("index.js", @embedFile("static_interact_index_js"));
 const MediaSelectionJs = static.Asset("media-selection.js", @embedFile("static_media_selection_js"));
+
+// Design system assets (from publr_ui amalgamation)
+const publr_ui = @import("publr_ui");
+const PublrCss = static.Asset("publr.css", publr_ui.css);
+const PublrCoreJs = static.Asset("publr-core.js", publr_ui.core_js);
+const PublrDialogJs = static.Asset("publr-dialog.js", publr_ui.dialog_js);
+const PublrDropdownJs = static.Asset("publr-dropdown.js", publr_ui.dropdown_js);
 
 // Global shutdown flag for signal handler
 var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -268,6 +272,7 @@ fn waitForConnections(timeout_ms: u64) void {
 fn handleConnectionThread(stream: std.net.Stream) void {
     _ = active_connections.fetchAdd(1, .acq_rel);
     defer {
+        tpl.resetArena();
         _ = active_connections.fetchSub(1, .acq_rel);
         stream.close();
     }
@@ -414,7 +419,7 @@ fn handleConnection(stream: std.net.Stream) !void {
 }
 
 fn handleIndex(ctx: *Context) !void {
-    const content = tpl.renderStatic(zsx_index.Index);
+    const content = tpl.renderStatic(views.index.Index);
     if (ctx.isPartial()) {
         ctx.html(content);
     } else {
@@ -423,7 +428,7 @@ fn handleIndex(ctx: *Context) !void {
 }
 
 fn wrapWithBase(content: []const u8, title: []const u8, css: []const []const u8, js: []const []const u8) []const u8 {
-    return tpl.render(zsx_base.Base, .{.{
+    return tpl.render(views.base.Base, .{.{
         .title = title,
         .content = content,
         .css = css,
@@ -474,6 +479,14 @@ fn handleStatic(ctx: *Context) !void {
         InteractIndex.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "media-selection.js")) {
         MediaSelectionJs.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "publr.css")) {
+        PublrCss.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "publr-core.js")) {
+        PublrCoreJs.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "publr-dialog.js")) {
+        PublrDialogJs.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "publr-dropdown.js")) {
+        PublrDropdownJs.serve(ctx, if_none_match);
     } else {
         ctx.response.setStatus("404 Not Found");
         ctx.response.setContentType("text/plain");
@@ -507,9 +520,21 @@ fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
     else if (std.mem.eql(u8, file, "media-selection.js"))
         "static/media-selection.js"
     else {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setContentType("text/plain");
-        ctx.response.setBody("Not Found");
+        // Design system assets are embedded (no disk files) — serve from amalgamation
+        const if_none_match = ctx.getRequestHeader("If-None-Match");
+        if (std.mem.eql(u8, file, "publr.css")) {
+            PublrCss.serve(ctx, if_none_match);
+        } else if (std.mem.eql(u8, file, "publr-core.js")) {
+            PublrCoreJs.serve(ctx, if_none_match);
+        } else if (std.mem.eql(u8, file, "publr-dialog.js")) {
+            PublrDialogJs.serve(ctx, if_none_match);
+        } else if (std.mem.eql(u8, file, "publr-dropdown.js")) {
+            PublrDropdownJs.serve(ctx, if_none_match);
+        } else {
+            ctx.response.setStatus("404 Not Found");
+            ctx.response.setContentType("text/plain");
+            ctx.response.setBody("Not Found");
+        }
         return;
     };
 
@@ -568,7 +593,7 @@ fn handleSetupGet(ctx: *Context) !void {
     }
 
     // Render setup form
-    const content = tpl.render(zsx_admin_setup.Setup, .{.{
+    const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = "",
         .csrf_token = csrf_token,
     }});
@@ -652,7 +677,7 @@ fn handleSetupPost(ctx: *Context) !void {
 
 fn renderSetupError(ctx: *Context, message: []const u8) void {
     const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.render(zsx_admin_setup.Setup, .{.{
+    const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
     }});
@@ -722,7 +747,7 @@ fn handleLoginGet(ctx: *Context) !void {
     }
 
     // Render login form
-    const content = tpl.render(zsx_admin_login.Login, .{.{
+    const content = tpl.render(views.admin.login.Login, .{.{
         .error_message = "",
         .csrf_token = csrf_token,
     }});
@@ -796,7 +821,7 @@ fn handleLogout(ctx: *Context) !void {
 
 fn renderLoginError(ctx: *Context, message: []const u8) void {
     const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.render(zsx_admin_login.Login, .{.{
+    const content = tpl.render(views.admin.login.Login, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
     }});
