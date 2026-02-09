@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS entries (
     data TEXT NOT NULL,
     status TEXT DEFAULT 'draft',
     version INTEGER DEFAULT 1,
+    current_version_id TEXT REFERENCES entry_versions(id),
     published_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
@@ -138,3 +139,25 @@ CREATE INDEX IF NOT EXISTS idx_media_terms_term ON media_terms(term_id);
 -- Media taxonomies
 INSERT OR IGNORE INTO taxonomies (id, slug, name, hierarchical) VALUES ('tax_media_folders', 'media-folders', 'Media Folders', 1);
 INSERT OR IGNORE INTO taxonomies (id, slug, name, hierarchical) VALUES ('tax_media_tags', 'media-tags', 'Media Tags', 0);
+
+-- Content versioning
+CREATE TABLE IF NOT EXISTS entry_versions (
+    id TEXT PRIMARY KEY,
+    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+    parent_id TEXT REFERENCES entry_versions(id),
+    data TEXT NOT NULL,
+    author_id TEXT REFERENCES users(id),
+    created_at INTEGER DEFAULT (unixepoch()),
+    version_type TEXT NOT NULL DEFAULT 'edit'
+);
+
+CREATE INDEX IF NOT EXISTS idx_versions_entry ON entry_versions(entry_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_versions_parent ON entry_versions(parent_id);
+
+-- Global settings (key-value store)
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+);

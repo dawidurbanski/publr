@@ -36,6 +36,7 @@ pub const content_schema_sql =
     \\    data TEXT NOT NULL,
     \\    status TEXT DEFAULT 'draft',
     \\    version INTEGER DEFAULT 1,
+    \\    current_version_id TEXT REFERENCES entry_versions(id),
     \\    published_at INTEGER,
     \\    created_at INTEGER DEFAULT (unixepoch()),
     \\    updated_at INTEGER DEFAULT (unixepoch()),
@@ -93,6 +94,28 @@ pub const content_schema_sql =
     \\);
     \\
     \\CREATE INDEX IF NOT EXISTS idx_entry_terms_term ON entry_terms(term_id);
+    \\
+    \\-- Content versioning
+    \\CREATE TABLE IF NOT EXISTS entry_versions (
+    \\    id TEXT PRIMARY KEY,
+    \\    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+    \\    parent_id TEXT REFERENCES entry_versions(id),
+    \\    data TEXT NOT NULL,
+    \\    author_id TEXT REFERENCES users(id),
+    \\    created_at INTEGER DEFAULT (unixepoch()),
+    \\    version_type TEXT NOT NULL DEFAULT 'edit'
+    \\);
+    \\
+    \\CREATE INDEX IF NOT EXISTS idx_versions_entry ON entry_versions(entry_id, created_at DESC);
+    \\CREATE INDEX IF NOT EXISTS idx_versions_parent ON entry_versions(parent_id);
+    \\
+    \\-- Global settings (key-value store)
+    \\CREATE TABLE IF NOT EXISTS settings (
+    \\    key TEXT PRIMARY KEY,
+    \\    value TEXT NOT NULL,
+    \\    created_at INTEGER DEFAULT (unixepoch()),
+    \\    updated_at INTEGER DEFAULT (unixepoch())
+    \\);
 ;
 
 /// Comptime schema hash - computed from all content type definitions
@@ -145,6 +168,9 @@ pub fn syncIfNeeded(db: *Db) !void {
     // Ensure tables exist first
     try ensureSchema(db);
 
+    // Run version migration (idempotent — checks if needed)
+    try migrateVersions(db);
+
     // Get stored hash
     const stored_hash = try getStoredHash(db);
 
@@ -186,6 +212,83 @@ fn setStoredHash(db: *Db, hash: []const u8) !void {
 
     try stmt.bindText(1, hash);
     _ = try stmt.step();
+}
+
+/// Generate a version ID (v_ prefix + 16 random alphanumeric chars)
+fn generateVersionId() [18]u8 {
+    var id_buf: [18]u8 = undefined;
+    id_buf[0] = 'v';
+    id_buf[1] = '_';
+
+    var rand_buf: [16]u8 = undefined;
+    std.crypto.random.bytes(&rand_buf);
+
+    const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
+    for (rand_buf, 0..) |byte, i| {
+        id_buf[2 + i] = charset[byte % charset.len];
+    }
+
+    return id_buf;
+}
+
+/// Migrate existing entries to have initial versions.
+/// Idempotent: only creates versions for entries that have no current_version_id.
+/// Also adds current_version_id column to entries if missing (upgrade path).
+fn migrateVersions(db: *Db) !void {
+    // Add current_version_id column if it doesn't exist (upgrade from pre-versioning schema).
+    // SQLite's ALTER TABLE ADD COLUMN is idempotent-safe: we catch the error if column exists.
+    db.exec("ALTER TABLE entries ADD COLUMN current_version_id TEXT REFERENCES entry_versions(id)") catch {};
+
+    // Check if any entries need migration (have no current_version_id)
+    var count_stmt = try db.prepare(
+        "SELECT COUNT(*) FROM entries WHERE current_version_id IS NULL",
+    );
+    defer count_stmt.deinit();
+
+    _ = try count_stmt.step();
+    const count = count_stmt.columnInt(0);
+    if (count == 0) return;
+
+    // Fetch entries needing migration
+    var entry_stmt = try db.prepare(
+        "SELECT id, data, created_at FROM entries WHERE current_version_id IS NULL",
+    );
+    defer entry_stmt.deinit();
+
+    // Prepare version insert statement
+    var insert_stmt = try db.prepare(
+        \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, created_at, version_type)
+        \\VALUES (?1, ?2, NULL, ?3, NULL, ?4, 'edit')
+    );
+    defer insert_stmt.deinit();
+
+    // Prepare entry update statement
+    var update_stmt = try db.prepare(
+        "UPDATE entries SET current_version_id = ?1 WHERE id = ?2",
+    );
+    defer update_stmt.deinit();
+
+    while (try entry_stmt.step()) {
+        const entry_id = entry_stmt.columnText(0) orelse continue;
+        const data = entry_stmt.columnText(1) orelse "{}";
+        const created_at = entry_stmt.columnInt(2);
+
+        const version_id = generateVersionId();
+
+        // Insert initial version
+        try insert_stmt.bindText(1, &version_id);
+        try insert_stmt.bindText(2, entry_id);
+        try insert_stmt.bindText(3, data);
+        try insert_stmt.bindInt(4, created_at);
+        _ = try insert_stmt.step();
+        insert_stmt.reset();
+
+        // Update entry to point to this version
+        try update_stmt.bindText(1, &version_id);
+        try update_stmt.bindText(2, entry_id);
+        _ = try update_stmt.step();
+        update_stmt.reset();
+    }
 }
 
 /// Sync all content types and taxonomies to database
@@ -320,4 +423,161 @@ test "syncIfNeeded skips if hash unchanged" {
     _ = try stmt.step();
     const count = stmt.columnInt(0);
     try std.testing.expect(count >= 3);
+}
+
+test "ensureSchema creates entry_versions table" {
+    var db = try Db.init(std.testing.allocator, ":memory:");
+    defer db.deinit();
+
+    try ensureSchema(&db);
+
+    var stmt = try db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='entry_versions'");
+    defer stmt.deinit();
+    try std.testing.expect(try stmt.step());
+}
+
+test "ensureSchema creates settings table" {
+    var db = try Db.init(std.testing.allocator, ":memory:");
+    defer db.deinit();
+
+    try ensureSchema(&db);
+
+    var stmt = try db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'");
+    defer stmt.deinit();
+    try std.testing.expect(try stmt.step());
+}
+
+test "entries table has current_version_id column" {
+    var db = try Db.init(std.testing.allocator, ":memory:");
+    defer db.deinit();
+
+    try ensureSchema(&db);
+
+    // Insert an entry with current_version_id to verify column exists
+    try db.exec(
+        \\INSERT INTO content_types (id, slug, name, fields, source)
+        \\VALUES ('test_ct', 'test_ct', 'Test', '[]', 'plugin')
+    );
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, current_version_id)
+        \\VALUES ('e_test1', 'test_ct', '{}', NULL)
+    );
+
+    var stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = 'e_test1'");
+    defer stmt.deinit();
+    try std.testing.expect(try stmt.step());
+    // Should be NULL
+    try std.testing.expect(stmt.columnIsNull(0));
+}
+
+test "migrateVersions creates versions for existing entries" {
+    var db = try Db.init(std.testing.allocator, ":memory:");
+    defer db.deinit();
+
+    try ensureSchema(&db);
+
+    // Insert a content type and entries WITHOUT versions
+    try db.exec(
+        \\INSERT INTO content_types (id, slug, name, fields, source)
+        \\VALUES ('test_ct', 'test_ct', 'Test', '[]', 'plugin')
+    );
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"Hello"}', 'draft')
+    );
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test2', 'test_ct', '{"title":"World"}', 'published')
+    );
+
+    // Run migration
+    try migrateVersions(&db);
+
+    // Check versions were created
+    {
+        var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqual(@as(i64, 2), stmt.columnInt(0));
+    }
+
+    // Check entries now have current_version_id set
+    {
+        var stmt = try db.prepare("SELECT COUNT(*) FROM entries WHERE current_version_id IS NOT NULL");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqual(@as(i64, 2), stmt.columnInt(0));
+    }
+
+    // Check version data matches entry data
+    {
+        var stmt = try db.prepare(
+            \\SELECT e.data, ev.data FROM entries e
+            \\JOIN entry_versions ev ON e.current_version_id = ev.id
+            \\WHERE e.id = 'e_test1'
+        );
+        defer stmt.deinit();
+        _ = try stmt.step();
+        const entry_data = stmt.columnText(0) orelse "";
+        const version_data = stmt.columnText(1) orelse "";
+        try std.testing.expectEqualStrings(entry_data, version_data);
+    }
+
+    // Check version has correct type and null parent/author
+    {
+        var stmt = try db.prepare(
+            "SELECT version_type, parent_id, author_id FROM entry_versions LIMIT 1",
+        );
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("edit", stmt.columnText(0) orelse "");
+        try std.testing.expect(stmt.columnIsNull(1)); // parent_id NULL (first version)
+        try std.testing.expect(stmt.columnIsNull(2)); // author_id NULL (migrated)
+    }
+}
+
+test "migrateVersions is idempotent" {
+    var db = try Db.init(std.testing.allocator, ":memory:");
+    defer db.deinit();
+
+    try ensureSchema(&db);
+
+    try db.exec(
+        \\INSERT INTO content_types (id, slug, name, fields, source)
+        \\VALUES ('test_ct', 'test_ct', 'Test', '[]', 'plugin')
+    );
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"Hello"}', 'draft')
+    );
+
+    // Run migration twice
+    try migrateVersions(&db);
+    try migrateVersions(&db);
+
+    // Should still have exactly 1 version
+    var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions");
+    defer stmt.deinit();
+    _ = try stmt.step();
+    try std.testing.expectEqual(@as(i64, 1), stmt.columnInt(0));
+}
+
+test "generateVersionId produces valid IDs" {
+    const id = generateVersionId();
+    try std.testing.expect(id[0] == 'v');
+    try std.testing.expect(id[1] == '_');
+    try std.testing.expectEqual(@as(usize, 18), id.len);
+
+    // Verify all chars are in valid charset
+    const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
+    for (id[2..]) |ch| {
+        var found = false;
+        for (charset) |valid| {
+            if (ch == valid) {
+                found = true;
+                break;
+            }
+        }
+        try std.testing.expect(found);
+    }
 }
