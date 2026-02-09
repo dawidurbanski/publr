@@ -59,6 +59,7 @@ pub fn EditSidebar(props: struct {
     post: PostData,
     csrf_token: []const u8,
     delete_url: []const u8 = "",
+    history_html: []const u8 = "",
 }) {
     <div class="edit-sidebar-section">
         <div class="edit-sidebar-actions">
@@ -136,6 +137,9 @@ pub fn EditSidebar(props: struct {
             )}
         </div>
     </div>
+    {if (props.history_html.len > 0) (
+        {@raw props.history_html}
+    )}
     {if (props.delete_url.len > 0) (
         <div class="edit-sidebar-section edit-sidebar-danger">
             <form method="POST" action={props.delete_url} onsubmit="return confirm('Delete this post permanently?')">

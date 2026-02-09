@@ -31,11 +31,13 @@ fn setup(app: *admin.PageApp) void {
     app.render(handleList);
     app.get("/new", handleNew);
     app.get("/:id", handleEdit);
+    app.get("/:id/versions/:vid", handleVersionPreview);
     app.post(handleCreate);
     app.postAt("/:id", handleUpdate);
     app.postAt("/:id/delete", handleDelete);
     app.postAt("/:id/publish", handlePublish);
     app.postAt("/:id/unpublish", handleUnpublish);
+    app.postAt("/:id/versions/:vid/restore", handleRestore);
 }
 
 // =============================================================================
@@ -135,6 +137,7 @@ fn handleNew(ctx: *Context) !void {
         .post = post_data,
         .csrf_token = csrf_token,
         .delete_url = "",
+        .history_html = "",
     }});
 
     ctx.html(registry.renderEditPage(page, ctx, "New Post", content, .{
@@ -203,10 +206,14 @@ fn handleEdit(ctx: *Context) !void {
         .action = edit_url,
     }});
 
+    // Build version history HTML for sidebar
+    const history_html = buildVersionHistoryHtml(ctx.allocator, db, post_id) catch "";
+
     const sidebar = tpl.render(views.admin.posts.edit.EditSidebar, .{.{
         .post = post_data,
         .csrf_token = csrf_token,
         .delete_url = delete_url,
+        .history_html = history_html,
     }});
 
     ctx.html(registry.renderEditPage(page, ctx, entry.title, content, .{
@@ -214,6 +221,151 @@ fn handleEdit(ctx: *Context) !void {
         .back_label = "Posts",
         .sidebar = sidebar,
     }));
+}
+
+fn handleVersionPreview(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/posts");
+        return;
+    };
+
+    const post_id = ctx.param("id") orelse {
+        redirect(ctx, "/admin/posts");
+        return;
+    };
+
+    const version_id = ctx.param("vid") orelse {
+        redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts");
+        return;
+    };
+
+    const csrf_token = csrf.ensureToken(ctx);
+
+    // Fetch the version
+    const version = cms.getVersion(ctx.allocator, db, version_id) catch {
+        redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts");
+        return;
+    } orelse {
+        redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts");
+        return;
+    };
+
+    // Fetch current entry data for diff
+    const entry = cms.getEntry(Post, ctx.allocator, db, post_id) catch {
+        redirect(ctx, "/admin/posts");
+        return;
+    } orelse {
+        redirect(ctx, "/admin/posts");
+        return;
+    };
+
+    // Get current version data for diff
+    const current_data = cms.getVersion(ctx.allocator, db, blk: {
+        var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+        defer cur_stmt.deinit();
+        try cur_stmt.bindText(1, post_id);
+        _ = try cur_stmt.step();
+        break :blk try ctx.allocator.dupe(u8, cur_stmt.columnText(0) orelse "");
+    }) catch null;
+
+    const current_json = if (current_data) |cd| cd.data else "{}";
+
+    // Build diff HTML
+    const diff_html = cms.diffVersions(ctx.allocator, version.data, current_json) catch "";
+
+    const time_str = cms.formatRelativeTime(ctx.allocator, version.created_at) catch "Unknown";
+    const author_str = version.author_email orelse "System";
+
+    const restore_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}/versions/{s}/restore", .{ post_id, version_id }) catch "";
+    const back_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
+
+    // Render version preview page
+    var buf: std.ArrayList(u8) = .{};
+    const w = buf.writer(ctx.allocator);
+
+    try w.writeAll(
+        \\<div class="version-preview">
+        \\  <div class="version-preview-header">
+        \\    <div class="version-preview-meta">
+        \\      <span class="version-preview-author">
+    );
+    try w.writeAll(author_str);
+    try w.writeAll(
+        \\</span>
+        \\      <span class="version-preview-time">
+    );
+    try w.writeAll(time_str);
+    try w.writeAll("</span></div>");
+
+    if (!version.is_current) {
+        try w.writeAll("<form method=\"POST\" action=\"");
+        try w.writeAll(restore_url);
+        try w.writeAll("\"><input type=\"hidden\" name=\"_csrf\" value=\"");
+        try w.writeAll(csrf_token);
+        try w.writeAll("\"/><button type=\"submit\" class=\"btn btn-primary btn-sm\">Restore this version</button></form>");
+    } else {
+        try w.writeAll("<span class=\"badge-current\">Current version</span>");
+    }
+
+    try w.writeAll(
+        \\  </div>
+        \\  <h3 class="version-preview-subtitle">Changes from this version to current</h3>
+    );
+    try w.writeAll(diff_html);
+    try w.writeAll("</div>");
+
+    const preview_content = buf.toOwnedSlice(ctx.allocator) catch "";
+
+    // Build sidebar with history (reuse same history list)
+    const history_html = buildVersionHistoryHtml(ctx.allocator, db, post_id) catch "";
+    const sidebar_html = blk: {
+        var sb: std.ArrayList(u8) = .{};
+        const sw = sb.writer(ctx.allocator);
+        try sw.writeAll(
+            \\<div class="edit-sidebar-section">
+            \\  <div class="edit-sidebar-actions">
+            \\    <a href="
+        );
+        try sw.writeAll(back_url);
+        try sw.writeAll(
+            \\" class="btn btn-full">Back to Editor</a>
+            \\  </div>
+            \\</div>
+        );
+        try sw.writeAll(history_html);
+        break :blk sb.toOwnedSlice(ctx.allocator) catch "";
+    };
+
+    ctx.html(registry.renderEditPage(page, ctx, entry.title, preview_content, .{
+        .back_url = back_url,
+        .back_label = "Posts",
+        .sidebar = sidebar_html,
+    }));
+}
+
+fn handleRestore(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/posts");
+        return;
+    };
+
+    const post_id = ctx.param("id") orelse {
+        redirect(ctx, "/admin/posts");
+        return;
+    };
+
+    const version_id = ctx.param("vid") orelse {
+        redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts");
+        return;
+    };
+
+    const author_id = auth_middleware.getUserId(ctx);
+
+    cms.restoreVersion(ctx.allocator, db, post_id, version_id, author_id) catch |err| {
+        std.debug.print("Error restoring version: {}\n", .{err});
+    };
+
+    redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts");
 }
 
 fn handleCreate(ctx: *Context) !void {
@@ -393,4 +545,53 @@ fn redirect(ctx: *Context, location: []const u8) void {
 
 fn formatDate(timestamp: i64, allocator: std.mem.Allocator) ![]const u8 {
     return std.fmt.allocPrint(allocator, "{d}", .{timestamp});
+}
+
+const Db = @import("db").Db;
+
+/// Build version history HTML for the edit sidebar
+fn buildVersionHistoryHtml(allocator: std.mem.Allocator, db: *Db, entry_id: []const u8) ![]const u8 {
+    const versions = try cms.listVersions(allocator, db, entry_id, .{ .limit = 20 });
+
+    if (versions.len == 0) return try allocator.dupe(u8, "");
+
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeAll(
+        \\<div class="edit-sidebar-section">
+        \\  <h3 class="edit-sidebar-title">Version History</h3>
+        \\  <div class="version-list">
+    );
+
+    for (versions) |v| {
+        const time_str = cms.formatRelativeTime(allocator, v.created_at) catch "Unknown";
+        const author_str = v.author_email orelse "System";
+        const version_url = std.fmt.allocPrint(allocator, "/admin/posts/{s}/versions/{s}", .{ entry_id, v.id }) catch "";
+
+        if (v.is_current) {
+            try w.writeAll("<div class=\"version-item version-current\">");
+        } else {
+            try w.writeAll("<a href=\"");
+            try w.writeAll(version_url);
+            try w.writeAll("\" class=\"version-item\">");
+        }
+
+        try w.writeAll("<span class=\"version-author\">");
+        try w.writeAll(author_str);
+        try w.writeAll("</span><span class=\"version-time\">");
+        try w.writeAll(time_str);
+        try w.writeAll("</span>");
+
+        if (v.is_current) {
+            try w.writeAll("<span class=\"version-badge\">current</span></div>");
+        } else {
+            try w.writeAll("</a>");
+        }
+    }
+
+    try w.writeAll("</div></div>");
+
+    return buf.toOwnedSlice(allocator);
 }

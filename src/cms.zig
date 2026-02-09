@@ -757,6 +757,280 @@ pub fn countEntries(comptime CT: type, db: *Db, opts: struct {
 }
 
 // =============================================================================
+// Version History API
+// =============================================================================
+
+/// A version record from entry_versions
+pub const Version = struct {
+    id: []const u8,
+    entry_id: []const u8,
+    parent_id: ?[]const u8,
+    data: []const u8,
+    author_id: ?[]const u8,
+    author_email: ?[]const u8,
+    created_at: i64,
+    version_type: []const u8,
+    is_current: bool,
+};
+
+/// List versions for an entry, newest first. Joins users for author email.
+pub fn listVersions(allocator: Allocator, db: *Db, entry_id: []const u8, opts: struct {
+    limit: u32 = 50,
+}) ![]Version {
+    var stmt = try db.prepare(
+        \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data,
+        \\       ev.author_id, u.email, ev.created_at, ev.version_type,
+        \\       (e.current_version_id = ev.id) AS is_current
+        \\FROM entry_versions ev
+        \\JOIN entries e ON e.id = ev.entry_id
+        \\LEFT JOIN users u ON u.id = ev.author_id
+        \\WHERE ev.entry_id = ?1
+        \\ORDER BY ev.created_at DESC
+        \\LIMIT ?2
+    );
+    defer stmt.deinit();
+
+    try stmt.bindText(1, entry_id);
+    try stmt.bindInt(2, @intCast(opts.limit));
+
+    var items: std.ArrayListUnmanaged(Version) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try stmt.step()) {
+        try items.append(allocator, .{
+            .id = try allocator.dupe(u8, stmt.columnText(0) orelse ""),
+            .entry_id = try allocator.dupe(u8, stmt.columnText(1) orelse ""),
+            .parent_id = if (stmt.columnText(2)) |v| try allocator.dupe(u8, v) else null,
+            .data = try allocator.dupe(u8, stmt.columnText(3) orelse "{}"),
+            .author_id = if (stmt.columnText(4)) |v| try allocator.dupe(u8, v) else null,
+            .author_email = if (stmt.columnText(5)) |v| try allocator.dupe(u8, v) else null,
+            .created_at = stmt.columnInt(6),
+            .version_type = try allocator.dupe(u8, stmt.columnText(7) orelse "edit"),
+            .is_current = stmt.columnInt(8) == 1,
+        });
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Get a single version by ID
+pub fn getVersion(allocator: Allocator, db: *Db, version_id: []const u8) !?Version {
+    var stmt = try db.prepare(
+        \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data,
+        \\       ev.author_id, u.email, ev.created_at, ev.version_type,
+        \\       (e.current_version_id = ev.id) AS is_current
+        \\FROM entry_versions ev
+        \\JOIN entries e ON e.id = ev.entry_id
+        \\LEFT JOIN users u ON u.id = ev.author_id
+        \\WHERE ev.id = ?1
+    );
+    defer stmt.deinit();
+
+    try stmt.bindText(1, version_id);
+
+    if (!try stmt.step()) return null;
+
+    return .{
+        .id = try allocator.dupe(u8, stmt.columnText(0) orelse ""),
+        .entry_id = try allocator.dupe(u8, stmt.columnText(1) orelse ""),
+        .parent_id = if (stmt.columnText(2)) |v| try allocator.dupe(u8, v) else null,
+        .data = try allocator.dupe(u8, stmt.columnText(3) orelse "{}"),
+        .author_id = if (stmt.columnText(4)) |v| try allocator.dupe(u8, v) else null,
+        .author_email = if (stmt.columnText(5)) |v| try allocator.dupe(u8, v) else null,
+        .created_at = stmt.columnInt(6),
+        .version_type = try allocator.dupe(u8, stmt.columnText(7) orelse "edit"),
+        .is_current = stmt.columnInt(8) == 1,
+    };
+}
+
+/// Restore a previous version: creates a new 'edit' version with the old data,
+/// pointing parent_id to the current version. Updates entries.data and current_version_id.
+pub fn restoreVersion(
+    allocator: Allocator,
+    db: *Db,
+    entry_id: []const u8,
+    source_version_id: []const u8,
+    author_id: ?[]const u8,
+) !void {
+    // Get the source version's data
+    const source = try getVersion(allocator, db, source_version_id) orelse return error.VersionNotFound;
+
+    // Get current version id (becomes parent of restored version)
+    var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+    defer cur_stmt.deinit();
+    try cur_stmt.bindText(1, entry_id);
+    if (!try cur_stmt.step()) return error.EntryNotFound;
+    const current_vid = cur_stmt.columnText(0);
+
+    // Create new version with old data
+    const new_vid = generateVersionId();
+
+    {
+        var v_stmt = try db.prepare(
+            \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+            \\VALUES (?1, ?2, ?3, ?4, ?5, 'edit')
+        );
+        defer v_stmt.deinit();
+
+        try v_stmt.bindText(1, &new_vid);
+        try v_stmt.bindText(2, entry_id);
+        if (current_vid) |cv| try v_stmt.bindText(3, cv) else try v_stmt.bindNull(3);
+        try v_stmt.bindText(4, source.data);
+        if (author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+
+        _ = try v_stmt.step();
+    }
+
+    // Update entry to point to new version and sync data
+    {
+        var u_stmt = try db.prepare(
+            \\UPDATE entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
+            \\WHERE id = ?3
+        );
+        defer u_stmt.deinit();
+
+        try u_stmt.bindText(1, &new_vid);
+        try u_stmt.bindText(2, source.data);
+        try u_stmt.bindText(3, entry_id);
+
+        _ = try u_stmt.step();
+    }
+
+    // Enforce retention limit
+    try pruneVersions(db, entry_id);
+}
+
+/// Format a unix timestamp as a relative time string ("2 hours ago", "yesterday", etc.)
+pub fn formatRelativeTime(allocator: Allocator, timestamp: i64) ![]const u8 {
+    const now = std.time.timestamp();
+    const diff = now - timestamp;
+
+    if (diff < 0) return try allocator.dupe(u8, "just now");
+    if (diff < 60) return try allocator.dupe(u8, "just now");
+    if (diff < 3600) {
+        const mins: u64 = @intCast(@divFloor(diff, 60));
+        return if (mins == 1)
+            try allocator.dupe(u8, "1 minute ago")
+        else
+            try std.fmt.allocPrint(allocator, "{d} minutes ago", .{mins});
+    }
+    if (diff < 86400) {
+        const hours: u64 = @intCast(@divFloor(diff, 3600));
+        return if (hours == 1)
+            try allocator.dupe(u8, "1 hour ago")
+        else
+            try std.fmt.allocPrint(allocator, "{d} hours ago", .{hours});
+    }
+    if (diff < 604800) {
+        const days: u64 = @intCast(@divFloor(diff, 86400));
+        return if (days == 1)
+            try allocator.dupe(u8, "yesterday")
+        else
+            try std.fmt.allocPrint(allocator, "{d} days ago", .{days});
+    }
+
+    const weeks: u64 = @intCast(@divFloor(diff, 604800));
+    return if (weeks == 1)
+        try allocator.dupe(u8, "1 week ago")
+    else
+        try std.fmt.allocPrint(allocator, "{d} weeks ago", .{weeks});
+}
+
+/// Compute a field-level diff between two JSON data strings.
+/// Returns HTML showing changes per field.
+pub fn diffVersions(allocator: Allocator, old_data: []const u8, new_data: []const u8) ![]const u8 {
+    // Parse both JSON objects
+    const old_parsed = std.json.parseFromSlice(std.json.Value, allocator, old_data, .{}) catch
+        return try allocator.dupe(u8, "<p class=\"diff-error\">Could not parse old version data</p>");
+    defer old_parsed.deinit();
+
+    const new_parsed = std.json.parseFromSlice(std.json.Value, allocator, new_data, .{}) catch
+        return try allocator.dupe(u8, "<p class=\"diff-error\">Could not parse new version data</p>");
+    defer new_parsed.deinit();
+
+    const old_obj = if (old_parsed.value == .object) old_parsed.value.object else return try allocator.dupe(u8, "");
+    const new_obj = if (new_parsed.value == .object) new_parsed.value.object else return try allocator.dupe(u8, "");
+
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeAll("<div class=\"diff\">");
+
+    // Check fields in new version (changed + added)
+    var new_it = new_obj.iterator();
+    while (new_it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const new_val = jsonValueToString(allocator, entry.value_ptr.*) catch "";
+        const old_val = if (old_obj.get(key)) |ov| jsonValueToString(allocator, ov) catch "" else "";
+
+        if (old_val.len == 0 and new_val.len == 0) continue;
+
+        if (!old_obj.contains(key)) {
+            // Added field
+            try w.writeAll("<div class=\"diff-field diff-added\"><span class=\"diff-key\">");
+            try w.writeAll(key);
+            try w.writeAll("</span><span class=\"diff-badge\">added</span><div class=\"diff-val diff-new\">");
+            try writeEscaped(w, new_val);
+            try w.writeAll("</div></div>");
+        } else if (!std.mem.eql(u8, old_val, new_val)) {
+            // Changed field
+            try w.writeAll("<div class=\"diff-field diff-changed\"><span class=\"diff-key\">");
+            try w.writeAll(key);
+            try w.writeAll("</span><span class=\"diff-badge\">changed</span><div class=\"diff-val diff-old\">");
+            try writeEscaped(w, old_val);
+            try w.writeAll("</div><div class=\"diff-val diff-new\">");
+            try writeEscaped(w, new_val);
+            try w.writeAll("</div></div>");
+        }
+    }
+
+    // Check fields removed (in old but not new)
+    var old_it = old_obj.iterator();
+    while (old_it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        if (!new_obj.contains(key)) {
+            const old_val = jsonValueToString(allocator, entry.value_ptr.*) catch "";
+            try w.writeAll("<div class=\"diff-field diff-removed\"><span class=\"diff-key\">");
+            try w.writeAll(key);
+            try w.writeAll("</span><span class=\"diff-badge\">removed</span><div class=\"diff-val diff-old\">");
+            try writeEscaped(w, old_val);
+            try w.writeAll("</div></div>");
+        }
+    }
+
+    try w.writeAll("</div>");
+
+    return buf.toOwnedSlice(allocator);
+}
+
+/// Convert a JSON value to a display string
+fn jsonValueToString(allocator: Allocator, value: std.json.Value) ![]const u8 {
+    return switch (value) {
+        .string => |s| try allocator.dupe(u8, s),
+        .null => try allocator.dupe(u8, ""),
+        .bool => |b| try allocator.dupe(u8, if (b) "true" else "false"),
+        .integer => |i| try std.fmt.allocPrint(allocator, "{d}", .{i}),
+        .float => |f| try std.fmt.allocPrint(allocator, "{d}", .{f}),
+        .array, .object => try std.fmt.allocPrint(allocator, "[complex value]", .{}),
+        else => try allocator.dupe(u8, ""),
+    };
+}
+
+/// Write HTML-escaped text
+fn writeEscaped(w: anytype, text: []const u8) !void {
+    for (text) |c| {
+        switch (c) {
+            '<' => try w.writeAll("&lt;"),
+            '>' => try w.writeAll("&gt;"),
+            '&' => try w.writeAll("&amp;"),
+            '"' => try w.writeAll("&quot;"),
+            else => try w.writeByte(c),
+        }
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -1071,4 +1345,147 @@ test "pruneVersions keeps most recent versions" {
     defer stmt.deinit();
     _ = try stmt.step();
     try std.testing.expectEqual(@as(i64, 2), stmt.columnInt(0));
+}
+
+test "listVersions returns versions in newest-first order" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
+    );
+
+    const v1 = try insertTestVersion(db, "e_test1", "{\"v\":1}", null);
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    _ = try insertTestVersion(db, "e_test1", "{\"v\":2}", &v1_copy);
+
+    const versions = try listVersions(std.testing.allocator, db, "e_test1", .{});
+    defer std.testing.allocator.free(versions);
+
+    try std.testing.expectEqual(@as(usize, 2), versions.len);
+    // Newest first — v2 should be first (is_current = true)
+    try std.testing.expect(versions[0].is_current);
+}
+
+test "listVersions returns empty for nonexistent entry" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    const versions = try listVersions(std.testing.allocator, db, "e_nonexistent", .{});
+    defer std.testing.allocator.free(versions);
+
+    try std.testing.expectEqual(@as(usize, 0), versions.len);
+}
+
+test "getVersion returns correct version" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
+    );
+
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"hello\"}", null);
+
+    const version = try getVersion(std.testing.allocator, db, &v1);
+    try std.testing.expect(version != null);
+    try std.testing.expectEqualStrings("{\"title\":\"hello\"}", version.?.data);
+    try std.testing.expect(version.?.is_current);
+}
+
+test "getVersion returns null for nonexistent version" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    const version = try getVersion(std.testing.allocator, db, "v_nonexistent12345");
+    try std.testing.expect(version == null);
+}
+
+test "restoreVersion creates new version with old data" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
+    );
+
+    // Create two versions
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"original\"}", null);
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"modified\"}", &v1_copy);
+
+    // Restore v1
+    try restoreVersion(std.testing.allocator, db, "e_test1", &v1, null);
+
+    // Should now have 3 versions
+    {
+        var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions WHERE entry_id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqual(@as(i64, 3), stmt.columnInt(0));
+    }
+
+    // Current version data should be the original
+    {
+        var stmt = try db.prepare(
+            \\SELECT ev.data FROM entries e
+            \\JOIN entry_versions ev ON e.current_version_id = ev.id
+            \\WHERE e.id = 'e_test1'
+        );
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("{\"title\":\"original\"}", stmt.columnText(0) orelse "");
+    }
+
+    // entries.data should also be synced
+    {
+        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("{\"title\":\"original\"}", stmt.columnText(0) orelse "");
+    }
+}
+
+test "diffVersions shows changed fields" {
+    const result = try diffVersions(
+        std.testing.allocator,
+        "{\"title\":\"old title\",\"body\":\"same\"}",
+        "{\"title\":\"new title\",\"body\":\"same\"}",
+    );
+    defer std.testing.allocator.free(result);
+
+    // Should contain "title" as changed
+    try std.testing.expect(std.mem.indexOf(u8, result, "title") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "changed") != null);
+    // Should NOT contain "body" (unchanged)
+    try std.testing.expect(std.mem.indexOf(u8, result, "diff-key\">body") == null);
+}
+
+test "diffVersions shows added fields" {
+    const result = try diffVersions(
+        std.testing.allocator,
+        "{\"title\":\"hello\"}",
+        "{\"title\":\"hello\",\"extra\":\"new\"}",
+    );
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "extra") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "added") != null);
+}
+
+test "diffVersions shows removed fields" {
+    const result = try diffVersions(
+        std.testing.allocator,
+        "{\"title\":\"hello\",\"old_field\":\"gone\"}",
+        "{\"title\":\"hello\"}",
+    );
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "old_field") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "removed") != null);
 }
