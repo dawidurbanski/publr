@@ -4,12 +4,31 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // ZSX amalgamation — single vendor/zsx.zig for all build tools + runtime
+    const zsx = b.createModule(.{
+        .root_source_file = b.path("vendor/zsx.zig"),
+    });
+
+    // Thin entry points for build tools (generated at build time)
+    const zsx_entries = b.addWriteFiles();
+    const transpile_entry = zsx_entries.add("zsx_transpile_main.zig",
+        \\const z = @import("zsx");
+        \\pub fn main() !void { return z.transpile.main(); }
+        \\
+    );
+    const format_entry = zsx_entries.add("zsx_format_main.zig",
+        \\const z = @import("zsx");
+        \\pub fn main() !void { return z.format.main(); }
+        \\
+    );
+
     // Build ZSX transpiler
     const zsx_transpiler = b.addExecutable(.{
         .name = "zsx_transpile",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tools/zsx_transpile.zig"),
+            .root_source_file = transpile_entry,
             .target = b.graph.host,
+            .imports = &.{.{ .name = "zsx", .module = zsx }},
         }),
     });
 
@@ -22,8 +41,9 @@ pub fn build(b: *std.Build) void {
     const zsx_formatter = b.addExecutable(.{
         .name = "zsx_format",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tools/zsx_format.zig"),
+            .root_source_file = format_entry,
             .target = b.graph.host,
+            .imports = &.{.{ .name = "zsx", .module = zsx }},
         }),
     });
 
@@ -131,141 +151,20 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("themes/demo/static/theme.css"),
     });
 
-    // Import ZSX runtime
-    const zsx_runtime = b.createModule(.{
-        .root_source_file = b.path("src/tools/zsx_runtime.zig"),
+    // Design system amalgamation — components, CSS, JS as string constants
+    const publr_ui = b.createModule(.{
+        .root_source_file = b.path("vendor/publr_ui.zig"),
     });
 
-    // Import generated ZSX component views (shared modules)
-    const zsx_components_toggle = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/toggle.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_dialog = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/dialog.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_dropdown = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/dropdown.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_select_menu = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/select_menu.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_popover = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/popover.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_tooltip = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/tooltip.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_tabs = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/tabs.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_switch_input = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/switch_input.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_checkbox_group = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/checkbox_group.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_components_radio_group = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/components/radio_group.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    // ZSX runtime for views (same amalgamation, views only use .runtime)
+    const zsx_views = b.createModule(.{
+        .root_source_file = b.path("vendor/zsx.zig"),
     });
 
-    // Create ZSX view modules
-    const zsx_base = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/base.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_index = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/index.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_layout = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/layout.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_dashboard = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/dashboard.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_posts_list = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/posts/list.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_posts_edit = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/posts/edit.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_users_list = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/users/list.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_users_new = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/users/new.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_users_edit = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/users/edit.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_users_profile = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/users/profile.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_components = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/components.zig"),
-        .imports = &.{
-            .{ .name = "zsx_runtime", .module = zsx_runtime },
-            .{ .name = "zsx_components_toggle", .module = zsx_components_toggle },
-            .{ .name = "zsx_components_dialog", .module = zsx_components_dialog },
-            .{ .name = "zsx_components_dropdown", .module = zsx_components_dropdown },
-            .{ .name = "zsx_components_select_menu", .module = zsx_components_select_menu },
-            .{ .name = "zsx_components_popover", .module = zsx_components_popover },
-            .{ .name = "zsx_components_tooltip", .module = zsx_components_tooltip },
-            .{ .name = "zsx_components_tabs", .module = zsx_components_tabs },
-            .{ .name = "zsx_components_switch_input", .module = zsx_components_switch_input },
-            .{ .name = "zsx_components_checkbox_group", .module = zsx_components_checkbox_group },
-            .{ .name = "zsx_components_radio_group", .module = zsx_components_radio_group },
-        },
-    });
-    const zsx_admin_setup = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/setup.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_login = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/login.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_design_system = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/design_system.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_media_list = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/media/list.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_admin_media_edit = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/admin/media/edit.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_error_404 = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/error/error_404.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_error_500 = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/error/error_500.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
-    });
-    const zsx_error_500_dev = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/error/error_500_dev.zig"),
-        .imports = &.{.{ .name = "zsx_runtime", .module = zsx_runtime }},
+    // Single views module — generated views.zig provides namespace hierarchy
+    const views = b.createModule(.{
+        .root_source_file = b.path("src/gen/views/views.zig"),
+        .imports = &.{.{ .name = "zsx", .module = zsx_views }},
     });
 
     // =========================================================================
@@ -485,8 +384,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/gravatar.zig"),
     });
 
-    // Add icons to layout module (needs icons for search/logout icons)
-    zsx_admin_layout.addImport("icons", icons_module);
+    // Add icons to views module (layout.zsx needs icons for search/logout icons)
+    views.addImport("icons", icons_module);
 
     // =========================================================================
     // Plugin Modules
@@ -502,8 +401,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "csrf", .module = csrf_module },
             .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "media", .module = media_module },
-            .{ .name = "zsx_admin_dashboard", .module = zsx_admin_dashboard },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "views", .module = views },
         },
     });
     const plugin_posts = b.createModule(.{
@@ -519,9 +417,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "cms", .module = cms_module },
             .{ .name = "schemas", .module = schemas_module },
             .{ .name = "schema_sync", .module = schema_sync_module },
-            .{ .name = "zsx_admin_posts_list", .module = zsx_admin_posts_list },
-            .{ .name = "zsx_admin_posts_edit", .module = zsx_admin_posts_edit },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "views", .module = views },
         },
     });
     const plugin_users = b.createModule(.{
@@ -534,11 +430,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "auth", .module = auth_module },
             .{ .name = "csrf", .module = csrf_module },
             .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "zsx_admin_users_list", .module = zsx_admin_users_list },
-            .{ .name = "zsx_admin_users_new", .module = zsx_admin_users_new },
-            .{ .name = "zsx_admin_users_edit", .module = zsx_admin_users_edit },
-            .{ .name = "zsx_admin_users_profile", .module = zsx_admin_users_profile },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "views", .module = views },
         },
     });
     const plugin_settings = b.createModule(.{
@@ -551,12 +443,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "csrf", .module = csrf_module },
             .{ .name = "auth", .module = auth_module },
             .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
-            .{ .name = "zsx_admin_users_list", .module = zsx_admin_users_list },
-            .{ .name = "zsx_admin_users_new", .module = zsx_admin_users_new },
-            .{ .name = "zsx_admin_users_edit", .module = zsx_admin_users_edit },
-            .{ .name = "zsx_admin_components", .module = zsx_admin_components },
-            .{ .name = "zsx_admin_design_system", .module = zsx_admin_design_system },
+            .{ .name = "views", .module = views },
         },
     });
     const plugin_components = b.createModule(.{
@@ -567,8 +454,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "zsx_admin_components", .module = zsx_admin_components },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "views", .module = views },
         },
     });
     const plugin_design_system = b.createModule(.{
@@ -579,8 +465,17 @@ pub fn build(b: *std.Build) void {
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "zsx_admin_design_system", .module = zsx_admin_design_system },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "views", .module = views },
+        },
+    });
+    const plugin_content_types = b.createModule(.{
+        .root_source_file = b.path("src/plugins/content_types.zig"),
+        .imports = &.{
+            .{ .name = "admin_api", .module = admin_api_module },
+            .{ .name = "icons", .module = icons_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "tpl", .module = tpl_module },
+            .{ .name = "views", .module = views },
         },
     });
     const plugin_media = b.createModule(.{
@@ -598,9 +493,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "schema_media", .module = schema_media_module },
             .{ .name = "media_handler", .module = media_handler_module },
             .{ .name = "db", .module = db_module },
-            .{ .name = "zsx_admin_media_list", .module = zsx_admin_media_list },
-            .{ .name = "zsx_admin_media_edit", .module = zsx_admin_media_edit },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "views", .module = views },
         },
     });
 
@@ -617,7 +510,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "csrf", .module = csrf_module },
             .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "gravatar", .module = gravatar_module },
-            .{ .name = "zsx_admin_layout", .module = zsx_admin_layout },
+            .{ .name = "views", .module = views },
             .{ .name = "plugin_dashboard", .module = plugin_dashboard },
             .{ .name = "plugin_posts", .module = plugin_posts },
             .{ .name = "plugin_media", .module = plugin_media },
@@ -625,6 +518,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "plugin_settings", .module = plugin_settings },
             .{ .name = "plugin_components", .module = plugin_components },
             .{ .name = "plugin_design_system", .module = plugin_design_system },
+            .{ .name = "plugin_content_types", .module = plugin_content_types },
         },
     });
 
@@ -636,29 +530,13 @@ pub fn build(b: *std.Build) void {
     plugin_settings.addImport("registry", registry_module);
     plugin_components.addImport("registry", registry_module);
     plugin_design_system.addImport("registry", registry_module);
+    plugin_content_types.addImport("registry", registry_module);
 
-    // Add imports to main executable
-    exe.root_module.addImport("zsx_base", zsx_base);
-    exe.root_module.addImport("zsx_index", zsx_index);
-    exe.root_module.addImport("zsx_admin_layout", zsx_admin_layout);
-    exe.root_module.addImport("zsx_admin_dashboard", zsx_admin_dashboard);
-    exe.root_module.addImport("zsx_admin_posts_list", zsx_admin_posts_list);
-    exe.root_module.addImport("zsx_admin_posts_edit", zsx_admin_posts_edit);
-    exe.root_module.addImport("zsx_admin_users_list", zsx_admin_users_list);
-    exe.root_module.addImport("zsx_admin_users_new", zsx_admin_users_new);
-    exe.root_module.addImport("zsx_admin_users_edit", zsx_admin_users_edit);
-    exe.root_module.addImport("zsx_admin_users_profile", zsx_admin_users_profile);
-    exe.root_module.addImport("zsx_admin_components", zsx_admin_components);
-    exe.root_module.addImport("zsx_admin_setup", zsx_admin_setup);
-    exe.root_module.addImport("zsx_admin_login", zsx_admin_login);
-    exe.root_module.addImport("zsx_admin_design_system", zsx_admin_design_system);
-    exe.root_module.addImport("zsx_admin_media_list", zsx_admin_media_list);
-    exe.root_module.addImport("zsx_admin_media_edit", zsx_admin_media_edit);
-    exe.root_module.addImport("zsx_error_404", zsx_error_404);
-    exe.root_module.addImport("zsx_error_500", zsx_error_500);
-    exe.root_module.addImport("zsx_error_500_dev", zsx_error_500_dev);
+    // Add views namespace and core imports to main executable
+    exe.root_module.addImport("views", views);
     exe.root_module.addImport("admin_api", admin_api_module);
     exe.root_module.addImport("icons", icons_module);
+    exe.root_module.addImport("publr_ui", publr_ui);
 
     // Add core modules to main exe
     exe.root_module.addImport("middleware", middleware_module);
@@ -692,6 +570,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("plugin_settings", plugin_settings);
     exe.root_module.addImport("plugin_components", plugin_components);
     exe.root_module.addImport("plugin_design_system", plugin_design_system);
+    exe.root_module.addImport("plugin_content_types", plugin_content_types);
 
     b.installArtifact(exe);
 
@@ -746,25 +625,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // Add imports to test executable
-    exe_tests.root_module.addImport("zsx_base", zsx_base);
-    exe_tests.root_module.addImport("zsx_index", zsx_index);
-    exe_tests.root_module.addImport("zsx_admin_layout", zsx_admin_layout);
-    exe_tests.root_module.addImport("zsx_admin_dashboard", zsx_admin_dashboard);
-    exe_tests.root_module.addImport("zsx_admin_posts_list", zsx_admin_posts_list);
-    exe_tests.root_module.addImport("zsx_admin_posts_edit", zsx_admin_posts_edit);
-    exe_tests.root_module.addImport("zsx_admin_users_list", zsx_admin_users_list);
-    exe_tests.root_module.addImport("zsx_admin_users_new", zsx_admin_users_new);
-    exe_tests.root_module.addImport("zsx_admin_users_edit", zsx_admin_users_edit);
-    exe_tests.root_module.addImport("zsx_admin_users_profile", zsx_admin_users_profile);
-    exe_tests.root_module.addImport("zsx_admin_components", zsx_admin_components);
-    exe_tests.root_module.addImport("zsx_admin_setup", zsx_admin_setup);
-    exe_tests.root_module.addImport("zsx_admin_login", zsx_admin_login);
-    exe_tests.root_module.addImport("zsx_admin_design_system", zsx_admin_design_system);
-    exe_tests.root_module.addImport("zsx_admin_media_list", zsx_admin_media_list);
-    exe_tests.root_module.addImport("zsx_admin_media_edit", zsx_admin_media_edit);
-    exe_tests.root_module.addImport("zsx_error_404", zsx_error_404);
-    exe_tests.root_module.addImport("zsx_error_500", zsx_error_500);
-    exe_tests.root_module.addImport("zsx_error_500_dev", zsx_error_500_dev);
+    exe_tests.root_module.addImport("views", views);
     exe_tests.root_module.addImport("registry", registry_module);
     exe_tests.root_module.addImport("admin_api", admin_api_module);
     exe_tests.root_module.addImport("icons", icons_module);
@@ -838,23 +699,8 @@ pub fn build(b: *std.Build) void {
         browser_wasm.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
     }
 
-    // Add ZSX runtime and views (same as native)
-    browser_wasm.root_module.addImport("zsx_base", zsx_base);
-    browser_wasm.root_module.addImport("zsx_admin_layout", zsx_admin_layout);
-    browser_wasm.root_module.addImport("zsx_admin_dashboard", zsx_admin_dashboard);
-    browser_wasm.root_module.addImport("zsx_admin_setup", zsx_admin_setup);
-    browser_wasm.root_module.addImport("zsx_admin_login", zsx_admin_login);
-    browser_wasm.root_module.addImport("zsx_admin_users_list", zsx_admin_users_list);
-    browser_wasm.root_module.addImport("zsx_admin_users_new", zsx_admin_users_new);
-    browser_wasm.root_module.addImport("zsx_admin_users_edit", zsx_admin_users_edit);
-    browser_wasm.root_module.addImport("zsx_admin_posts_list", zsx_admin_posts_list);
-    browser_wasm.root_module.addImport("zsx_admin_posts_edit", zsx_admin_posts_edit);
-    browser_wasm.root_module.addImport("zsx_admin_users_profile", zsx_admin_users_profile);
-    browser_wasm.root_module.addImport("zsx_admin_design_system", zsx_admin_design_system);
-    browser_wasm.root_module.addImport("zsx_admin_components", zsx_admin_components);
-    browser_wasm.root_module.addImport("zsx_admin_media_list", zsx_admin_media_list);
-    browser_wasm.root_module.addImport("zsx_admin_media_edit", zsx_admin_media_edit);
-    browser_wasm.root_module.addImport("zsx_error_404", zsx_error_404);
+    // Add views namespace (same as native)
+    browser_wasm.root_module.addImport("views", views);
 
     // WASM storage module (SQLite blob backend)
     const wasm_storage_module = b.createModule(.{

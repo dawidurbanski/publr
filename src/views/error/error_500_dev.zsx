@@ -22,7 +22,7 @@ pub fn Error500Dev(props: struct {
                 error.{props.error_name}
             </pre>
         </div>
-        {!props.trace_section}
+        {@raw props.trace_section}
         <div style="margin-top: 30px; text-align: center;">
             <a href="/" style="color: #3498db; text-decoration: none;">&#x2190; Back to Home</a>
         </div>

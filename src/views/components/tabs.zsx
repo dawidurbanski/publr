@@ -24,7 +24,7 @@ pub fn Tabs(props: struct { tabs: anytype, }) {
                     data-publr-part="panel"
                     data-publr-tab={tab.id}
                 >
-                    {!tab.content}
+                    {@raw tab.content}
                 </div>
             ) else (
                 <div
@@ -34,7 +34,7 @@ pub fn Tabs(props: struct { tabs: anytype, }) {
                     data-publr-tab={tab.id}
                     hidden="true"
                 >
-                    {!tab.content}
+                    {@raw tab.content}
                 </div>
             )}
         )}

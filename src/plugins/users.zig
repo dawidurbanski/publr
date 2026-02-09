@@ -11,7 +11,7 @@ const tpl = @import("tpl");
 const Auth = @import("auth").Auth;
 const csrf = @import("csrf");
 const auth_middleware = @import("auth_middleware");
-const zsx_admin_users_profile = @import("zsx_admin_users_profile");
+const views = @import("views");
 const registry = @import("registry");
 
 /// Users page - only used as parent for profile, hidden from nav
@@ -71,7 +71,7 @@ fn handleProfile(ctx: *Context) !void {
     };
     defer auth_instance.freeUser(&user);
 
-    const content = tpl.render(zsx_admin_users_profile.Profile, .{.{
+    const content = tpl.render(views.admin.users.profile.Profile, .{.{
         .error_message = "",
         .user = .{
             .id = user.id,

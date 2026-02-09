@@ -20,7 +20,7 @@ pub fn Base(props: struct {
         </head>
         <body>
             <main>
-                {!props.content}
+                {@raw props.content}
             </main>
             {for (props.js) |src| (
                 <script src={src}></script>

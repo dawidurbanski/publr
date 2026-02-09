@@ -1,0 +1,8 @@
+// Content types management page
+
+pub fn ContentTypes(props: struct {}) {
+    _ = props;
+    <div class="empty-state-container">
+        <p class="empty-state">Content types management coming soon.</p>
+    </div>
+}

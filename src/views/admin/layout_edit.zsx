@@ -1,17 +1,15 @@
-// Admin layout template - topbar nav with conditional section sidebar
+// Edit layout — no left sidebar, topbar with logo, back nav bar, right sidebar shell
 
 const icons = @import("icons");
 
-pub fn Layout(props: struct {
+pub fn LayoutEdit(props: struct {
     title: []const u8,
     content: []const u8,
-    page_title_actions: []const u8,
     topbar_nav_html: []const u8,
-    section_sidebar_html: []const u8,
     csrf_token: []const u8,
     user_gravatar_url: []const u8,
-    subtitle: []const u8 = "",
-    bottom_bar: []const u8 = "",
+    back_url: []const u8,
+    sidebar: []const u8 = "",
 }) {
     <!DOCTYPE html>
     <html>
@@ -25,7 +23,7 @@ pub fn Layout(props: struct {
             <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
         </head>
-        <body class="admin">
+        <body class="admin admin-edit">
             <header class="top-bar">
                 <div class="top-bar-left">
                     <a href="/admin" class="logo">Publr</a>
@@ -48,41 +46,21 @@ pub fn Layout(props: struct {
                     </div>
                 </div>
             </header>
-            <div class="admin-body">
-                {if (props.section_sidebar_html.len > 0) (
-                    <aside class="section-sidebar">
-                        <nav class="section-sidebar-nav">
-                            {@raw props.section_sidebar_html}
-                        </nav>
-                    </aside>
-                )}
-                <main class="main-content">
-                    <div class="content-wrapper">
-                        <div class="content-body">
-                            <div class="page-title-wrapper">
-                                <div class="page-title-subtitle">
-                                    <h1 class="page-title">{props.title}</h1>
-                                    {@raw props.subtitle}
-                                </div>
-                                {@raw props.page_title_actions}
-                            </div>
-                            {@raw props.content}
-                        </div>
+            <div class="edit-body">
+                <div class="edit-area">
+                    <div class="edit-nav">
+                        <a href={props.back_url} class="back-btn" aria-label="Back">
+                            <span class="back-btn-icon">{@raw icons.arrow_left}</span>
+                        </a>
+                        <span class="edit-nav-title">{props.title}</span>
                     </div>
-                </main>
-            </div>
-            <div class="bottom-bar">
-                <div class="bottom-bar-left">
-                    <a href="/admin/settings" class="settings-link">
-                        <span class="nav-icon">{@raw icons.settings}</span>
-                        Settings
-                    </a>
+                    <main class="edit-content">
+                        {@raw props.content}
+                    </main>
                 </div>
-                {if (props.bottom_bar.len > 0) (
-                    <div class="bottom-bar-content">
-                        {@raw props.bottom_bar}
-                    </div>
-                )}
+                <aside class="edit-sidebar">
+                    {@raw props.sidebar}
+                </aside>
             </div>
             <script type="module" src="/static/publr-core.js"></script>
             <script type="module" src="/static/interact/index.js"></script>

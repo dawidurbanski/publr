@@ -14,9 +14,8 @@ const csrf = @import("csrf");
 const wasm_storage = @import("wasm_storage");
 const wasm_media_handler = @import("wasm_media_handler");
 
-// Auth/setup templates
-const zsx_admin_setup = @import("zsx_admin_setup");
-const zsx_admin_login = @import("zsx_admin_login");
+// Generated ZSX views
+const views = @import("views");
 
 // Database schema (single source of truth)
 const schema_sql = @embedFile("tools/schema.sql");
@@ -324,8 +323,11 @@ export fn cms_request(
         return 0;
     }
 
-    // Process response
+    // Process response (copies body into result_buffer)
     processResponse(&ctx);
+
+    // Free all template memory now that response is copied
+    tpl.resetArena();
     return 0;
 }
 
@@ -441,7 +443,7 @@ fn handleSetupGet(ctx: *mw.Context) !void {
         return;
     }
 
-    const content = tpl.render(zsx_admin_setup.Setup, .{.{
+    const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = "",
         .csrf_token = csrf_token,
     }});
@@ -500,7 +502,7 @@ fn handleSetupPost(ctx: *mw.Context) !void {
 
 fn renderSetupError(ctx: *mw.Context, message: []const u8) void {
     const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.render(zsx_admin_setup.Setup, .{.{
+    const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
     }});
@@ -519,7 +521,7 @@ fn handleLoginGet(ctx: *mw.Context) !void {
         return;
     }
 
-    const content = tpl.render(zsx_admin_login.Login, .{.{
+    const content = tpl.render(views.admin.login.Login, .{.{
         .error_message = "",
         .csrf_token = csrf_token,
     }});
@@ -574,7 +576,7 @@ fn handleLogout(ctx: *mw.Context) !void {
 
 fn renderLoginError(ctx: *mw.Context, message: []const u8) void {
     const csrf_token = csrf.ensureToken(ctx);
-    const content = tpl.render(zsx_admin_login.Login, .{.{
+    const content = tpl.render(views.admin.login.Login, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
     }});

@@ -14,11 +14,7 @@ const tpl = @import("tpl");
 const Auth = @import("auth").Auth;
 const csrf = @import("csrf");
 const auth_middleware = @import("auth_middleware");
-const zsx_admin_users_list = @import("zsx_admin_users_list");
-const zsx_admin_users_new = @import("zsx_admin_users_new");
-const zsx_admin_users_edit = @import("zsx_admin_users_edit");
-const zsx_admin_components = @import("zsx_admin_components");
-const zsx_admin_design_system = @import("zsx_admin_design_system");
+const views = @import("views");
 const registry = @import("registry");
 
 /// Settings page - hidden from nav (accessed via sidebar footer)
@@ -166,7 +162,7 @@ fn handleUserList(ctx: *Context) !void {
         };
     }
 
-    const content = tpl.render(zsx_admin_users_list.List, .{.{
+    const content = tpl.render(views.admin.users.list.List, .{.{
         .has_users = view_users.items.len > 0,
         .users = view_users.items,
         .csrf_token = csrf_token,
@@ -178,7 +174,7 @@ fn handleUserList(ctx: *Context) !void {
 fn handleUserNew(ctx: *Context) !void {
     const csrf_token = csrf.ensureToken(ctx);
     const tab_bar = renderTabBar(ctx.allocator, "/admin/settings/users");
-    const content = tpl.render(zsx_admin_users_new.New, .{.{
+    const content = tpl.render(views.admin.users.new.New, .{.{
         .error_message = "",
         .csrf_token = csrf_token,
     }});
@@ -247,7 +243,7 @@ fn handleUserEdit(ctx: *Context) !void {
         return;
     };
 
-    const content = tpl.render(zsx_admin_users_edit.Edit, .{.{
+    const content = tpl.render(views.admin.users.edit.Edit, .{.{
         .error_message = "",
         .user = .{
             .id = user.id,
@@ -313,7 +309,7 @@ fn handleUserDelete(ctx: *Context) !void {
 fn renderNewError(ctx: *Context, message: []const u8) void {
     const csrf_token = csrf.ensureToken(ctx);
     const tab_bar = renderTabBar(ctx.allocator, "/admin/settings/users");
-    const content = tpl.render(zsx_admin_users_new.New, .{.{
+    const content = tpl.render(views.admin.users.new.New, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
     }});
@@ -326,7 +322,7 @@ fn renderNewError(ctx: *Context, message: []const u8) void {
 
 fn handleComponents(ctx: *Context) !void {
     const tab_bar = renderTabBar(ctx.allocator, "/admin/settings/components");
-    const content = tpl.renderStatic(zsx_admin_components.Components);
+    const content = tpl.renderStatic(views.admin.components.Components);
     ctx.html(registry.renderPageWith(page, ctx, content, tab_bar));
 }
 
@@ -336,6 +332,6 @@ fn handleComponents(ctx: *Context) !void {
 
 fn handleDesign(ctx: *Context) !void {
     const tab_bar = renderTabBar(ctx.allocator, "/admin/settings/design");
-    const content = tpl.renderStatic(zsx_admin_design_system.DesignSystem);
+    const content = tpl.renderStatic(views.admin.design_system.DesignSystem);
     ctx.html(registry.renderPageWith(page, ctx, content, tab_bar));
 }

@@ -4,7 +4,7 @@ const admin = @import("admin_api");
 const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
-const zsx_admin_design_system = @import("zsx_admin_design_system");
+const views = @import("views");
 const registry = @import("registry");
 
 pub const page = admin.registerPage(.{
@@ -21,6 +21,6 @@ fn setup(app: *admin.PageApp) void {
 }
 
 fn handleDesignSystem(ctx: *Context) !void {
-    const content = tpl.renderStatic(zsx_admin_design_system.DesignSystem);
+    const content = tpl.renderStatic(views.admin.design_system.DesignSystem);
     ctx.html(registry.renderPage(page, ctx, content));
 }

@@ -20,7 +20,7 @@ pub fn SelectMenu(props: struct { name: []const u8, default_label: []const u8, d
             class="select-trigger"
         >
             <span data-publr-part="label">{props.default_label}</span>
-            <span class="select-arrow">{!icon_chevron_down}</span>
+            <span class="select-arrow">{@raw icon_chevron_down}</span>
         </button>
         <div data-publr-part="content" class="select-menu" role="listbox">
             {for (props.items) |item| (

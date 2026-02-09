@@ -1,0 +1,13 @@
+// Topbar navigation — horizontal nav items in the top bar
+
+pub fn TopbarNav(props: struct { items: anytype }) {
+    {for (props.items) |item| (
+        <a
+            href={item.path}
+            class={if (item.is_active) "topbar-nav-item active" else "topbar-nav-item"}
+        >
+            <span class="nav-icon">{@raw item.icon}</span>
+            {item.label}
+        </a>
+    )}
+}

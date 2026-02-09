@@ -15,8 +15,7 @@ const storage = @import("storage");
 const auth_middleware = @import("auth_middleware");
 const registry = @import("registry");
 const db_mod = @import("db");
-const zsx_admin_media_list = @import("zsx_admin_media_list");
-const zsx_admin_media_edit = @import("zsx_admin_media_edit");
+const views = @import("views");
 
 const builtin = @import("builtin");
 const is_wasm = builtin.target.cpu.arch == .wasm32;
@@ -36,6 +35,7 @@ pub const page = admin.registerPage(.{
     .path = "/media",
     .icon = icons.image,
     .position = 25,
+    .section = "media",
     .setup = setup,
 });
 
@@ -387,7 +387,7 @@ fn handleList(ctx: *Context) !void {
         };
     }
 
-    const content = tpl.render(zsx_admin_media_list.List, .{.{
+    const content = tpl.render(views.admin.media.list.List, .{.{
         .has_media = items.len > 0,
         .media = items,
         .csrf_token = csrf_token,
@@ -429,11 +429,27 @@ fn handleList(ctx: *Context) !void {
         .items_per_page_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{items_per_page}) catch "25",
     }});
 
-    const subtitle = tpl.render(zsx_admin_media_list.Breadcrumbs, .{.{
+    const subtitle = tpl.render(views.admin.media.list.Breadcrumbs, .{.{
         .items = breadcrumbs,
     }});
 
-    ctx.html(registry.renderPageWith(page, ctx, content, subtitle));
+    const bottom_bar = tpl.render(views.admin.media.list.BottomBar, .{.{
+        .active_folder = folder_filter orelse "",
+        .total_pages = total_pages,
+        .prev_page_url = if (current_page > 1) buildPageUrl(ctx.allocator, base_url, current_page - 1) else "",
+        .next_page_url = if (current_page < total_pages) buildPageUrl(ctx.allocator, base_url, current_page + 1) else "",
+        .page_urls = page_urls,
+        .csrf_token = csrf.ensureToken(ctx),
+    }});
+
+    const page_title_actions = tpl.render(views.admin.media.list.MediaControls, .{.{
+        .filtered_count = filtered_count,
+        .view_mode = view_mode,
+        .view_grid_url = buildMediaUrl(ctx.allocator, "grid", folder_filter, active_tag_ids, show_unreviewed, search_term, year_filter, month_filter),
+        .view_list_url = buildMediaUrl(ctx.allocator, "list", folder_filter, active_tag_ids, show_unreviewed, search_term, year_filter, month_filter),
+    }});
+
+    ctx.html(registry.renderPageFull(page, ctx, content, subtitle, bottom_bar, page_title_actions));
 }
 
 fn handleEdit(ctx: *Context) !void {
@@ -516,7 +532,7 @@ fn handleEdit(ctx: *Context) !void {
         tag_display = buf.toOwnedSlice(ctx.allocator) catch "";
     }
 
-    const content = tpl.render(zsx_admin_media_edit.Edit, .{.{
+    const content = tpl.render(views.admin.media.edit.Edit, .{.{
         .media = .{
             .id = record.id,
             .filename = record.filename,

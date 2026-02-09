@@ -45,7 +45,7 @@ pub fn List(props: struct {
                         <th class="table-col-thumb"></th>
                         <th class="table-sortable">
                             Title
-                            <span class="table-sort-icon">{!icon_chevron_up}</span>
+                            <span class="table-sort-icon">{@raw icon_chevron_up}</span>
                         </th>
                         <th>Author</th>
                         <th>Status</th>
@@ -60,23 +60,23 @@ pub fn List(props: struct {
                                 <input type="checkbox" class="table-checkbox" aria-label="Select post" />
                             </td>
                             <td class="table-col-thumb">
-                                <div class="table-thumb">{!icon_file}</div>
+                                <div class="table-thumb">{@raw icon_file}</div>
                             </td>
                             <td>
                                 <a href={post.edit_url}>{post.title}</a>
                             </td>
                             <td>
                                 <span class="table-cell-icon">
-                                    <span class="table-cell-icon-prefix">{!icon_users}</span>
+                                    <span class="table-cell-icon-prefix">{@raw icon_users}</span>
                                     {post.author}
                                 </span>
                             </td>
                             <td>
                                 <span class="table-cell-icon">
                                     {if (@import("std").mem.eql(u8, post.status, "published")) (
-                                        <span class="table-cell-icon-prefix" style="color: var(--color-success)">{!icon_dot_filled}</span>
+                                        <span class="table-cell-icon-prefix" style="color: var(--color-success)">{@raw icon_dot_filled}</span>
                                     ) else (
-                                        <span class="table-cell-icon-prefix">{!icon_dot_outline}</span>
+                                        <span class="table-cell-icon-prefix">{@raw icon_dot_outline}</span>
                                     )}
                                     <span class={if (@import("std").mem.eql(u8, post.status, "published")) ("badge badge-published") else ("badge badge-draft")}>{post.status}</span>
                                 </span>
@@ -85,7 +85,7 @@ pub fn List(props: struct {
                             <td class="actions-col">
                                 <div data-publr-component="dropdown">
                                     <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        {!icon_more}
+                                        {@raw icon_more}
                                     </button>
                                     <div class="dropdown-menu" data-publr-part="content">
                                         <a href={post.edit_url} class="dropdown-item">Edit</a>

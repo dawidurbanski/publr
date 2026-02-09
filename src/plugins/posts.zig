@@ -10,8 +10,7 @@ const tpl = @import("tpl");
 const csrf = @import("csrf");
 const cms = @import("cms");
 const schemas = @import("schemas");
-const zsx_admin_posts_list = @import("zsx_admin_posts_list");
-const zsx_admin_posts_edit = @import("zsx_admin_posts_edit");
+const views = @import("views");
 const registry = @import("registry");
 const auth_middleware = @import("auth_middleware");
 
@@ -24,6 +23,7 @@ pub const page = admin.registerPage(.{
     .path = "/posts",
     .icon = icons.edit,
     .position = 20,
+    .section = "content",
     .setup = setup,
 });
 
@@ -66,7 +66,7 @@ fn handleList(ctx: *Context) !void {
     }) catch |err| {
         std.debug.print("Error listing posts: {}\n", .{err});
         // Fall back to empty list on error
-        const content = tpl.render(zsx_admin_posts_list.List, .{.{
+        const content = tpl.render(views.admin.posts.list.List, .{.{
             .has_posts = false,
             .posts = &[_]ViewPost{},
         }});
@@ -92,7 +92,7 @@ fn handleList(ctx: *Context) !void {
         };
     }
 
-    const content = tpl.render(zsx_admin_posts_list.List, .{.{
+    const content = tpl.render(views.admin.posts.list.List, .{.{
         .has_posts = posts.len > 0,
         .posts = posts,
     }});
@@ -114,22 +114,34 @@ fn handleNew(ctx: *Context) !void {
         featured_image_url: []const u8,
     };
 
-    const content = tpl.render(zsx_admin_posts_edit.Edit, .{.{
-        .post = PostData{
-            .title = "",
-            .slug = "",
-            .content = "",
-            .date = formatDate(std.time.timestamp(), ctx.allocator) catch "Unknown",
-            .is_draft = true,
-            .is_published = false,
-            .featured_image = "",
-            .featured_image_url = "",
-        },
+    const post_data = PostData{
+        .title = "",
+        .slug = "",
+        .content = "",
+        .date = formatDate(std.time.timestamp(), ctx.allocator) catch "Unknown",
+        .is_draft = true,
+        .is_published = false,
+        .featured_image = "",
+        .featured_image_url = "",
+    };
+
+    const content = tpl.render(views.admin.posts.edit.Edit, .{.{
+        .post = post_data,
         .csrf_token = csrf_token,
         .action = "/admin/posts",
     }});
 
-    ctx.html(registry.renderPage(page, ctx, content));
+    const sidebar = tpl.render(views.admin.posts.edit.EditSidebar, .{.{
+        .post = post_data,
+        .csrf_token = csrf_token,
+        .delete_url = "",
+    }});
+
+    ctx.html(registry.renderEditPage(page, ctx, "New Post", content, .{
+        .back_url = "/admin/posts",
+        .back_label = "Posts",
+        .sidebar = sidebar,
+    }));
 }
 
 fn handleEdit(ctx: *Context) !void {
@@ -165,6 +177,7 @@ fn handleEdit(ctx: *Context) !void {
     };
 
     const edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
+    const delete_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}/delete", .{post_id}) catch "";
 
     // Get featured image URL if set
     const featured_image_id = entry.data.featured_image orelse "";
@@ -173,22 +186,34 @@ fn handleEdit(ctx: *Context) !void {
     else
         "";
 
-    const content = tpl.render(zsx_admin_posts_edit.Edit, .{.{
-        .post = PostData{
-            .title = entry.title,
-            .slug = entry.slug orelse "",
-            .content = entry.data.body,
-            .date = formatDate(entry.created_at, ctx.allocator) catch "Unknown",
-            .is_draft = entry.isDraft(),
-            .is_published = entry.isPublished(),
-            .featured_image = featured_image_id,
-            .featured_image_url = featured_image_url,
-        },
+    const post_data = PostData{
+        .title = entry.title,
+        .slug = entry.slug orelse "",
+        .content = entry.data.body,
+        .date = formatDate(entry.created_at, ctx.allocator) catch "Unknown",
+        .is_draft = entry.isDraft(),
+        .is_published = entry.isPublished(),
+        .featured_image = featured_image_id,
+        .featured_image_url = featured_image_url,
+    };
+
+    const content = tpl.render(views.admin.posts.edit.Edit, .{.{
+        .post = post_data,
         .csrf_token = csrf_token,
         .action = edit_url,
     }});
 
-    ctx.html(registry.renderPage(page, ctx, content));
+    const sidebar = tpl.render(views.admin.posts.edit.EditSidebar, .{.{
+        .post = post_data,
+        .csrf_token = csrf_token,
+        .delete_url = delete_url,
+    }});
+
+    ctx.html(registry.renderEditPage(page, ctx, entry.title, content, .{
+        .back_url = "/admin/posts",
+        .back_label = "Posts",
+        .sidebar = sidebar,
+    }));
 }
 
 fn handleCreate(ctx: *Context) !void {

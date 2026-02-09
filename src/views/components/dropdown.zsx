@@ -14,7 +14,7 @@ pub fn Dropdown(props: struct { trigger_label: []const u8, items: anytype, }) {
             class="btn"
         >
             {props.trigger_label}
-            {!icon_chevron_down}
+            {@raw icon_chevron_down}
         </button>
         <div data-publr-part="content" class="dropdown-menu" role="menu">
             {for (props.items) |item| (

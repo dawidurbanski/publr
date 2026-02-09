@@ -192,37 +192,6 @@ pub fn List(props: struct {
         <input type="file" id="media-file-input" name="file" multiple="" />
     </form>
 
-    <div class="media-toolbar">
-        <div class="media-toolbar-left">
-            <input type="checkbox" class="media-select-all" id="media-select-all" aria-label="Select all" />
-            <span class="media-count" id="media-count-default">{props.filtered_count} files</span>
-            <span class="media-selection-info" id="media-selection-info" style="display:none">
-                <span id="media-selection-count">0</span> selected
-                <div data-publr-component="dropdown" class="media-bulk-actions">
-                    <button class="btn btn-sm" data-publr-part="trigger">Bulk Actions</button>
-                    <div class="dropdown-menu" data-publr-part="content">
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="delete">Delete</button>
-                        <hr class="dropdown-divider" />
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="add-tag">Add Tag...</button>
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="remove-tag">Remove Tag...</button>
-                        <hr class="dropdown-divider" />
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="move-folder">Move to Folder...</button>
-                    </div>
-                </div>
-            </span>
-        </div>
-        <div class="media-toolbar-right">
-            <div class="media-view-toggle">
-                <a href={props.view_grid_url} class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active") else ("media-view-btn")} aria-label="Grid view">
-                    {!icon_grid}
-                </a>
-                <a href={props.view_list_url} class={if (std.mem.eql(u8, props.view_mode, "list")) ("media-view-btn active") else ("media-view-btn")} aria-label="List view">
-                    {!icon_list}
-                </a>
-            </div>
-        </div>
-    </div>
-
     <div class="media-select-all-banner" id="media-select-all-banner" style="display:none"
          data-filtered-count={props.filtered_count_str}
          data-items-per-page={props.items_per_page_str}
@@ -255,7 +224,7 @@ pub fn List(props: struct {
             {for (props.search_hidden_params) |param| (
                 <input type="hidden" name={param.name} value={param.value} />
             )}
-            <input type="text" name="search" value={props.search_term} placeholder="Search..." class="media-search-input" />
+            <input type="text" name="search" value={props.search_term} placeholder="Type to search for assets" class="media-search-input" />
         </form>
         {if (props.active_filters.len > 0) (
             <a href={props.reset_url} class="refinement-reset">Reset all</a>
@@ -268,20 +237,20 @@ pub fn List(props: struct {
                 <div class="media-sidebar-header">
                     <h3 class="media-sidebar-title">Folders</h3>
                     <button type="button" class="btn-icon-sm" data-publr-action="create-toplevel" aria-label="New folder">
-                        {!icon_folder_plus}
+                        {@raw icon_folder_plus}
                     </button>
                 </div>
                 <ul class="media-folder-list">
                     <li class={if (std.mem.eql(u8, props.active_folder, "default")) ("media-folder-item active") else ("media-folder-item")}>
                         <div class="media-folder-row">
                             <a href={props.unsorted_url} class="media-folder-link">
-                                {!icon_folder}
+                                {@raw icon_folder}
                                 <span class="media-folder-name">Default</span>
                             </a>
                             <span class="media-folder-count">{props.unsorted_count}</span>
                             <span class="media-folder-controls">
                                 <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id="" title="New folder">
-                                    {!icon_folder_plus}
+                                    {@raw icon_folder_plus}
                                 </button>
                             </span>
                         </div>
@@ -291,12 +260,12 @@ pub fn List(props: struct {
                             <div class="media-folder-row" data-folder-id={folder.id} data-folder-name={folder.name} data-folder-depth={depth_strs[@min(folder.depth, depth_strs.len - 1)]}>
                                 {if (folder.is_disabled) (
                                     <span class="media-folder-link">
-                                        {!icon_folder}
+                                        {@raw icon_folder}
                                         <span class="media-folder-name">{folder.name}</span>
                                     </span>
                                 ) else (
                                     <a href={folder.url} class="media-folder-link">
-                                        {!icon_folder}
+                                        {@raw icon_folder}
                                         <span class="media-folder-name">{folder.name}</span>
                                     </a>
                                 )}
@@ -304,12 +273,12 @@ pub fn List(props: struct {
                                 <span class="media-folder-controls">
                                     {if (folder.depth < max_depth) (
                                         <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id={folder.id} title="New subfolder">
-                                            {!icon_folder_plus}
+                                            {@raw icon_folder_plus}
                                         </button>
                                     ) else (<span></span>)}
                                     <div data-publr-component="dropdown" class="media-folder-actions">
                                         <button class="btn-icon-sm" data-publr-part="trigger" aria-label="Folder actions">
-                                            {!icon_more}
+                                            {@raw icon_more}
                                         </button>
                                         <div class="dropdown-menu" data-publr-part="content">
                                             <button type="button" class="dropdown-item" data-publr-part="item" data-publr-action="rename-folder" data-folder-id={folder.id} data-folder-name={folder.name}>Rename</button>
@@ -346,7 +315,7 @@ pub fn List(props: struct {
                 <div class="media-sidebar-header">
                     <h3 class="media-sidebar-title">Tags</h3>
                     <button type="button" class="btn-icon-sm" data-publr-component="inline-create" data-publr-part="trigger" data-publr-target="tag-create-form" aria-label="New tag">
-                        {!icon_plus_circle}
+                        {@raw icon_plus_circle}
                     </button>
                 </div>
                 <div class="media-tag-list">
@@ -372,7 +341,7 @@ pub fn List(props: struct {
                     <div class="inline-create-row">
                         <input type="text" name="tag_name" placeholder="Tag name..." class="form-control form-control-sm" />
                         <button type="submit" class="btn-icon-sm btn-icon-confirm" aria-label="Create tag">
-                            {!icon_check}
+                            {@raw icon_check}
                         </button>
                     </div>
                 </form>
@@ -456,10 +425,10 @@ pub fn List(props: struct {
                                         {if (item.is_image) (
                                             <img src={item.thumb_url} alt={item.filename} loading="lazy" />
                                         ) else (
-                                            <div class="media-card-icon">{!icon_file}</div>
+                                            <div class="media-card-icon">{@raw icon_file}</div>
                                         )}
                                         {if (item.is_private) (
-                                            <span class="media-card-badge">{!icon_lock}</span>
+                                            <span class="media-card-badge">{@raw icon_lock}</span>
                                         ) else (<span></span>)}
                                     </div>
                                     <div class="media-card-info">
@@ -497,7 +466,7 @@ pub fn List(props: struct {
                                                 <img src={item.thumb_url} alt={item.filename} />
                                             </div>
                                         ) else (
-                                            <div class="table-thumb">{!icon_file}</div>
+                                            <div class="table-thumb">{@raw icon_file}</div>
                                         )}
                                     </td>
                                     <td>
@@ -511,7 +480,7 @@ pub fn List(props: struct {
                                     <td class="actions-col">
                                         <div data-publr-component="dropdown">
                                             <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                                {!icon_more}
+                                                {@raw icon_more}
                                             </button>
                                             <div class="dropdown-menu" data-publr-part="content">
                                                 <a href={item.edit_url} class="dropdown-item">Edit</a>
@@ -531,13 +500,13 @@ pub fn List(props: struct {
             ) else (
                 {if (props.active_folder.len > 0 or props.active_tags.len > 0 or props.search_term.len > 0) (
                     <div class="empty-state media-upload-zone" id="media-upload-zone">
-                        <div class="empty-state-icon">{!icon_upload}</div>
+                        <div class="empty-state-icon">{@raw icon_upload}</div>
                         <p>No files match your current filters.</p>
                         <p class="empty-state-hint">Drop files here to upload, or <a href={props.reset_url}>reset all</a>.</p>
                     </div>
                 ) else (
                     <div class="empty-state media-upload-zone" id="media-upload-zone">
-                        <div class="empty-state-icon">{!icon_upload}</div>
+                        <div class="empty-state-icon">{@raw icon_upload}</div>
                         <p>No media files yet.</p>
                         <p class="empty-state-hint">Drop files here or use the upload button below.</p>
                     </div>
@@ -546,48 +515,6 @@ pub fn List(props: struct {
         </div>
     </div>
 
-    <div class="media-bottom-bar" data-active-folder={props.active_folder}>
-        <div class="media-bottom-bar-left">
-            {if (props.total_pages > 1) (
-                <nav class="pagination" aria-label="Media pagination">
-                    <span class="pagination-label">Page:</span>
-                    {if (props.prev_page_url.len > 0) (
-                        <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page">{!icon_chevron_left}</a>
-                    ) else (
-                        <span class="pagination-btn disabled" aria-label="Previous page">{!icon_chevron_left}</span>
-                    )}
-                    {for (props.page_urls) |pg| (
-                        {if (pg.is_current) (
-                            <span class="pagination-page active">{pg.page_num}</span>
-                        ) else (
-                            <a href={pg.url} class="pagination-page">{pg.page_num}</a>
-                        )}
-                    )}
-                    {if (props.next_page_url.len > 0) (
-                        <a href={props.next_page_url} class="pagination-btn" aria-label="Next page">{!icon_chevron_right}</a>
-                    ) else (
-                        <span class="pagination-btn disabled" aria-label="Next page">{!icon_chevron_right}</span>
-                    )}
-                </nav>
-            ) else (<span></span>)}
-        </div>
-        <div class="media-bottom-bar-right">
-            <div class="media-upload-progress" id="upload-progress" style="display:none">
-                <div class="upload-progress-bar" id="upload-progress-bar"></div>
-                <span class="upload-progress-text" id="upload-progress-text">Uploading...</span>
-            </div>
-            {if (props.active_folder.len > 0 and !std.mem.eql(u8, props.active_folder, "default")) (
-                <button type="button" class="btn btn-sm" id="upload-default-btn">Upload to default</button>
-                <button type="button" class="btn btn-sm btn-primary" id="upload-here-btn">
-                    {!icon_upload} Upload here
-                </button>
-            ) else (
-                <button type="button" class="btn btn-sm btn-primary" id="upload-default-btn">
-                    {!icon_upload} Upload
-                </button>
-            )}
-        </div>
-    </div>
 
     <div data-publr-component="dialog" data-publr-state="closed" id="bulk-add-tag-dialog">
         <button data-publr-part="trigger" hidden=""></button>
@@ -694,4 +621,94 @@ pub fn List(props: struct {
         <input type="hidden" name="filter_month" id="bulk-delete-filter-month" value="" />
     </form>
 
+}
+
+pub fn BottomBar(props: struct {
+    active_folder: []const u8,
+    total_pages: u32,
+    prev_page_url: []const u8,
+    next_page_url: []const u8,
+    page_urls: []const PageUrl,
+    csrf_token: []const u8,
+}) {
+    <div class="media-bottom-bar" data-active-folder={props.active_folder}>
+        <div class="media-bottom-bar-left">
+            {if (props.total_pages > 1) (
+                <nav class="pagination" aria-label="Media pagination">
+                    <span class="pagination-label">Page:</span>
+                    {if (props.prev_page_url.len > 0) (
+                        <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page">{@raw icon_chevron_left}</a>
+                    ) else (
+                        <span class="pagination-btn disabled" aria-label="Previous page">{@raw icon_chevron_left}</span>
+                    )}
+                    {for (props.page_urls) |pg| (
+                        {if (pg.is_current) (
+                            <span class="pagination-page active">{pg.page_num}</span>
+                        ) else (
+                            <a href={pg.url} class="pagination-page">{pg.page_num}</a>
+                        )}
+                    )}
+                    {if (props.next_page_url.len > 0) (
+                        <a href={props.next_page_url} class="pagination-btn" aria-label="Next page">{@raw icon_chevron_right}</a>
+                    ) else (
+                        <span class="pagination-btn disabled" aria-label="Next page">{@raw icon_chevron_right}</span>
+                    )}
+                </nav>
+            ) else (<span></span>)}
+        </div>
+        <div class="media-bottom-bar-right">
+            <div class="media-upload-progress" id="upload-progress" style="display:none">
+                <div class="upload-progress-bar" id="upload-progress-bar"></div>
+                <span class="upload-progress-text" id="upload-progress-text">Uploading...</span>
+            </div>
+            {if (props.active_folder.len > 0 and !std.mem.eql(u8, props.active_folder, "default")) (
+                <button type="button" class="btn btn-sm" id="upload-default-btn">Upload to default</button>
+                <button type="button" class="btn btn-sm btn-primary" id="upload-here-btn">
+                    {@raw icon_upload} Upload here
+                </button>
+            ) else (
+                <button type="button" class="btn btn-sm btn-primary" id="upload-default-btn">
+                    {@raw icon_upload} Upload
+                </button>
+            )}
+        </div>
+    </div>
+}
+
+pub fn MediaControls(props: struct {
+    filtered_count: u32,
+    view_mode: []const u8,
+    view_grid_url: []const u8,
+    view_list_url: []const u8,
+}) {
+    <div class="media-toolbar">
+        <div class="media-toolbar-left">
+            <input type="checkbox" class="media-select-all" id="media-select-all" aria-label="Select all" />
+            <span class="media-count" id="media-count-default">{props.filtered_count} files</span>
+            <span class="media-selection-info" id="media-selection-info" style="display:none">
+                <span id="media-selection-count">0</span> selected
+                <div data-publr-component="dropdown" class="media-bulk-actions">
+                    <button class="btn btn-sm" data-publr-part="trigger">Bulk Actions</button>
+                    <div class="dropdown-menu" data-publr-part="content">
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="delete">Delete</button>
+                        <hr class="dropdown-divider" />
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="add-tag">Add Tag...</button>
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="remove-tag">Remove Tag...</button>
+                        <hr class="dropdown-divider" />
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="move-folder">Move to Folder...</button>
+                    </div>
+                </div>
+            </span>
+        </div>
+        <div class="media-toolbar-right">
+            <div class="media-view-toggle">
+                <a href={props.view_grid_url} class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active") else ("media-view-btn")} aria-label="Grid view">
+                    {@raw icon_grid}
+                </a>
+                <a href={props.view_list_url} class={if (std.mem.eql(u8, props.view_mode, "list")) ("media-view-btn active") else ("media-view-btn")} aria-label="List view">
+                    {@raw icon_list}
+                </a>
+            </div>
+        </div>
+    </div>
 }

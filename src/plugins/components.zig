@@ -4,7 +4,7 @@ const admin = @import("admin_api");
 const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
-const zsx_admin_components = @import("zsx_admin_components");
+const views = @import("views");
 const registry = @import("registry");
 
 pub const page = admin.registerPage(.{
@@ -21,6 +21,6 @@ fn setup(app: *admin.PageApp) void {
 }
 
 fn handleComponents(ctx: *Context) !void {
-    const content = tpl.renderStatic(zsx_admin_components.Components);
+    const content = tpl.renderStatic(views.admin.components.Components);
     ctx.html(registry.renderPage(page, ctx, content));
 }

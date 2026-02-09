@@ -1,14 +1,14 @@
 // Admin components showcase — living reference for all interactive components
-const Toggle = @import("zsx_components_toggle").Toggle;
-const Dialog = @import("zsx_components_dialog").Dialog;
-const Dropdown = @import("zsx_components_dropdown").Dropdown;
-const SelectMenu = @import("zsx_components_select_menu").SelectMenu;
-const Popover = @import("zsx_components_popover").Popover;
-const Tooltip = @import("zsx_components_tooltip").Tooltip;
-const Tabs = @import("zsx_components_tabs").Tabs;
-const SwitchInput = @import("zsx_components_switch_input").SwitchInput;
-const CheckboxGroup = @import("zsx_components_checkbox_group").CheckboxGroup;
-const RadioGroup = @import("zsx_components_radio_group").RadioGroup;
+const Toggle = @import("../components/toggle.zig").Toggle;
+const Dialog = @import("../components/dialog.zig").Dialog;
+const Dropdown = @import("../components/dropdown.zig").Dropdown;
+const SelectMenu = @import("../components/select_menu.zig").SelectMenu;
+const Popover = @import("../components/popover.zig").Popover;
+const Tooltip = @import("../components/tooltip.zig").Tooltip;
+const Tabs = @import("../components/tabs.zig").Tabs;
+const SwitchInput = @import("../components/switch_input.zig").SwitchInput;
+const CheckboxGroup = @import("../components/checkbox_group.zig").CheckboxGroup;
+const RadioGroup = @import("../components/radio_group.zig").RadioGroup;
 
 // Demo data
 const DropdownItem = struct {

@@ -35,7 +35,7 @@ pub fn List(props: struct {
                         <th class="table-col-thumb"></th>
                         <th class="table-sortable">
                             Name
-                            <span class="table-sort-icon">{!icon_chevron_up}</span>
+                            <span class="table-sort-icon">{@raw icon_chevron_up}</span>
                         </th>
                         <th>Email</th>
                         <th class="actions-col"></th>
@@ -48,7 +48,7 @@ pub fn List(props: struct {
                                 <input type="checkbox" class="table-checkbox" aria-label="Select user" />
                             </td>
                             <td class="table-col-thumb">
-                                <div class="table-thumb">{!icon_users}</div>
+                                <div class="table-thumb">{@raw icon_users}</div>
                             </td>
                             <td>
                                 <a href={user.edit_url}>
@@ -63,7 +63,7 @@ pub fn List(props: struct {
                             <td class="actions-col">
                                 <div data-publr-component="dropdown">
                                     <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        {!icon_more}
+                                        {@raw icon_more}
                                     </button>
                                     <div class="dropdown-menu" data-publr-part="content">
                                         <a href={user.edit_url} class="dropdown-item">Edit</a>

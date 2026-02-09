@@ -5,7 +5,7 @@ const admin = @import("admin_api");
 const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
-const zsx_admin_dashboard = @import("zsx_admin_dashboard");
+const views = @import("views");
 const registry = @import("registry");
 const auth_middleware = @import("auth_middleware");
 const media = @import("media");
@@ -34,7 +34,7 @@ fn handleDashboard(ctx: *Context) !void {
     const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
     const posts: []const Post = &.{};
 
-    const content = tpl.render(zsx_admin_dashboard.Dashboard, .{.{
+    const content = tpl.render(views.admin.dashboard.Dashboard, .{.{
         .posts_count = "0",
         .pages_count = "0",
         .media_count = media_count_str,

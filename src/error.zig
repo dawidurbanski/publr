@@ -4,11 +4,8 @@ const tpl = @import("tpl");
 const Context = mw.Context;
 const NextFn = mw.NextFn;
 
-// Generated ZSX templates
-const zsx_base = @import("zsx_base");
-const zsx_404 = @import("zsx_error_404");
-const zsx_500 = @import("zsx_error_500");
-const zsx_500_dev = @import("zsx_error_500_dev");
+// Generated ZSX views
+const views = @import("views");
 
 /// Module-level dev mode flag (set during init)
 var dev_mode: bool = false;
@@ -20,7 +17,7 @@ pub fn init(is_dev_mode: bool) void {
 
 /// Wrap content in base layout (error pages have no CSS/JS)
 fn wrapWithBase(content: []const u8) []const u8 {
-    return tpl.render(zsx_base.Base, .{.{
+    return tpl.render(views.base.Base, .{.{
         .title = "Error - Publr",
         .content = content,
         .css = &[_][]const u8{},
@@ -61,7 +58,7 @@ pub fn notFoundHandler(ctx: *Context) !void {
 
 /// Render 404 page content using ZSX template
 fn render404() []const u8 {
-    return tpl.render(zsx_404.Error404, .{.{
+    return tpl.render(views.@"error".error_404.Error404, .{.{
         .status_code = "404",
         .title = "Page Not Found",
         .message = "The page you're looking for doesn't exist or has been moved.",
@@ -70,7 +67,7 @@ fn render404() []const u8 {
 
 /// Render 500 page for production (no error details)
 fn render500Prod() []const u8 {
-    return wrapWithBase(tpl.renderStatic(zsx_500.Error500));
+    return wrapWithBase(tpl.renderStatic(views.@"error".error_500.Error500));
 }
 
 /// Render 500 page for dev mode (with error details and stack trace)
@@ -129,7 +126,7 @@ fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
         trace_section = fbs.getWritten();
     }
 
-    const content = tpl.render(zsx_500_dev.Error500Dev, .{.{
+    const content = tpl.render(views.@"error".error_500_dev.Error500Dev, .{.{
         .error_name = error_name,
         .trace_section = trace_section,
     }});

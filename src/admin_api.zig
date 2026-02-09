@@ -52,6 +52,9 @@ pub const Page = struct {
     /// Parent page ID for submenu items (e.g., "users" for "users.new")
     parent: ?[]const u8 = null,
 
+    /// Topbar section: "content", "content_types", "media"
+    section: ?[]const u8 = null,
+
     /// Setup function that registers routes for this page
     setup: *const fn (*PageApp) void,
 

@@ -66,173 +66,180 @@ pub fn Edit(props: struct {
                 </div>
             ) else (
                 <div class="media-preview-file">
-                    {!icon_file}
+                    {@raw icon_file}
                     <span class="media-preview-filename">{props.media.filename}</span>
                 </div>
             )}
 
-            <div class="media-file-info">
-                <dl class="media-info-list">
-                    <div class="media-info-row">
-                        <dt>Filename</dt>
-                        <dd>{props.media.filename}</dd>
-                    </div>
-                    <div class="media-info-row">
-                        <dt>Type</dt>
-                        <dd>{props.media.mime_type}</dd>
-                    </div>
-                    <div class="media-info-row">
-                        <dt>Size</dt>
-                        <dd>{props.media.size_display}</dd>
-                    </div>
-                    {if (props.media.dimensions.len > 0) (
-                        <div class="media-info-row">
-                            <dt>Dimensions</dt>
-                            <dd>{props.media.dimensions}</dd>
-                        </div>
-                    ) else (<span></span>)}
-                    <div class="media-info-row">
-                        <dt>Uploaded</dt>
-                        <dd>{props.media.created_at}</dd>
-                    </div>
-                    <div class="media-info-row">
-                        <dt>URL</dt>
-                        <dd><a href={props.media.media_url} class="media-url-link" target="_blank">{props.media.media_url}</a></dd>
-                    </div>
-                </dl>
-            </div>
-
-            <div class="media-visibility">
-                <div class="media-visibility-status">
-                    <span class={if (props.media.is_private) ("badge badge-draft") else ("badge badge-published")}>{props.media.visibility}</span>
+            <div class="media-file-meta">
+                <div class="media-meta-item">
+                    <span class="media-meta-label">Size</span>
+                    <span class="media-meta-value">{props.media.size_display}</span>
                 </div>
-                <form method="POST" action={props.toggle_url} class="media-visibility-form">
-                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    {if (props.media.is_private) (
-                        <button type="submit" class="btn btn-sm">Make Public</button>
-                    ) else (
-                        <button type="submit" class="btn btn-sm">Make Private</button>
-                    )}
-                </form>
+                <div class="media-meta-item">
+                    <span class="media-meta-label">Type</span>
+                    <span class="media-meta-value">{props.media.mime_type}</span>
+                </div>
+                {if (props.media.dimensions.len > 0) (
+                    <div class="media-meta-item">
+                        <span class="media-meta-label">Dimensions</span>
+                        <span class="media-meta-value">{props.media.dimensions}</span>
+                    </div>
+                ) else (<span></span>)}
+                <div class="media-meta-item">
+                    <span class="media-meta-label">Uploaded</span>
+                    <span class="media-meta-value">{props.media.created_at}</span>
+                </div>
             </div>
         </div>
 
-        <div class="media-edit-form">
-            <form method="POST" action={props.action} class="form">
+        <div class="media-edit-panel">
+            <form method="POST" action={props.action} class="form media-edit-form">
                 <input type="hidden" name="_csrf" value={props.csrf_token} />
 
-                <div class="form-group">
-                    <label for="alt_text">Alt Text</label>
-                    <input
-                        type="text"
-                        id="alt_text"
-                        name="alt_text"
-                        value={props.media.alt_text}
-                        class="form-control"
-                        placeholder="Describe this image for accessibility"
-                    />
-                    <span class="form-hint">Describes the image for screen readers and when images fail to load.</span>
+                <div class="media-panel-section">
+                    <div class="form-group">
+                        <label for="alt_text">Alt Text</label>
+                        <input
+                            type="text"
+                            id="alt_text"
+                            name="alt_text"
+                            value={props.media.alt_text}
+                            class="form-control"
+                            placeholder="Describe this image for accessibility"
+                        />
+                        <span class="form-hint">Describes the image for screen readers and when images fail to load.</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="caption">Caption</label>
+                        <textarea
+                            id="caption"
+                            name="caption"
+                            class="form-control"
+                            rows="2"
+                            placeholder="Optional caption displayed below the media"
+                        >{props.media.caption}</textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="credit">Credit</label>
+                        <input
+                            type="text"
+                            id="credit"
+                            name="credit"
+                            value={props.media.credit}
+                            class="form-control"
+                            placeholder="Photo by..."
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="focal_point">Focal Point</label>
+                        <input
+                            type="text"
+                            id="focal_point"
+                            name="focal_point"
+                            value={props.media.focal_point}
+                            class="form-control"
+                            readonly=""
+                        />
+                    </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="caption">Caption</label>
-                    <textarea
-                        id="caption"
-                        name="caption"
-                        class="form-control"
-                        rows="3"
-                        placeholder="Optional caption displayed below the media"
-                    >{props.media.caption}</textarea>
-                </div>
-
-                <div class="form-group">
-                    <label for="credit">Credit</label>
-                    <input
-                        type="text"
-                        id="credit"
-                        name="credit"
-                        value={props.media.credit}
-                        class="form-control"
-                        placeholder="Photo by..."
-                    />
-                </div>
-
-                <div class="form-group">
-                    <label for="focal_point">Focal Point</label>
-                    <input
-                        type="text"
-                        id="focal_point"
-                        name="focal_point"
-                        value={props.media.focal_point}
-                        class="form-control"
-                        readonly=""
-                    />
-                </div>
-
-                <div class="form-group">
-                    <label for="folder">Folder</label>
-                    <select id="folder" name="folder" class="form-control">
-                        <option value="">Default</option>
-                        {for (props.folders) |folder| (
-                            {if (folder.is_selected) (
-                                <option value={folder.id} selected="selected">{depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}</option>
-                            ) else (
-                                <option value={folder.id}>{depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}</option>
+                <div class="media-panel-section">
+                    <div class="form-group">
+                        <label for="folder">Folder</label>
+                        <select id="folder" name="folder" class="form-control">
+                            <option value="">Default</option>
+                            {for (props.folders) |folder| (
+                                {if (folder.is_selected) (
+                                    <option value={folder.id} selected="selected">{depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}</option>
+                                ) else (
+                                    <option value={folder.id}>{depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}</option>
+                                )}
                             )}
-                        )}
-                    </select>
-                    <span class="form-hint">Each file belongs to one folder. Use tags for multi-assignment.</span>
-                </div>
+                        </select>
+                    </div>
 
-                <div class="form-group">
-                    <label>Tags</label>
-                    <div class="tag-picker" data-publr-component="tag-picker">
-                        <div class="tag-picker-selected" data-publr-part="selected">
-                            {for (props.all_tags) |tag| (
-                                {if (tag.is_selected) (
-                                    <span class="tag-picker-chip" data-tag-name={tag.name} data-tag-id={tag.id}>
-                                        {tag.name}
-                                        <button type="button" class="tag-picker-chip-remove" data-publr-part="remove" aria-label="Remove tag">&times;</button>
-                                    </span>
-                                ) else (<span></span>)}
-                            )}
-                        </div>
-                        <input type="text" class="form-control form-control-sm" data-publr-part="search" placeholder="Search or add tags..." autocomplete="off" />
-                        <div class="tag-picker-dropdown" data-publr-part="dropdown" style="display:none">
-                            <div class="tag-picker-options" data-publr-part="options">
+                    <div class="form-group">
+                        <label>Tags</label>
+                        <div class="tag-picker" data-publr-component="tag-picker">
+                            <div class="tag-picker-selected" data-publr-part="selected">
                                 {for (props.all_tags) |tag| (
-                                    <label class="tag-picker-option">
-                                        {if (tag.is_selected) (
-                                            <input type="checkbox" data-publr-part="option" data-tag-name={tag.name} data-tag-id={tag.id} value={tag.name} checked="checked" />
-                                        ) else (
-                                            <input type="checkbox" data-publr-part="option" data-tag-name={tag.name} data-tag-id={tag.id} value={tag.name} />
-                                        )}
-                                        {" "}
-                                        {tag.name}
-                                    </label>
+                                    {if (tag.is_selected) (
+                                        <span class="tag-picker-chip" data-tag-name={tag.name} data-tag-id={tag.id}>
+                                            {tag.name}
+                                            <button type="button" class="tag-picker-chip-remove" data-publr-part="remove" aria-label="Remove tag">&times;</button>
+                                        </span>
+                                    ) else (<span></span>)}
                                 )}
                             </div>
-                            <button type="button" class="tag-picker-create" data-publr-part="create" style="display:none"></button>
+                            <input type="text" class="form-control form-control-sm" data-publr-part="search" placeholder="Search or add tags..." autocomplete="off" />
+                            <div class="tag-picker-dropdown" data-publr-part="dropdown" style="display:none">
+                                <div class="tag-picker-options" data-publr-part="options">
+                                    {for (props.all_tags) |tag| (
+                                        <label class="tag-picker-option">
+                                            {if (tag.is_selected) (
+                                                <input type="checkbox" data-publr-part="option" data-tag-name={tag.name} data-tag-id={tag.id} value={tag.name} checked="checked" />
+                                            ) else (
+                                                <input type="checkbox" data-publr-part="option" data-tag-name={tag.name} data-tag-id={tag.id} value={tag.name} />
+                                            )}
+                                            {" "}
+                                            {tag.name}
+                                        </label>
+                                    )}
+                                </div>
+                                <button type="button" class="tag-picker-create" data-publr-part="create" style="display:none"></button>
+                            </div>
+                            <input type="hidden" name="tags" data-publr-part="hidden" value={props.tags_display} />
                         </div>
-                        <input type="hidden" name="tags" data-publr-part="hidden" value={props.tags_display} />
                     </div>
-                    <span class="form-hint">Select existing tags or type to create new ones.</span>
                 </div>
 
-                <div class="form-actions">
+                <div class="media-panel-section">
+                    <div class="media-visibility">
+                        <div class="media-visibility-info">
+                            <span class="form-label">Visibility</span>
+                            <span class={if (props.media.is_private) ("badge badge-draft") else ("badge badge-published")}>{props.media.visibility}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="media-panel-section media-panel-details">
+                    <div class="media-detail-row">
+                        <span class="media-detail-label">Filename</span>
+                        <span class="media-detail-value">{props.media.filename}</span>
+                    </div>
+                    <div class="media-detail-row">
+                        <span class="media-detail-label">URL</span>
+                        <a href={props.media.media_url} class="media-url-link" target="_blank">{props.media.media_url}</a>
+                    </div>
+                </div>
+
+                <div class="media-panel-actions">
                     <button type="submit" class="btn btn-primary">Save</button>
                     <a href="/admin/media" class="btn" onclick="if(history.length>1){history.back();return false}">Cancel</a>
                 </div>
             </form>
 
-            <div class="media-danger-zone">
-                <h3 class="media-danger-title">Danger Zone</h3>
-                <form method="POST" action={props.delete_url}>
-                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    <button type="submit" class="btn btn-danger" onclick="return confirm('Delete this file permanently? This cannot be undone.')">
-                        Delete File
-                    </button>
-                </form>
+            <div class="media-panel-footer">
+                <div class="media-footer-actions">
+                    <form method="POST" action={props.toggle_url} class="media-visibility-form">
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        {if (props.media.is_private) (
+                            <button type="submit" class="btn btn-sm">Make Public</button>
+                        ) else (
+                            <button type="submit" class="btn btn-sm">Make Private</button>
+                        )}
+                    </form>
+                    <form method="POST" action={props.delete_url}>
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this file permanently? This cannot be undone.')">
+                            Delete
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
