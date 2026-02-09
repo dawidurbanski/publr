@@ -245,7 +245,9 @@ fn handleCreate(ctx: *Context) !void {
         .meta_description = null,
     };
 
-    _ = cms.saveEntry(Post, ctx.allocator, db, null, data) catch |err| {
+    _ = cms.saveEntry(Post, ctx.allocator, db, null, data, .{
+        .author_id = auth_middleware.getUserId(ctx),
+    }) catch |err| {
         std.debug.print("Error creating post: {}\n", .{err});
     };
 
@@ -286,7 +288,9 @@ fn handleUpdate(ctx: *Context) !void {
         .meta_description = null,
     };
 
-    _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data) catch |err| {
+    _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
+        .author_id = auth_middleware.getUserId(ctx),
+    }) catch |err| {
         std.debug.print("Error updating post: {}\n", .{err});
     };
 
@@ -335,7 +339,9 @@ fn handlePublish(ctx: *Context) !void {
     var data = entry.data;
     data.status = "published";
 
-    _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data) catch |err| {
+    _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
+        .author_id = auth_middleware.getUserId(ctx),
+    }) catch |err| {
         std.debug.print("Error publishing post: {}\n", .{err});
     };
 
@@ -366,7 +372,9 @@ fn handleUnpublish(ctx: *Context) !void {
     var data = entry.data;
     data.status = "draft";
 
-    _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data) catch |err| {
+    _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
+        .author_id = auth_middleware.getUserId(ctx),
+    }) catch |err| {
         std.debug.print("Error unpublishing post: {}\n", .{err});
     };
 

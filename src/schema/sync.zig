@@ -215,7 +215,7 @@ fn setStoredHash(db: *Db, hash: []const u8) !void {
 }
 
 /// Generate a version ID (v_ prefix + 16 random alphanumeric chars)
-fn generateVersionId() [18]u8 {
+pub fn generateVersionId() [18]u8 {
     var id_buf: [18]u8 = undefined;
     id_buf[0] = 'v';
     id_buf[1] = '_';
