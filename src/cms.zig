@@ -431,8 +431,8 @@ fn generateVersionId() [18]u8 {
     return id_buf;
 }
 
-/// Prune old edit versions if version_history_limit is set.
-/// Keeps the N most recent 'edit' versions per entry, deletes the rest.
+/// Prune old versions if version_history_limit is set.
+/// Keeps the N most recent versions per entry, deletes the rest.
 fn pruneVersions(db: *Db, entry_id: []const u8) !void {
     // Read the limit from settings table
     var limit_stmt = try db.prepare(
@@ -446,16 +446,14 @@ fn pruneVersions(db: *Db, entry_id: []const u8) !void {
     const limit = std.fmt.parseInt(u32, limit_str, 10) catch return;
     if (limit == 0) return;
 
-    // Delete oldest edit versions beyond the limit.
+    // Delete oldest versions beyond the limit.
     // Keep the N most recent by created_at; delete the rest.
     var del_stmt = try db.prepare(
         \\DELETE FROM entry_versions
         \\WHERE entry_id = ?1
-        \\  AND version_type = 'edit'
         \\  AND id NOT IN (
         \\    SELECT id FROM entry_versions
         \\    WHERE entry_id = ?1
-        \\      AND version_type = 'edit'
         \\    ORDER BY created_at DESC
         \\    LIMIT ?2
         \\  )
@@ -532,27 +530,27 @@ pub fn saveEntry(
     }
     defer if (prev_version_id) |v| allocator.free(v);
 
-    // Create version
     const version_id = generateVersionId();
 
-    {
-        var v_stmt = try db.prepare(
-            \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
-            \\VALUES (?1, ?2, ?3, ?4, ?5, 'edit')
-        );
-        defer v_stmt.deinit();
-
-        try v_stmt.bindText(1, &version_id);
-        try v_stmt.bindText(2, entry_id);
-        if (prev_version_id) |pv| try v_stmt.bindText(3, pv) else try v_stmt.bindNull(3);
-        try v_stmt.bindText(4, data_json);
-        if (opts.author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
-
-        _ = try v_stmt.step();
-    }
-
     if (is_update) {
-        // Update existing entry (keep entries.data in sync as denormalized copy)
+        // Create version first (entry already exists, FK is satisfied)
+        {
+            var v_stmt = try db.prepare(
+                \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+                \\VALUES (?1, ?2, ?3, ?4, ?5, 'updated')
+            );
+            defer v_stmt.deinit();
+
+            try v_stmt.bindText(1, &version_id);
+            try v_stmt.bindText(2, entry_id);
+            if (prev_version_id) |pv| try v_stmt.bindText(3, pv) else try v_stmt.bindNull(3);
+            try v_stmt.bindText(4, data_json);
+            if (opts.author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+
+            _ = try v_stmt.step();
+        }
+
+        // Update entry
         var stmt = try db.prepare(
             \\UPDATE entries SET
             \\    slug = ?2,
@@ -574,22 +572,52 @@ pub fn saveEntry(
 
         _ = try stmt.step();
     } else {
-        // Create new entry with version pointer
-        var stmt = try db.prepare(
-            \\INSERT INTO entries (id, content_type_id, slug, title, data, status, current_version_id)
-            \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        );
-        defer stmt.deinit();
+        // Create entry first (so FK on entry_versions.entry_id is satisfied)
+        {
+            var stmt = try db.prepare(
+                \\INSERT INTO entries (id, content_type_id, slug, title, data, status)
+                \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            );
+            defer stmt.deinit();
 
-        try stmt.bindText(1, entry_id);
-        try stmt.bindText(2, CT.type_id);
-        if (slug) |s| try stmt.bindText(3, s) else try stmt.bindNull(3);
-        try stmt.bindText(4, title);
-        try stmt.bindText(5, data_json);
-        try stmt.bindText(6, status);
-        try stmt.bindText(7, &version_id);
+            try stmt.bindText(1, entry_id);
+            try stmt.bindText(2, CT.type_id);
+            if (slug) |s| try stmt.bindText(3, s) else try stmt.bindNull(3);
+            try stmt.bindText(4, title);
+            try stmt.bindText(5, data_json);
+            try stmt.bindText(6, status);
 
-        _ = try stmt.step();
+            _ = try stmt.step();
+        }
+
+        // Then create version
+        {
+            var v_stmt = try db.prepare(
+                \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+                \\VALUES (?1, ?2, NULL, ?3, ?4, 'created')
+            );
+            defer v_stmt.deinit();
+
+            try v_stmt.bindText(1, &version_id);
+            try v_stmt.bindText(2, entry_id);
+            try v_stmt.bindText(3, data_json);
+            if (opts.author_id) |aid| try v_stmt.bindText(4, aid) else try v_stmt.bindNull(4);
+
+            _ = try v_stmt.step();
+        }
+
+        // Update entry with version pointer
+        {
+            var u_stmt = try db.prepare(
+                "UPDATE entries SET current_version_id = ?1 WHERE id = ?2",
+            );
+            defer u_stmt.deinit();
+
+            try u_stmt.bindText(1, &version_id);
+            try u_stmt.bindText(2, entry_id);
+
+            _ = try u_stmt.step();
+        }
     }
 
     // Enforce version retention limit
@@ -843,7 +871,7 @@ pub fn getVersion(allocator: Allocator, db: *Db, version_id: []const u8) !?Versi
     };
 }
 
-/// Restore a previous version: creates a new 'edit' version with the old data,
+/// Restore a previous version: creates a new 'restored' version with the old data,
 /// pointing parent_id to the current version. Updates entries.data and current_version_id.
 pub fn restoreVersion(
     allocator: Allocator,
@@ -868,7 +896,7 @@ pub fn restoreVersion(
     {
         var v_stmt = try db.prepare(
             \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
-            \\VALUES (?1, ?2, ?3, ?4, ?5, 'edit')
+            \\VALUES (?1, ?2, ?3, ?4, ?5, 'restored')
         );
         defer v_stmt.deinit();
 

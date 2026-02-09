@@ -747,9 +747,8 @@ body.admin {
 
 .version-item {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--space-md);
     padding: var(--space-md) var(--space-lg);
     background: var(--bg-primary);
     text-decoration: none;
@@ -766,8 +765,32 @@ a.version-item:hover {
     background: var(--bg-secondary);
 }
 
-.version-author {
+.version-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+}
+
+.version-avatar-system {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-control);
+    color: var(--text-tertiary);
+    font-size: var(--text-xs);
+    font-weight: 600;
+}
+
+.version-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.version-type {
     font-weight: 500;
+    text-transform: capitalize;
 }
 
 .version-time {

@@ -13,6 +13,7 @@ const schemas = @import("schemas");
 const views = @import("views");
 const registry = @import("registry");
 const auth_middleware = @import("auth_middleware");
+const gravatar = @import("gravatar");
 
 const Post = schemas.Post;
 
@@ -567,7 +568,6 @@ fn buildVersionHistoryHtml(allocator: std.mem.Allocator, db: *Db, entry_id: []co
 
     for (versions) |v| {
         const time_str = cms.formatRelativeTime(allocator, v.created_at) catch "Unknown";
-        const author_str = v.author_email orelse "System";
         const version_url = std.fmt.allocPrint(allocator, "/admin/posts/{s}/versions/{s}", .{ entry_id, v.id }) catch "";
 
         if (v.is_current) {
@@ -578,11 +578,24 @@ fn buildVersionHistoryHtml(allocator: std.mem.Allocator, db: *Db, entry_id: []co
             try w.writeAll("\" class=\"version-item\">");
         }
 
-        try w.writeAll("<span class=\"version-author\">");
-        try w.writeAll(author_str);
-        try w.writeAll("</span><span class=\"version-time\">");
-        try w.writeAll(time_str);
+        // Avatar
+        if (v.author_email) |email| {
+            const avatar = gravatar.url(email, 24);
+            try w.writeAll("<img src=\"");
+            try w.writeAll(avatar.slice());
+            try w.writeAll("\" alt=\"\" class=\"version-avatar\" />");
+        } else {
+            try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
+        }
+
+        // Info column: type + time
+        try w.writeAll("<span class=\"version-info\">");
+        try w.writeAll("<span class=\"version-type\">");
+        try w.writeAll(v.version_type);
         try w.writeAll("</span>");
+        try w.writeAll("<span class=\"version-time\">");
+        try w.writeAll(time_str);
+        try w.writeAll("</span></span>");
 
         if (v.is_current) {
             try w.writeAll("<span class=\"version-badge\">current</span></div>");

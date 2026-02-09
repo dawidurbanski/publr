@@ -417,6 +417,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "cms", .module = cms_module },
             .{ .name = "schemas", .module = schemas_module },
             .{ .name = "schema_sync", .module = schema_sync_module },
+            .{ .name = "gravatar", .module = gravatar_module },
             .{ .name = "views", .module = views },
         },
     });
