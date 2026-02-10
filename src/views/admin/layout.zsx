@@ -33,18 +33,25 @@ pub fn Layout(props: struct {
                         {@raw props.topbar_nav_html}
                     </nav>
                 </div>
-                <div data-publr-component="dropdown" class="avatar-dropdown">
-                    <button data-publr-part="trigger" class="avatar-trigger" aria-label="User menu">
-                        <img src={props.user_gravatar_url} alt="" class="avatar-img" />
-                    </button>
-                    <div class="dropdown-menu dropdown-menu-right" data-publr-part="content">
-                        <a href="/admin/users/profile" class="dropdown-item">Profile</a>
-                        <a href="/admin/settings" class="dropdown-item">Settings</a>
-                        <hr class="dropdown-divider" />
-                        <form method="POST" action="/admin/logout">
-                            <input type="hidden" name="_csrf" value={props.csrf_token} />
-                            <button type="submit" class="dropdown-item">Logout</button>
-                        </form>
+                <div class="top-bar-right">
+                    <div class="bottom-bar-left">
+                        <a href="/admin/settings" class="settings-link">
+                            <span class="nav-icon">{@raw icons.settings}</span>
+                        </a>
+                    </div>
+                    <div data-publr-component="dropdown" class="avatar-dropdown">
+                        <button data-publr-part="trigger" class="avatar-trigger" aria-label="User menu">
+                            <img src={props.user_gravatar_url} alt="" class="avatar-img" />
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-right" data-publr-part="content">
+                            <a href="/admin/users/profile" class="dropdown-item">Profile</a>
+                            <a href="/admin/settings" class="dropdown-item">Settings</a>
+                            <hr class="dropdown-divider" />
+                            <form method="POST" action="/admin/logout">
+                                <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                <button type="submit" class="dropdown-item">Logout</button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </header>
@@ -72,12 +79,6 @@ pub fn Layout(props: struct {
                 </main>
             </div>
             <div class="bottom-bar">
-                <div class="bottom-bar-left">
-                    <a href="/admin/settings" class="settings-link">
-                        <span class="nav-icon">{@raw icons.settings}</span>
-                        Settings
-                    </a>
-                </div>
                 {if (props.bottom_bar.len > 0) (
                     <div class="bottom-bar-content">
                         {@raw props.bottom_bar}

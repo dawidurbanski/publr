@@ -1,0 +1,55 @@
+// Release menu — dropdown for adding posts to releases or creating new ones
+// Items submit through the main #post-form via hidden inputs so changes are saved.
+
+const std = @import("std");
+
+const icon_chevron_down =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
+const icon_check =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
+const ReleaseOption = struct {
+    id: []const u8,
+    name: []const u8,
+    is_added: bool,
+};
+
+pub fn ReleaseMenu(props: struct {
+    releases: []const ReleaseOption,
+}) {
+    // Hidden fields associated with main post form
+    <input type="hidden" name="action" value="" form="post-form" id="release-action" />
+    <input type="hidden" name="release_id" value="" form="post-form" id="release-id" />
+    <input type="hidden" name="release_name" value="" form="post-form" id="release-name" />
+
+    <div data-publr-component="dropdown" data-publr-state="closed" id="release-dropdown">
+        <button type="button" data-publr-part="trigger" class="btn btn-full" aria-expanded="false" aria-haspopup="true" disabled="">
+            Add to Release
+            {@raw icon_chevron_down}
+        </button>
+        <div data-publr-part="content" class="dropdown-menu" role="menu">
+            {for (props.releases) |rel| (
+                {if (rel.is_added) (
+                    <span class="dropdown-item dropdown-item-added" role="menuitem">
+                        {@raw icon_check}
+                        {rel.name}
+                    </span>
+                ) else (
+                    <button type="button" class="dropdown-item" data-publr-part="item" role="menuitem" data-release-id={rel.id}>
+                        {rel.name}
+                    </button>
+                )}
+            )}
+            {if (props.releases.len > 0) (
+                <hr class="dropdown-divider" />
+            )}
+            <div class="dropdown-create-row">
+                <input type="text" id="release-name-input" placeholder="New release..." class="dropdown-create-input" />
+                <button type="button" class="dropdown-create-btn" data-publr-part="item" id="release-create-btn">Create</button>
+            </div>
+        </div>
+    </div>
+}

@@ -1186,17 +1186,17 @@ fn makeZigIdentifier(allocator: Allocator, name: []const u8) ![]u8 {
 
 fn isZigKeyword(name: []const u8) bool {
     const keywords = [_][]const u8{
-        "addrspace",  "align",      "allowzero",  "and",        "anyframe",
-        "anytype",    "asm",        "async",      "await",      "break",
-        "callconv",   "catch",      "comptime",   "const",      "continue",
-        "defer",      "else",       "enum",       "errdefer",   "error",
-        "export",     "extern",     "false",      "fn",         "for",
-        "if",         "inline",     "linksection", "noalias",   "nosuspend",
-        "null",       "opaque",     "or",         "orelse",     "packed",
-        "pub",        "resume",     "return",     "struct",     "suspend",
-        "switch",     "test",       "threadlocal", "true",      "try",
-        "type",       "undefined",  "union",      "unreachable", "var",
-        "volatile",   "while",
+        "addrspace", "align",     "allowzero",   "and",         "anyframe",
+        "anytype",   "asm",       "async",       "await",       "break",
+        "callconv",  "catch",     "comptime",    "const",       "continue",
+        "defer",     "else",      "enum",        "errdefer",    "error",
+        "export",    "extern",    "false",       "fn",          "for",
+        "if",        "inline",    "linksection", "noalias",     "nosuspend",
+        "null",      "opaque",    "or",          "orelse",      "packed",
+        "pub",       "resume",    "return",      "struct",      "suspend",
+        "switch",    "test",      "threadlocal", "true",        "try",
+        "type",      "undefined", "union",       "unreachable", "var",
+        "volatile",  "while",
     };
     for (keywords) |kw| {
         if (mem.eql(u8, name, kw)) return true;
@@ -2113,7 +2113,13 @@ const Parser = struct {
     }
 
     fn parseIf(self: *Parser) Error!void {
-        // Already consumed {, positioned at "if"
+        try self.parseIfChain(true);
+    }
+
+    /// Parse an if/else-if/else chain. `is_first` controls whether we emit
+    /// "if" or "} else if" and whether we consume the closing `}`.
+    fn parseIfChain(self: *Parser, is_first: bool) Error!void {
+        // Consume "if " or "if(" keyword
         if (self.matchKeyword("if ")) self.pos += 3;
         if (self.matchKeyword("if(")) self.pos += 2;
 
@@ -2149,13 +2155,34 @@ const Parser = struct {
 
         self.skipWhitespace();
 
-        // Check for else
-        var else_body: ?[]const u8 = null;
+        // Emit "if (...) {" or "} else if (...) {"
+        if (is_first) {
+            try self.writeIndent();
+            try self.write("if (");
+        } else {
+            try self.writeIndent();
+            try self.write("} else if (");
+        }
+        try self.write(cond);
+        try self.write(") {\n");
+
+        self.indent += 1;
+        try self.parseFunctionBody(body);
+        self.indent -= 1;
+
+        // Check for else / else if
         if (self.matchKeyword("else ") or self.matchKeyword("else(")) {
             if (self.matchKeyword("else ")) self.pos += 5;
             if (self.matchKeyword("else(")) self.pos += 4;
             self.skipWhitespace();
 
+            if (self.matchKeyword("if ") or self.matchKeyword("if(")) {
+                // else if — recurse (will emit "} else if ..." and handle further chains)
+                try self.parseIfChain(false);
+                return; // closing } already emitted by recursive call
+            }
+
+            // Plain else — parse body
             if (self.pos < self.source.len and self.source[self.pos] == '(') {
                 self.pos += 1;
                 const else_start = self.pos;
@@ -2165,8 +2192,14 @@ const Parser = struct {
                     if (self.source[self.pos] == ')') depth -= 1;
                     if (depth > 0) self.pos += 1;
                 }
-                else_body = self.source[else_start..self.pos];
+                const else_body = self.source[else_start..self.pos];
                 self.pos += 1; // skip )
+
+                try self.writeIndent();
+                try self.write("} else {\n");
+                self.indent += 1;
+                try self.parseFunctionBody(else_body);
+                self.indent -= 1;
             }
 
             self.skipWhitespace();
@@ -2175,24 +2208,6 @@ const Parser = struct {
         // Skip closing }
         if (self.pos < self.source.len and self.source[self.pos] == '}') {
             self.pos += 1;
-        }
-
-        // Emit if statement
-        try self.writeIndent();
-        try self.write("if (");
-        try self.write(cond);
-        try self.write(") {\n");
-
-        self.indent += 1;
-        try self.parseFunctionBody(body);
-        self.indent -= 1;
-
-        if (else_body) |eb| {
-            try self.writeIndent();
-            try self.write("} else {\n");
-            self.indent += 1;
-            try self.parseFunctionBody(eb);
-            self.indent -= 1;
         }
 
         try self.writeIndent();

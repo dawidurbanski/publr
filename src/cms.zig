@@ -31,6 +31,7 @@ const Allocator = std.mem.Allocator;
 pub const Status = enum {
     draft,
     published,
+    changed,
     archived,
 
     pub fn toString(self: Status) []const u8 {
@@ -77,6 +78,11 @@ pub fn Entry(comptime CT: type) type {
         /// Check if entry is draft
         pub fn isDraft(self: Self) bool {
             return std.mem.eql(u8, self.status, "draft");
+        }
+
+        /// Check if entry has unpublished changes
+        pub fn isChanged(self: Self) bool {
+            return std.mem.eql(u8, self.status, "changed");
         }
     };
 }
@@ -816,6 +822,7 @@ pub const Version = struct {
     created_at: i64,
     version_type: []const u8,
     is_current: bool,
+    release_name: ?[]const u8 = null,
 };
 
 /// List versions for an entry, newest first. Joins users for author email.
@@ -825,10 +832,13 @@ pub fn listVersions(allocator: Allocator, db: *Db, entry_id: []const u8, opts: s
     var stmt = try db.prepare(
         \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data,
         \\       ev.author_id, u.email, ev.created_at, ev.version_type,
-        \\       (e.current_version_id = ev.id) AS is_current
+        \\       (e.current_version_id = ev.id) AS is_current,
+        \\       r.name AS release_name
         \\FROM entry_versions ev
         \\JOIN entries e ON e.id = ev.entry_id
         \\LEFT JOIN users u ON u.id = ev.author_id
+        \\LEFT JOIN release_items ri ON ri.to_version = ev.id AND ri.entry_id = ev.entry_id
+        \\LEFT JOIN releases r ON r.id = ri.release_id AND r.name IS NOT NULL
         \\WHERE ev.entry_id = ?1
         \\ORDER BY ev.created_at DESC
         \\LIMIT ?2
@@ -852,6 +862,7 @@ pub fn listVersions(allocator: Allocator, db: *Db, entry_id: []const u8, opts: s
             .created_at = stmt.columnInt(6),
             .version_type = try allocator.dupe(u8, stmt.columnText(7) orelse "edit"),
             .is_current = stmt.columnInt(8) == 1,
+            .release_name = if (stmt.columnText(9)) |v| try allocator.dupe(u8, v) else null,
         });
     }
 
@@ -900,49 +911,8 @@ pub fn restoreVersion(
     // Get the source version's data
     const source = try getVersion(allocator, db, source_version_id) orelse return error.VersionNotFound;
 
-    // Get current version id (becomes parent of restored version)
-    var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
-    defer cur_stmt.deinit();
-    try cur_stmt.bindText(1, entry_id);
-    if (!try cur_stmt.step()) return error.EntryNotFound;
-    const current_vid = cur_stmt.columnText(0);
-
-    // Create new version with old data
-    const new_vid = generateVersionId();
-
-    {
-        var v_stmt = try db.prepare(
-            \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
-            \\VALUES (?1, ?2, ?3, ?4, ?5, 'restored')
-        );
-        defer v_stmt.deinit();
-
-        try v_stmt.bindText(1, &new_vid);
-        try v_stmt.bindText(2, entry_id);
-        if (current_vid) |cv| try v_stmt.bindText(3, cv) else try v_stmt.bindNull(3);
-        try v_stmt.bindText(4, source.data);
-        if (author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
-
-        _ = try v_stmt.step();
-    }
-
-    // Update entry to point to new version and sync data
-    {
-        var u_stmt = try db.prepare(
-            \\UPDATE entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
-            \\WHERE id = ?3
-        );
-        defer u_stmt.deinit();
-
-        try u_stmt.bindText(1, &new_vid);
-        try u_stmt.bindText(2, source.data);
-        try u_stmt.bindText(3, entry_id);
-
-        _ = try u_stmt.step();
-    }
-
-    // Enforce retention limit
-    try pruneVersions(db, entry_id);
+    // Delegate to restoreVersionWithData with the source version's data
+    try restoreVersionWithData(db, entry_id, source.data, author_id);
 }
 
 /// Format a unix timestamp as a relative time string ("2 hours ago", "yesterday", etc.)
@@ -979,6 +949,144 @@ pub fn formatRelativeTime(allocator: Allocator, timestamp: i64) ![]const u8 {
         try allocator.dupe(u8, "1 week ago")
     else
         try std.fmt.allocPrint(allocator, "{d} weeks ago", .{weeks});
+}
+
+/// Structured field comparison result
+pub const FieldComparison = struct {
+    key: []const u8,
+    old_value: []const u8,
+    new_value: []const u8,
+    changed: bool,
+};
+
+/// Compare two JSON data strings field-by-field, returning structured data
+/// for all fields (union of keys from both objects).
+pub fn compareVersionFields(allocator: Allocator, old_data: []const u8, new_data: []const u8) ![]FieldComparison {
+    const old_parsed = std.json.parseFromSlice(std.json.Value, allocator, old_data, .{}) catch
+        return &.{};
+    defer old_parsed.deinit();
+
+    const new_parsed = std.json.parseFromSlice(std.json.Value, allocator, new_data, .{}) catch
+        return &.{};
+    defer new_parsed.deinit();
+
+    const old_obj = if (old_parsed.value == .object) old_parsed.value.object else return &.{};
+    const new_obj = if (new_parsed.value == .object) new_parsed.value.object else return &.{};
+
+    var items: std.ArrayListUnmanaged(FieldComparison) = .{};
+    errdefer items.deinit(allocator);
+
+    // Keys from new version
+    var new_it = new_obj.iterator();
+    while (new_it.next()) |entry| {
+        const key = try allocator.dupe(u8, entry.key_ptr.*);
+        const new_val = jsonValueToString(allocator, entry.value_ptr.*) catch try allocator.dupe(u8, "");
+        const old_val = if (old_obj.get(key)) |ov| jsonValueToString(allocator, ov) catch try allocator.dupe(u8, "") else try allocator.dupe(u8, "");
+
+        try items.append(allocator, .{
+            .key = key,
+            .old_value = old_val,
+            .new_value = new_val,
+            .changed = !std.mem.eql(u8, old_val, new_val),
+        });
+    }
+
+    // Keys only in old version (removed fields)
+    var old_it = old_obj.iterator();
+    while (old_it.next()) |entry| {
+        if (!new_obj.contains(entry.key_ptr.*)) {
+            const key = try allocator.dupe(u8, entry.key_ptr.*);
+            const old_val = jsonValueToString(allocator, entry.value_ptr.*) catch try allocator.dupe(u8, "");
+
+            try items.append(allocator, .{
+                .key = key,
+                .old_value = old_val,
+                .new_value = try allocator.dupe(u8, ""),
+                .changed = true,
+            });
+        }
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+/// Restore a version with arbitrary merged data. Creates a 'restored' version
+/// with the given data, updates entries.data, title, slug, status from the JSON.
+pub fn restoreVersionWithData(
+    db: *Db,
+    entry_id: []const u8,
+    data: []const u8,
+    author_id: ?[]const u8,
+) !void {
+    // Get current version id (becomes parent of restored version)
+    var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+    defer cur_stmt.deinit();
+    try cur_stmt.bindText(1, entry_id);
+    if (!try cur_stmt.step()) return error.EntryNotFound;
+    const current_vid = cur_stmt.columnText(0);
+
+    // Create new version with merged data
+    const new_vid = generateVersionId();
+
+    {
+        var v_stmt = try db.prepare(
+            \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+            \\VALUES (?1, ?2, ?3, ?4, ?5, 'restored')
+        );
+        defer v_stmt.deinit();
+
+        try v_stmt.bindText(1, &new_vid);
+        try v_stmt.bindText(2, entry_id);
+        if (current_vid) |cv| try v_stmt.bindText(3, cv) else try v_stmt.bindNull(3);
+        try v_stmt.bindText(4, data);
+        if (author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+
+        _ = try v_stmt.step();
+    }
+
+    // Extract title, slug, status from data JSON for entries update
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, data, .{}) catch null;
+    defer if (parsed) |p| p.deinit();
+
+    var title: []const u8 = "";
+    var slug: ?[]const u8 = null;
+    var status: []const u8 = "draft";
+
+    if (parsed) |p| {
+        if (p.value == .object) {
+            if (p.value.object.get("title")) |v| {
+                if (v == .string) title = v.string;
+            }
+            if (p.value.object.get("slug")) |v| {
+                if (v == .string) slug = v.string;
+            }
+            if (p.value.object.get("status")) |v| {
+                if (v == .string) status = v.string;
+            }
+        }
+    }
+
+    // Update entry to point to new version and sync data + promoted fields
+    {
+        var u_stmt = try db.prepare(
+            \\UPDATE entries SET current_version_id = ?1, data = ?2,
+            \\    title = ?3, slug = ?4, status = ?5, updated_at = unixepoch()
+            \\WHERE id = ?6
+        );
+        defer u_stmt.deinit();
+
+        try u_stmt.bindText(1, &new_vid);
+        try u_stmt.bindText(2, data);
+        try u_stmt.bindText(3, title);
+        if (slug) |s| try u_stmt.bindText(4, s) else try u_stmt.bindNull(4);
+        try u_stmt.bindText(5, status);
+        try u_stmt.bindText(6, entry_id);
+
+        _ = try u_stmt.step();
+    }
+
+    // Enforce retention limit
+    try pruneVersions(db, entry_id);
 }
 
 /// Compute a field-level diff between two JSON data strings.
@@ -1050,7 +1158,7 @@ pub fn diffVersions(allocator: Allocator, old_data: []const u8, new_data: []cons
 }
 
 /// Convert a JSON value to a display string
-fn jsonValueToString(allocator: Allocator, value: std.json.Value) ![]const u8 {
+pub fn jsonValueToString(allocator: Allocator, value: std.json.Value) ![]const u8 {
     return switch (value) {
         .string => |s| try allocator.dupe(u8, s),
         .null => try allocator.dupe(u8, ""),
@@ -1063,7 +1171,7 @@ fn jsonValueToString(allocator: Allocator, value: std.json.Value) ![]const u8 {
 }
 
 /// Write HTML-escaped text
-fn writeEscaped(w: anytype, text: []const u8) !void {
+pub fn writeEscaped(w: anytype, text: []const u8) !void {
     for (text) |c| {
         switch (c) {
             '<' => try w.writeAll("&lt;"),
@@ -1073,6 +1181,701 @@ fn writeEscaped(w: anytype, text: []const u8) !void {
             else => try w.writeByte(c),
         }
     }
+}
+
+// =============================================================================
+// Releases
+// =============================================================================
+
+/// Generate a release ID (rel_ prefix + 16 random alphanumeric chars)
+fn generateReleaseId() [20]u8 {
+    var id_buf: [20]u8 = undefined;
+    id_buf[0] = 'r';
+    id_buf[1] = 'e';
+    id_buf[2] = 'l';
+    id_buf[3] = '_';
+
+    var rand_buf: [16]u8 = undefined;
+    std.crypto.random.bytes(&rand_buf);
+
+    const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
+    for (rand_buf, 0..) |byte, i| {
+        id_buf[4 + i] = charset[byte % charset.len];
+    }
+
+    return id_buf;
+}
+
+/// Get the current_version_id for an entry
+pub fn getEntryVersionId(db: *Db, entry_id: []const u8) !?[]const u8 {
+    var stmt = try db.prepare(
+        "SELECT current_version_id FROM entries WHERE id = ?1",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, entry_id);
+    if (try stmt.step()) {
+        if (stmt.columnText(0)) |v| {
+            return try db.allocator.dupe(u8, v);
+        }
+    }
+    return null;
+}
+
+/// Get the published version's data for an entry (for smart change detection).
+/// Returns null if no published version exists (i.e. entry was never published).
+pub fn getPublishedData(allocator: Allocator, db: *Db, entry_id: []const u8) !?[]const u8 {
+    var stmt = try db.prepare(
+        \\SELECT ev.data FROM entries e
+        \\JOIN entry_versions ev ON ev.id = e.published_version_id
+        \\WHERE e.id = ?1
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, entry_id);
+    if (try stmt.step()) {
+        if (stmt.columnText(0)) |d| {
+            return try allocator.dupe(u8, d);
+        }
+    }
+    return null;
+}
+
+/// Create an instant release for a single entry publish.
+/// Records from_version → to_version and marks the release as 'released'.
+pub fn createRelease(
+    db: *Db,
+    entry_id: []const u8,
+    from_version: ?[]const u8,
+    to_version: []const u8,
+    author_id: ?[]const u8,
+) !void {
+    const release_id = generateReleaseId();
+
+    // Insert release (instant = already released)
+    {
+        var stmt = try db.prepare(
+            \\INSERT INTO releases (id, name, status, author_id, created_at, released_at)
+            \\VALUES (?1, NULL, 'released', ?2, unixepoch(), unixepoch())
+        );
+        defer stmt.deinit();
+
+        try stmt.bindText(1, &release_id);
+        if (author_id) |aid| try stmt.bindText(2, aid) else try stmt.bindNull(2);
+
+        _ = try stmt.step();
+    }
+
+    // Insert release item
+    {
+        var stmt = try db.prepare(
+            \\INSERT INTO release_items (release_id, entry_id, from_version, to_version)
+            \\VALUES (?1, ?2, ?3, ?4)
+        );
+        defer stmt.deinit();
+
+        try stmt.bindText(1, &release_id);
+        try stmt.bindText(2, entry_id);
+        if (from_version) |fv| try stmt.bindText(3, fv) else try stmt.bindNull(3);
+        try stmt.bindText(4, to_version);
+
+        _ = try stmt.step();
+    }
+
+    // Set published_version_id on the entry so we can track what's "live"
+    {
+        var stmt = try db.prepare(
+            "UPDATE entries SET published_version_id = ?1 WHERE id = ?2",
+        );
+        defer stmt.deinit();
+
+        try stmt.bindText(1, to_version);
+        try stmt.bindText(2, entry_id);
+
+        _ = try stmt.step();
+    }
+}
+
+/// Error returned when a release operation is blocked
+pub const ReleaseError = error{
+    ReleaseNotFound,
+    InvalidReleaseStatus,
+    EntryModifiedSinceRelease,
+};
+
+/// Revert a released release: for each item, create a new version with
+/// from_version's data, update current_version_id, set status to 'reverted'.
+/// Blocked if any entry's current_version_id != the release item's to_version.
+pub fn revertRelease(db: *Db, release_id: []const u8, author_id: ?[]const u8) (Db.Error || ReleaseError)!void {
+    // 1. Load release — must be status='released'
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+        const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+        if (!std.mem.eql(u8, status, "released")) return ReleaseError.InvalidReleaseStatus;
+    }
+
+    // 2. Check blocking condition for all items
+    {
+        var stmt = try db.prepare(
+            \\SELECT ri.entry_id FROM release_items ri
+            \\JOIN entries e ON e.id = ri.entry_id
+            \\WHERE ri.release_id = ?1
+            \\  AND e.current_version_id != ri.to_version
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (try stmt.step()) return ReleaseError.EntryModifiedSinceRelease;
+    }
+
+    // 3. For each item, create new version with from_version's data
+    {
+        var items_stmt = try db.prepare(
+            \\SELECT ri.entry_id, ri.from_version, ri.to_version
+            \\FROM release_items ri
+            \\WHERE ri.release_id = ?1
+        );
+        defer items_stmt.deinit();
+        try items_stmt.bindText(1, release_id);
+
+        while (try items_stmt.step()) {
+            const entry_id = items_stmt.columnText(0) orelse continue;
+            const from_version = items_stmt.columnText(1);
+            const current_to = items_stmt.columnText(2) orelse continue;
+
+            // Get data to restore: from_version's data, or empty JSON if from_version is NULL (new entry)
+            var data: []const u8 = "{}";
+            var data_stmt: ?Statement = null;
+            defer if (data_stmt) |*s| s.deinit();
+
+            if (from_version) |fv| {
+                var stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+                try stmt.bindText(1, fv);
+                if (try stmt.step()) {
+                    data = stmt.columnText(0) orelse "{}";
+                }
+                data_stmt = stmt;
+            }
+
+            // Create new version
+            const new_vid = generateVersionId();
+            {
+                var v_stmt = try db.prepare(
+                    \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+                    \\VALUES (?1, ?2, ?3, ?4, ?5, 'reverted')
+                );
+                defer v_stmt.deinit();
+
+                try v_stmt.bindText(1, &new_vid);
+                try v_stmt.bindText(2, entry_id);
+                try v_stmt.bindText(3, current_to);
+                try v_stmt.bindText(4, data);
+                if (author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+
+                _ = try v_stmt.step();
+            }
+
+            // Update entry
+            {
+                var u_stmt = try db.prepare(
+                    \\UPDATE entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
+                    \\WHERE id = ?3
+                );
+                defer u_stmt.deinit();
+
+                try u_stmt.bindText(1, &new_vid);
+                try u_stmt.bindText(2, data);
+                try u_stmt.bindText(3, entry_id);
+
+                _ = try u_stmt.step();
+            }
+        }
+    }
+
+    // 4. Update release status
+    {
+        var stmt = try db.prepare(
+            "UPDATE releases SET status = 'reverted', reverted_at = unixepoch() WHERE id = ?1",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        _ = try stmt.step();
+    }
+}
+
+/// Re-release a reverted release: for each item, create a new version with
+/// to_version's data, update current_version_id, set status back to 'released'.
+/// Blocked if any entry has been modified since the revert.
+pub fn reReleaseReverted(db: *Db, release_id: []const u8, author_id: ?[]const u8) (Db.Error || ReleaseError)!void {
+    // 1. Load release — must be status='reverted'
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+        const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+        if (!std.mem.eql(u8, status, "reverted")) return ReleaseError.InvalidReleaseStatus;
+    }
+
+    // 2. Check blocking: current_version_id must be the version created by the revert.
+    //    That version's parent_id == to_version, so we check that current_version_id's
+    //    parent matches to_version for each item.
+    {
+        var stmt = try db.prepare(
+            \\SELECT ri.entry_id FROM release_items ri
+            \\JOIN entries e ON e.id = ri.entry_id
+            \\JOIN entry_versions ev ON ev.id = e.current_version_id
+            \\WHERE ri.release_id = ?1
+            \\  AND (ev.parent_id IS NULL OR ev.parent_id != ri.to_version)
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (try stmt.step()) return ReleaseError.EntryModifiedSinceRelease;
+    }
+
+    // 3. For each item, create new version with to_version's data
+    {
+        var items_stmt = try db.prepare(
+            \\SELECT ri.entry_id, ri.to_version
+            \\FROM release_items ri
+            \\WHERE ri.release_id = ?1
+        );
+        defer items_stmt.deinit();
+        try items_stmt.bindText(1, release_id);
+
+        while (try items_stmt.step()) {
+            const entry_id = items_stmt.columnText(0) orelse continue;
+            const to_version = items_stmt.columnText(1) orelse continue;
+
+            // Get to_version's data
+            var data: []const u8 = "{}";
+            var data_stmt: ?Statement = null;
+            defer if (data_stmt) |*s| s.deinit();
+            {
+                var stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+                try stmt.bindText(1, to_version);
+                if (try stmt.step()) {
+                    data = stmt.columnText(0) orelse "{}";
+                }
+                data_stmt = stmt;
+            }
+
+            // Get current version id (parent for new version)
+            var current_vid: ?[]const u8 = null;
+            var cv_stmt: ?Statement = null;
+            defer if (cv_stmt) |*s| s.deinit();
+            {
+                var stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+                try stmt.bindText(1, entry_id);
+                if (try stmt.step()) {
+                    current_vid = stmt.columnText(0);
+                }
+                cv_stmt = stmt;
+            }
+
+            // Create new version
+            const new_vid = generateVersionId();
+            {
+                var v_stmt = try db.prepare(
+                    \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+                    \\VALUES (?1, ?2, ?3, ?4, ?5, 'restored')
+                );
+                defer v_stmt.deinit();
+
+                try v_stmt.bindText(1, &new_vid);
+                try v_stmt.bindText(2, entry_id);
+                if (current_vid) |cv| try v_stmt.bindText(3, cv) else try v_stmt.bindNull(3);
+                try v_stmt.bindText(4, data);
+                if (author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+
+                _ = try v_stmt.step();
+            }
+
+            // Update entry
+            {
+                var u_stmt = try db.prepare(
+                    \\UPDATE entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
+                    \\WHERE id = ?3
+                );
+                defer u_stmt.deinit();
+
+                try u_stmt.bindText(1, &new_vid);
+                try u_stmt.bindText(2, data);
+                try u_stmt.bindText(3, entry_id);
+
+                _ = try u_stmt.step();
+            }
+        }
+    }
+
+    // 4. Update release status back to released
+    {
+        var stmt = try db.prepare(
+            "UPDATE releases SET status = 'released', released_at = unixepoch(), reverted_at = NULL WHERE id = ?1",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        _ = try stmt.step();
+    }
+}
+
+/// Set a pending release to scheduled state with a target timestamp.
+/// No execution — just stores the state for future use.
+pub fn scheduleRelease(db: *Db, release_id: []const u8, scheduled_for: i64) (Db.Error || ReleaseError)!void {
+    var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, release_id);
+    if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+    const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+    if (!std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
+
+    var u_stmt = try db.prepare(
+        "UPDATE releases SET status = 'scheduled', scheduled_for = ?1 WHERE id = ?2",
+    );
+    defer u_stmt.deinit();
+    try u_stmt.bindInt(1, scheduled_for);
+    try u_stmt.bindText(2, release_id);
+    _ = try u_stmt.step();
+}
+
+// =============================================================================
+// Batch Releases
+// =============================================================================
+
+/// Lightweight struct for pending release dropdowns
+pub const PendingReleaseOption = struct {
+    id: []const u8,
+    name: []const u8,
+};
+
+/// Struct for release list items
+pub const ReleaseListItem = struct {
+    id: []const u8,
+    name: []const u8,
+    status: []const u8,
+    item_count: i64,
+    author_email: ?[]const u8,
+    created_at: i64,
+};
+
+/// Struct for a single release item in the detail view
+pub const ReleaseDetailItem = struct {
+    entry_id: []const u8,
+    entry_title: []const u8,
+    entry_status: []const u8,
+    from_version: ?[]const u8,
+    to_version: []const u8,
+};
+
+/// Full release detail (header + items)
+pub const ReleaseDetail = struct {
+    id: []const u8,
+    name: []const u8,
+    status: []const u8,
+    author_email: ?[]const u8,
+    created_at: i64,
+    released_at: ?i64,
+    scheduled_for: ?i64,
+    reverted_at: ?i64,
+    items: []const ReleaseDetailItem,
+};
+
+/// Create a pending (batch) release with a name.
+pub fn createPendingRelease(db: *Db, name: []const u8, author_id: ?[]const u8) (Db.Error || error{OutOfMemory})![20]u8 {
+    const release_id = generateReleaseId();
+
+    var stmt = try db.prepare(
+        \\INSERT INTO releases (id, name, status, author_id, created_at)
+        \\VALUES (?1, ?2, 'pending', ?3, unixepoch())
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, &release_id);
+    try stmt.bindText(2, name);
+    if (author_id) |aid| try stmt.bindText(3, aid) else try stmt.bindNull(3);
+    _ = try stmt.step();
+
+    return release_id;
+}
+
+/// Add an entry to a pending release. Uses INSERT OR REPLACE so
+/// re-adding the same entry updates the version references.
+pub fn addToRelease(
+    db: *Db,
+    release_id: []const u8,
+    entry_id: []const u8,
+    from_version: ?[]const u8,
+    to_version: []const u8,
+) (Db.Error || ReleaseError)!void {
+    // Validate release is pending
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+        const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+        if (!std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
+    }
+
+    var stmt = try db.prepare(
+        \\INSERT OR REPLACE INTO release_items (release_id, entry_id, from_version, to_version)
+        \\VALUES (?1, ?2, ?3, ?4)
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, release_id);
+    try stmt.bindText(2, entry_id);
+    if (from_version) |fv| try stmt.bindText(3, fv) else try stmt.bindNull(3);
+    try stmt.bindText(4, to_version);
+    _ = try stmt.step();
+}
+
+/// Remove an entry from a pending release.
+pub fn removeFromRelease(db: *Db, release_id: []const u8, entry_id: []const u8) (Db.Error || ReleaseError)!void {
+    // Validate release is pending
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+        const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+        if (!std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
+    }
+
+    var stmt = try db.prepare(
+        "DELETE FROM release_items WHERE release_id = ?1 AND entry_id = ?2",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, release_id);
+    try stmt.bindText(2, entry_id);
+    _ = try stmt.step();
+}
+
+/// Archive a release (any status except pending). Archived releases are hidden
+/// from the list by default but can still be viewed directly.
+pub fn archiveRelease(db: *Db, release_id: []const u8) (Db.Error || ReleaseError)!void {
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+        const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+        if (std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
+    }
+
+    var stmt = try db.prepare(
+        "UPDATE releases SET status = 'archived' WHERE id = ?1",
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, release_id);
+    _ = try stmt.step();
+}
+
+/// Publish a batch release: for each item, set entry status to 'published',
+/// then mark release as 'released'.
+pub fn publishBatchRelease(db: *Db, release_id: []const u8) (Db.Error || ReleaseError)!void {
+    // Validate release is pending
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+        const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+        if (!std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
+    }
+
+    // For each item: apply to_version data and set status to published
+    {
+        var items_stmt = try db.prepare(
+            \\SELECT ri.entry_id, ri.to_version, ev.data
+            \\FROM release_items ri
+            \\JOIN entry_versions ev ON ev.id = ri.to_version
+            \\WHERE ri.release_id = ?1
+        );
+        defer items_stmt.deinit();
+        try items_stmt.bindText(1, release_id);
+
+        while (try items_stmt.step()) {
+            const eid = items_stmt.columnText(0) orelse continue;
+            const to_vid = items_stmt.columnText(1) orelse continue;
+            const to_data = items_stmt.columnText(2) orelse continue;
+
+            var u_stmt = try db.prepare(
+                \\UPDATE entries SET status = 'published', data = ?1,
+                \\current_version_id = ?2, published_at = unixepoch(),
+                \\updated_at = unixepoch() WHERE id = ?3
+            );
+            defer u_stmt.deinit();
+            try u_stmt.bindText(1, to_data);
+            try u_stmt.bindText(2, to_vid);
+            try u_stmt.bindText(3, eid);
+            _ = try u_stmt.step();
+        }
+    }
+
+    // Mark release as released
+    {
+        var stmt = try db.prepare(
+            "UPDATE releases SET status = 'released', released_at = unixepoch() WHERE id = ?1",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        _ = try stmt.step();
+    }
+}
+
+/// List releases with optional status filter.
+pub fn listReleases(allocator: Allocator, db: *Db, opts: struct {
+    status: ?[]const u8 = null,
+    limit: u32 = 50,
+    include_archived: bool = false,
+}) ![]ReleaseListItem {
+    // Build query dynamically based on filter
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeAll(
+        \\SELECT r.id, r.name, r.status,
+        \\  COUNT(ri.entry_id) as item_count,
+        \\  u.email, r.created_at
+        \\FROM releases r
+        \\LEFT JOIN release_items ri ON ri.release_id = r.id
+        \\LEFT JOIN users u ON u.id = r.author_id
+        \\WHERE r.name IS NOT NULL
+    );
+
+    if (opts.status) |_| {
+        try w.writeAll(" AND r.status = ?1");
+    }
+
+    if (!opts.include_archived) {
+        try w.writeAll(" AND r.status != 'archived'");
+    }
+
+    try w.writeAll(" GROUP BY r.id ORDER BY r.created_at DESC");
+    try w.print(" LIMIT {d}", .{opts.limit});
+
+    const sql = try buf.toOwnedSlice(allocator);
+    defer allocator.free(sql);
+
+    var stmt = try db.prepare(sql);
+    defer stmt.deinit();
+
+    if (opts.status) |s| try stmt.bindText(1, s);
+
+    var results: std.ArrayList(ReleaseListItem) = .{};
+    errdefer results.deinit(allocator);
+
+    while (try stmt.step()) {
+        const item = ReleaseListItem{
+            .id = try allocator.dupe(u8, stmt.columnText(0) orelse ""),
+            .name = try allocator.dupe(u8, stmt.columnText(1) orelse "(unnamed)"),
+            .status = try allocator.dupe(u8, stmt.columnText(2) orelse ""),
+            .item_count = stmt.columnInt(3),
+            .author_email = if (stmt.columnText(4)) |e| try allocator.dupe(u8, e) else null,
+            .created_at = stmt.columnInt(5),
+        };
+        try results.append(allocator, item);
+    }
+
+    return results.toOwnedSlice(allocator);
+}
+
+/// Get full release detail (header + items with entry info).
+pub fn getRelease(allocator: Allocator, db: *Db, release_id: []const u8) !?ReleaseDetail {
+    // Fetch header
+    var h_stmt = try db.prepare(
+        \\SELECT r.id, COALESCE(r.name, ''), r.status, u.email,
+        \\  r.created_at, r.released_at, r.scheduled_for, r.reverted_at
+        \\FROM releases r
+        \\LEFT JOIN users u ON u.id = r.author_id
+        \\WHERE r.id = ?1
+    );
+    defer h_stmt.deinit();
+    try h_stmt.bindText(1, release_id);
+    if (!try h_stmt.step()) return null;
+
+    const id = try allocator.dupe(u8, h_stmt.columnText(0) orelse "");
+    const name = try allocator.dupe(u8, h_stmt.columnText(1) orelse "");
+    const status = try allocator.dupe(u8, h_stmt.columnText(2) orelse "");
+    const author_email = if (h_stmt.columnText(3)) |e| try allocator.dupe(u8, e) else null;
+    const created_at = h_stmt.columnInt(4);
+    const released_at: ?i64 = if (h_stmt.columnIsNull(5)) null else h_stmt.columnInt(5);
+    const scheduled_for: ?i64 = if (h_stmt.columnIsNull(6)) null else h_stmt.columnInt(6);
+    const reverted_at: ?i64 = if (h_stmt.columnIsNull(7)) null else h_stmt.columnInt(7);
+
+    // Fetch items
+    var i_stmt = try db.prepare(
+        \\SELECT ri.entry_id, COALESCE(e.title, '(untitled)'), COALESCE(e.status, ''),
+        \\  ri.from_version, ri.to_version
+        \\FROM release_items ri
+        \\LEFT JOIN entries e ON e.id = ri.entry_id
+        \\WHERE ri.release_id = ?1
+    );
+    defer i_stmt.deinit();
+    try i_stmt.bindText(1, release_id);
+
+    var items: std.ArrayList(ReleaseDetailItem) = .{};
+    errdefer items.deinit(allocator);
+
+    while (try i_stmt.step()) {
+        try items.append(allocator, .{
+            .entry_id = try allocator.dupe(u8, i_stmt.columnText(0) orelse ""),
+            .entry_title = try allocator.dupe(u8, i_stmt.columnText(1) orelse "(untitled)"),
+            .entry_status = try allocator.dupe(u8, i_stmt.columnText(2) orelse ""),
+            .from_version = if (i_stmt.columnText(3)) |v| try allocator.dupe(u8, v) else null,
+            .to_version = try allocator.dupe(u8, i_stmt.columnText(4) orelse ""),
+        });
+    }
+
+    return ReleaseDetail{
+        .id = id,
+        .name = name,
+        .status = status,
+        .author_email = author_email,
+        .created_at = created_at,
+        .released_at = released_at,
+        .scheduled_for = scheduled_for,
+        .reverted_at = reverted_at,
+        .items = try items.toOwnedSlice(allocator),
+    };
+}
+
+/// List pending releases (lightweight, for dropdown).
+pub fn listPendingReleases(allocator: Allocator, db: *Db) ![]PendingReleaseOption {
+    var stmt = try db.prepare(
+        "SELECT id, name FROM releases WHERE status = 'pending' ORDER BY created_at DESC",
+    );
+    defer stmt.deinit();
+
+    var results: std.ArrayList(PendingReleaseOption) = .{};
+    errdefer results.deinit(allocator);
+
+    while (try stmt.step()) {
+        try results.append(allocator, .{
+            .id = try allocator.dupe(u8, stmt.columnText(0) orelse ""),
+            .name = try allocator.dupe(u8, stmt.columnText(1) orelse "(unnamed)"),
+        });
+    }
+
+    return results.toOwnedSlice(allocator);
+}
+
+/// Get IDs of pending releases that contain a given entry.
+pub fn getEntryPendingReleaseIds(allocator: Allocator, db: *Db, entry_id: []const u8) ![][]const u8 {
+    var stmt = try db.prepare(
+        \\SELECT ri.release_id FROM release_items ri
+        \\JOIN releases r ON r.id = ri.release_id
+        \\WHERE ri.entry_id = ?1 AND r.status = 'pending'
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, entry_id);
+
+    var results: std.ArrayList([]const u8) = .{};
+    errdefer results.deinit(allocator);
+    while (try stmt.step()) {
+        try results.append(allocator, try allocator.dupe(u8, stmt.columnText(0) orelse ""));
+    }
+    return results.toOwnedSlice(allocator);
 }
 
 // =============================================================================
@@ -1154,6 +1957,23 @@ fn setupTestDb() !*Db {
         \\    value TEXT NOT NULL,
         \\    created_at INTEGER DEFAULT (unixepoch()),
         \\    updated_at INTEGER DEFAULT (unixepoch())
+        \\);
+        \\CREATE TABLE IF NOT EXISTS releases (
+        \\    id TEXT PRIMARY KEY,
+        \\    name TEXT,
+        \\    status TEXT NOT NULL DEFAULT 'pending',
+        \\    author_id TEXT REFERENCES users(id),
+        \\    created_at INTEGER DEFAULT (unixepoch()),
+        \\    released_at INTEGER,
+        \\    scheduled_for INTEGER,
+        \\    reverted_at INTEGER
+        \\);
+        \\CREATE TABLE IF NOT EXISTS release_items (
+        \\    release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+        \\    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+        \\    from_version TEXT REFERENCES entry_versions(id),
+        \\    to_version TEXT NOT NULL REFERENCES entry_versions(id),
+        \\    PRIMARY KEY (release_id, entry_id)
         \\);
         \\INSERT INTO content_types (id, slug, name, fields, source)
         \\VALUES ('test_ct', 'test_ct', 'Test', '[]', 'core');
@@ -1533,4 +2353,627 @@ test "diffVersions shows removed fields" {
 
     try std.testing.expect(std.mem.indexOf(u8, result, "old_field") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "removed") != null);
+}
+
+test "generateReleaseId produces valid IDs" {
+    const id = generateReleaseId();
+    try std.testing.expect(id[0] == 'r');
+    try std.testing.expect(id[1] == 'e');
+    try std.testing.expect(id[2] == 'l');
+    try std.testing.expect(id[3] == '_');
+    try std.testing.expectEqual(@as(usize, 20), id.len);
+}
+
+test "createRelease inserts release and item" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    // Create entry and version
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
+
+    // Create a release
+    try createRelease(db, "e_test1", null, &v1, null);
+
+    // Verify release exists with correct status
+    {
+        var stmt = try db.prepare("SELECT status, released_at FROM releases");
+        defer stmt.deinit();
+        try std.testing.expect(try stmt.step());
+        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
+        try std.testing.expect(!stmt.columnIsNull(1)); // released_at is set
+    }
+
+    // Verify release item
+    {
+        var stmt = try db.prepare(
+            "SELECT entry_id, from_version, to_version FROM release_items",
+        );
+        defer stmt.deinit();
+        try std.testing.expect(try stmt.step());
+        try std.testing.expectEqualStrings("e_test1", stmt.columnText(0) orelse "");
+        try std.testing.expect(stmt.columnIsNull(1)); // from_version is NULL (new entry)
+        try std.testing.expectEqualStrings(&v1, stmt.columnText(2) orelse "");
+    }
+}
+
+test "createRelease tracks from_version on update" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    // Create entry with initial version
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
+
+    // Create second version
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
+
+    // Create release with from/to
+    try createRelease(db, "e_test1", &v1, &v2, null);
+
+    // Verify release item has both versions
+    {
+        var stmt = try db.prepare(
+            "SELECT from_version, to_version FROM release_items",
+        );
+        defer stmt.deinit();
+        try std.testing.expect(try stmt.step());
+        try std.testing.expectEqualStrings(&v1, stmt.columnText(0) orelse "");
+        try std.testing.expectEqualStrings(&v2, stmt.columnText(1) orelse "");
+    }
+}
+
+test "createRelease stores author_id" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    // Create a user
+    try db.exec(
+        \\INSERT INTO users (id, email, password_hash)
+        \\VALUES ('u_author1', 'test@example.com', 'hash')
+    );
+
+    // Create entry and version
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'published')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+
+    // Create release with author
+    try createRelease(db, "e_test1", null, &v1, "u_author1");
+
+    // Verify author_id
+    {
+        var stmt = try db.prepare("SELECT author_id FROM releases");
+        defer stmt.deinit();
+        try std.testing.expect(try stmt.step());
+        try std.testing.expectEqualStrings("u_author1", stmt.columnText(0) orelse "");
+    }
+}
+
+test "getEntryVersionId returns current version" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+
+    const version_id = try getEntryVersionId(db, "e_test1");
+    try std.testing.expect(version_id != null);
+    defer db.allocator.free(version_id.?);
+    try std.testing.expectEqualStrings(&v1, version_id.?);
+}
+
+test "getEntryVersionId returns null for no version" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status, current_version_id)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft', NULL)
+    );
+
+    const version_id = try getEntryVersionId(db, "e_test1");
+    try std.testing.expect(version_id == null);
+}
+
+test "instant release has null name" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'published')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+
+    try createRelease(db, "e_test1", null, &v1, null);
+
+    // Verify name is NULL (instant release)
+    {
+        var stmt = try db.prepare("SELECT name FROM releases");
+        defer stmt.deinit();
+        try std.testing.expect(try stmt.step());
+        try std.testing.expect(stmt.columnIsNull(0));
+    }
+}
+
+/// Helper: create a released release for testing revert/re-release
+fn createTestRelease(db: *Db, entry_id: []const u8, from_v: ?[]const u8, to_v: []const u8) ![20]u8 {
+    const release_id = generateReleaseId();
+    {
+        var stmt = try db.prepare(
+            \\INSERT INTO releases (id, name, status, author_id, created_at, released_at)
+            \\VALUES (?1, NULL, 'released', NULL, unixepoch(), unixepoch())
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, &release_id);
+        _ = try stmt.step();
+    }
+    {
+        var stmt = try db.prepare(
+            \\INSERT INTO release_items (release_id, entry_id, from_version, to_version)
+            \\VALUES (?1, ?2, ?3, ?4)
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, &release_id);
+        try stmt.bindText(2, entry_id);
+        if (from_v) |fv| try stmt.bindText(3, fv) else try stmt.bindNull(3);
+        try stmt.bindText(4, to_v);
+        _ = try stmt.step();
+    }
+    return release_id;
+}
+
+test "revertRelease restores from_version data" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
+    );
+
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
+
+    // Create release: v1 → v2
+    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
+
+    // Revert
+    try revertRelease(db, &rel_id, null);
+
+    // Verify entry data is restored to v1
+    {
+        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("{\"title\":\"v1\"}", stmt.columnText(0) orelse "");
+    }
+
+    // Verify release status is reverted
+    {
+        var stmt = try db.prepare("SELECT status, reverted_at FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("reverted", stmt.columnText(0) orelse "");
+        try std.testing.expect(!stmt.columnIsNull(1)); // reverted_at set
+    }
+
+    // Verify a new 'reverted' version was created
+    {
+        var stmt = try db.prepare(
+            "SELECT version_type FROM entry_versions WHERE entry_id = 'e_test1' ORDER BY created_at DESC LIMIT 1",
+        );
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("reverted", stmt.columnText(0) orelse "");
+    }
+}
+
+test "revertRelease blocked when entry modified since release" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
+    );
+
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
+
+    // Create release: v1 → v2
+    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
+
+    // Modify entry after release (v3)
+    var v2_copy: [18]u8 = undefined;
+    @memcpy(&v2_copy, &v2);
+    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"v3\"}", &v2_copy);
+
+    // Revert should be blocked
+    const result = revertRelease(db, &rel_id, null);
+    try std.testing.expectError(ReleaseError.EntryModifiedSinceRelease, result);
+
+    // Verify release status unchanged
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
+    }
+}
+
+test "revertRelease fails on non-released status" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    // Create a pending release (not released)
+    const rel_id = generateReleaseId();
+    {
+        var stmt = try db.prepare(
+            "INSERT INTO releases (id, status) VALUES (?1, 'pending')",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+    }
+
+    const result = revertRelease(db, &rel_id, null);
+    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
+}
+
+test "reReleaseReverted restores to_version data" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
+    );
+
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
+
+    // Create release and revert it
+    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
+    try revertRelease(db, &rel_id, null);
+
+    // Re-release
+    try reReleaseReverted(db, &rel_id, null);
+
+    // Verify entry data is back to v2
+    {
+        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("{\"title\":\"v2\"}", stmt.columnText(0) orelse "");
+    }
+
+    // Verify release status is released again
+    {
+        var stmt = try db.prepare("SELECT status, reverted_at FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
+        try std.testing.expect(stmt.columnIsNull(1)); // reverted_at cleared
+    }
+}
+
+test "reReleaseReverted blocked when entry modified after revert" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
+    );
+
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
+
+    // Create release, revert, then modify
+    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
+    try revertRelease(db, &rel_id, null);
+
+    // Get current version (the revert version) and modify entry after revert
+    const revert_vid = (try getEntryVersionId(db, "e_test1")).?;
+    defer db.allocator.free(revert_vid);
+    var rv_copy: [18]u8 = undefined;
+    @memcpy(&rv_copy, revert_vid[0..18]);
+    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"v4\"}", &rv_copy);
+
+    // Re-release should be blocked
+    const result = reReleaseReverted(db, &rel_id, null);
+    try std.testing.expectError(ReleaseError.EntryModifiedSinceRelease, result);
+}
+
+test "scheduleRelease sets scheduled state" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    // Create a pending release
+    const rel_id = generateReleaseId();
+    {
+        var stmt = try db.prepare(
+            "INSERT INTO releases (id, status) VALUES (?1, 'pending')",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+    }
+
+    const target_time: i64 = 1738800000; // some future timestamp
+    try scheduleRelease(db, &rel_id, target_time);
+
+    // Verify
+    {
+        var stmt = try db.prepare("SELECT status, scheduled_for FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("scheduled", stmt.columnText(0) orelse "");
+        try std.testing.expectEqual(target_time, stmt.columnInt(1));
+    }
+}
+
+test "scheduleRelease fails on non-pending status" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    // Create a released release
+    const rel_id = generateReleaseId();
+    {
+        var stmt = try db.prepare(
+            "INSERT INTO releases (id, status) VALUES (?1, 'released')",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+    }
+
+    const result = scheduleRelease(db, &rel_id, 1738800000);
+    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
+}
+
+test "revertRelease with null from_version restores empty data" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"first"}', 'published')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"first\"}", null);
+
+    // Release with null from_version (new entry publish)
+    const rel_id = try createTestRelease(db, "e_test1", null, &v1);
+
+    try revertRelease(db, &rel_id, null);
+
+    // Entry data should be empty JSON
+    {
+        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("{}", stmt.columnText(0) orelse "");
+    }
+}
+
+test "createPendingRelease creates a pending release with name" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    const rel_id = try createPendingRelease(db, "Sprint 42", null);
+
+    var stmt = try db.prepare("SELECT name, status FROM releases WHERE id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, &rel_id);
+    try std.testing.expect(try stmt.step());
+    try std.testing.expectEqualStrings("Sprint 42", stmt.columnText(0) orelse "");
+    try std.testing.expectEqualStrings("pending", stmt.columnText(1) orelse "");
+}
+
+test "addToRelease inserts item into pending release" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+
+    const rel_id = try createPendingRelease(db, "Batch 1", null);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+
+    var stmt = try db.prepare("SELECT entry_id, to_version FROM release_items WHERE release_id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, &rel_id);
+    try std.testing.expect(try stmt.step());
+    try std.testing.expectEqualStrings("e_test1", stmt.columnText(0) orelse "");
+    try std.testing.expectEqualStrings(&v1, stmt.columnText(1) orelse "");
+}
+
+test "addToRelease fails on non-pending release" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    const rel_id = generateReleaseId();
+    {
+        var stmt = try db.prepare("INSERT INTO releases (id, status) VALUES (?1, 'released')");
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+    }
+
+    const result = addToRelease(db, &rel_id, "e_test1", null, "v_fake_version123");
+    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
+}
+
+test "removeFromRelease removes item" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+
+    const rel_id = try createPendingRelease(db, "Batch 1", null);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+
+    // Remove
+    try removeFromRelease(db, &rel_id, "e_test1");
+
+    var stmt = try db.prepare("SELECT COUNT(*) FROM release_items WHERE release_id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, &rel_id);
+    _ = try stmt.step();
+    try std.testing.expectEqual(@as(i64, 0), stmt.columnInt(0));
+}
+
+test "publishBatchRelease sets entries to published" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"staged\"}", null);
+
+    const rel_id = try createPendingRelease(db, "Launch", null);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+
+    try publishBatchRelease(db, &rel_id);
+
+    // Entry should be published
+    {
+        var stmt = try db.prepare("SELECT status FROM entries WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("published", stmt.columnText(0) orelse "");
+    }
+
+    // Release should be released
+    {
+        var stmt = try db.prepare("SELECT status, released_at FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
+        try std.testing.expect(!stmt.columnIsNull(1));
+    }
+}
+
+test "publishBatchRelease fails on non-pending" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    const rel_id = generateReleaseId();
+    {
+        var stmt = try db.prepare("INSERT INTO releases (id, status) VALUES (?1, 'released')");
+        defer stmt.deinit();
+        try stmt.bindText(1, &rel_id);
+        _ = try stmt.step();
+    }
+
+    const result = publishBatchRelease(db, &rel_id);
+    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
+}
+
+test "listReleases returns releases" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    _ = try createPendingRelease(db, "Release A", null);
+    _ = try createPendingRelease(db, "Release B", null);
+
+    const releases = try listReleases(std.testing.allocator, db, .{});
+    defer std.testing.allocator.free(releases);
+    try std.testing.expectEqual(@as(usize, 2), releases.len);
+}
+
+test "listReleases filters by status" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    _ = try createPendingRelease(db, "Pending One", null);
+
+    // Create a released one directly
+    try db.exec("INSERT INTO releases (id, name, status) VALUES ('rel_released_test1', 'Done', 'released')");
+
+    const pending = try listReleases(std.testing.allocator, db, .{ .status = "pending" });
+    defer std.testing.allocator.free(pending);
+    try std.testing.expectEqual(@as(usize, 1), pending.len);
+    try std.testing.expectEqualStrings("Pending One", pending[0].name);
+}
+
+test "getRelease returns detail with items" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, title, data, status)
+        \\VALUES ('e_test1', 'test_ct', 'My Post', '{}', 'draft')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+
+    const rel_id = try createPendingRelease(db, "Detail Test", null);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+
+    const detail = try getRelease(std.testing.allocator, db, &rel_id);
+    try std.testing.expect(detail != null);
+    const d = detail.?;
+    defer std.testing.allocator.free(d.items);
+    try std.testing.expectEqualStrings("Detail Test", d.name);
+    try std.testing.expectEqualStrings("pending", d.status);
+    try std.testing.expectEqual(@as(usize, 1), d.items.len);
+    try std.testing.expectEqualStrings("My Post", d.items[0].entry_title);
+}
+
+test "getRelease returns null for nonexistent" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    const detail = try getRelease(std.testing.allocator, db, "rel_nonexistent12345");
+    try std.testing.expect(detail == null);
+}
+
+test "listPendingReleases returns only pending" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    _ = try createPendingRelease(db, "Active", null);
+    try db.exec("INSERT INTO releases (id, name, status) VALUES ('rel_released_test2', 'Done', 'released')");
+
+    const pending = try listPendingReleases(std.testing.allocator, db);
+    defer std.testing.allocator.free(pending);
+    try std.testing.expectEqual(@as(usize, 1), pending.len);
+    try std.testing.expectEqualStrings("Active", pending[0].name);
 }

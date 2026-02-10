@@ -60,6 +60,7 @@
   var selectAllPagesBtn = document.getElementById('media-select-all-pages-btn');
   var selectAllPagesText = document.getElementById('media-select-all-pages-text');
   var clearSelectionBtn = document.getElementById('media-clear-selection-btn');
+  var bulkActionsBtn = document.getElementById('media-bulk-actions-btn');
 
   var filteredCount = banner ? parseInt(banner.dataset.filteredCount, 10) || 0 : 0;
   var itemsPerPage = banner ? parseInt(banner.dataset.itemsPerPage, 10) || 25 : 25;
@@ -79,9 +80,11 @@
       countDefault.style.display = 'none';
       selectionInfo.style.display = '';
       selectionCount.textContent = count;
+      bulkActionsBtn.disabled = false;
     } else {
       countDefault.style.display = '';
       selectionInfo.style.display = 'none';
+      bulkActionsBtn.disabled = true;
     }
 
     // Select-all checkbox state

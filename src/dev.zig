@@ -6,38 +6,49 @@ const publr_config = @import("publr_config");
 
 /// Live reload script using Server-Sent Events.
 /// Single persistent connection — no polling noise in network tab.
+/// Shows a floating indicator during rebuilds, auto-refreshes when server restarts.
 const live_reload_script =
     \\<script>
     \\(function(){
-    \\  var es = new EventSource('/__dev/events');
-    \\  es.addEventListener('reload', function(){
-    \\    es.close();
-    \\    location.reload();
-    \\  });
-    \\  es.addEventListener('css-reload', function(){
-    \\    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(link){
-    \\      var href = link.href.replace(/(\?|&)_t=\d+/, '');
-    \\      link.href = href + (href.indexOf('?') > -1 ? '&' : '?') + '_t=' + Date.now();
+    \\  var ind;
+    \\  function show(){
+    \\    if(ind) return;
+    \\    ind=document.createElement('div');
+    \\    ind.textContent='Rebuilding\u2026';
+    \\    ind.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:99999;'
+    \\      +'padding:6px 14px;background:rgba(0,0,0,.82);color:#fff;'
+    \\      +'border-radius:99px;font:500 13px/1 system-ui,sans-serif;'
+    \\      +'pointer-events:none;animation:__dr .8s ease-in-out infinite alternate';
+    \\    var s=document.createElement('style');
+    \\    s.textContent='@keyframes __dr{from{opacity:1}to{opacity:.5}}';
+    \\    document.head.appendChild(s);
+    \\    document.body.appendChild(ind);
+    \\  }
+    \\  var es=new EventSource('/__dev/events');
+    \\  es.addEventListener('rebuilding',show);
+    \\  es.addEventListener('css-reload',function(){
+    \\    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){
+    \\      var h=l.href.replace(/(\?|&)_t=\d+/,'');
+    \\      l.href=h+(h.indexOf('?')>-1?'&':'?')+'_t='+Date.now();
     \\    });
     \\  });
-    \\  window.addEventListener('beforeunload', function(){ es.close(); });
-    \\  es.onerror = function(){
-    \\    es.close();
-    \\    var d = 200;
-    \\    var check = function(){
+    \\  window.addEventListener('beforeunload',function(){es.close()});
+    \\  es.onerror=function(){
+    \\    es.close(); show();
+    \\    var d=200;
+    \\    (function poll(){
     \\      fetch('/__dev/ready').then(function(r){
-    \\        if(r.ok) location.reload();
-    \\        else { d = Math.min(d * 1.5, 2000); setTimeout(check, d); }
-    \\      }).catch(function(){ d = Math.min(d * 1.5, 2000); setTimeout(check, d); });
-    \\    };
-    \\    setTimeout(check, 300);
+    \\        if(r.ok)location.reload();
+    \\        else{d=Math.min(d*1.5,2000);setTimeout(poll,d)}
+    \\      }).catch(function(){d=Math.min(d*1.5,2000);setTimeout(poll,d)});
+    \\    })();
     \\  };
     \\})();
     \\</script>
 ;
 
-/// Track mtimes separately: templates trigger full reload, assets swap in-place
-var latest_tpl_mtime: i128 = 0;
+/// Track mtimes separately: source changes trigger rebuild indicator, assets swap in-place
+var latest_src_mtime: i128 = 0;
 var latest_asset_mtime: i128 = 0;
 var latest_input_mtime: i128 = 0;
 var mtime_initialized: bool = false;
@@ -82,7 +93,7 @@ pub fn readyHandler(ctx: *Context) !void {
     ctx.response.setBody("ok");
 }
 
-/// SSE endpoint — holds connection open, sends "reload" event on file changes
+/// SSE endpoint — holds connection open, sends events on file changes
 pub fn eventsHandler(ctx: *Context) !void {
     const stream = ctx.stream orelse return;
 
@@ -97,7 +108,7 @@ pub fn eventsHandler(ctx: *Context) !void {
 
     // Initialize mtimes on first connection
     if (!mtime_initialized) {
-        latest_tpl_mtime = getLatestTemplateMtime();
+        latest_src_mtime = getLatestSourceMtime();
         latest_asset_mtime = getLatestAssetMtime();
         latest_input_mtime = getLatestInputMtime();
         mtime_initialized = true;
@@ -117,15 +128,15 @@ pub fn eventsHandler(ctx: *Context) !void {
             return;
         }
 
-        const current_tpl_mtime = getLatestTemplateMtime();
+        const current_src_mtime = getLatestSourceMtime();
         const current_asset_mtime = getLatestAssetMtime();
         const current_input_mtime = getLatestInputMtime();
 
-        if (current_tpl_mtime != latest_tpl_mtime) {
-            latest_tpl_mtime = current_tpl_mtime;
+        if (current_src_mtime != latest_src_mtime) {
+            latest_src_mtime = current_src_mtime;
             latest_asset_mtime = current_asset_mtime;
             latest_input_mtime = current_input_mtime;
-            _ = stream.write("event: reload\ndata: changed\n\n") catch return;
+            _ = stream.write("event: rebuilding\ndata: changed\n\n") catch return;
         } else if (current_input_mtime != latest_input_mtime) {
             // Source file changed (e.g. input.css) — run build command then check output
             latest_input_mtime = current_input_mtime;
@@ -139,9 +150,25 @@ pub fn eventsHandler(ctx: *Context) !void {
     }
 }
 
-/// Get the latest mtime from ZSX template files
-fn getLatestTemplateMtime() i128 {
-    return getDirLatestMtime("src/views");
+/// Get the latest mtime from source files (.zig and .zsx in src/, excluding gen/)
+fn getLatestSourceMtime() i128 {
+    var dir = std.fs.cwd().openDir("src", .{ .iterate = true }) catch return 0;
+    defer dir.close();
+    var max_mtime: i128 = 0;
+    var walker = dir.walk(std.heap.page_allocator) catch return 0;
+    defer walker.deinit();
+    while (walker.next() catch null) |entry| {
+        if (entry.kind != .file) continue;
+        // Skip generated files
+        if (std.mem.startsWith(u8, entry.path, "gen/")) continue;
+        if (std.mem.endsWith(u8, entry.basename, ".zig") or
+            std.mem.endsWith(u8, entry.basename, ".zsx"))
+        {
+            const stat = entry.dir.statFile(entry.basename) catch continue;
+            max_mtime = @max(max_mtime, stat.mtime);
+        }
+    }
+    return max_mtime;
 }
 
 /// Get the latest mtime from static assets (output CSS, JS, images)
@@ -188,22 +215,4 @@ fn runWatcherCommands() void {
 fn getFileMtime(path: []const u8) i128 {
     const stat = std.fs.cwd().statFile(path) catch return 0;
     return stat.mtime;
-}
-
-fn getDirLatestMtime(path: []const u8) i128 {
-    var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return 0;
-    defer dir.close();
-
-    var max_mtime: i128 = 0;
-    var walker = dir.walk(std.heap.page_allocator) catch return 0;
-    defer walker.deinit();
-
-    while (walker.next() catch null) |entry| {
-        if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, ".zsx")) {
-            const stat = entry.dir.statFile(entry.basename) catch continue;
-            max_mtime = @max(max_mtime, stat.mtime);
-        }
-    }
-
-    return max_mtime;
 }

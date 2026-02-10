@@ -1,0 +1,73 @@
+// Releases list template
+
+const std = @import("std");
+
+const icon_more =
+    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 13C12.5523 13 13 12.5523 13 12C13 11.4477 12.5523 11 12 11C11.4477 11 11 11.4477 11 12C11 12.5523 11.4477 13 12 13Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 6C12.5523 6 13 5.55228 13 5C13 4.44772 12.5523 4 12 4C11.4477 4 11 4.44772 11 5C11 5.55228 11.4477 6 12 6Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 20C12.5523 20 13 19.5523 13 19C13 18.4477 12.5523 18 12 18C11.4477 18 11 18.4477 11 19C11 19.5523 11.4477 20 12 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
+const Release = struct {
+    id: []const u8,
+    name: []const u8,
+    status: []const u8,
+    item_count: []const u8,
+    author: []const u8,
+    date: []const u8,
+    detail_url: []const u8,
+};
+
+pub fn List(props: struct {
+    has_releases: bool,
+    releases: []const Release,
+    csrf_token: []const u8,
+}) {
+    {if (props.has_releases) (
+        <div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Items</th>
+                        <th>Author</th>
+                        <th>Created</th>
+                        <th class="actions-col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {for (props.releases) |release| (
+                        <tr>
+                            <td class="table-col-strong">
+                                <a href={release.detail_url}>{release.name}</a>
+                            </td>
+                            <td>
+                                <span class={if (std.mem.eql(u8, release.status, "pending")) ("badge badge-pending") else if (std.mem.eql(u8, release.status, "released")) ("badge badge-released") else if (std.mem.eql(u8, release.status, "reverted")) ("badge badge-reverted") else if (std.mem.eql(u8, release.status, "scheduled")) ("badge badge-scheduled") else if (std.mem.eql(u8, release.status, "archived")) ("badge badge-archived") else ("badge badge-draft")}>{release.status}</span>
+                            </td>
+                            <td>{release.item_count}</td>
+                            <td>{release.author}</td>
+                            <td>{release.date}</td>
+                            <td class="actions-col">
+                                <div data-publr-component="dropdown">
+                                    <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
+                                        {@raw icon_more}
+                                    </button>
+                                    <div class="dropdown-menu" data-publr-part="content">
+                                        <a href={release.detail_url} class="dropdown-item">View Details</a>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+            <div class="table-footer">
+                <span class="table-item-count">{props.releases.len} releases</span>
+            </div>
+        </div>
+    ) else (
+        <div class="empty-state">
+            <p>No releases yet.</p>
+            <p class="empty-state-hint">Releases let you batch-publish multiple entries at once.</p>
+        </div>
+    )}
+}

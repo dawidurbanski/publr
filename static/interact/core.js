@@ -14,8 +14,12 @@ export function feature(name, fn) {
 
 export function init() {
     document.querySelectorAll('[data-publr-component]').forEach(el => {
+        if (el._publrInit) return;
         const type = el.dataset.publrComponent;
-        if (handlers[type]) handlers[type](el);
+        if (handlers[type]) {
+            el._publrInit = true;
+            handlers[type](el);
+        }
     });
     Object.values(features).forEach(fn => fn());
 }

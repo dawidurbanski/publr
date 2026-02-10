@@ -85,8 +85,10 @@ register('dropdown', (el) => {
             e.preventDefault();
             items[items.length - 1].focus();
         } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (idx >= 0) items[idx].click();
+            if (idx >= 0) {
+                e.preventDefault();
+                items[idx].click();
+            }
         }
     });
 
@@ -142,8 +144,10 @@ register('select', (el) => {
             e.preventDefault();
             items[items.length - 1].focus();
         } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (idx >= 0) items[idx].click();
+            if (idx >= 0) {
+                e.preventDefault();
+                items[idx].click();
+            }
         } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
             typeBuffer += e.key.toLowerCase();
             clearTimeout(typeTimer);
@@ -976,7 +980,10 @@ function selectImage(picker, mediaId, thumbUrl, altText) {
     const remove = picker.querySelector('[data-publr-part="remove"]');
 
     // Update hidden input
-    if (hidden) hidden.value = mediaId;
+    if (hidden) {
+        hidden.value = mediaId;
+        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     // Update preview
     if (preview) {
@@ -1002,7 +1009,10 @@ function clearImage(picker) {
     const remove = picker.querySelector('[data-publr-part="remove"]');
 
     // Clear hidden input
-    if (hidden) hidden.value = '';
+    if (hidden) {
+        hidden.value = '';
+        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     // Reset preview
     if (preview) {

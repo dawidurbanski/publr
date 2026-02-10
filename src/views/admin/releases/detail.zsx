@@ -1,0 +1,120 @@
+// Release detail template — shows header info + items table + action buttons
+
+const std = @import("std");
+
+const Item = struct {
+    entry_id: []const u8,
+    entry_title: []const u8,
+    entry_status: []const u8,
+    edit_url: []const u8,
+    remove_url: []const u8,
+};
+
+pub fn Detail(props: struct {
+    name: []const u8,
+    status: []const u8,
+    author: []const u8,
+    date: []const u8,
+    items: []const Item,
+    csrf_token: []const u8,
+    publish_url: []const u8,
+    revert_url: []const u8,
+    re_release_url: []const u8,
+    archive_url: []const u8,
+    is_pending: bool,
+    is_released: bool,
+    is_reverted: bool,
+    can_archive: bool,
+    error_message: []const u8 = "",
+}) {
+    <div class="release-detail">
+        <div class="release-header">
+            <div class="release-header-info">
+                <span class={if (std.mem.eql(u8, props.status, "pending")) ("badge badge-pending") else if (std.mem.eql(u8, props.status, "released")) ("badge badge-released") else if (std.mem.eql(u8, props.status, "reverted")) ("badge badge-reverted") else if (std.mem.eql(u8, props.status, "scheduled")) ("badge badge-scheduled") else if (std.mem.eql(u8, props.status, "archived")) ("badge badge-archived") else ("badge badge-draft")}>{props.status}</span>
+                <span class="release-meta">{props.author}</span>
+                <span class="release-meta">{props.date}</span>
+            </div>
+            <div class="release-header-actions">
+                {if (props.is_pending) (
+                    <form method="POST" action={props.publish_url} style="display:inline">
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <button type="submit" class="btn btn-primary"
+                            onclick="return confirm('Publish this release? All staged entries will go live.')">
+                            Publish Release
+                        </button>
+                    </form>
+                )}
+                {if (props.is_released) (
+                    <form method="POST" action={props.revert_url} style="display:inline">
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <button type="submit" class="btn btn-danger"
+                            onclick="return confirm('Revert this release? Entries will be restored to their previous state.')">
+                            Revert Release
+                        </button>
+                    </form>
+                )}
+                {if (props.is_reverted) (
+                    <form method="POST" action={props.re_release_url} style="display:inline">
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <button type="submit" class="btn btn-primary"
+                            onclick="return confirm('Re-release? Entries will be published again.')">
+                            Re-release
+                        </button>
+                    </form>
+                )}
+                {if (props.can_archive) (
+                    <form method="POST" action={props.archive_url} style="display:inline">
+                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <button type="submit" class="btn"
+                            onclick="return confirm('Archive this release?')">
+                            Archive
+                        </button>
+                    </form>
+                )}
+            </div>
+        </div>
+
+        {if (props.error_message.len > 0) (
+            <div class="alert alert-danger">{props.error_message}</div>
+        )}
+
+        {if (props.items.len > 0) (
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Entry</th>
+                        <th>Status</th>
+                        {if (props.is_pending) (
+                            <th class="actions-col"></th>
+                        )}
+                    </tr>
+                </thead>
+                <tbody>
+                    {for (props.items) |item| (
+                        <tr>
+                            <td class="table-col-strong">
+                                <a href={item.edit_url}>{item.entry_title}</a>
+                            </td>
+                            <td>
+                                <span class={if (std.mem.eql(u8, item.entry_status, "published")) ("badge badge-published") else ("badge badge-draft")}>{item.entry_status}</span>
+                            </td>
+                            {if (props.is_pending) (
+                                <td class="actions-col">
+                                    <form method="POST" action={item.remove_url} style="display:inline">
+                                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                        <button type="submit" class="btn btn-sm btn-ghost btn-danger-text">Remove</button>
+                                    </form>
+                                </td>
+                            )}
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+        ) else (
+            <div class="empty-state">
+                <p>No entries in this release yet.</p>
+                <p class="empty-state-hint">Add entries from the post editor sidebar.</p>
+            </div>
+        )}
+    </div>
+}

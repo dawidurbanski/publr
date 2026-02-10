@@ -683,12 +683,15 @@ pub fn MediaControls(props: struct {
 }) {
     <div class="media-toolbar">
         <div class="media-toolbar-left">
+            <label for="media-select-all" class="media-count">Select all:</label>
             <input type="checkbox" class="media-select-all" id="media-select-all" aria-label="Select all" />
-            <span class="media-count" id="media-count-default">{props.filtered_count} files</span>
-            <span class="media-selection-info" id="media-selection-info" style="display:none">
-                <span id="media-selection-count">0</span> selected
+            <span class="media-selection-info">
+                <span>  
+                    <span class="media-count" id="media-count-default">{props.filtered_count} files</span>
+                    <span id="media-selection-info"><span id="media-selection-count">0</span> selected</span>
+                </span>
                 <div data-publr-component="dropdown" class="media-bulk-actions">
-                    <button class="btn btn-sm" data-publr-part="trigger">Bulk Actions</button>
+                    <button class="btn btn-sm" id="media-bulk-actions-btn" data-publr-part="trigger">Bulk Actions</button>
                     <div class="dropdown-menu" data-publr-part="content">
                         <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="delete">Delete</button>
                         <hr class="dropdown-divider" />

@@ -5,10 +5,14 @@ const PostData = struct {
     slug: []const u8,
     content: []const u8,
     date: []const u8,
+    status: []const u8,
     is_draft: bool,
     is_published: bool,
+    is_changed: bool,
     featured_image: []const u8,
     featured_image_url: []const u8,
+    entry_id: []const u8,
+    published_data: []const u8,
 };
 
 /// Main editor content (left side)
@@ -17,7 +21,11 @@ pub fn Edit(props: struct {
     csrf_token: []const u8,
     action: []const u8 = "",
 }) {
-    <form method="POST" action={props.action} id="post-form" class="form">
+    <form method="POST" action={props.action} id="post-form" class="form"
+        data-entry-id={props.post.entry_id}
+        data-entry-status={props.post.status}
+        data-published-state={props.post.published_data}
+    >
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <div class="form-group">
             <label for="title">Title</label>
@@ -58,34 +66,32 @@ pub fn EditSidebar(props: struct {
     csrf_token: []const u8,
     delete_url: []const u8 = "",
     history_html: []const u8 = "",
+    release_html: []const u8 = "",
 }) {
     <div class="edit-sidebar-section">
         <div class="edit-sidebar-actions">
-            <button type="submit" form="post-form" class="btn btn-primary btn-full">
-                {props.post.is_published ? "Update" : "Save"}
-            </button>
+            <div class="autosave-status" id="autosave-status"></div>
             {if (props.post.is_draft) (
-                <button type="submit" form="post-form" name="status" value="published" class="btn btn-full">
+                <button type="submit" form="post-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn">
                     Publish
                 </button>
+            ) else if (props.post.is_changed) (
+                <button type="submit" form="post-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn">
+                    Publish Changes
+                </button>
+            ) else (
+                <button type="submit" form="post-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn" disabled="">
+                    Published
+                </button>
             )}
-        </div>
-    </div>
-    <div class="edit-sidebar-section">
-        <h3 class="edit-sidebar-title">Status</h3>
-        <div class="edit-sidebar-field">
-            <select id="status" name="status" class="form-control" form="post-form">
-                {if (props.post.is_draft) (
-                    <option value="draft" selected="">Draft</option>
-                ) else (
-                    <option value="draft">Draft</option>
-                )}
-                {if (props.post.is_published) (
-                    <option value="published" selected="">Published</option>
-                ) else (
-                    <option value="published">Published</option>
-                )}
-            </select>
+            {if (props.post.is_changed) (
+                <button type="button" class="btn btn-ghost btn-full" id="discard-btn">
+                    Discard Changes
+                </button>
+            )}
+            {if (props.release_html.len > 0) (
+                {@raw props.release_html}
+            )}
         </div>
     </div>
     <div class="edit-sidebar-section">

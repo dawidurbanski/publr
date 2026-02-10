@@ -28,12 +28,14 @@ const settings = @import("plugin_settings");
 const components = @import("plugin_components");
 const design_system = @import("plugin_design_system");
 const content_types = @import("plugin_content_types");
+const releases = @import("plugin_releases");
 const icons = @import("icons");
 
 /// All registered admin pages, sorted by position
 pub const pages: []const admin.Page = &[_]admin.Page{
     dashboard.page,
     posts.page,
+    releases.page,
     content_types.page,
     media_plugin.page,
     users.page,
@@ -121,6 +123,7 @@ const topbar_entries = [_]struct {
     icon: []const u8,
 }{
     .{ .label = "Content", .path = "/admin/posts", .section = "content", .icon = icons.edit },
+    .{ .label = "Releases", .path = "/admin/releases", .section = "releases", .icon = icons.package },
     .{ .label = "Content Types", .path = "/admin/content-types", .section = "content_types", .icon = icons.file },
     .{ .label = "Media", .path = "/admin/media", .section = "media", .icon = icons.image },
 };
@@ -193,6 +196,7 @@ pub const settings_plugin = settings;
 pub const components_plugin = components;
 pub const design_system_plugin = design_system;
 pub const content_types_plugin = content_types;
+pub const releases_plugin = releases;
 
 // =============================================================================
 // Page Rendering

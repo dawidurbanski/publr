@@ -376,3 +376,233 @@
     });
 
 })();
+
+// ── Version Compare ──────────────────────────────
+(function() {
+    'use strict';
+    var toggle = document.getElementById('show-diff-only');
+    var fields = document.getElementById('version-compare-fields');
+    var applyBtn = document.getElementById('apply-changes-btn');
+    if (!fields) return;
+
+    function updateApplyBtn() {
+        if (!applyBtn) return;
+        var hasOld = document.querySelector('.version-compare-cell-old input[type="radio"]:checked') !== null;
+        applyBtn.disabled = !hasOld;
+    }
+
+    if (toggle) {
+        toggle.addEventListener('change', function() {
+            fields.classList.toggle('show-diff-only', toggle.checked);
+        });
+    }
+
+    var selectAll = document.getElementById('select-all-old');
+    if (selectAll) {
+        selectAll.addEventListener('click', function(e) {
+            e.preventDefault();
+            document.querySelectorAll('.version-compare-cell-old input[type="radio"]:not(:disabled)').forEach(function(r) {
+                r.checked = true;
+            });
+            updateApplyBtn();
+        });
+    }
+
+    fields.addEventListener('change', function(e) {
+        if (e.target.type === 'radio') updateApplyBtn();
+    });
+})();
+
+// ── Post Edit: Auto-save + Release Integration ──
+(function() {
+    'use strict';
+    var form = document.getElementById('post-form');
+    if (!form) return;
+
+    var publishBtn = document.getElementById('publish-btn');
+    var discardBtn = document.getElementById('discard-btn');
+    var statusEl = document.getElementById('autosave-status');
+    var releaseDropdown = document.getElementById('release-dropdown');
+    var releaseTrigger = releaseDropdown ? releaseDropdown.querySelector('[data-publr-part="trigger"]') : null;
+    var releaseAction = document.getElementById('release-action');
+    var releaseIdField = document.getElementById('release-id');
+    var releaseNameField = document.getElementById('release-name');
+
+    // State from data attributes
+    var entryId = form.dataset.entryId || '';
+    var entryStatus = form.dataset.entryStatus || 'draft';
+    var publishedState = form.dataset.publishedState || '';
+
+    // Capture form state (excluding meta fields)
+    function getFormState() {
+        var state = {};
+        new FormData(form).forEach(function(value, key) {
+            if (key === '_csrf' || key === 'action' || key === 'release_id' || key === 'release_name' || key === 'status') return;
+            state[key] = value;
+        });
+        return state;
+    }
+
+    var lastSavedState = JSON.stringify(getFormState());
+    var saveTimer = null;
+    var isSaving = false;
+
+    function showStatus(type) {
+        if (!statusEl) return;
+        statusEl.className = 'autosave-status';
+        if (type === 'saving') {
+            statusEl.textContent = 'Saving...';
+            statusEl.classList.add('autosave-status-saving');
+        } else if (type === 'saved') {
+            statusEl.textContent = 'All changes saved';
+            statusEl.classList.add('autosave-status-saved');
+        } else if (type === 'error') {
+            statusEl.textContent = 'Save failed';
+            statusEl.classList.add('autosave-status-error');
+        } else {
+            statusEl.textContent = '';
+        }
+    }
+
+    function onFormChange() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(autoSave, 1500);
+    }
+
+    function autoSave() {
+        var currentState = getFormState();
+        var stateJson = JSON.stringify(currentState);
+        if (stateJson === lastSavedState) return;
+        if (isSaving) {
+            // Retry after current save completes
+            saveTimer = setTimeout(autoSave, 500);
+            return;
+        }
+
+        isSaving = true;
+        showStatus('saving');
+
+        var url = entryId
+            ? '/admin/posts/' + entryId + '/autosave'
+            : '/admin/posts/autosave';
+
+        fetch(url, {
+            method: 'POST',
+            body: new FormData(form)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            isSaving = false;
+            lastSavedState = stateJson;
+
+            // First save of new entry — update URL and entry ID
+            if (!entryId && data.entry_id) {
+                entryId = data.entry_id;
+                form.dataset.entryId = entryId;
+                form.action = '/admin/posts/' + entryId;
+                history.replaceState(null, '', '/admin/posts/' + entryId);
+            }
+
+            if (data.status) {
+                entryStatus = data.status;
+                form.dataset.entryStatus = entryStatus;
+            }
+
+            showStatus('saved');
+            updateButtons();
+        })
+        .catch(function() {
+            isSaving = false;
+            showStatus('error');
+        });
+    }
+
+    function updateButtons() {
+        if (!publishBtn) return;
+
+        if (entryStatus === 'draft') {
+            publishBtn.textContent = 'Publish';
+            publishBtn.disabled = false;
+        } else if (entryStatus === 'changed') {
+            publishBtn.textContent = 'Publish Changes';
+            publishBtn.disabled = false;
+            if (discardBtn) discardBtn.classList.remove('hidden');
+        } else if (entryStatus === 'published') {
+            publishBtn.textContent = 'Published';
+            publishBtn.disabled = true;
+            if (discardBtn) discardBtn.classList.add('hidden');
+        }
+    }
+
+    // Listen for changes
+    form.addEventListener('input', onFormChange);
+    form.addEventListener('change', onFormChange);
+
+    document.querySelectorAll('[form="post-form"]').forEach(function(el) {
+        el.addEventListener('input', onFormChange);
+        el.addEventListener('change', onFormChange);
+    });
+
+    // Discard changes button
+    if (discardBtn && entryId) {
+        discardBtn.addEventListener('click', function() {
+            if (!confirm('Discard all changes and revert to the published version?')) return;
+            var csrfField = form.querySelector('input[name="_csrf"]');
+            var discardForm = document.createElement('form');
+            discardForm.method = 'POST';
+            discardForm.action = '/admin/posts/' + entryId + '/discard';
+            var csrf = document.createElement('input');
+            csrf.type = 'hidden';
+            csrf.name = '_csrf';
+            csrf.value = csrfField ? csrfField.value : '';
+            discardForm.appendChild(csrf);
+            document.body.appendChild(discardForm);
+            discardForm.submit();
+        });
+    }
+
+    // Release dropdown: clicking a release item submits main form
+    if (releaseDropdown) {
+        releaseDropdown.addEventListener('click', function(e) {
+            var item = e.target.closest('[data-release-id]');
+            if (item && releaseAction && releaseIdField) {
+                e.preventDefault();
+                e.stopPropagation();
+                releaseAction.value = 'add_to_release';
+                releaseIdField.value = item.dataset.releaseId;
+                releaseNameField.value = '';
+                form.submit();
+            }
+        });
+
+        // Create release button
+        var createBtn = document.getElementById('release-create-btn');
+        var nameInput = document.getElementById('release-name-input');
+        if (createBtn && nameInput) {
+            createBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var name = nameInput.value.trim();
+                if (!name) return;
+                releaseAction.value = 'create_release';
+                releaseIdField.value = '';
+                releaseNameField.value = name;
+                form.submit();
+            });
+            nameInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    createBtn.click();
+                }
+            });
+        }
+    }
+
+    // Ensure action field is cleared on normal form submit
+    form.addEventListener('submit', function() {
+        if (releaseAction && !releaseAction.value) {
+            releaseAction.value = '';
+        }
+    });
+})();
+

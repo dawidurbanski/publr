@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const watch_mode = b.option(bool, "watch", "Skip preBuild hooks and init_db (used by --watch rebuilds)") orelse false;
 
     // ZSX amalgamation — single vendor/zsx.zig for all build tools + runtime
     const zsx = b.createModule(.{
@@ -32,10 +33,24 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // Run ZSX transpiler for views
+    // Run ZSX transpiler for views (cacheable: declared inputs + output directory)
     const transpile_zsx_cmd = b.addRunArtifact(zsx_transpiler);
-    transpile_zsx_cmd.setCwd(b.path("."));
-    transpile_zsx_cmd.addArgs(&.{ "src/views", "src/gen/views" });
+    transpile_zsx_cmd.addDirectoryArg(b.path("src/views"));
+    const gen_views = transpile_zsx_cmd.addOutputDirectoryArg("views");
+
+    // Register .zsx files for content-based cache checking
+    {
+        var views_dir = b.build_root.handle.openDir("src/views", .{ .iterate = true }) catch
+            @panic("cannot open src/views");
+        defer views_dir.close();
+        var walker = views_dir.walk(b.allocator) catch @panic("cannot walk src/views");
+        defer walker.deinit();
+        while (walker.next() catch @panic("walk error")) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, ".zsx")) {
+                transpile_zsx_cmd.addFileInput(b.path(b.pathJoin(&.{ "src/views", entry.path })));
+            }
+        }
+    }
 
     // Build ZSX formatter
     const zsx_formatter = b.addExecutable(.{
@@ -67,12 +82,15 @@ pub fn build(b: *std.Build) void {
     exe.step.dependOn(&transpile_zsx_cmd.step);
 
     // Run preBuild hooks from publr.zon (theme tooling, asset pipelines, etc.)
-    const publr_config = @import("publr.zon");
-    if (@hasField(@TypeOf(publr_config), "build")) {
-        if (@hasField(@TypeOf(publr_config.build), "preBuild")) {
-            inline for (publr_config.build.preBuild) |cmd| {
-                const hook = b.addSystemCommand(&cmd);
-                exe.step.dependOn(&hook.step);
+    // Skipped in watch mode — watchers handle these independently
+    if (!watch_mode) {
+        const publr_config = @import("publr.zon");
+        if (@hasField(@TypeOf(publr_config), "build")) {
+            if (@hasField(@TypeOf(publr_config.build), "preBuild")) {
+                inline for (publr_config.build.preBuild) |cmd| {
+                    const hook = b.addSystemCommand(&cmd);
+                    exe.step.dependOn(&hook.step);
+                }
             }
         }
     }
@@ -163,7 +181,7 @@ pub fn build(b: *std.Build) void {
 
     // Single views module — generated views.zig provides namespace hierarchy
     const views = b.createModule(.{
-        .root_source_file = b.path("src/gen/views/views.zig"),
+        .root_source_file = gen_views.path(b, "views.zig"),
         .imports = &.{.{ .name = "zsx", .module = zsx_views }},
     });
 
@@ -293,8 +311,10 @@ pub fn build(b: *std.Build) void {
     const init_db_cmd = b.addRunArtifact(init_db);
     init_db_cmd.addArg("data/publr.db");
 
-    // Main exe depends on database init
-    exe.step.dependOn(&init_db_cmd.step);
+    // Main exe depends on database init (skipped in watch mode — DB already initialized)
+    if (!watch_mode) {
+        exe.step.dependOn(&init_db_cmd.step);
+    }
 
     // CMS query API
     const cms_module = b.createModule(.{
@@ -498,6 +518,20 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const plugin_releases = b.createModule(.{
+        .root_source_file = b.path("src/plugins/releases.zig"),
+        .imports = &.{
+            .{ .name = "admin_api", .module = admin_api_module },
+            .{ .name = "icons", .module = icons_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "tpl", .module = tpl_module },
+            .{ .name = "csrf", .module = csrf_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "views", .module = views },
+        },
+    });
+
     // =========================================================================
     // Registry Module (imports all plugins)
     // =========================================================================
@@ -520,6 +554,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "plugin_components", .module = plugin_components },
             .{ .name = "plugin_design_system", .module = plugin_design_system },
             .{ .name = "plugin_content_types", .module = plugin_content_types },
+            .{ .name = "plugin_releases", .module = plugin_releases },
         },
     });
 
@@ -532,6 +567,7 @@ pub fn build(b: *std.Build) void {
     plugin_components.addImport("registry", registry_module);
     plugin_design_system.addImport("registry", registry_module);
     plugin_content_types.addImport("registry", registry_module);
+    plugin_releases.addImport("registry", registry_module);
 
     // Add views namespace and core imports to main executable
     exe.root_module.addImport("views", views);
@@ -572,6 +608,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("plugin_components", plugin_components);
     exe.root_module.addImport("plugin_design_system", plugin_design_system);
     exe.root_module.addImport("plugin_content_types", plugin_content_types);
+    exe.root_module.addImport("plugin_releases", plugin_releases);
 
     b.installArtifact(exe);
 

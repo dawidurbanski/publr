@@ -134,18 +134,18 @@ fn resolvePort(cli_port: ?u16) u16 {
     return 8080;
 }
 
-/// Runs the server with watchexec watchers.
-/// Spawns watchexec for .zig/.zon files (server rebuild) and user-defined watchers from publr.zon.
+/// Runs the server with two watchexec processes:
+/// 1. Build watcher — watches sources, runs `zig build -Dwatch` (server stays up during build)
+/// 2. Server watcher — watches `zig-out/bin/publr`, restarts server when binary changes
+/// Server downtime = just the process restart, not the entire build.
 fn runWithWatchers(port: u16, dev_mode: bool) !void {
-    // Build inner command: run watcher commands then start server
-    // All watcher commands run before zig build so Tailwind CSS is ready
+    // Build command for build watcher (tailwind + zig build)
     var cmd_buf: [512]u8 = undefined;
     var cmd_offset: usize = 0;
 
     if (@hasField(@TypeOf(publr_config), "dev")) {
         if (@hasField(@TypeOf(publr_config.dev), "watchers")) {
             inline for (publr_config.dev.watchers) |watcher| {
-                // Append each watcher command joined by " && "
                 inline for (watcher.cmd, 0..) |arg, i| {
                     if (i > 0) {
                         @memcpy(cmd_buf[cmd_offset..][0..1], " ");
@@ -160,37 +160,70 @@ fn runWithWatchers(port: u16, dev_mode: bool) !void {
         }
     }
 
-    const server_cmd = if (dev_mode)
-        try std.fmt.bufPrint(cmd_buf[cmd_offset..], "zig build run -- serve --port {d} --dev", .{port})
-    else
-        try std.fmt.bufPrint(cmd_buf[cmd_offset..], "zig build run -- serve --port {d}", .{port});
-    cmd_offset += server_cmd.len;
+    const build_suffix = "zig build -Dwatch";
+    @memcpy(cmd_buf[cmd_offset..][0..build_suffix.len], build_suffix);
+    cmd_offset += build_suffix.len;
+    cmd_buf[cmd_offset] = 0;
 
-    const inner_cmd = cmd_buf[0..cmd_offset];
-
-    // Exec into main watchexec
-    var inner_cmd_z: [513]u8 = undefined;
-    @memcpy(inner_cmd_z[0..inner_cmd.len], inner_cmd);
-    inner_cmd_z[inner_cmd.len] = 0;
-
-    // In dev mode, don't watch .css - it's served from disk at runtime
-    // Watch .zsx so template edits trigger rebuild (ZSX compiles to Zig)
+    // In dev mode, don't watch .css — served from disk at runtime
     const extensions = if (dev_mode) "zig,zon,zsx" else "zig,zon,zsx,css";
 
-    const argv = [_:null]?[*:0]const u8{
+    const build_argv = [_:null]?[*:0]const u8{
         "watchexec",
-        "-r",
-        "--stop-signal=SIGINT",
-        "--stop-timeout=0",
         "-e",
         extensions,
         "-i",
         "src/gen/**",
-        @ptrCast(&inner_cmd_z),
+        @ptrCast(&cmd_buf),
     };
 
-    const err = std.posix.execvpeZ("watchexec", &argv, std.c.environ);
-    return err;
+    // Format port as null-terminated string (u16 max = 5 digits)
+    var port_buf: [6]u8 = undefined;
+    const port_str = std.fmt.bufPrint(port_buf[0..5], "{d}", .{port}) catch unreachable;
+    port_buf[port_str.len] = 0;
+
+    // Server watcher: watches binary, restarts on change (no shell layer)
+    const dev_flag: ?[*:0]const u8 = if (dev_mode) "--dev" else null;
+    const server_argv = [_:null]?[*:0]const u8{
+        "watchexec",
+        "-r",
+        "--stop-signal=SIGINT",
+        "--stop-timeout=0",
+        "-w",
+        "zig-out/bin/publr",
+        "--",
+        "zig-out/bin/publr",
+        "serve",
+        "--port",
+        @ptrCast(&port_buf),
+        dev_flag,
+    };
+
+    // Fork build watcher
+    const build_pid = try std.posix.fork();
+    if (build_pid == 0) {
+        const err = std.posix.execvpeZ("watchexec", &build_argv, std.c.environ);
+        if (err == error.FileNotFound) printWatchexecMissing();
+        std.process.exit(1);
+    }
+
+    // Fork server watcher
+    const server_pid = std.posix.fork() catch |err| {
+        std.posix.kill(build_pid, std.posix.SIG.TERM) catch {};
+        _ = std.posix.waitpid(build_pid, 0);
+        return err;
+    };
+    if (server_pid == 0) {
+        const err = std.posix.execvpeZ("watchexec", &server_argv, std.c.environ);
+        std.debug.print("Failed to start server watcher: {s}\n", .{@errorName(err)});
+        std.process.exit(1);
+    }
+
+    // Wait for either child to exit, then clean up the other
+    const result = std.posix.waitpid(-1, 0);
+    const remaining = if (result.pid == build_pid) server_pid else build_pid;
+    std.posix.kill(remaining, std.posix.SIG.TERM) catch {};
+    _ = std.posix.waitpid(remaining, 0);
 }
 
 fn printWatchexecMissing() void {

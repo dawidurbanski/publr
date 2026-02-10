@@ -15,6 +15,7 @@ const auth_middleware = @import("auth_middleware");
 const csrf = @import("csrf");
 const admin_api = @import("admin_api");
 const media_handler = @import("media_handler");
+const schema_sync = @import("schema_sync");
 
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
@@ -24,6 +25,7 @@ const plugin_users = @import("plugin_users");
 const plugin_settings = @import("plugin_settings");
 const plugin_components = @import("plugin_components");
 const plugin_design_system = @import("plugin_design_system");
+const plugin_releases = @import("plugin_releases");
 
 // Generated ZSX views
 const views = @import("views");
@@ -76,6 +78,12 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     };
     defer db.deinit();
 
+    // Ensure all schema tables exist (safe to re-run — uses IF NOT EXISTS)
+    schema_sync.ensureSchema(&db) catch |err| {
+        std.debug.print("Failed to ensure schema: {}\n", .{err});
+        return err;
+    };
+
     // Initialize auth
     var auth = Auth.init(allocator, &db);
 
@@ -117,8 +125,10 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     try router.get("/static/*", handleStatic);
     try router.get("/media/*", media_handler.handleMedia);
 
-    // Register plugin routes
-    registerPluginRoutes(&router, allocator);
+    // Register plugin routes (arena freed on shutdown)
+    var route_arena = std.heap.ArenaAllocator.init(allocator);
+    defer route_arena.deinit();
+    registerPluginRoutes(&router, route_arena.allocator());
 
     // Dev-only test route to trigger 500 error
     if (dev_mode) {
@@ -178,9 +188,12 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     }
 
     // Graceful shutdown: wait for active connections with timeout
-    std.debug.print("\nShutting down...\n", .{});
     waitForConnections(5000); // 5 second timeout
-    std.debug.print("Goodbye!\n", .{});
+
+    // Exit immediately — defers are unnecessary at process termination
+    // (OS reclaims memory, closes sockets/files). Without this, the process
+    // lingers after zig-build's parent exits, leaving the terminal without a prompt.
+    std.process.exit(0);
 }
 
 // =============================================================================
@@ -193,6 +206,7 @@ pub fn serve(port: u16, dev_mode: bool) !void {
 const all_pages = [_]admin_api.Page{
     plugin_dashboard.page,
     plugin_posts.page,
+    plugin_releases.page,
     plugin_media.page,
         // Users: only profile page remains, user management moved to Settings
     plugin_users.page_profile, // /admin/users/profile
@@ -251,6 +265,8 @@ fn setupSignalHandlers() void {
 }
 
 fn signalHandler(_: c_int) callconv(.c) void {
+    // write() is async-signal-safe — prints before zig-build parent can exit
+    _ = std.posix.write(2, "\nShutting down... Goodbye!\n") catch {};
     shutdown_requested.store(true, .release);
 }
 
