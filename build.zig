@@ -856,4 +856,27 @@ pub fn build(b: *std.Build) void {
 
     // Wire verify step to also check WASM build
     verify_step.dependOn(&browser_install.step);
+
+    // =========================================================================
+    // Browser Bundle (source + .o files + manifest for browser compilation)
+    // =========================================================================
+    const browser_bundle_step = b.step("browser-bundle", "Create CMS source bundle for browser compilation");
+
+    const bundle_tool = b.addExecutable(.{
+        .name = "browser_bundle",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/browser_bundle.zig"),
+            .target = b.graph.host,
+        }),
+    });
+
+    const run_bundle = b.addRunArtifact(bundle_tool);
+    run_bundle.addArg(b.pathJoin(&.{ "zig-out", "browser-bundle" }));
+    run_bundle.addDirectoryArg(gen_views);
+    run_bundle.setCwd(b.path("."));
+
+    // Bundle depends on transpile step (needs generated views)
+    run_bundle.step.dependOn(&transpile_zsx_cmd.step);
+
+    browser_bundle_step.dependOn(&run_bundle.step);
 }
