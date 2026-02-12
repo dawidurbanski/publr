@@ -22,6 +22,19 @@ const icon_dot_outline =
 const icon_dot_half =
     \\<svg class="icon icon-dot" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 7a5 5 0 010 10V7z" fill="currentColor"/></svg>
 ;
+const icon_chevron_left =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+const icon_chevron_right =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
+
+const PageUrl = struct {
+    page_num: []const u8,
+    url: []const u8,
+    is_current: bool,
+    is_ellipsis: bool = false,
+};
 
 const Post = struct {
     id: []const u8,
@@ -36,6 +49,11 @@ const Post = struct {
 pub fn List(props: struct {
     has_posts: bool,
     posts: []const Post,
+    total_count: []const u8,
+    total_pages: u32,
+    prev_page_url: []const u8,
+    next_page_url: []const u8,
+    page_urls: []const PageUrl,
 }) {
     {if (props.has_posts) (
         <div>
@@ -105,7 +123,31 @@ pub fn List(props: struct {
                 </tbody>
             </table>
             <div class="table-footer">
-                <span class="table-item-count">{props.posts.len} items</span>
+                <span class="table-item-count">{props.total_count} items</span>
+                {if (props.total_pages > 1) (
+                    <nav class="pagination" aria-label="Posts pagination">
+                        <span class="pagination-label">Page:</span>
+                        {if (props.prev_page_url.len > 0) (
+                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page">{@raw icon_chevron_left}</a>
+                        ) else (
+                            <span class="pagination-btn disabled" aria-label="Previous page">{@raw icon_chevron_left}</span>
+                        )}
+                        {for (props.page_urls) |pg| (
+                            {if (pg.is_ellipsis) (
+                                <span class="pagination-ellipsis">...</span>
+                            ) else if (pg.is_current) (
+                                <span class="pagination-page active">{pg.page_num}</span>
+                            ) else (
+                                <a href={pg.url} class="pagination-page">{pg.page_num}</a>
+                            )}
+                        )}
+                        {if (props.next_page_url.len > 0) (
+                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page">{@raw icon_chevron_right}</a>
+                        ) else (
+                            <span class="pagination-btn disabled" aria-label="Next page">{@raw icon_chevron_right}</span>
+                        )}
+                    </nav>
+                )}
             </div>
         </div>
     ) else (

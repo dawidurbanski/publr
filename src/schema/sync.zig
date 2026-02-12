@@ -45,6 +45,7 @@ pub const content_schema_sql =
     \\);
     \\
     \\CREATE INDEX IF NOT EXISTS idx_entries_type_status ON entries(content_type_id, status, created_at DESC);
+    \\CREATE INDEX IF NOT EXISTS idx_entries_type_created ON entries(content_type_id, created_at DESC);
     \\CREATE INDEX IF NOT EXISTS idx_entries_slug ON entries(content_type_id, slug);
     \\
     \\-- Entry metadata (filterable scalar fields)

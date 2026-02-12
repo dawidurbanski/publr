@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS entries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_entries_type_status ON entries(content_type_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_type_created ON entries(content_type_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_slug ON entries(content_type_id, slug);
 
 CREATE TABLE IF NOT EXISTS entry_meta (

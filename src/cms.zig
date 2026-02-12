@@ -1589,18 +1589,14 @@ fn writeJsonValue(w: anytype, value: std.json.Value) !void {
 /// Handles both full and partial (field-level) publish through the same
 /// publishBatchRelease path — one code path for all publishing.
 pub fn publishEntry(allocator: Allocator, db: *Db, entry_id: []const u8, author_id: ?[]const u8, fields_json: ?[]const u8) !void {
-    // Get current version IDs
-    var e_stmt = try db.prepare("SELECT current_version_id, published_version_id FROM entries WHERE id = ?1");
-    defer e_stmt.deinit();
-    try e_stmt.bindText(1, entry_id);
-    if (!try e_stmt.step()) return error.EntryNotFound;
-
-    const to_version = e_stmt.columnText(0) orelse return error.EntryNotFound;
-    const from_version = e_stmt.columnText(1);
-
     // Skip if already published with same version and no partial fields
     if (fields_json == null) {
-        if (from_version) |fv| {
+        var e_stmt = try db.prepare("SELECT current_version_id, published_version_id FROM entries WHERE id = ?1");
+        defer e_stmt.deinit();
+        try e_stmt.bindText(1, entry_id);
+        if (!try e_stmt.step()) return error.EntryNotFound;
+        const to_version = e_stmt.columnText(0) orelse return error.EntryNotFound;
+        if (e_stmt.columnText(1)) |fv| {
             if (std.mem.eql(u8, fv, to_version)) return;
         }
     }
@@ -1618,20 +1614,8 @@ pub fn publishEntry(allocator: Allocator, db: *Db, entry_id: []const u8, author_
         _ = try stmt.step();
     }
 
-    // Add single item
-    {
-        var stmt = try db.prepare(
-            \\INSERT INTO release_items (release_id, entry_id, from_version, to_version, fields)
-            \\VALUES (?1, ?2, ?3, ?4, ?5)
-        );
-        defer stmt.deinit();
-        try stmt.bindText(1, &release_id);
-        try stmt.bindText(2, entry_id);
-        if (from_version) |fv| try stmt.bindText(3, fv) else try stmt.bindNull(3);
-        try stmt.bindText(4, to_version);
-        if (fields_json) |fj| try stmt.bindText(5, fj) else try stmt.bindNull(5);
-        _ = try stmt.step();
-    }
+    // Add single item — addToRelease reads from/to versions from entries table
+    try addToRelease(db, &release_id, entry_id, fields_json);
 
     // Publish through the single shared path
     try publishBatchRelease(allocator, db, &release_id);
@@ -1943,12 +1927,12 @@ pub fn createPendingRelease(db: *Db, name: []const u8, author_id: ?[]const u8) (
 
 /// Add an entry to a pending release. Uses INSERT OR REPLACE so
 /// re-adding the same entry updates the version references.
+/// Reads from_version (published_version_id) and to_version (current_version_id)
+/// directly from the entries table — callers never supply these.
 pub fn addToRelease(
     db: *Db,
     release_id: []const u8,
     entry_id: []const u8,
-    from_version: ?[]const u8,
-    to_version: []const u8,
     fields: ?[]const u8,
 ) (Db.Error || ReleaseError)!void {
     // Validate release is pending
@@ -1960,6 +1944,16 @@ pub fn addToRelease(
         const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
         if (!std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
     }
+
+    // Always read version refs from entries — single source of truth
+    var e_stmt = try db.prepare(
+        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+    );
+    defer e_stmt.deinit();
+    try e_stmt.bindText(1, entry_id);
+    if (!try e_stmt.step()) return ReleaseError.ReleaseNotFound;
+    const to_version = e_stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+    const from_version = e_stmt.columnText(1);
 
     var stmt = try db.prepare(
         \\INSERT OR REPLACE INTO release_items (release_id, entry_id, from_version, to_version, fields)
@@ -3464,7 +3458,7 @@ test "addToRelease inserts item into pending release" {
     const v1 = try insertTestVersion(db, "e_test1", "{}", null);
 
     const rel_id = try createPendingRelease(db, "Batch 1", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
+    try addToRelease(db, &rel_id, "e_test1", null);
 
     var stmt = try db.prepare("SELECT entry_id, to_version FROM release_items WHERE release_id = ?1");
     defer stmt.deinit();
@@ -3486,7 +3480,7 @@ test "addToRelease fails on non-pending release" {
         _ = try stmt.step();
     }
 
-    const result = addToRelease(db, &rel_id, "e_test1", null, "v_fake_version123", null);
+    const result = addToRelease(db, &rel_id, "e_test1", null);
     try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
 }
 
@@ -3498,10 +3492,10 @@ test "removeFromRelease removes item" {
         \\INSERT INTO entries (id, content_type_id, data, status)
         \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
     );
-    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+    _ = try insertTestVersion(db, "e_test1", "{}", null);
 
     const rel_id = try createPendingRelease(db, "Batch 1", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
+    try addToRelease(db, &rel_id, "e_test1", null);
 
     // Remove
     try removeFromRelease(db, &rel_id, "e_test1");
@@ -3521,10 +3515,10 @@ test "publishBatchRelease sets entries to published" {
         \\INSERT INTO entries (id, content_type_id, data, status)
         \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
     );
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"staged\"}", null);
+    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"staged\"}", null);
 
     const rel_id = try createPendingRelease(db, "Launch", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
+    try addToRelease(db, &rel_id, "e_test1", null);
 
     try publishBatchRelease(std.testing.allocator, db, &rel_id);
 
@@ -3598,10 +3592,10 @@ test "getRelease returns detail with items" {
         \\INSERT INTO entries (id, content_type_id, title, data, status)
         \\VALUES ('e_test1', 'test_ct', 'My Post', '{}', 'draft')
     );
-    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
+    _ = try insertTestVersion(db, "e_test1", "{}", null);
 
     const rel_id = try createPendingRelease(db, "Detail Test", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
+    try addToRelease(db, &rel_id, "e_test1", null);
 
     const detail = try getRelease(std.testing.allocator, db, &rel_id);
     try std.testing.expect(detail != null);

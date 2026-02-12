@@ -65,17 +65,37 @@ fn handleList(ctx: *Context) !void {
         preview_url: []const u8,
     };
 
+    const PageUrl = struct {
+        page_num: []const u8,
+        url: []const u8,
+        is_current: bool,
+        is_ellipsis: bool = false,
+    };
+
+    // Pagination
+    const items_per_page: u32 = 20;
+    const current_page: u32 = @max(1, parseIntParam(ctx.query, "page", u32) orelse 1);
+    const offset: u32 = (current_page - 1) * items_per_page;
+
+    const total_count = cms.countEntries(Post, db, .{}) catch 0;
+    const total_pages: u32 = if (total_count == 0) 1 else (total_count + items_per_page - 1) / items_per_page;
+
     // Fetch posts from database
     const entries = cms.listEntries(Post, ctx.allocator, db, .{
-        .limit = 50,
+        .limit = items_per_page,
+        .offset = offset,
         .order_by = "created_at",
         .order_dir = .desc,
     }) catch |err| {
         std.debug.print("Error listing posts: {}\n", .{err});
-        // Fall back to empty list on error
         const content = tpl.render(views.admin.posts.list.List, .{.{
             .has_posts = false,
             .posts = &[_]ViewPost{},
+            .total_count = "0",
+            .total_pages = @as(u32, 1),
+            .prev_page_url = "",
+            .next_page_url = "",
+            .page_urls = &[_]PageUrl{},
         }});
         ctx.html(registry.renderPage(page, ctx, content));
         return;
@@ -99,9 +119,61 @@ fn handleList(ctx: *Context) !void {
         };
     }
 
+    // Build truncated pagination URLs: 1 ... 4 [5] 6 ... 251
+    const base_url = "/admin/posts";
+    const page_urls = blk: {
+        var list: std.ArrayListUnmanaged(PageUrl) = .{};
+        const window = 1; // pages on each side of current
+
+        // Collect which page numbers to show
+        var pages_to_show: std.ArrayListUnmanaged(u32) = .{};
+        // Always page 1
+        pages_to_show.append(ctx.allocator, 1) catch break :blk &[_]PageUrl{};
+        // Window around current page
+        const win_start = @max(2, if (current_page > window) current_page - window else 1);
+        const win_end = @min(total_pages - 1, current_page + window);
+        var pg = win_start;
+        while (pg <= win_end) : (pg += 1) {
+            pages_to_show.append(ctx.allocator, pg) catch break :blk &[_]PageUrl{};
+        }
+        // Always last page (if > 1)
+        if (total_pages > 1) {
+            pages_to_show.append(ctx.allocator, total_pages) catch break :blk &[_]PageUrl{};
+        }
+
+        // Build PageUrl entries, inserting ellipsis between gaps
+        var prev_pg: u32 = 0;
+        for (pages_to_show.items) |p| {
+            if (prev_pg > 0 and p > prev_pg + 1) {
+                list.append(ctx.allocator, .{
+                    .page_num = "...",
+                    .url = "",
+                    .is_current = false,
+                    .is_ellipsis = true,
+                }) catch break :blk &[_]PageUrl{};
+            }
+            const num_str: []const u8 = std.fmt.allocPrint(ctx.allocator, "{d}", .{p}) catch "?";
+            list.append(ctx.allocator, .{
+                .page_num = num_str,
+                .url = buildPageUrl(ctx.allocator, base_url, p),
+                .is_current = p == current_page,
+            }) catch break :blk &[_]PageUrl{};
+            prev_pg = p;
+        }
+
+        break :blk list.items;
+    };
+
+    const total_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{total_count}) catch "0";
+
     const content = tpl.render(views.admin.posts.list.List, .{.{
         .has_posts = posts.len > 0,
         .posts = posts,
+        .total_count = total_count_str,
+        .total_pages = total_pages,
+        .prev_page_url = if (current_page > 1) buildPageUrl(ctx.allocator, base_url, current_page - 1) else "",
+        .next_page_url = if (current_page < total_pages) buildPageUrl(ctx.allocator, base_url, current_page + 1) else "",
+        .page_urls = page_urls,
     }});
 
     const add_btn =
@@ -948,10 +1020,6 @@ fn handleUpdate(ctx: *Context) !void {
 
     const author_id = auth_middleware.getUserId(ctx);
 
-    // Capture version before save
-    const from_version = cms.getEntryVersionId(db, post_id) catch null;
-    defer if (from_version) |v| db.allocator.free(v);
-
     // Save entry (skips version creation if data unchanged)
     _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
         .author_id = author_id,
@@ -961,19 +1029,13 @@ fn handleUpdate(ctx: *Context) !void {
         return;
     };
 
-    // Capture version after save
-    const to_version = cms.getEntryVersionId(db, post_id) catch null;
-    defer if (to_version) |v| db.allocator.free(v);
-
-    // Handle release actions — use current version as target (autosave already saved the data)
+    // Handle release actions — addToRelease reads version refs from entries table
     if (std.mem.eql(u8, action, "add_to_release")) {
         const release_id = ctx.formValue("release_id") orelse "";
         if (release_id.len > 0) {
-            if (to_version) |tv| {
-                cms.addToRelease(db, release_id, post_id, from_version, tv, fields_json) catch |err| {
-                    std.debug.print("Error adding to release: {}\n", .{err});
-                };
-            }
+            cms.addToRelease(db, release_id, post_id, fields_json) catch |err| {
+                std.debug.print("Error adding to release: {}\n", .{err});
+            };
         }
         const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
         redirect(ctx, url);
@@ -988,9 +1050,7 @@ fn handleUpdate(ctx: *Context) !void {
                 redirect(ctx, url);
                 return;
             };
-            if (to_version) |tv| {
-                cms.addToRelease(db, &rel_id, post_id, from_version, tv, fields_json) catch {};
-            }
+            cms.addToRelease(db, &rel_id, post_id, fields_json) catch {};
         }
         const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
         redirect(ctx, url);
@@ -1004,7 +1064,8 @@ fn handleUpdate(ctx: *Context) !void {
         };
     }
 
-    redirect(ctx, "/admin/posts");
+    const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
+    redirect(ctx, url);
 }
 
 fn handleDelete(ctx: *Context) !void {
@@ -1092,6 +1153,31 @@ fn redirect(ctx: *Context, location: []const u8) void {
 
 fn formatDate(timestamp: i64, allocator: std.mem.Allocator) ![]const u8 {
     return std.fmt.allocPrint(allocator, "{d}", .{timestamp});
+}
+
+fn parseQueryParam(query: ?[]const u8, name: []const u8) ?[]const u8 {
+    const q = query orelse return null;
+    var iter = std.mem.splitScalar(u8, q, '&');
+    while (iter.next()) |pair| {
+        if (std.mem.indexOf(u8, pair, "=")) |eq_pos| {
+            if (std.mem.eql(u8, pair[0..eq_pos], name)) {
+                return pair[eq_pos + 1 ..];
+            }
+        }
+    }
+    return null;
+}
+
+fn parseIntParam(query: ?[]const u8, name: []const u8, comptime T: type) ?T {
+    const raw = parseQueryParam(query, name) orelse return null;
+    if (raw.len == 0) return null;
+    return std.fmt.parseInt(T, raw, 10) catch null;
+}
+
+fn buildPageUrl(allocator: std.mem.Allocator, base_url: []const u8, page_num: u32) []const u8 {
+    if (page_num <= 1) return base_url;
+    const sep: []const u8 = if (std.mem.indexOf(u8, base_url, "?") != null) "&" else "?";
+    return std.fmt.allocPrint(allocator, "{s}{s}page={d}", .{ base_url, sep, page_num }) catch base_url;
 }
 
 const Db = @import("db").Db;

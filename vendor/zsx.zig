@@ -1015,8 +1015,6 @@ fn transpileFile(allocator: Allocator, input_dir: []const u8, output_dir: []cons
     var file = try fs.cwd().createFile(output_path, .{});
     defer file.close();
     try file.writeAll(zig_code);
-
-    std.debug.print("Transpiled: {s} -> {s}\n", .{ input_path, output_path });
 }
 
 const ComponentImport = struct {

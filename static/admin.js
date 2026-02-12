@@ -494,7 +494,9 @@
             link.href = '/admin/releases/' + rel.id;
             link.className = 'field-release-link';
             link.textContent = 'In release ' + rel.name;
-            group.querySelector('.form-label-row').appendChild(link);
+            var checkRow = group.querySelector('.field-check-row');
+            if (checkRow) checkRow.appendChild(link);
+            else group.querySelector('.form-label-row').appendChild(link);
         }
     });
 
@@ -507,10 +509,17 @@
         if (existing) return existing;
         var control = group.querySelector('.form-control');
         if (!control) return null;
+        var hadFocus = document.activeElement === control;
+        var selStart = control.selectionStart;
+        var selEnd = control.selectionEnd;
         var wrapper = document.createElement('div');
         wrapper.className = 'field-peek-wrapper';
         control.parentNode.insertBefore(wrapper, control);
         wrapper.appendChild(control);
+        if (hadFocus) {
+            control.focus();
+            try { control.setSelectionRange(selStart, selEnd); } catch(e) {}
+        }
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'field-peek-btn';

@@ -251,13 +251,19 @@ body.admin {
 /* Topbar */
 .top-bar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 var(--space-xl);
-    height: var(--topbar-height);
-    background: var(--bg-primary);
+    flex-direction: column;
+    align-items: start;
+    height: auto;
+    background: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-default);
     flex-shrink: 0;
+}
+
+.top-bar-meta {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--space-xl);
 }
 
 /* Bottom Bar */
@@ -348,7 +354,8 @@ body.admin {
 .topbar-nav {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    width: 100%;
+    padding: 0 var(--space-sm);
 }
 
 .topbar-nav-item {
@@ -357,23 +364,22 @@ body.admin {
     gap: var(--space-md);
     padding: var(--space-md) var(--space-lg);
     color: var(--text-secondary);
+    border-bottom: 2px solid transparent;
     font-size: var(--text-sm);
     font-weight: 500;
-    border-radius: var(--radius-md);
     text-decoration: none;
     transition: color 0.15s ease, background 0.15s ease;
 }
 
 .topbar-nav-item:hover {
     color: var(--text-primary);
-    background: var(--bg-control);
+    border-bottom: 2px solid var(--accent-hover);
     text-decoration: none;
 }
 
 .topbar-nav-item.active {
     color: var(--text-primary);
-    font-weight: 600;
-    background: var(--bg-control);
+    border-bottom: 2px solid var(--accent-hover);
 }
 
 .topbar-nav-item .nav-icon {
@@ -1878,7 +1884,8 @@ a.version-item:hover {
 }
 
 .form-group.field-changed .field-editor-badge.field-editor-active,
-.form-group.field-deselected .field-editor-badge.field-editor-active {
+.form-group.field-deselected .field-editor-badge.field-editor-active,
+.form-group.field-in-release .field-editor-badge.field-editor-active {
     display: flex;
 }
 
@@ -3581,6 +3588,15 @@ select.form-control {
 .pagination-page.active {
     font-weight: 800;
     text-decoration: underline;
+}
+
+.pagination-ellipsis {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    color: var(--text-tertiary);
+    font-size: var(--text-sm);
 }
 
 .pagination-label {
