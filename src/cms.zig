@@ -19,6 +19,7 @@
 //! ```
 
 const std = @import("std");
+const time_util = @import("time_util");
 const db_mod = @import("db");
 const Db = db_mod.Db;
 const Statement = db_mod.Statement;
@@ -917,7 +918,7 @@ pub fn restoreVersion(
 
 /// Format a unix timestamp as a relative time string ("2 hours ago", "yesterday", etc.)
 pub fn formatRelativeTime(allocator: Allocator, timestamp: i64) ![]const u8 {
-    const now = std.time.timestamp();
+    const now = time_util.timestamp();
     const diff = now - timestamp;
 
     if (diff < 0) return try allocator.dupe(u8, "just now");

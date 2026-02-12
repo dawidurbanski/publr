@@ -5,6 +5,7 @@
 //! replace the function pointers to route storage elsewhere.
 
 const std = @import("std");
+const time_util = @import("time_util");
 const Allocator = std.mem.Allocator;
 
 /// Visibility levels for media files
@@ -161,7 +162,7 @@ fn fsUrl(allocator: Allocator, storage_key: []const u8, _: Visibility, params: I
 /// Generate a date-based storage key with random suffix.
 /// Format: `YYYY/MM/name-XXXXXX.ext`
 pub fn generateStorageKey(allocator: Allocator, filename: []const u8) ![]const u8 {
-    const now = std.time.timestamp();
+    const now = time_util.timestamp();
     const epoch_secs: u64 = @intCast(now);
     const epoch_day = epoch_secs / 86400;
     const date = epochDayToYMD(epoch_day);

@@ -316,6 +316,11 @@ pub fn build(b: *std.Build) void {
         exe.step.dependOn(&init_db_cmd.step);
     }
 
+    // Time utility (avoids 128-bit math on WASI for non-LLVM backend)
+    const time_util_module = b.createModule(.{
+        .root_source_file = b.path("src/time_util.zig"),
+    });
+
     // CMS query API
     const cms_module = b.createModule(.{
         .root_source_file = b.path("src/cms.zig"),
@@ -323,11 +328,15 @@ pub fn build(b: *std.Build) void {
             .{ .name = "field", .module = field_module },
             .{ .name = "schema_registry", .module = schema_registry_module },
             .{ .name = "db", .module = db_module },
+            .{ .name = "time_util", .module = time_util_module },
         },
     });
     // Storage backend
     const storage_module = b.createModule(.{
         .root_source_file = b.path("src/storage.zig"),
+        .imports = &.{
+            .{ .name = "time_util", .module = time_util_module },
+        },
     });
     // SVG sanitizer
     const svg_sanitize_module = b.createModule(.{
@@ -361,7 +370,10 @@ pub fn build(b: *std.Build) void {
     });
     const auth_module = b.createModule(.{
         .root_source_file = b.path("src/auth.zig"),
-        .imports = &.{.{ .name = "db", .module = db_module }},
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "time_util", .module = time_util_module },
+        },
     });
     const auth_middleware_module = b.createModule(.{
         .root_source_file = b.path("src/auth_middleware.zig"),
@@ -439,6 +451,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "schema_sync", .module = schema_sync_module },
             .{ .name = "gravatar", .module = gravatar_module },
             .{ .name = "views", .module = views },
+            .{ .name = "time_util", .module = time_util_module },
         },
     });
     const plugin_users = b.createModule(.{

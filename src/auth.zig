@@ -1,4 +1,5 @@
 const std = @import("std");
+const time_util = @import("time_util");
 const Db = @import("db").Db;
 const Statement = @import("db").Statement;
 
@@ -261,7 +262,7 @@ pub const Auth = struct {
         var secret_hash: [32]u8 = undefined;
         Sha256.hash(&secret_bytes, &secret_hash, .{});
 
-        const now = std.time.timestamp();
+        const now = time_util.timestamp();
         const expires_at = now + SESSION_DURATION_SECS;
 
         var stmt = self.db.prepare(
@@ -324,7 +325,7 @@ pub const Auth = struct {
         }
 
         // Check expiry
-        const now = std.time.timestamp();
+        const now = time_util.timestamp();
         if (now > expires_at) {
             return Error.SessionExpired;
         }
@@ -376,7 +377,7 @@ pub const Auth = struct {
 
     /// Clean up expired sessions
     pub fn cleanupExpiredSessions(self: *Auth) Error!u32 {
-        const now = std.time.timestamp();
+        const now = time_util.timestamp();
 
         var stmt = self.db.prepare("DELETE FROM sessions WHERE expires_at < ?1") catch return Error.DbError;
         defer stmt.deinit();
