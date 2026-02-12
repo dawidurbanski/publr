@@ -5,6 +5,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const watch_mode = b.option(bool, "watch", "Skip preBuild hooks and init_db (used by --watch rebuilds)") orelse false;
 
+    // External source tree options (for recompilation from ~/.publr/src/)
+    const config_path = b.option([]const u8, "config-path", "Absolute path to publr.zon (external source tree builds)");
+    const plugins_path = b.option([]const u8, "plugins-path", "Absolute path to plugins directory (external source tree builds)");
+    const project_dir = b.option([]const u8, "project-dir", "Absolute path to project directory (external source tree builds — resolves themes, data)");
+    _ = plugins_path; // Reserved for future plugin discovery
+
     // ZSX amalgamation — single vendor/zsx.zig for all build tools + runtime
     const zsx = b.createModule(.{
         .root_source_file = b.path("vendor/zsx.zig"),
@@ -82,8 +88,9 @@ pub fn build(b: *std.Build) void {
     exe.step.dependOn(&transpile_zsx_cmd.step);
 
     // Run preBuild hooks from publr.zon (theme tooling, asset pipelines, etc.)
-    // Skipped in watch mode — watchers handle these independently
-    if (!watch_mode) {
+    // Skipped in watch mode (watchers handle independently) and external builds
+    // (recompile endpoint runs hooks separately before invoking zig build)
+    if (!watch_mode and config_path == null) {
         const publr_config = @import("publr.zon");
         if (@hasField(@TypeOf(publr_config), "build")) {
             if (@hasField(@TypeOf(publr_config.build), "preBuild")) {
@@ -95,11 +102,18 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    // Link libc for SQLite
-    exe.linkLibC();
-
-    // Add SQLite C source
-    exe.addCSourceFile(.{
+    // Vendor static library — SQLite, stb_image, libwebp compiled once and cached.
+    // Only recompiled when vendor sources change, not when Zig code changes.
+    const vendor_lib = b.addLibrary(.{
+        .name = "publr_vendors",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    vendor_lib.linkLibC();
+    vendor_lib.addIncludePath(b.path("vendor"));
+    vendor_lib.addCSourceFile(.{
         .file = b.path("vendor/sqlite3.c"),
         .flags = &.{
             "-DSQLITE_DQS=0",
@@ -111,28 +125,32 @@ pub fn build(b: *std.Build) void {
             "-DSQLITE_ENABLE_JSON1",
         },
     });
-    exe.addIncludePath(b.path("vendor"));
-
-    // Add STB image processing (decode, resize, encode)
     // stb_image_resize2 does intentional misaligned uint64 stores in stbir__pack_coefficients,
     // which triggers UBSan in debug builds. Disable alignment sanitizer for this file.
-    exe.addCSourceFile(.{
+    vendor_lib.addCSourceFile(.{
         .file = b.path("vendor/stb_impl.c"),
         .flags = &.{"-fno-sanitize=alignment"},
     });
-
-    // Add libwebp (two-file amalgamation: libwebp.c + libwebp.h)
-    // Split amalgamation: same file compiled 124 times with different PART values
+    // libwebp split amalgamation: same file compiled 124 times with different PART values
     for (0..124) |part| {
         var buf: [32]u8 = undefined;
         const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        exe.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+        vendor_lib.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
     }
 
-    // Import project config (publr.zon)
-    exe.root_module.addAnonymousImport("publr_config", .{
-        .root_source_file = b.path("publr.zon"),
+    // Link vendor lib + libc into exe
+    exe.linkLibC();
+    exe.addIncludePath(b.path("vendor")); // for @cImport headers
+    exe.linkLibrary(vendor_lib);
+
+    // Import project config (publr.zon) — from config-path in external builds
+    const publr_config_module = b.createModule(.{
+        .root_source_file = if (config_path) |cp|
+            .{ .cwd_relative = cp }
+        else
+            b.path("publr.zon"),
     });
+    exe.root_module.addImport("publr_config", publr_config_module);
 
     // Embed static assets
     exe.root_module.addAnonymousImport("static_admin_css", .{
@@ -166,7 +184,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("static/media-selection.js"),
     });
     exe.root_module.addAnonymousImport("static_theme_css", .{
-        .root_source_file = b.path("themes/demo/static/theme.css"),
+        .root_source_file = if (project_dir) |pd|
+            .{ .cwd_relative = b.pathJoin(&.{ pd, "themes/demo/static/theme.css" }) }
+        else
+            b.path("themes/demo/static/theme.css"),
     });
 
     // Design system amalgamation — components, CSS, JS as string constants
@@ -309,10 +330,15 @@ pub fn build(b: *std.Build) void {
 
     // Run init_db as build step
     const init_db_cmd = b.addRunArtifact(init_db);
-    init_db_cmd.addArg("data/publr.db");
+    init_db_cmd.addArg(if (project_dir) |pd|
+        b.pathJoin(&.{ pd, "data/publr.db" })
+    else
+        "data/publr.db");
 
-    // Main exe depends on database init (skipped in watch mode — DB already initialized)
-    if (!watch_mode) {
+    // Main exe depends on database init
+    // Skipped in watch mode (DB already initialized) and external builds
+    // (DB exists in project directory, managed by the running CMS)
+    if (!watch_mode and config_path == null) {
         exe.step.dependOn(&init_db_cmd.step);
     }
 
@@ -577,6 +603,7 @@ pub fn build(b: *std.Build) void {
     plugin_media.addImport("registry", registry_module);
     plugin_users.addImport("registry", registry_module);
     plugin_settings.addImport("registry", registry_module);
+    plugin_settings.addImport("publr_config", publr_config_module);
     plugin_components.addImport("registry", registry_module);
     plugin_design_system.addImport("registry", registry_module);
     plugin_content_types.addImport("registry", registry_module);
@@ -718,11 +745,17 @@ pub fn build(b: *std.Build) void {
     // WASM-specific settings
     browser_wasm.rdynamic = true;
 
-    // Link libc for SQLite
-    browser_wasm.linkLibC();
-
-    // Add SQLite C source (same as native build)
-    browser_wasm.addCSourceFile(.{
+    // Vendor static library for WASM (separate from native — different SQLite flags)
+    const vendor_lib_wasm = b.addLibrary(.{
+        .name = "publr_vendors",
+        .root_module = b.createModule(.{
+            .target = wasm_target,
+            .optimize = .ReleaseSmall,
+        }),
+    });
+    vendor_lib_wasm.linkLibC();
+    vendor_lib_wasm.addIncludePath(b.path("vendor"));
+    vendor_lib_wasm.addCSourceFile(.{
         .file = b.path("vendor/sqlite3.c"),
         .flags = &.{
             "-DSQLITE_DQS=0",
@@ -735,20 +768,20 @@ pub fn build(b: *std.Build) void {
             "-DSQLITE_OMIT_LOAD_EXTENSION",
         },
     });
-    browser_wasm.addIncludePath(b.path("vendor"));
-
-    // Add STB image processing (decode, resize, encode)
-    browser_wasm.addCSourceFile(.{
+    vendor_lib_wasm.addCSourceFile(.{
         .file = b.path("vendor/stb_impl.c"),
         .flags = &.{"-fno-sanitize=alignment"},
     });
-
-    // Add libwebp (same split amalgamation as native build)
     for (0..124) |part| {
         var buf: [32]u8 = undefined;
         const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        browser_wasm.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+        vendor_lib_wasm.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
     }
+
+    // Link vendor lib + libc into WASM build
+    browser_wasm.linkLibC();
+    browser_wasm.addIncludePath(b.path("vendor")); // for @cImport headers
+    browser_wasm.linkLibrary(vendor_lib_wasm);
 
     // Add views namespace (same as native)
     browser_wasm.root_module.addImport("views", views);
@@ -806,6 +839,7 @@ pub fn build(b: *std.Build) void {
     browser_wasm.root_module.addImport("media_handler", media_handler_module);
     browser_wasm.root_module.addImport("wasm_storage", wasm_storage_module);
     browser_wasm.root_module.addImport("wasm_media_handler", wasm_media_handler_module);
+    browser_wasm.root_module.addImport("schema_sync", schema_sync_module);
 
     // Add wasm_storage to modules that conditionally import it
     media_module.addImport("wasm_storage", wasm_storage_module);
