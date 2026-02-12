@@ -477,6 +477,9 @@ fn pruneVersions(db: *Db, entry_id: []const u8) !void {
 pub const SaveOptions = struct {
     /// Author user ID for version tracking (null for system/anonymous saves)
     author_id: ?[]const u8 = null,
+    /// When true, update existing version in-place instead of creating a new one.
+    /// Used by autosave to avoid polluting version history.
+    autosave: bool = false,
 };
 
 /// Save an entry (create or update), creating a version in the history
@@ -521,12 +524,17 @@ pub fn saveEntry(
     const data_json = try CT.stringifyData(allocator, data);
     defer allocator.free(data_json);
 
-    // Get previous version id and data (for change detection)
+    // Get previous version id, data, author (for change detection + author tracking)
     var prev_version_id: ?[]const u8 = null;
     var prev_data: ?[]const u8 = null;
+    var published_vid: ?[]const u8 = null;
+    var prev_author_id: ?[]const u8 = null;
     if (is_update) {
         var pv_stmt = try db.prepare(
-            "SELECT current_version_id, data FROM entries WHERE id = ?1",
+            \\SELECT e.current_version_id, e.data, e.published_version_id, ev.author_id
+            \\FROM entries e
+            \\LEFT JOIN entry_versions ev ON ev.id = e.current_version_id
+            \\WHERE e.id = ?1
         );
         defer pv_stmt.deinit();
         try pv_stmt.bindText(1, entry_id);
@@ -537,22 +545,47 @@ pub fn saveEntry(
             if (pv_stmt.columnText(1)) |d| {
                 prev_data = try allocator.dupe(u8, d);
             }
+            if (pv_stmt.columnText(2)) |v| {
+                published_vid = try allocator.dupe(u8, v);
+            }
+            if (pv_stmt.columnText(3)) |v| {
+                prev_author_id = try allocator.dupe(u8, v);
+            }
         }
     }
     defer if (prev_version_id) |v| allocator.free(v);
     defer if (prev_data) |d| allocator.free(d);
+    defer if (published_vid) |v| allocator.free(v);
+    defer if (prev_author_id) |v| allocator.free(v);
 
     // Skip version creation if data hasn't changed
     const data_changed = if (prev_data) |pd| !std.mem.eql(u8, pd, data_json) else true;
 
+    // Autosave must create a new version (not update in-place) when current == published,
+    // otherwise the published version's data would be corrupted.
+    const is_published_version = if (prev_version_id) |pv|
+        if (published_vid) |pub_v| std.mem.eql(u8, pv, pub_v) else false
+    else
+        false;
+
     const version_id = generateVersionId();
 
+    // Autosave can update in-place ONLY when:
+    // 1. Current version != published version (preserve published snapshot)
+    // 2. Same author is editing (different author = new version for attribution)
+    const same_author = if (prev_author_id) |pa|
+        if (opts.author_id) |oa| std.mem.eql(u8, pa, oa) else true
+    else
+        true;
+    const can_autosave_inplace = opts.autosave and !is_published_version and same_author;
+
     if (is_update) {
-        if (data_changed) {
-            // Create version (entry already exists, FK is satisfied)
+        if (data_changed and !can_autosave_inplace) {
+            // Create new version (explicit save, or autosave that would corrupt published)
+            const version_type: []const u8 = if (opts.autosave) "autosave" else "updated";
             var v_stmt = try db.prepare(
                 \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
-                \\VALUES (?1, ?2, ?3, ?4, ?5, 'updated')
+                \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             );
             defer v_stmt.deinit();
 
@@ -561,8 +594,22 @@ pub fn saveEntry(
             if (prev_version_id) |pv| try v_stmt.bindText(3, pv) else try v_stmt.bindNull(3);
             try v_stmt.bindText(4, data_json);
             if (opts.author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+            try v_stmt.bindText(6, version_type);
 
             _ = try v_stmt.step();
+        } else if (data_changed and can_autosave_inplace) {
+            // Autosave: update existing version in-place (no history entry)
+            if (prev_version_id) |pv| {
+                var v_stmt = try db.prepare(
+                    "UPDATE entry_versions SET data = ?1 WHERE id = ?2",
+                );
+                defer v_stmt.deinit();
+
+                try v_stmt.bindText(1, data_json);
+                try v_stmt.bindText(2, pv);
+
+                _ = try v_stmt.step();
+            }
         }
 
         // Update entry
@@ -583,8 +630,8 @@ pub fn saveEntry(
             _ = try stmt.step();
         }
 
-        // Point to new version if data changed
-        if (data_changed) {
+        // Point to new version if data changed (skip for in-place autosave)
+        if (data_changed and !can_autosave_inplace) {
             var cv_stmt = try db.prepare(
                 "UPDATE entries SET current_version_id = ?1 WHERE id = ?2",
             );

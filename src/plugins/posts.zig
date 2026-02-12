@@ -713,46 +713,16 @@ fn handleAutosaveUpdate(ctx: *Context) !void {
         return;
     };
 
-    const title = ctx.formValue("title") orelse "";
-    const slug = ctx.formValue("slug") orelse "";
-    const body = ctx.formValue("content") orelse "";
-    const featured_image_raw = ctx.formValue("featured_image") orelse "";
+    // For each field: use submitted value if present, keep existing if absent (disabled field)
+    const title = ctx.formValue("title") orelse entry.title;
+    const slug = ctx.formValue("slug") orelse entry.slug orelse "";
+    const body = ctx.formValue("content") orelse entry.data.body;
+    const featured_image_raw = ctx.formValue("featured_image") orelse entry.data.featured_image orelse "";
     const featured_image: ?[]const u8 = if (featured_image_raw.len > 0) featured_image_raw else null;
 
-    // Determine status: drafts stay draft; published/changed entries
-    // check against published version to determine if changed
-    var status: []const u8 = "draft";
-    if (entry.isDraft()) {
-        status = "draft";
-    } else {
-        // Entry was published or changed — compare against published data
-        const published_data = cms.getPublishedData(ctx.allocator, db, post_id) catch null;
-        if (published_data) |pd| {
-            // Build current data JSON for comparison
-            const current_data = Post.Data{
-                .title = title,
-                .slug = slug,
-                .body = body,
-                .status = "published", // normalize for comparison
-                .author = null,
-                .category = null,
-                .tag = null,
-                .published_at = null,
-                .featured = false,
-                .featured_image = featured_image,
-                .meta_description = null,
-            };
-            const current_json = Post.stringifyData(ctx.allocator, current_data) catch null;
-            if (current_json) |cj| {
-                status = if (std.mem.eql(u8, cj, pd)) "published" else "changed";
-            } else {
-                status = "changed";
-            }
-        } else {
-            // No published version — keep as published (shouldn't happen normally)
-            status = "published";
-        }
-    }
+    // Determine status: drafts stay draft; published/changed become "changed"
+    // Only explicit publish or discard can set status back to "published"
+    const status: []const u8 = if (entry.isDraft()) "draft" else "changed";
 
     const data = Post.Data{
         .title = title,
@@ -771,6 +741,7 @@ fn handleAutosaveUpdate(ctx: *Context) !void {
     const author_id = auth_middleware.getUserId(ctx);
     _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
         .author_id = author_id,
+        .autosave = true,
     }) catch {
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.response.setBody("{\"error\":\"save failed\"}");
