@@ -27,7 +27,7 @@ pub fn ReleaseMenu(props: struct {
 
     <div data-publr-component="dropdown" data-publr-state="closed" id="release-dropdown">
         <button type="button" data-publr-part="trigger" class="btn btn-full" aria-expanded="false" aria-haspopup="true" disabled="">
-            Add to Release
+            <span id="release-trigger-text">Add to Release</span>
             {@raw icon_chevron_down}
         </button>
         <div data-publr-part="content" class="dropdown-menu" role="menu">

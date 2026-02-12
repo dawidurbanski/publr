@@ -20,15 +20,26 @@ pub fn Edit(props: struct {
     post: PostData,
     csrf_token: []const u8,
     action: []const u8 = "",
+    fields_in_releases: []const u8 = "[]",
+    field_editors: []const u8 = "{}",
 }) {
     <form method="POST" action={props.action} id="post-form" class="form"
         data-entry-id={props.post.entry_id}
         data-entry-status={props.post.status}
         data-published-state={props.post.published_data}
+        data-fields-in-releases={props.fields_in_releases}
+        data-field-editors={props.field_editors}
     >
         <input type="hidden" name="_csrf" value={props.csrf_token} />
-        <div class="form-group">
-            <label for="title">Title</label>
+        <input type="hidden" name="fields" value="" id="publish-fields" />
+        <div class="form-group" data-field="title">
+            <div class="form-label-row">
+                <label for="title">Title</label>
+                <div class="field-check-row">
+                    <span class="field-editor-badge" data-field="title"></span>
+                    <input type="checkbox" class="field-publish-check" data-field="title" checked="" />
+                </div>
+            </div>
             <input
                 type="text"
                 id="title"
@@ -38,8 +49,14 @@ pub fn Edit(props: struct {
                 required=""
             />
         </div>
-        <div class="form-group">
-            <label for="slug">Slug</label>
+        <div class="form-group" data-field="slug">
+            <div class="form-label-row">
+                <label for="slug">Slug</label>
+                <div class="field-check-row">
+                    <span class="field-editor-badge" data-field="slug"></span>
+                    <input type="checkbox" class="field-publish-check" data-field="slug" checked="" />
+                </div>
+            </div>
             <input
                 type="text"
                 id="slug"
@@ -48,8 +65,14 @@ pub fn Edit(props: struct {
                 class="form-control"
             />
         </div>
-        <div class="form-group">
-            <label for="content">Content</label>
+        <div class="form-group" data-field="body">
+            <div class="form-label-row">
+                <label for="content">Content</label>
+                <div class="field-check-row">
+                    <span class="field-editor-badge" data-field="body"></span>
+                    <input type="checkbox" class="field-publish-check" data-field="body" checked="" />
+                </div>
+            </div>
             <textarea
                 id="content"
                 name="content"
@@ -84,8 +107,8 @@ pub fn EditSidebar(props: struct {
                     Published
                 </button>
             )}
-            {if (props.post.is_changed) (
-                <button type="button" class="btn btn-ghost btn-full" id="discard-btn">
+            {if (!props.post.is_draft) (
+                <button type="button" class={if (props.post.is_changed) "btn btn-ghost btn-full" else "btn btn-ghost btn-full hidden"} id="discard-btn">
                     Discard Changes
                 </button>
             )}

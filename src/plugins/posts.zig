@@ -104,61 +104,44 @@ fn handleList(ctx: *Context) !void {
         .posts = posts,
     }});
 
-    ctx.html(registry.renderPage(page, ctx, content));
+    const add_btn =
+        \\<a href="/admin/posts/new" class="btn btn-primary">Add new</a>
+    ;
+
+    ctx.html(registry.renderPageFull(page, ctx, content, "", "", add_btn));
 }
 
 fn handleNew(ctx: *Context) !void {
-    const csrf_token = csrf.ensureToken(ctx);
-
-    const PostData = struct {
-        title: []const u8,
-        slug: []const u8,
-        content: []const u8,
-        date: []const u8,
-        status: []const u8,
-        is_draft: bool,
-        is_published: bool,
-        is_changed: bool,
-        featured_image: []const u8,
-        featured_image_url: []const u8,
-        entry_id: []const u8,
-        published_data: []const u8,
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/posts");
+        return;
     };
 
-    const post_data = PostData{
+    // Create empty draft entry immediately so it has an ID for releases
+    const data = Post.Data{
         .title = "",
         .slug = "",
-        .content = "",
-        .date = formatDate(std.time.timestamp(), ctx.allocator) catch "Unknown",
+        .body = "",
         .status = "draft",
-        .is_draft = true,
-        .is_published = false,
-        .is_changed = false,
-        .featured_image = "",
-        .featured_image_url = "",
-        .entry_id = "",
-        .published_data = "",
+        .author = null,
+        .category = null,
+        .tag = null,
+        .published_at = null,
+        .featured = false,
+        .featured_image = null,
+        .meta_description = null,
     };
 
-    const content = tpl.render(views.admin.posts.edit.Edit, .{.{
-        .post = post_data,
-        .csrf_token = csrf_token,
-        .action = "/admin/posts",
-    }});
+    const author_id = auth_middleware.getUserId(ctx);
+    const entry = cms.saveEntry(Post, ctx.allocator, db, null, data, .{
+        .author_id = author_id,
+    }) catch {
+        redirect(ctx, "/admin/posts");
+        return;
+    };
 
-    const sidebar = tpl.render(views.admin.posts.edit.EditSidebar, .{.{
-        .post = post_data,
-        .csrf_token = csrf_token,
-        .delete_url = "",
-        .history_html = "",
-        .release_html = "",
-    }});
-
-    ctx.html(registry.renderEditPage(page, ctx, "New Post", content, .{
-        .back_url = "/admin/posts",
-        .back_label = "Posts",
-        .sidebar = sidebar,
-    }));
+    const edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{entry.id}) catch "/admin/posts";
+    redirect(ctx, edit_url);
 }
 
 fn handleEdit(ctx: *Context) !void {
@@ -210,6 +193,14 @@ fn handleEdit(ctx: *Context) !void {
     // Get published version data for smart change detection
     const published_data = cms.getPublishedData(ctx.allocator, db, post_id) catch null;
 
+    // Build per-field release info JSON for the edit form
+    const release_field_info = cms.getEntryPendingReleaseFields(ctx.allocator, db, post_id) catch &.{};
+    const fields_in_releases_json = buildFieldsInReleasesJson(ctx.allocator, release_field_info) catch "[]";
+
+    // Build field editors JSON: who last changed each field (for multi-user editing)
+    const current_user_id = auth_middleware.getUserId(ctx) orelse "";
+    const field_editors_json = buildFieldEditorsJson(ctx.allocator, db, post_id, current_user_id) catch "{}";
+
     const post_data = PostData{
         .title = entry.title,
         .slug = entry.slug orelse "",
@@ -229,6 +220,8 @@ fn handleEdit(ctx: *Context) !void {
         .post = post_data,
         .csrf_token = csrf_token,
         .action = edit_url,
+        .fields_in_releases = fields_in_releases_json,
+        .field_editors = field_editors_json,
     }});
 
     // Build version history HTML for sidebar
@@ -272,7 +265,8 @@ fn handleEdit(ctx: *Context) !void {
         .release_html = release_html,
     }});
 
-    ctx.html(registry.renderEditPage(page, ctx, entry.title, content, .{
+    const display_title = if (entry.title.len > 0) entry.title else "Untitled";
+    ctx.html(registry.renderEditPage(page, ctx, display_title, content, .{
         .back_url = "/admin/posts",
         .back_label = "Posts",
         .sidebar = sidebar,
@@ -316,18 +310,21 @@ fn handleVersionPreview(ctx: *Context) !void {
     };
 
     // Get current version data
-    const current_data = cms.getVersion(ctx.allocator, db, blk: {
+    const current_version_id = blk: {
         var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
         defer cur_stmt.deinit();
         try cur_stmt.bindText(1, post_id);
         _ = try cur_stmt.step();
         break :blk try ctx.allocator.dupe(u8, cur_stmt.columnText(0) orelse "");
-    }) catch null;
+    };
+    const current_data = cms.getVersion(ctx.allocator, db, current_version_id) catch null;
 
     const current_json = if (current_data) |cd| cd.data else "{}";
 
-    // Get structured field comparison
-    const fields = cms.compareVersionFields(ctx.allocator, version.data, current_json) catch &.{};
+    // Get structured field comparison with per-field author attribution
+    var empty_fields = [_]cms.FieldComparison{};
+    const fields = cms.compareVersionFields(ctx.allocator, version.data, current_json) catch &empty_fields;
+    cms.populateFieldAuthors(ctx.allocator, db, fields, current_version_id, version_id);
 
     // Count changed fields
     var changed_count: u32 = 0;
@@ -336,7 +333,7 @@ fn handleVersionPreview(ctx: *Context) !void {
     }
 
     const time_str = cms.formatRelativeTime(ctx.allocator, version.created_at) catch "Unknown";
-    const author_str = version.author_email orelse "System";
+    const author_str = version.authorLabel();
     const restore_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}/versions/{s}/restore", .{ post_id, version_id }) catch "";
     const back_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
 
@@ -371,12 +368,25 @@ fn handleVersionPreview(ctx: *Context) !void {
         try w.writeAll(csrf_token);
         try w.writeAll("\"/>");
 
-        // Header row with version info
+        // Header row with version info and collaborator avatars
         try w.writeAll(
             \\<div class="version-compare-header">
             \\  <div class="version-compare-col-old">
             \\    <span class="version-compare-col-title">
         );
+        // Old version: show avatar + author + time
+        if (version.author_email) |email| {
+            const old_avatar = gravatar.url(email, 24);
+            try w.writeAll("<img src=\"");
+            try w.writeAll(old_avatar.slice());
+            try w.writeAll("\" alt=\"\" title=\"");
+            try cms.writeEscaped(w, version.authorLabel());
+            try w.writeAll("\" class=\"version-avatar\" /> ");
+        }
+        // Show "Published by X" for published versions, otherwise just author
+        if (std.mem.eql(u8, version.version_type, "published")) {
+            try w.writeAll("Published by ");
+        }
         try w.writeAll(author_str);
         try w.writeAll(" &middot; ");
         try w.writeAll(time_str);
@@ -385,7 +395,62 @@ fn handleVersionPreview(ctx: *Context) !void {
             \\    <a href="#" id="select-all-old" class="version-compare-select-all">Select all from this version</a>
             \\  </div>
             \\  <div class="version-compare-col-current">
-            \\    <span class="version-compare-col-title">Current version</span>
+            \\    <span class="version-compare-col-title">
+        );
+        // Current version: show collaborator avatars if available
+        if (current_data) |cd| {
+            if (cd.collaborators) |collab_json| {
+                const parsed = std.json.parseFromSlice(std.json.Value, ctx.allocator, collab_json, .{}) catch null;
+                defer if (parsed) |p| p.deinit();
+                if (parsed) |p| {
+                    if (p.value == .array and p.value.array.items.len > 0) {
+                        try w.writeAll("<span class=\"version-avatars\">");
+                        const items = p.value.array.items;
+                        const max_show: usize = 3;
+                        const show_count = @min(items.len, max_show);
+                        for (items[0..show_count]) |item| {
+                            if (item == .object) {
+                                if (item.object.get("email")) |email_val| {
+                                    if (email_val == .string) {
+                                        const avatar = gravatar.url(email_val.string, 24);
+                                        const name_val = if (item.object.get("name")) |n| (if (n == .string and n.string.len > 0) n.string else email_val.string) else email_val.string;
+                                        try w.writeAll("<img src=\"");
+                                        try w.writeAll(avatar.slice());
+                                        try w.writeAll("\" alt=\"\" title=\"");
+                                        try cms.writeEscaped(w, name_val);
+                                        try w.writeAll("\" class=\"version-avatar version-avatar-stacked\" />");
+                                    }
+                                }
+                            }
+                        }
+                        if (items.len > max_show) {
+                            try w.print("<span class=\"version-avatar version-avatar-overflow\">+{d}</span>", .{items.len - max_show});
+                        }
+                        try w.writeAll("</span> ");
+                    }
+                }
+            } else if (cd.author_email) |email| {
+                const cur_avatar = gravatar.url(email, 24);
+                try w.writeAll("<img src=\"");
+                try w.writeAll(cur_avatar.slice());
+                try w.writeAll("\" alt=\"\" title=\"");
+                try cms.writeEscaped(w, cd.authorLabel());
+                try w.writeAll("\" class=\"version-avatar\" /> ");
+            }
+        }
+        // Show "Published by X" or "Current version" label
+        if (current_data) |cd| {
+            if (std.mem.eql(u8, cd.version_type, "published")) {
+                try w.writeAll("Published by ");
+                try cms.writeEscaped(w, cd.authorLabel());
+            } else {
+                try w.writeAll("Current version");
+            }
+        } else {
+            try w.writeAll("Current version");
+        }
+        try w.writeAll(
+            \\</span>
             \\  </div>
             \\</div>
         );
@@ -414,11 +479,16 @@ fn handleVersionPreview(ctx: *Context) !void {
             try w.writeAll(status_attr);
             try w.writeAll("\">");
 
-            // Field label
+            // Field label with "by User" attribution
             try w.writeAll("<div class=\"version-compare-label\">");
             try cms.writeEscaped(w, f.key);
             if (f.changed) {
                 try w.writeAll(" <span class=\"version-compare-badge\">changed</span>");
+                if (f.changed_by) |email| {
+                    try w.writeAll(" <span class=\"version-compare-author\">by ");
+                    try cms.writeEscaped(w, email);
+                    try w.writeAll("</span>");
+                }
             }
             try w.writeAll("</div>");
 
@@ -769,27 +839,13 @@ fn handleDiscard(ctx: *Context) !void {
         return;
     };
 
-    const author_id = auth_middleware.getUserId(ctx);
+    _ = auth_middleware.getUserId(ctx);
 
-    // Get published version data
-    const published_data = cms.getPublishedData(ctx.allocator, db, post_id) catch null;
-    if (published_data) |pd| {
-        // Restore to published version's data
-        cms.restoreVersionWithData(db, post_id, pd, author_id) catch |err| {
-            std.debug.print("Error discarding changes: {}\n", .{err});
-        };
-
-        // Set status back to published
-        var stmt = db.prepare(
-            "UPDATE entries SET status = 'published' WHERE id = ?1",
-        ) catch {
-            redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts");
-            return;
-        };
-        defer stmt.deinit();
-        stmt.bindText(1, post_id) catch {};
-        _ = stmt.step() catch {};
-    }
+    // Reset entry to published version without creating history.
+    // This is a WIP revert — no trace needed.
+    cms.discardToPublished(db, post_id) catch |err| {
+        std.debug.print("Error discarding changes: {}\n", .{err});
+    };
 
     redirect(ctx, std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts");
 }
@@ -832,15 +888,11 @@ fn handleCreate(ctx: *Context) !void {
         return;
     };
 
-    // Create release if publishing
+    // Publish if requested
     if (std.mem.eql(u8, status, "published")) {
-        const to_version = cms.getEntryVersionId(db, entry.id) catch null;
-        defer if (to_version) |v| db.allocator.free(v);
-        if (to_version) |tv| {
-            cms.createRelease(db, entry.id, null, tv, author_id) catch |err| {
-                std.debug.print("Error creating release: {}\n", .{err});
-            };
-        }
+        cms.publishEntry(ctx.allocator, db, entry.id, author_id, null) catch |err| {
+            std.debug.print("Error publishing: {}\n", .{err});
+        };
     }
 
     redirect(ctx, "/admin/posts");
@@ -858,14 +910,27 @@ fn handleUpdate(ctx: *Context) !void {
     };
 
     const action = ctx.formValue("action") orelse "";
+    const fields_json_raw = ctx.formValue("fields") orelse "";
+    const fields_json: ?[]const u8 = if (fields_json_raw.len > 0) fields_json_raw else null;
 
-    // Parse form data (shared by all actions — release actions now submit through main form)
-    const title = ctx.formValue("title") orelse "";
-    const slug = ctx.formValue("slug") orelse "";
-    const body = ctx.formValue("content") orelse "";
-    const status = ctx.formValue("status") orelse "draft";
-    const featured_image_raw = ctx.formValue("featured_image") orelse "";
+    // Fetch existing entry to preserve values for absent (disabled) fields
+    const entry = cms.getEntry(Post, ctx.allocator, db, post_id) catch {
+        redirect(ctx, "/admin/posts");
+        return;
+    } orelse {
+        redirect(ctx, "/admin/posts");
+        return;
+    };
+
+    // For each field: use submitted value if present, keep existing if absent (disabled field)
+    const title = ctx.formValue("title") orelse entry.title;
+    const slug = ctx.formValue("slug") orelse entry.slug orelse "";
+    const body = ctx.formValue("content") orelse entry.data.body;
+    const featured_image_raw = ctx.formValue("featured_image") orelse entry.data.featured_image orelse "";
     const featured_image: ?[]const u8 = if (featured_image_raw.len > 0) featured_image_raw else null;
+
+    // Status: use form value if present (publish button), otherwise preserve existing status
+    const status = ctx.formValue("status") orelse entry.status;
 
     const data = Post.Data{
         .title = title,
@@ -900,17 +965,12 @@ fn handleUpdate(ctx: *Context) !void {
     const to_version = cms.getEntryVersionId(db, post_id) catch null;
     defer if (to_version) |v| db.allocator.free(v);
 
-    const version_changed = if (from_version) |fv|
-        if (to_version) |tv| !std.mem.eql(u8, fv, tv) else false
-    else
-        to_version != null;
-
-    // Handle release actions
+    // Handle release actions — use current version as target (autosave already saved the data)
     if (std.mem.eql(u8, action, "add_to_release")) {
         const release_id = ctx.formValue("release_id") orelse "";
-        if (release_id.len > 0 and version_changed) {
+        if (release_id.len > 0) {
             if (to_version) |tv| {
-                cms.addToRelease(db, release_id, post_id, from_version, tv) catch |err| {
+                cms.addToRelease(db, release_id, post_id, from_version, tv, fields_json) catch |err| {
                     std.debug.print("Error adding to release: {}\n", .{err});
                 };
             }
@@ -922,14 +982,14 @@ fn handleUpdate(ctx: *Context) !void {
 
     if (std.mem.eql(u8, action, "create_release")) {
         const release_name = ctx.formValue("release_name") orelse "";
-        if (release_name.len > 0 and version_changed) {
+        if (release_name.len > 0) {
             const rel_id = cms.createPendingRelease(db, release_name, author_id) catch {
                 const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
                 redirect(ctx, url);
                 return;
             };
             if (to_version) |tv| {
-                cms.addToRelease(db, &rel_id, post_id, from_version, tv) catch {};
+                cms.addToRelease(db, &rel_id, post_id, from_version, tv, fields_json) catch {};
             }
         }
         const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
@@ -937,13 +997,11 @@ fn handleUpdate(ctx: *Context) !void {
         return;
     }
 
-    // Create instant release if publishing and version actually changed
-    if (std.mem.eql(u8, status, "published") and version_changed) {
-        if (to_version) |tv| {
-            cms.createRelease(db, post_id, from_version, tv, author_id) catch |err| {
-                std.debug.print("Error creating release: {}\n", .{err});
-            };
-        }
+    // Handle publish
+    if (std.mem.eql(u8, status, "published")) {
+        cms.publishEntry(ctx.allocator, db, post_id, author_id, fields_json) catch |err| {
+            std.debug.print("Error publishing: {}\n", .{err});
+        };
     }
 
     redirect(ctx, "/admin/posts");
@@ -978,44 +1036,13 @@ fn handlePublish(ctx: *Context) !void {
         return;
     };
 
-    // Get existing post
-    const entry = cms.getEntry(Post, ctx.allocator, db, post_id) catch {
-        redirect(ctx, "/admin/posts");
-        return;
-    } orelse {
-        redirect(ctx, "/admin/posts");
-        return;
-    };
-
     const author_id = auth_middleware.getUserId(ctx);
+    const fields_json_raw = ctx.formValue("fields") orelse "";
+    const fields_json: ?[]const u8 = if (fields_json_raw.len > 0) fields_json_raw else null;
 
-    // Capture version before save for release tracking
-    const from_version = cms.getEntryVersionId(db, post_id) catch null;
-    defer if (from_version) |v| db.allocator.free(v);
-
-    // Update status to published
-    var data = entry.data;
-    data.status = "published";
-
-    _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
-        .author_id = author_id,
-    }) catch |err| {
-        std.debug.print("Error publishing post: {}\n", .{err});
-        redirect(ctx, "/admin/posts");
-        return;
+    cms.publishEntry(ctx.allocator, db, post_id, author_id, fields_json) catch |err| {
+        std.debug.print("Error publishing: {}\n", .{err});
     };
-
-    // Create release
-    const to_version = cms.getEntryVersionId(db, post_id) catch null;
-    defer if (to_version) |v| db.allocator.free(v);
-    if (to_version) |tv| {
-        const skip = if (from_version) |fv| std.mem.eql(u8, fv, tv) else false;
-        if (!skip) {
-            cms.createRelease(db, post_id, from_version, tv, author_id) catch |err| {
-                std.debug.print("Error creating release: {}\n", .{err});
-            };
-        }
-    }
 
     redirect(ctx, "/admin/posts");
 }
@@ -1069,6 +1096,136 @@ fn formatDate(timestamp: i64, allocator: std.mem.Allocator) ![]const u8 {
 
 const Db = @import("db").Db;
 
+/// Build JSON for fields-in-releases data attribute.
+/// Output: [{"id":"...","name":"...","fields":["a","b"]},{"id":"...","name":"...","fields":null}]
+/// Build JSON mapping field keys to their last editor info, excluding the current user.
+/// Returns e.g. {"title":{"name":"John","avatar":"https://gravatar.com/..."}}
+fn buildFieldEditorsJson(allocator: std.mem.Allocator, db: *Db, entry_id: []const u8, current_user_id: []const u8) ![]const u8 {
+    // Get current and published version IDs
+    var ver_stmt = try db.prepare(
+        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+    );
+    defer ver_stmt.deinit();
+    try ver_stmt.bindText(1, entry_id);
+    if (!try ver_stmt.step()) return try allocator.dupe(u8, "{}");
+
+    const current_vid = ver_stmt.columnText(0) orelse return try allocator.dupe(u8, "{}");
+    const published_vid = ver_stmt.columnText(1) orelse return try allocator.dupe(u8, "{}");
+    if (std.mem.eql(u8, current_vid, published_vid)) return try allocator.dupe(u8, "{}");
+
+    // Dupe before the statement is deinitialized
+    const cur_vid = try allocator.dupe(u8, current_vid);
+    defer allocator.free(cur_vid);
+    const pub_vid = try allocator.dupe(u8, published_vid);
+    defer allocator.free(pub_vid);
+
+    // Get published and current data for comparison
+    const published_data = try cms.getPublishedData(allocator, db, entry_id) orelse return try allocator.dupe(u8, "{}");
+    defer allocator.free(published_data);
+
+    // Get current version data
+    var data_stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+    defer data_stmt.deinit();
+    try data_stmt.bindText(1, cur_vid);
+    if (!try data_stmt.step()) return try allocator.dupe(u8, "{}");
+    const current_data = try allocator.dupe(u8, data_stmt.columnText(0) orelse "{}");
+    defer allocator.free(current_data);
+
+    // Compare fields and attribute authors
+    const fields = try cms.compareVersionFields(allocator, published_data, current_data);
+    defer allocator.free(fields);
+    cms.populateFieldAuthors(allocator, db, fields, cur_vid, pub_vid);
+
+    // Find the current user's email for comparison
+    var user_stmt = try db.prepare("SELECT email FROM users WHERE id = ?1");
+    defer user_stmt.deinit();
+    try user_stmt.bindText(1, current_user_id);
+    const current_email = if (try user_stmt.step())
+        user_stmt.columnText(0) orelse ""
+    else
+        "";
+
+    // Build JSON with only fields changed by other users
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+    try w.writeByte('{');
+    var first = true;
+    for (fields) |f| {
+        if (!f.changed) continue;
+        const editor_email = f.changed_by_email orelse continue;
+        // Skip fields changed by the current user
+        if (current_email.len > 0 and std.mem.eql(u8, editor_email, current_email)) continue;
+
+        if (!first) try w.writeByte(',');
+        first = false;
+
+        // Key
+        try w.writeByte('"');
+        try writeJsonEscaped(w, f.key);
+        try w.writeAll("\":{\"name\":\"");
+        try writeJsonEscaped(w, f.changed_by orelse editor_email);
+        try w.writeAll("\",\"avatar\":\"");
+        const avatar = gravatar.url(editor_email, 20);
+        try w.writeAll(avatar.slice());
+        try w.writeAll("\"}");
+    }
+    try w.writeByte('}');
+    return buf.toOwnedSlice(allocator);
+}
+
+fn writeJsonEscaped(w: anytype, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '"' => try w.writeAll("\\\""),
+            '\\' => try w.writeAll("\\\\"),
+            '\n' => try w.writeAll("\\n"),
+            '\r' => try w.writeAll("\\r"),
+            '\t' => try w.writeAll("\\t"),
+            else => try w.writeByte(c),
+        }
+    }
+}
+
+fn buildFieldsInReleasesJson(allocator: std.mem.Allocator, items: []const cms.EntryReleaseFieldInfo) ![]const u8 {
+    if (items.len == 0) return try allocator.dupe(u8, "[]");
+
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeByte('[');
+    for (items, 0..) |item, i| {
+        if (i > 0) try w.writeByte(',');
+        // release_id is system-generated (safe for direct output)
+        try w.writeAll("{\"id\":\"");
+        try w.writeAll(item.release_id);
+        try w.writeAll("\",\"name\":");
+        // JSON-escape the release name (user input)
+        try w.writeByte('"');
+        for (item.release_name) |c| {
+            switch (c) {
+                '"' => try w.writeAll("\\\""),
+                '\\' => try w.writeAll("\\\\"),
+                '\n' => try w.writeAll("\\n"),
+                '\r' => try w.writeAll("\\r"),
+                '\t' => try w.writeAll("\\t"),
+                else => try w.writeByte(c),
+            }
+        }
+        try w.writeByte('"');
+        try w.writeAll(",\"fields\":");
+        if (item.fields) |f| {
+            try w.writeAll(f); // Already a JSON array from the database
+        } else {
+            try w.writeAll("null");
+        }
+        try w.writeByte('}');
+    }
+    try w.writeByte(']');
+    return buf.toOwnedSlice(allocator);
+}
+
 /// Build version history HTML for the edit sidebar
 fn buildVersionHistoryHtml(allocator: std.mem.Allocator, db: *Db, entry_id: []const u8) ![]const u8 {
     const versions = try cms.listVersions(allocator, db, entry_id, .{ .limit = 20 });
@@ -1097,12 +1254,49 @@ fn buildVersionHistoryHtml(allocator: std.mem.Allocator, db: *Db, entry_id: []co
             try w.writeAll("\" class=\"version-item\">");
         }
 
-        // Avatar
-        if (v.author_email) |email| {
+        // Avatars: show collaborators stack for published versions, single avatar otherwise
+        if (v.collaborators) |collab_json| {
+            const parsed = std.json.parseFromSlice(std.json.Value, allocator, collab_json, .{}) catch null;
+            defer if (parsed) |p| p.deinit();
+
+            if (parsed) |p| {
+                if (p.value == .array and p.value.array.items.len > 0) {
+                    try w.writeAll("<span class=\"version-avatars\">");
+                    const items = p.value.array.items;
+                    const max_show: usize = 3;
+                    const show_count = @min(items.len, max_show);
+                    for (items[0..show_count]) |item| {
+                        if (item == .object) {
+                            if (item.object.get("email")) |email_val| {
+                                if (email_val == .string) {
+                                    const avatar = gravatar.url(email_val.string, 24);
+                                    const name_val = if (item.object.get("name")) |n| (if (n == .string and n.string.len > 0) n.string else email_val.string) else email_val.string;
+                                    try w.writeAll("<img src=\"");
+                                    try w.writeAll(avatar.slice());
+                                    try w.writeAll("\" alt=\"\" title=\"");
+                                    try cms.writeEscaped(w, name_val);
+                                    try w.writeAll("\" class=\"version-avatar version-avatar-stacked\" />");
+                                }
+                            }
+                        }
+                    }
+                    if (items.len > max_show) {
+                        try w.print("<span class=\"version-avatar version-avatar-overflow\">+{d}</span>", .{items.len - max_show});
+                    }
+                    try w.writeAll("</span>");
+                } else {
+                    try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
+                }
+            } else {
+                try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
+            }
+        } else if (v.author_email) |email| {
             const avatar = gravatar.url(email, 24);
             try w.writeAll("<img src=\"");
             try w.writeAll(avatar.slice());
-            try w.writeAll("\" alt=\"\" class=\"version-avatar\" />");
+            try w.writeAll("\" alt=\"\" title=\"");
+            try cms.writeEscaped(w, v.authorLabel());
+            try w.writeAll("\" class=\"version-avatar\" />");
         } else {
             try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
         }

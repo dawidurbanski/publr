@@ -223,7 +223,7 @@ fn handlePublish(ctx: *Context) !void {
         return;
     };
 
-    cms.publishBatchRelease(db, release_id) catch |err| {
+    cms.publishBatchRelease(ctx.allocator, db, release_id) catch |err| {
         std.debug.print("Error publishing release: {}\n", .{err});
     };
 

@@ -867,10 +867,20 @@ pub const Version = struct {
     data: []const u8,
     author_id: ?[]const u8,
     author_email: ?[]const u8,
+    author_display_name: ?[]const u8 = null,
     created_at: i64,
     version_type: []const u8,
     is_current: bool,
     release_name: ?[]const u8 = null,
+    collaborators: ?[]const u8 = null,
+
+    /// Returns display_name if non-empty, otherwise email, otherwise "System"
+    pub fn authorLabel(self: Version) []const u8 {
+        if (self.author_display_name) |dn| {
+            if (dn.len > 0) return dn;
+        }
+        return self.author_email orelse "System";
+    }
 };
 
 /// List versions for an entry, newest first. Joins users for author email.
@@ -881,13 +891,15 @@ pub fn listVersions(allocator: Allocator, db: *Db, entry_id: []const u8, opts: s
         \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data,
         \\       ev.author_id, u.email, ev.created_at, ev.version_type,
         \\       (e.current_version_id = ev.id) AS is_current,
-        \\       r.name AS release_name
+        \\       r.name AS release_name,
+        \\       ev.collaborators, u.display_name
         \\FROM entry_versions ev
         \\JOIN entries e ON e.id = ev.entry_id
         \\LEFT JOIN users u ON u.id = ev.author_id
         \\LEFT JOIN release_items ri ON ri.to_version = ev.id AND ri.entry_id = ev.entry_id
         \\LEFT JOIN releases r ON r.id = ri.release_id AND r.name IS NOT NULL
         \\WHERE ev.entry_id = ?1
+        \\  AND ev.version_type != 'autosave'
         \\ORDER BY ev.created_at DESC
         \\LIMIT ?2
     );
@@ -911,6 +923,8 @@ pub fn listVersions(allocator: Allocator, db: *Db, entry_id: []const u8, opts: s
             .version_type = try allocator.dupe(u8, stmt.columnText(7) orelse "edit"),
             .is_current = stmt.columnInt(8) == 1,
             .release_name = if (stmt.columnText(9)) |v| try allocator.dupe(u8, v) else null,
+            .collaborators = if (stmt.columnText(10)) |v| try allocator.dupe(u8, v) else null,
+            .author_display_name = if (stmt.columnText(11)) |v| try allocator.dupe(u8, v) else null,
         });
     }
 
@@ -922,7 +936,8 @@ pub fn getVersion(allocator: Allocator, db: *Db, version_id: []const u8) !?Versi
     var stmt = try db.prepare(
         \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data,
         \\       ev.author_id, u.email, ev.created_at, ev.version_type,
-        \\       (e.current_version_id = ev.id) AS is_current
+        \\       (e.current_version_id = ev.id) AS is_current,
+        \\       ev.collaborators, u.display_name
         \\FROM entry_versions ev
         \\JOIN entries e ON e.id = ev.entry_id
         \\LEFT JOIN users u ON u.id = ev.author_id
@@ -944,6 +959,8 @@ pub fn getVersion(allocator: Allocator, db: *Db, version_id: []const u8) !?Versi
         .created_at = stmt.columnInt(6),
         .version_type = try allocator.dupe(u8, stmt.columnText(7) orelse "edit"),
         .is_current = stmt.columnInt(8) == 1,
+        .collaborators = if (stmt.columnText(9)) |v| try allocator.dupe(u8, v) else null,
+        .author_display_name = if (stmt.columnText(10)) |v| try allocator.dupe(u8, v) else null,
     };
 }
 
@@ -1005,6 +1022,8 @@ pub const FieldComparison = struct {
     old_value: []const u8,
     new_value: []const u8,
     changed: bool,
+    changed_by: ?[]const u8 = null, // display name (or email) of who last changed this field
+    changed_by_email: ?[]const u8 = null, // email of who last changed this field (for gravatar)
 };
 
 /// Compare two JSON data strings field-by-field, returning structured data
@@ -1058,6 +1077,102 @@ pub fn compareVersionFields(allocator: Allocator, old_data: []const u8, new_data
     return items.toOwnedSlice(allocator);
 }
 
+/// Walk the version chain from current back to old_version and determine
+/// who last changed each field. Populates `changed_by` on the FieldComparison items.
+pub fn populateFieldAuthors(allocator: Allocator, db: *Db, fields: []FieldComparison, current_version_id: []const u8, old_version_id: []const u8) void {
+    // Walk parent_id chain from current to old, collecting (data, author_label) pairs
+    const ChainEntry = struct { data: []const u8, label: ?[]const u8, email: ?[]const u8 };
+    var chain: std.ArrayListUnmanaged(ChainEntry) = .{};
+    defer {
+        for (chain.items) |item| {
+            allocator.free(item.data);
+            if (item.label) |l| allocator.free(l);
+            if (item.email) |e| allocator.free(e);
+        }
+        chain.deinit(allocator);
+    }
+
+    var walk_id: ?[]const u8 = allocator.dupe(u8, current_version_id) catch return;
+    defer if (walk_id) |w| allocator.free(w);
+
+    var steps: usize = 0;
+    while (walk_id) |wid| {
+        if (steps > 100) break; // safety limit
+        steps += 1;
+
+        var stmt = db.prepare(
+            \\SELECT ev.data, u.email, ev.parent_id, u.display_name
+            \\FROM entry_versions ev
+            \\LEFT JOIN users u ON u.id = ev.author_id
+            \\WHERE ev.id = ?1
+        ) catch break;
+        defer stmt.deinit();
+        stmt.bindText(1, wid) catch break;
+        if (!(stmt.step() catch break)) break;
+
+        const data = allocator.dupe(u8, stmt.columnText(0) orelse "{}") catch break;
+        // Prefer display_name over email
+        const display_name = stmt.columnText(3);
+        const email = stmt.columnText(1);
+        const label = if (display_name) |dn| (if (dn.len > 0) allocator.dupe(u8, dn) catch null else if (email) |e| allocator.dupe(u8, e) catch null else null) else if (email) |e| allocator.dupe(u8, e) catch null else null;
+        const email_dupe = if (email) |e| allocator.dupe(u8, e) catch null else null;
+        chain.append(allocator, .{ .data = data, .label = label, .email = email_dupe }) catch break;
+
+        const at_old = std.mem.eql(u8, wid, old_version_id);
+        if (at_old) break;
+
+        if (stmt.columnText(2)) |parent| {
+            allocator.free(wid);
+            walk_id = allocator.dupe(u8, parent) catch null;
+        } else break;
+    }
+
+    if (chain.items.len < 2) return;
+
+    // chain is [current, parent, grandparent, ..., old] — walk adjacent pairs
+    // For each pair (newer, older): fields that differ were changed by newer's author
+    for (0..chain.items.len - 1) |i| {
+        const newer = chain.items[i];
+        const older = chain.items[i + 1];
+
+        const newer_parsed = std.json.parseFromSlice(std.json.Value, allocator, newer.data, .{}) catch continue;
+        defer newer_parsed.deinit();
+        const older_parsed = std.json.parseFromSlice(std.json.Value, allocator, older.data, .{}) catch continue;
+        defer older_parsed.deinit();
+
+        if (newer_parsed.value != .object or older_parsed.value != .object) continue;
+        const newer_obj = newer_parsed.value.object;
+        const older_obj = older_parsed.value.object;
+
+        for (fields) |*f| {
+            if (!f.changed or f.changed_by != null) continue; // already attributed
+
+            const newer_val = newer_obj.get(f.key);
+            const older_val = older_obj.get(f.key);
+
+            const differs = if (newer_val) |nv| blk: {
+                if (older_val) |ov| {
+                    const nv_str = jsonValueToString(allocator, nv) catch continue;
+                    defer allocator.free(nv_str);
+                    const ov_str = jsonValueToString(allocator, ov) catch continue;
+                    defer allocator.free(ov_str);
+                    break :blk !std.mem.eql(u8, nv_str, ov_str);
+                } else break :blk true;
+            } else older_val != null;
+
+            if (differs) {
+                // This version introduced the change for this field
+                if (newer.label) |l| {
+                    f.changed_by = allocator.dupe(u8, l) catch null;
+                }
+                if (newer.email) |e| {
+                    f.changed_by_email = allocator.dupe(u8, e) catch null;
+                }
+            }
+        }
+    }
+}
+
 /// Restore a version with arbitrary merged data. Creates a 'restored' version
 /// with the given data, updates entries.data, title, slug, status from the JSON.
 pub fn restoreVersionWithData(
@@ -1066,12 +1181,15 @@ pub fn restoreVersionWithData(
     data: []const u8,
     author_id: ?[]const u8,
 ) !void {
-    // Get current version id (becomes parent of restored version)
-    var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+    // Get current version id and check if entry is published
+    var cur_stmt = try db.prepare(
+        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+    );
     defer cur_stmt.deinit();
     try cur_stmt.bindText(1, entry_id);
     if (!try cur_stmt.step()) return error.EntryNotFound;
     const current_vid = cur_stmt.columnText(0);
+    const is_published = cur_stmt.columnText(1) != null;
 
     // Create new version with merged data
     const new_vid = generateVersionId();
@@ -1114,8 +1232,24 @@ pub fn restoreVersionWithData(
         }
     }
 
-    // Update entry to point to new version and sync data + promoted fields
-    {
+    // Update entry — if published, also update published_version_id so restore goes live immediately
+    if (is_published) {
+        var u_stmt = try db.prepare(
+            \\UPDATE entries SET current_version_id = ?1, published_version_id = ?1, data = ?2,
+            \\    title = ?3, slug = ?4, status = ?5, updated_at = unixepoch()
+            \\WHERE id = ?6
+        );
+        defer u_stmt.deinit();
+
+        try u_stmt.bindText(1, &new_vid);
+        try u_stmt.bindText(2, data);
+        try u_stmt.bindText(3, title);
+        if (slug) |s| try u_stmt.bindText(4, s) else try u_stmt.bindNull(4);
+        try u_stmt.bindText(5, status);
+        try u_stmt.bindText(6, entry_id);
+
+        _ = try u_stmt.step();
+    } else {
         var u_stmt = try db.prepare(
             \\UPDATE entries SET current_version_id = ?1, data = ?2,
             \\    title = ?3, slug = ?4, status = ?5, updated_at = unixepoch()
@@ -1269,6 +1403,7 @@ pub fn getEntryVersionId(db: *Db, entry_id: []const u8) !?[]const u8 {
     return null;
 }
 
+/// Set published_version_id on an entry (used when publishing without data change)
 /// Get the published version's data for an entry (for smart change detection).
 /// Returns null if no published version exists (i.e. entry was never published).
 pub fn getPublishedData(allocator: Allocator, db: *Db, entry_id: []const u8) !?[]const u8 {
@@ -1287,59 +1422,219 @@ pub fn getPublishedData(allocator: Allocator, db: *Db, entry_id: []const u8) !?[
     return null;
 }
 
-/// Create an instant release for a single entry publish.
-/// Records from_version → to_version and marks the release as 'released'.
-pub fn createRelease(
-    db: *Db,
-    entry_id: []const u8,
-    from_version: ?[]const u8,
-    to_version: []const u8,
-    author_id: ?[]const u8,
-) !void {
-    const release_id = generateReleaseId();
+/// Discard WIP changes by resetting an entry to its published version.
+/// No history entry is created — this silently reverts current_version_id
+/// and entries.data back to the published snapshot.
+pub fn discardToPublished(db: *Db, entry_id: []const u8) !void {
+    // Get published version id and data
+    var stmt = try db.prepare(
+        \\SELECT e.published_version_id, ev.data
+        \\FROM entries e
+        \\JOIN entry_versions ev ON ev.id = e.published_version_id
+        \\WHERE e.id = ?1
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, entry_id);
+    if (!try stmt.step()) return;
 
-    // Insert release (instant = already released)
+    const published_vid = stmt.columnText(0) orelse return;
+    const published_data = stmt.columnText(1) orelse return;
+
+    // Extract title and slug from published data for entries table
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, published_data, .{}) catch null;
+    defer if (parsed) |p| p.deinit();
+
+    var title: []const u8 = "";
+    var slug: ?[]const u8 = null;
+
+    if (parsed) |p| {
+        if (p.value == .object) {
+            if (p.value.object.get("title")) |t| {
+                if (t == .string) title = t.string;
+            }
+            if (p.value.object.get("slug")) |s| {
+                if (s == .string) slug = s.string;
+            }
+        }
+    }
+
+    // Reset entry to published state
+    var u_stmt = try db.prepare(
+        \\UPDATE entries SET current_version_id = ?1, data = ?2,
+        \\    title = ?3, slug = ?4, status = 'published', updated_at = unixepoch()
+        \\WHERE id = ?5
+    );
+    defer u_stmt.deinit();
+    try u_stmt.bindText(1, published_vid);
+    try u_stmt.bindText(2, published_data);
+    try u_stmt.bindText(3, title);
+    if (slug) |s| try u_stmt.bindText(4, s) else try u_stmt.bindNull(4);
+    try u_stmt.bindText(5, entry_id);
+    _ = try u_stmt.step();
+}
+
+/// Merge selected fields from draft JSON into published JSON.
+/// Returns a new JSON string with all published fields + selected fields overlaid from draft.
+pub fn mergeJsonFields(allocator: Allocator, published_json: []const u8, draft_json: []const u8, field_names: []const []const u8) ![]const u8 {
+    const pub_parsed = std.json.parseFromSlice(std.json.Value, allocator, published_json, .{}) catch
+        return try allocator.dupe(u8, published_json);
+    defer pub_parsed.deinit();
+
+    const draft_parsed = std.json.parseFromSlice(std.json.Value, allocator, draft_json, .{}) catch
+        return try allocator.dupe(u8, published_json);
+    defer draft_parsed.deinit();
+
+    const pub_obj = if (pub_parsed.value == .object) pub_parsed.value.object else return try allocator.dupe(u8, published_json);
+    const draft_obj = if (draft_parsed.value == .object) draft_parsed.value.object else return try allocator.dupe(u8, published_json);
+
+    // Build merged JSON string: start with all published fields, overlay selected from draft
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeByte('{');
+    var first = true;
+
+    // Write all published fields, substituting selected ones from draft
+    var pub_it = pub_obj.iterator();
+    while (pub_it.next()) |entry| {
+        if (!first) try w.writeByte(',');
+        first = false;
+
+        // Write key
+        try w.print("\"{s}\":", .{entry.key_ptr.*});
+
+        // Check if this field should come from draft
+        var use_draft = false;
+        for (field_names) |fname| {
+            if (std.mem.eql(u8, fname, entry.key_ptr.*)) {
+                use_draft = true;
+                break;
+            }
+        }
+
+        if (use_draft) {
+            if (draft_obj.get(entry.key_ptr.*)) |draft_val| {
+                try writeJsonValue(w, draft_val);
+            } else {
+                try writeJsonValue(w, entry.value_ptr.*);
+            }
+        } else {
+            try writeJsonValue(w, entry.value_ptr.*);
+        }
+    }
+
+    // Add any draft-only fields that are in the selection but not in published
+    for (field_names) |fname| {
+        if (!pub_obj.contains(fname)) {
+            if (draft_obj.get(fname)) |draft_val| {
+                if (!first) try w.writeByte(',');
+                first = false;
+                try w.print("\"{s}\":", .{fname});
+                try writeJsonValue(w, draft_val);
+            }
+        }
+    }
+
+    try w.writeByte('}');
+    return try buf.toOwnedSlice(allocator);
+}
+
+/// Write a JSON value to a writer
+fn writeJsonValue(w: anytype, value: std.json.Value) !void {
+    switch (value) {
+        .null => try w.writeAll("null"),
+        .bool => |b| try w.writeAll(if (b) "true" else "false"),
+        .integer => |i| try w.print("{d}", .{i}),
+        .float => |f| try w.print("{d}", .{f}),
+        .string => |s| {
+            try w.writeByte('"');
+            for (s) |c| {
+                switch (c) {
+                    '"' => try w.writeAll("\\\""),
+                    '\\' => try w.writeAll("\\\\"),
+                    '\n' => try w.writeAll("\\n"),
+                    '\r' => try w.writeAll("\\r"),
+                    '\t' => try w.writeAll("\\t"),
+                    else => try w.writeByte(c),
+                }
+            }
+            try w.writeByte('"');
+        },
+        .array => |arr| {
+            try w.writeByte('[');
+            for (arr.items, 0..) |item, i| {
+                if (i > 0) try w.writeByte(',');
+                try writeJsonValue(w, item);
+            }
+            try w.writeByte(']');
+        },
+        .object => |obj| {
+            try w.writeByte('{');
+            var it = obj.iterator();
+            var first = true;
+            while (it.next()) |entry| {
+                if (!first) try w.writeByte(',');
+                first = false;
+                try w.print("\"{s}\":", .{entry.key_ptr.*});
+                try writeJsonValue(w, entry.value_ptr.*);
+            }
+            try w.writeByte('}');
+        },
+        .number_string => |s| try w.writeAll(s),
+    }
+}
+
+/// Publish a single entry by creating an instant release and publishing it.
+/// Handles both full and partial (field-level) publish through the same
+/// publishBatchRelease path — one code path for all publishing.
+pub fn publishEntry(allocator: Allocator, db: *Db, entry_id: []const u8, author_id: ?[]const u8, fields_json: ?[]const u8) !void {
+    // Get current version IDs
+    var e_stmt = try db.prepare("SELECT current_version_id, published_version_id FROM entries WHERE id = ?1");
+    defer e_stmt.deinit();
+    try e_stmt.bindText(1, entry_id);
+    if (!try e_stmt.step()) return error.EntryNotFound;
+
+    const to_version = e_stmt.columnText(0) orelse return error.EntryNotFound;
+    const from_version = e_stmt.columnText(1);
+
+    // Skip if already published with same version and no partial fields
+    if (fields_json == null) {
+        if (from_version) |fv| {
+            if (std.mem.eql(u8, fv, to_version)) return;
+        }
+    }
+
+    // Create pending release (instant = unnamed)
+    const release_id = generateReleaseId();
     {
         var stmt = try db.prepare(
-            \\INSERT INTO releases (id, name, status, author_id, created_at, released_at)
-            \\VALUES (?1, NULL, 'released', ?2, unixepoch(), unixepoch())
+            \\INSERT INTO releases (id, name, status, author_id, created_at)
+            \\VALUES (?1, NULL, 'pending', ?2, unixepoch())
         );
         defer stmt.deinit();
-
         try stmt.bindText(1, &release_id);
         if (author_id) |aid| try stmt.bindText(2, aid) else try stmt.bindNull(2);
-
         _ = try stmt.step();
     }
 
-    // Insert release item
+    // Add single item
     {
         var stmt = try db.prepare(
-            \\INSERT INTO release_items (release_id, entry_id, from_version, to_version)
-            \\VALUES (?1, ?2, ?3, ?4)
+            \\INSERT INTO release_items (release_id, entry_id, from_version, to_version, fields)
+            \\VALUES (?1, ?2, ?3, ?4, ?5)
         );
         defer stmt.deinit();
-
         try stmt.bindText(1, &release_id);
         try stmt.bindText(2, entry_id);
         if (from_version) |fv| try stmt.bindText(3, fv) else try stmt.bindNull(3);
         try stmt.bindText(4, to_version);
-
+        if (fields_json) |fj| try stmt.bindText(5, fj) else try stmt.bindNull(5);
         _ = try stmt.step();
     }
 
-    // Set published_version_id on the entry so we can track what's "live"
-    {
-        var stmt = try db.prepare(
-            "UPDATE entries SET published_version_id = ?1 WHERE id = ?2",
-        );
-        defer stmt.deinit();
-
-        try stmt.bindText(1, to_version);
-        try stmt.bindText(2, entry_id);
-
-        _ = try stmt.step();
-    }
+    // Publish through the single shared path
+    try publishBatchRelease(allocator, db, &release_id);
 }
 
 /// Error returned when a release operation is blocked
@@ -1613,6 +1908,7 @@ pub const ReleaseDetailItem = struct {
     entry_status: []const u8,
     from_version: ?[]const u8,
     to_version: []const u8,
+    fields: ?[]const u8,
 };
 
 /// Full release detail (header + items)
@@ -1653,6 +1949,7 @@ pub fn addToRelease(
     entry_id: []const u8,
     from_version: ?[]const u8,
     to_version: []const u8,
+    fields: ?[]const u8,
 ) (Db.Error || ReleaseError)!void {
     // Validate release is pending
     {
@@ -1665,14 +1962,15 @@ pub fn addToRelease(
     }
 
     var stmt = try db.prepare(
-        \\INSERT OR REPLACE INTO release_items (release_id, entry_id, from_version, to_version)
-        \\VALUES (?1, ?2, ?3, ?4)
+        \\INSERT OR REPLACE INTO release_items (release_id, entry_id, from_version, to_version, fields)
+        \\VALUES (?1, ?2, ?3, ?4, ?5)
     );
     defer stmt.deinit();
     try stmt.bindText(1, release_id);
     try stmt.bindText(2, entry_id);
     if (from_version) |fv| try stmt.bindText(3, fv) else try stmt.bindNull(3);
     try stmt.bindText(4, to_version);
+    if (fields) |f| try stmt.bindText(5, f) else try stmt.bindNull(5);
     _ = try stmt.step();
 }
 
@@ -1717,9 +2015,130 @@ pub fn archiveRelease(db: *Db, release_id: []const u8) (Db.Error || ReleaseError
     _ = try stmt.step();
 }
 
+/// Collect unique collaborators between from_version and to_version for an entry.
+/// Returns a JSON array like [{"id":"u1","email":"a@b.com","name":"Alice"},{"id":"u2","email":"c@d.com","name":""}].
+/// Includes all version authors in the range, plus the publisher who triggered the release.
+fn collectCollaborators(
+    allocator: Allocator,
+    db: *Db,
+    entry_id: []const u8,
+    from_version: ?[]const u8,
+    to_version: []const u8,
+    publisher_id: ?[]const u8,
+) !?[]const u8 {
+    // Get the created_at of from_version (0 if null = first publish, include all)
+    var from_time: i64 = 0;
+    if (from_version) |fv| {
+        var t_stmt = try db.prepare("SELECT created_at FROM entry_versions WHERE id = ?1");
+        defer t_stmt.deinit();
+        try t_stmt.bindText(1, fv);
+        if (try t_stmt.step()) {
+            from_time = t_stmt.columnInt(0);
+        }
+    }
+
+    // Get to_version's created_at as upper bound
+    var to_time: i64 = std.math.maxInt(i32);
+    {
+        var t_stmt = try db.prepare("SELECT created_at FROM entry_versions WHERE id = ?1");
+        defer t_stmt.deinit();
+        try t_stmt.bindText(1, to_version);
+        if (try t_stmt.step()) {
+            to_time = t_stmt.columnInt(0);
+        }
+    }
+
+    const Collab = struct { id: []const u8, email: []const u8, name: []const u8 };
+    var collabs: std.ArrayListUnmanaged(Collab) = .{};
+    defer {
+        for (collabs.items) |c| {
+            allocator.free(c.id);
+            allocator.free(c.email);
+            allocator.free(c.name);
+        }
+        collabs.deinit(allocator);
+    }
+
+    // Collect unique authors from versions in the range
+    {
+        var stmt = try db.prepare(
+            \\SELECT DISTINCT ev.author_id, u.email, u.display_name
+            \\FROM entry_versions ev
+            \\JOIN users u ON u.id = ev.author_id
+            \\WHERE ev.entry_id = ?1
+            \\  AND ev.author_id IS NOT NULL
+            \\  AND ev.created_at > ?2
+            \\  AND ev.created_at <= ?3
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, entry_id);
+        try stmt.bindInt(2, from_time);
+        try stmt.bindInt(3, to_time);
+
+        while (try stmt.step()) {
+            const aid = stmt.columnText(0) orelse continue;
+            const email = stmt.columnText(1) orelse continue;
+            const name = stmt.columnText(2) orelse "";
+            try collabs.append(allocator, .{
+                .id = try allocator.dupe(u8, aid),
+                .email = try allocator.dupe(u8, email),
+                .name = try allocator.dupe(u8, name),
+            });
+        }
+    }
+
+    // Add publisher if not already present
+    if (publisher_id) |pid| {
+        var exists = false;
+        for (collabs.items) |c| {
+            if (std.mem.eql(u8, c.id, pid)) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            var pu_stmt = try db.prepare("SELECT email, display_name FROM users WHERE id = ?1");
+            defer pu_stmt.deinit();
+            try pu_stmt.bindText(1, pid);
+            if (try pu_stmt.step()) {
+                if (pu_stmt.columnText(0)) |email| {
+                    const name = pu_stmt.columnText(1) orelse "";
+                    try collabs.append(allocator, .{
+                        .id = try allocator.dupe(u8, pid),
+                        .email = try allocator.dupe(u8, email),
+                        .name = try allocator.dupe(u8, name),
+                    });
+                }
+            }
+        }
+    }
+
+    if (collabs.items.len == 0) return null;
+
+    // Serialize to JSON
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeByte('[');
+    for (collabs.items, 0..) |c, i| {
+        if (i > 0) try w.writeByte(',');
+        try w.writeAll("{\"id\":\"");
+        try writeEscaped(w, c.id);
+        try w.writeAll("\",\"email\":\"");
+        try writeEscaped(w, c.email);
+        try w.writeAll("\",\"name\":\"");
+        try writeEscaped(w, c.name);
+        try w.writeAll("\"}");
+    }
+    try w.writeByte(']');
+
+    return try buf.toOwnedSlice(allocator);
+}
+
 /// Publish a batch release: for each item, set entry status to 'published',
 /// then mark release as 'released'.
-pub fn publishBatchRelease(db: *Db, release_id: []const u8) (Db.Error || ReleaseError)!void {
+pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8) !void {
     // Validate release is pending
     {
         var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
@@ -1730,10 +2149,24 @@ pub fn publishBatchRelease(db: *Db, release_id: []const u8) (Db.Error || Release
         if (!std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
     }
 
-    // For each item: apply to_version data and set status to published
+    // Fetch release author
+    var release_author_id: ?[]const u8 = null;
+    {
+        var a_stmt = try db.prepare("SELECT author_id FROM releases WHERE id = ?1");
+        defer a_stmt.deinit();
+        try a_stmt.bindText(1, release_id);
+        if (try a_stmt.step()) {
+            if (a_stmt.columnText(0)) |aid| {
+                release_author_id = try allocator.dupe(u8, aid);
+            }
+        }
+    }
+    defer if (release_author_id) |a| allocator.free(a);
+
+    // For each item: apply to_version data and set status/published_version_id
     {
         var items_stmt = try db.prepare(
-            \\SELECT ri.entry_id, ri.to_version, ev.data
+            \\SELECT ri.entry_id, ri.to_version, ev.data, ri.fields, ri.from_version
             \\FROM release_items ri
             \\JOIN entry_versions ev ON ev.id = ri.to_version
             \\WHERE ri.release_id = ?1
@@ -1745,17 +2178,156 @@ pub fn publishBatchRelease(db: *Db, release_id: []const u8) (Db.Error || Release
             const eid = items_stmt.columnText(0) orelse continue;
             const to_vid = items_stmt.columnText(1) orelse continue;
             const to_data = items_stmt.columnText(2) orelse continue;
+            const fields = items_stmt.columnText(3);
+            const from_vid = items_stmt.columnText(4);
 
-            var u_stmt = try db.prepare(
-                \\UPDATE entries SET status = 'published', data = ?1,
-                \\current_version_id = ?2, published_at = unixepoch(),
-                \\updated_at = unixepoch() WHERE id = ?3
-            );
-            defer u_stmt.deinit();
-            try u_stmt.bindText(1, to_data);
-            try u_stmt.bindText(2, to_vid);
-            try u_stmt.bindText(3, eid);
-            _ = try u_stmt.step();
+            if (fields) |fields_json| {
+                // Partial publish: merge selected fields into published version
+                const parsed = std.json.parseFromSlice(std.json.Value, allocator, fields_json, .{}) catch continue;
+                defer parsed.deinit();
+
+                if (parsed.value != .array) continue;
+
+                const arr = parsed.value.array;
+                var names = allocator.alloc([]const u8, arr.items.len) catch continue;
+                defer allocator.free(names);
+                var count: usize = 0;
+
+                for (arr.items) |item| {
+                    if (item == .string) {
+                        names[count] = item.string;
+                        count += 1;
+                    }
+                }
+                if (count == 0) continue;
+                const field_names = names[0..count];
+
+                // Get current published data
+                const published_data = getPublishedData(allocator, db, eid) catch continue orelse continue;
+                defer allocator.free(published_data);
+
+                // Merge: published + selected fields from to_version data
+                const merged_data = mergeJsonFields(allocator, published_data, to_data, field_names) catch continue;
+                defer allocator.free(merged_data);
+
+                // Collect collaborators from version chain
+                const collab_json = collectCollaborators(
+                    allocator,
+                    db,
+                    eid,
+                    from_vid,
+                    to_vid,
+                    release_author_id,
+                ) catch null;
+                defer if (collab_json) |c| allocator.free(c);
+
+                // Create new version with merged data, author, and collaborators
+                const new_vid = generateVersionId();
+                {
+                    var v_stmt = try db.prepare(
+                        \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type, collaborators)
+                        \\VALUES (?1, ?2, ?3, ?4, ?5, 'published', ?6)
+                    );
+                    defer v_stmt.deinit();
+                    try v_stmt.bindText(1, &new_vid);
+                    try v_stmt.bindText(2, eid);
+                    try v_stmt.bindText(3, to_vid);
+                    try v_stmt.bindText(4, merged_data);
+                    if (release_author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+                    if (collab_json) |cj| try v_stmt.bindText(6, cj) else try v_stmt.bindNull(6);
+                    _ = try v_stmt.step();
+                }
+
+                // Update release_items.to_version to point to the new published version
+                {
+                    var ri_stmt = try db.prepare(
+                        "UPDATE release_items SET to_version = ?1 WHERE release_id = ?2 AND entry_id = ?3",
+                    );
+                    defer ri_stmt.deinit();
+                    try ri_stmt.bindText(1, &new_vid);
+                    try ri_stmt.bindText(2, release_id);
+                    try ri_stmt.bindText(3, eid);
+                    _ = try ri_stmt.step();
+                }
+
+                // Determine status: compare merged (new published) vs current draft
+                var cur_stmt2 = try db.prepare(
+                    \\SELECT ev.data FROM entries e
+                    \\JOIN entry_versions ev ON ev.id = e.current_version_id
+                    \\WHERE e.id = ?1
+                );
+                defer cur_stmt2.deinit();
+                try cur_stmt2.bindText(1, eid);
+                const still_changed = if (try cur_stmt2.step())
+                    if (cur_stmt2.columnText(0)) |cur_data|
+                        !std.mem.eql(u8, cur_data, merged_data)
+                    else
+                        true
+                else
+                    true;
+
+                const new_status: []const u8 = if (still_changed) "changed" else "published";
+                var u_stmt = try db.prepare(
+                    \\UPDATE entries SET status = ?1, published_version_id = ?2,
+                    \\published_at = unixepoch(), updated_at = unixepoch()
+                    \\WHERE id = ?3
+                );
+                defer u_stmt.deinit();
+                try u_stmt.bindText(1, new_status);
+                try u_stmt.bindText(2, &new_vid);
+                try u_stmt.bindText(3, eid);
+                _ = try u_stmt.step();
+            } else {
+                // Full publish: set published_version_id, determine status
+                var cur_stmt2 = try db.prepare(
+                    \\SELECT ev.data FROM entries e
+                    \\JOIN entry_versions ev ON ev.id = e.current_version_id
+                    \\WHERE e.id = ?1
+                );
+                defer cur_stmt2.deinit();
+                try cur_stmt2.bindText(1, eid);
+                const still_changed = if (try cur_stmt2.step())
+                    if (cur_stmt2.columnText(0)) |cur_data|
+                        !std.mem.eql(u8, cur_data, to_data)
+                    else
+                        false
+                else
+                    false;
+
+                const new_status: []const u8 = if (still_changed) "changed" else "published";
+                var u_stmt = try db.prepare(
+                    \\UPDATE entries SET status = ?1, published_version_id = ?2,
+                    \\published_at = unixepoch(), updated_at = unixepoch()
+                    \\WHERE id = ?3
+                );
+                defer u_stmt.deinit();
+                try u_stmt.bindText(1, new_status);
+                try u_stmt.bindText(2, to_vid);
+                try u_stmt.bindText(3, eid);
+                _ = try u_stmt.step();
+
+                // Mark the published version's type and store collaborators
+                {
+                    const collab_json = collectCollaborators(
+                        allocator,
+                        db,
+                        eid,
+                        from_vid,
+                        to_vid,
+                        release_author_id,
+                    ) catch null;
+                    defer if (collab_json) |c| allocator.free(c);
+
+                    var vt_stmt = try db.prepare(
+                        "UPDATE entry_versions SET version_type = 'published', collaborators = ?1, author_id = ?2 WHERE id = ?3",
+                    );
+                    defer vt_stmt.deinit();
+                    if (collab_json) |cj| try vt_stmt.bindText(1, cj) else try vt_stmt.bindNull(1);
+                    if (release_author_id) |aid| try vt_stmt.bindText(2, aid) else try vt_stmt.bindNull(2);
+                    try vt_stmt.bindText(3, to_vid);
+                    _ = try vt_stmt.step();
+                }
+            }
         }
     }
 
@@ -1854,7 +2426,7 @@ pub fn getRelease(allocator: Allocator, db: *Db, release_id: []const u8) !?Relea
     // Fetch items
     var i_stmt = try db.prepare(
         \\SELECT ri.entry_id, COALESCE(e.title, '(untitled)'), COALESCE(e.status, ''),
-        \\  ri.from_version, ri.to_version
+        \\  ri.from_version, ri.to_version, ri.fields
         \\FROM release_items ri
         \\LEFT JOIN entries e ON e.id = ri.entry_id
         \\WHERE ri.release_id = ?1
@@ -1872,6 +2444,7 @@ pub fn getRelease(allocator: Allocator, db: *Db, release_id: []const u8) !?Relea
             .entry_status = try allocator.dupe(u8, i_stmt.columnText(2) orelse ""),
             .from_version = if (i_stmt.columnText(3)) |v| try allocator.dupe(u8, v) else null,
             .to_version = try allocator.dupe(u8, i_stmt.columnText(4) orelse ""),
+            .fields = if (i_stmt.columnText(5)) |f| try allocator.dupe(u8, f) else null,
         });
     }
 
@@ -1922,6 +2495,36 @@ pub fn getEntryPendingReleaseIds(allocator: Allocator, db: *Db, entry_id: []cons
     errdefer results.deinit(allocator);
     while (try stmt.step()) {
         try results.append(allocator, try allocator.dupe(u8, stmt.columnText(0) orelse ""));
+    }
+    return results.toOwnedSlice(allocator);
+}
+
+/// Info about which fields of an entry are in pending releases.
+pub const EntryReleaseFieldInfo = struct {
+    release_id: []const u8,
+    release_name: []const u8,
+    fields: ?[]const u8, // JSON array of field names, or null for full publish
+};
+
+/// Get pending release items for an entry, with release name and field list.
+pub fn getEntryPendingReleaseFields(allocator: Allocator, db: *Db, entry_id: []const u8) ![]const EntryReleaseFieldInfo {
+    var stmt = try db.prepare(
+        \\SELECT ri.release_id, r.name, ri.fields
+        \\FROM release_items ri
+        \\JOIN releases r ON r.id = ri.release_id
+        \\WHERE ri.entry_id = ?1 AND r.status = 'pending' AND r.name IS NOT NULL
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, entry_id);
+
+    var results: std.ArrayList(EntryReleaseFieldInfo) = .{};
+    errdefer results.deinit(allocator);
+    while (try stmt.step()) {
+        try results.append(allocator, .{
+            .release_id = try allocator.dupe(u8, stmt.columnText(0) orelse ""),
+            .release_name = try allocator.dupe(u8, stmt.columnText(1) orelse ""),
+            .fields = if (stmt.columnText(2)) |f| try allocator.dupe(u8, f) else null,
+        });
     }
     return results.toOwnedSlice(allocator);
 }
@@ -2415,100 +3018,123 @@ test "generateReleaseId produces valid IDs" {
     try std.testing.expectEqual(@as(usize, 20), id.len);
 }
 
-test "createRelease inserts release and item" {
+test "publishEntry creates release and publishes" {
     var db = try setupTestDb();
     defer destroyTestDb(&db);
 
-    // Create entry and version
     try db.exec(
         \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
+        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'draft')
     );
     const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
 
-    // Create a release
-    try createRelease(db, "e_test1", null, &v1, null);
+    try publishEntry(std.testing.allocator, db, "e_test1", null, null);
 
-    // Verify release exists with correct status
+    // Verify entry is published with published_version_id set
     {
-        var stmt = try db.prepare("SELECT status, released_at FROM releases");
+        var stmt = try db.prepare("SELECT status, published_version_id FROM entries WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("published", stmt.columnText(0) orelse "");
+        try std.testing.expectEqualStrings(&v1, stmt.columnText(1) orelse "");
+    }
+
+    // Verify release exists and is released
+    {
+        var stmt = try db.prepare("SELECT status, released_at, name FROM releases");
         defer stmt.deinit();
         try std.testing.expect(try stmt.step());
         try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
-        try std.testing.expect(!stmt.columnIsNull(1)); // released_at is set
+        try std.testing.expect(!stmt.columnIsNull(1));
+        try std.testing.expect(stmt.columnIsNull(2)); // instant release has null name
     }
 
     // Verify release item
     {
-        var stmt = try db.prepare(
-            "SELECT entry_id, from_version, to_version FROM release_items",
-        );
+        var stmt = try db.prepare("SELECT entry_id, from_version, to_version FROM release_items");
         defer stmt.deinit();
         try std.testing.expect(try stmt.step());
         try std.testing.expectEqualStrings("e_test1", stmt.columnText(0) orelse "");
-        try std.testing.expect(stmt.columnIsNull(1)); // from_version is NULL (new entry)
+        try std.testing.expect(stmt.columnIsNull(1)); // from_version is NULL (first publish)
         try std.testing.expectEqualStrings(&v1, stmt.columnText(2) orelse "");
     }
 }
 
-test "createRelease tracks from_version on update" {
+test "publishEntry skips when already published with same version" {
     var db = try setupTestDb();
     defer destroyTestDb(&db);
 
-    // Create entry with initial version
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-
-    // Create second version
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
-
-    // Create release with from/to
-    try createRelease(db, "e_test1", &v1, &v2, null);
-
-    // Verify release item has both versions
-    {
-        var stmt = try db.prepare(
-            "SELECT from_version, to_version FROM release_items",
-        );
-        defer stmt.deinit();
-        try std.testing.expect(try stmt.step());
-        try std.testing.expectEqualStrings(&v1, stmt.columnText(0) orelse "");
-        try std.testing.expectEqualStrings(&v2, stmt.columnText(1) orelse "");
-    }
-}
-
-test "createRelease stores author_id" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    // Create a user
-    try db.exec(
-        \\INSERT INTO users (id, email, password_hash)
-        \\VALUES ('u_author1', 'test@example.com', 'hash')
-    );
-
-    // Create entry and version
     try db.exec(
         \\INSERT INTO entries (id, content_type_id, data, status)
         \\VALUES ('e_test1', 'test_ct', '{}', 'published')
     );
     const v1 = try insertTestVersion(db, "e_test1", "{}", null);
 
-    // Create release with author
-    try createRelease(db, "e_test1", null, &v1, "u_author1");
-
-    // Verify author_id
+    // Set published_version_id = current_version_id (already published)
     {
-        var stmt = try db.prepare("SELECT author_id FROM releases");
+        var stmt = try db.prepare("UPDATE entries SET published_version_id = ?1 WHERE id = 'e_test1'");
         defer stmt.deinit();
-        try std.testing.expect(try stmt.step());
-        try std.testing.expectEqualStrings("u_author1", stmt.columnText(0) orelse "");
+        try stmt.bindText(1, &v1);
+        _ = try stmt.step();
     }
+
+    try publishEntry(std.testing.allocator, db, "e_test1", null, null);
+
+    // No release should be created
+    {
+        var stmt = try db.prepare("SELECT COUNT(*) FROM releases");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqual(@as(i64, 0), stmt.columnInt(0));
+    }
+}
+
+test "publishEntry partial publish merges selected fields" {
+    var db = try setupTestDb();
+    defer destroyTestDb(&db);
+
+    // Start with published entry
+    try db.exec(
+        \\INSERT INTO entries (id, content_type_id, data, status)
+        \\VALUES ('e_test1', 'test_ct', '{"title":"old","slug":"old-slug"}', 'changed')
+    );
+    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"old\",\"slug\":\"old-slug\"}", null);
+
+    // Set as published
+    {
+        var stmt = try db.prepare("UPDATE entries SET published_version_id = ?1 WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        try stmt.bindText(1, &v1);
+        _ = try stmt.step();
+    }
+
+    // Create draft with changes to both fields
+    var v1_copy: [18]u8 = undefined;
+    @memcpy(&v1_copy, &v1);
+    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"new\",\"slug\":\"new-slug\"}", &v1_copy);
+
+    // Partial publish: only title
+    try publishEntry(std.testing.allocator, db, "e_test1", null, "[\"title\"]");
+
+    // Entry should still be changed (slug not published)
+    {
+        var stmt = try db.prepare("SELECT status FROM entries WHERE id = 'e_test1'");
+        defer stmt.deinit();
+        _ = try stmt.step();
+        try std.testing.expectEqualStrings("changed", stmt.columnText(0) orelse "");
+    }
+
+    // Published data should have new title but old slug
+    const pub_data = try getPublishedData(std.testing.allocator, db, "e_test1");
+    defer if (pub_data) |d| std.testing.allocator.free(d);
+    try std.testing.expect(pub_data != null);
+
+    // Parse and verify
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, pub_data.?, .{});
+    defer parsed.deinit();
+    const obj = parsed.value.object;
+    try std.testing.expectEqualStrings("new", obj.get("title").?.string);
+    try std.testing.expectEqualStrings("old-slug", obj.get("slug").?.string);
 }
 
 test "getEntryVersionId returns current version" {
@@ -2538,27 +3164,6 @@ test "getEntryVersionId returns null for no version" {
 
     const version_id = try getEntryVersionId(db, "e_test1");
     try std.testing.expect(version_id == null);
-}
-
-test "instant release has null name" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'published')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
-
-    try createRelease(db, "e_test1", null, &v1, null);
-
-    // Verify name is NULL (instant release)
-    {
-        var stmt = try db.prepare("SELECT name FROM releases");
-        defer stmt.deinit();
-        try std.testing.expect(try stmt.step());
-        try std.testing.expect(stmt.columnIsNull(0));
-    }
 }
 
 /// Helper: create a released release for testing revert/re-release
@@ -2859,7 +3464,7 @@ test "addToRelease inserts item into pending release" {
     const v1 = try insertTestVersion(db, "e_test1", "{}", null);
 
     const rel_id = try createPendingRelease(db, "Batch 1", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
 
     var stmt = try db.prepare("SELECT entry_id, to_version FROM release_items WHERE release_id = ?1");
     defer stmt.deinit();
@@ -2881,7 +3486,7 @@ test "addToRelease fails on non-pending release" {
         _ = try stmt.step();
     }
 
-    const result = addToRelease(db, &rel_id, "e_test1", null, "v_fake_version123");
+    const result = addToRelease(db, &rel_id, "e_test1", null, "v_fake_version123", null);
     try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
 }
 
@@ -2896,7 +3501,7 @@ test "removeFromRelease removes item" {
     const v1 = try insertTestVersion(db, "e_test1", "{}", null);
 
     const rel_id = try createPendingRelease(db, "Batch 1", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
 
     // Remove
     try removeFromRelease(db, &rel_id, "e_test1");
@@ -2919,9 +3524,9 @@ test "publishBatchRelease sets entries to published" {
     const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"staged\"}", null);
 
     const rel_id = try createPendingRelease(db, "Launch", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
 
-    try publishBatchRelease(db, &rel_id);
+    try publishBatchRelease(std.testing.allocator, db, &rel_id);
 
     // Entry should be published
     {
@@ -2954,7 +3559,7 @@ test "publishBatchRelease fails on non-pending" {
         _ = try stmt.step();
     }
 
-    const result = publishBatchRelease(db, &rel_id);
+    const result = publishBatchRelease(std.testing.allocator, db, &rel_id);
     try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
 }
 
@@ -2996,7 +3601,7 @@ test "getRelease returns detail with items" {
     const v1 = try insertTestVersion(db, "e_test1", "{}", null);
 
     const rel_id = try createPendingRelease(db, "Detail Test", null);
-    try addToRelease(db, &rel_id, "e_test1", null, &v1);
+    try addToRelease(db, &rel_id, "e_test1", null, &v1, null);
 
     const detail = try getRelease(std.testing.allocator, db, &rel_id);
     try std.testing.expect(detail != null);

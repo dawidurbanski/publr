@@ -433,11 +433,142 @@
     var entryStatus = form.dataset.entryStatus || 'draft';
     var publishedState = form.dataset.publishedState || '';
 
+    // Parse published state for field-level change detection
+    var publishedFields = null;
+    if (publishedState) {
+        try { publishedFields = JSON.parse(publishedState); } catch(e) {}
+    }
+    var publishFieldsInput = document.getElementById('publish-fields');
+    var releaseTriggerText = document.getElementById('release-trigger-text');
+
+    // Parse fields-in-releases: build map of fieldName → {id, name}
+    var fieldsInReleases = {};
+    var fieldsInReleasesRaw = form.dataset.fieldsInReleases || '[]';
+    try {
+        var releaseItems = JSON.parse(fieldsInReleasesRaw);
+        for (var ri = 0; ri < releaseItems.length; ri++) {
+            var item = releaseItems[ri];
+            if (item.fields === null) {
+                // Full publish — all fields are in this release
+                form.querySelectorAll('.form-group[data-field]').forEach(function(g) {
+                    if (!fieldsInReleases[g.dataset.field]) {
+                        fieldsInReleases[g.dataset.field] = { id: item.id, name: item.name };
+                    }
+                });
+            } else {
+                for (var fi = 0; fi < item.fields.length; fi++) {
+                    if (!fieldsInReleases[item.fields[fi]]) {
+                        fieldsInReleases[item.fields[fi]] = { id: item.id, name: item.name };
+                    }
+                }
+            }
+        }
+    } catch(e) {}
+
+    // Parse field editors: fields changed by other users
+    var fieldEditors = {};
+    try {
+        fieldEditors = JSON.parse(form.dataset.fieldEditors || '{}');
+    } catch(e) {}
+
+    // Populate editor badges and disable fields edited by other users
+    form.querySelectorAll('.field-editor-badge[data-field]').forEach(function(badge) {
+        var editor = fieldEditors[badge.dataset.field];
+        if (editor) {
+            badge.innerHTML = '<img src="' + editor.avatar + '" alt="" class="field-editor-avatar" /><span>Edited by ' + editor.name + '</span>';
+            badge.classList.add('field-editor-active');
+            // Disable the field — backend preserves existing value for absent fields
+            var group = badge.closest('.form-group');
+            if (group) {
+                var field = group.querySelector('.form-control');
+                if (field) field.disabled = true;
+            }
+        }
+    });
+
+    // Create "In release XXX" links for fields already in a release
+    form.querySelectorAll('.form-group[data-field]').forEach(function(group) {
+        var rel = fieldsInReleases[group.dataset.field];
+        if (rel) {
+            var link = document.createElement('a');
+            link.href = '/admin/releases/' + rel.id;
+            link.className = 'field-release-link';
+            link.textContent = 'In release ' + rel.name;
+            group.querySelector('.form-label-row').appendChild(link);
+        }
+    });
+
+    // Peek icons (inline SVG for showing published value)
+    var peekIconShow = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.42 12.71C2.28 12.5 2.22 12.39 2.18 12.22A.68.68 0 0 1 2.18 11.78C2.22 11.61 2.28 11.5 2.42 11.29 3.55 9.5 6.9 5 12 5s8.45 4.5 9.58 6.29c.14.21.21.32.24.49a.68.68 0 0 1 0 .44c-.04.17-.1.28-.24.49C20.45 14.5 17.1 19 12 19S3.55 14.5 2.42 12.71Z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var peekIconHide = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.74 5.09C11.15 5.03 11.57 5 12 5c5.1 0 8.45 4.5 9.58 6.29.14.21.21.32.24.49a.68.68 0 0 1 0 .45c-.04.16-.1.28-.24.49-.3.47-.76 1.14-1.36 1.86M6.72 6.72A14.02 14.02 0 0 0 2.42 11.29c-.14.22-.21.33-.24.49a.68.68 0 0 0 0 .44c.04.17.1.28.24.49C3.55 14.5 6.9 19 12 19c2.06 0 3.83-.73 5.29-1.72M3 3l18 18M9.88 9.88A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.12-.88"/></svg>';
+
+    function ensurePeekWrapper(group) {
+        var existing = group.querySelector('.field-peek-wrapper');
+        if (existing) return existing;
+        var control = group.querySelector('.form-control');
+        if (!control) return null;
+        var wrapper = document.createElement('div');
+        wrapper.className = 'field-peek-wrapper';
+        control.parentNode.insertBefore(wrapper, control);
+        wrapper.appendChild(control);
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'field-peek-btn';
+        btn.title = 'Show published value';
+        btn.innerHTML = peekIconShow;
+        wrapper.appendChild(btn);
+        var valueBox = document.createElement('div');
+        valueBox.className = 'field-peek-value';
+        valueBox.style.display = 'none';
+        wrapper.after(valueBox);
+        btn.addEventListener('click', function() {
+            var vb = group.querySelector('.field-peek-value');
+            if (vb.style.display === 'none') {
+                vb.style.display = '';
+                btn.innerHTML = peekIconHide;
+                btn.title = 'Hide published value';
+            } else {
+                vb.style.display = 'none';
+                btn.innerHTML = peekIconShow;
+                btn.title = 'Show published value';
+            }
+        });
+        return wrapper;
+    }
+
+    function removePeekWrapper(group) {
+        var vb = group.querySelector('.field-peek-value');
+        if (vb) vb.remove();
+        var wrapper = group.querySelector('.field-peek-wrapper');
+        if (!wrapper) return;
+        var control = wrapper.querySelector('.form-control');
+        if (control) wrapper.parentNode.insertBefore(control, wrapper);
+        wrapper.remove();
+    }
+
+    function updatePeek(group, publishedValue) {
+        var wrapper = ensurePeekWrapper(group);
+        if (!wrapper) return;
+        var vb = group.querySelector('.field-peek-value');
+        if (!vb) return;
+        var fieldKey = group.dataset.field;
+        var currentValue = getFieldValue(fieldKey);
+        var oldDisplay = publishedValue === '' ? '(empty)' : escapeHtml(publishedValue);
+        var newDisplay = currentValue === '' ? '(empty)' : escapeHtml(currentValue);
+        vb.innerHTML = '<div class="field-peek-row"><span class="field-peek-old">' + oldDisplay + '</span><span class="field-peek-arrow">\u2192</span><span class="field-peek-new">' + newDisplay + '</span></div>';
+    }
+
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
     // Capture form state (excluding meta fields)
     function getFormState() {
         var state = {};
         new FormData(form).forEach(function(value, key) {
-            if (key === '_csrf' || key === 'action' || key === 'release_id' || key === 'release_name' || key === 'status') return;
+            if (key === '_csrf' || key === 'action' || key === 'release_id' || key === 'release_name' || key === 'status' || key === 'fields') return;
             state[key] = value;
         });
         return state;
@@ -446,6 +577,7 @@
     var lastSavedState = JSON.stringify(getFormState());
     var saveTimer = null;
     var isSaving = false;
+    var isDirty = false;
 
     function showStatus(type) {
         if (!statusEl) return;
@@ -464,9 +596,13 @@
         }
     }
 
-    function onFormChange() {
+    function onFormChange(e) {
+        // Ignore checkbox toggles for field-publish — they don't affect form content
+        if (e && e.target && e.target.classList.contains('field-publish-check')) return;
         clearTimeout(saveTimer);
-        saveTimer = setTimeout(autoSave, 1500);
+        isDirty = JSON.stringify(getFormState()) !== lastSavedState;
+        updateButtons();
+        if (isDirty) saveTimer = setTimeout(autoSave, 1500);
     }
 
     function autoSave() {
@@ -482,26 +618,16 @@
         isSaving = true;
         showStatus('saving');
 
-        var url = entryId
-            ? '/admin/posts/' + entryId + '/autosave'
-            : '/admin/posts/autosave';
-
-        fetch(url, {
+        fetch('/admin/posts/' + entryId + '/autosave', {
             method: 'POST',
-            body: new FormData(form)
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams(new FormData(form))
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             isSaving = false;
             lastSavedState = stateJson;
-
-            // First save of new entry — update URL and entry ID
-            if (!entryId && data.entry_id) {
-                entryId = data.entry_id;
-                form.dataset.entryId = entryId;
-                form.action = '/admin/posts/' + entryId;
-                history.replaceState(null, '', '/admin/posts/' + entryId);
-            }
+            isDirty = false;
 
             if (data.status) {
                 entryStatus = data.status;
@@ -517,21 +643,127 @@
         });
     }
 
-    function updateButtons() {
-        if (!publishBtn) return;
+    // Field-level change detection: compare form values against published data
+    var changedFieldCount = 0;
+    var selectedFieldCount = 0;
 
-        if (entryStatus === 'draft') {
-            publishBtn.textContent = 'Publish';
-            publishBtn.disabled = false;
-        } else if (entryStatus === 'changed') {
-            publishBtn.textContent = 'Publish Changes';
-            publishBtn.disabled = false;
-            if (discardBtn) discardBtn.classList.remove('hidden');
-        } else if (entryStatus === 'published') {
-            publishBtn.textContent = 'Published';
-            publishBtn.disabled = true;
-            if (discardBtn) discardBtn.classList.add('hidden');
+    function getFieldValue(fieldKey) {
+        // Map JSON key to form field name
+        var formName = fieldKey === 'body' ? 'content' : fieldKey;
+        var el = form.querySelector('[name="' + formName + '"]') ||
+                 document.querySelector('[name="' + formName + '"][form="post-form"]');
+        return el ? (el.value || '') : '';
+    }
+
+    function detectChangedFields() {
+        if (!publishedFields || entryStatus === 'draft') {
+            changedFieldCount = 0;
+            selectedFieldCount = 0;
+            form.querySelectorAll('.field-peek-wrapper').forEach(function(w) {
+                removePeekWrapper(w.closest('.form-group'));
+            });
+            return;
         }
+
+        var groups = form.querySelectorAll('.form-group[data-field]');
+        changedFieldCount = 0;
+        selectedFieldCount = 0;
+
+        groups.forEach(function(group) {
+            var fieldKey = group.dataset.field;
+            var currentValue = getFieldValue(fieldKey);
+            var publishedValue = (publishedFields[fieldKey] != null) ? String(publishedFields[fieldKey]) : '';
+            var checkbox = group.querySelector('.field-publish-check');
+
+            // Field already in a pending release — show as locked
+            if (fieldsInReleases[fieldKey] && currentValue !== publishedValue) {
+                group.classList.add('field-in-release');
+                group.classList.remove('field-changed', 'field-deselected');
+                removePeekWrapper(group);
+                return;
+            }
+            group.classList.remove('field-in-release');
+
+            if (currentValue !== publishedValue) {
+                changedFieldCount++;
+                updatePeek(group, publishedValue);
+                if (checkbox.checked) {
+                    group.classList.add('field-changed');
+                    group.classList.remove('field-deselected');
+                    selectedFieldCount++;
+                } else {
+                    group.classList.remove('field-changed');
+                    group.classList.add('field-deselected');
+                }
+            } else {
+                // Field unchanged — hide checkbox, reset state
+                checkbox.checked = true;
+                group.classList.remove('field-changed', 'field-deselected');
+                removePeekWrapper(group);
+            }
+        });
+    }
+
+    function updateButtons() {
+        detectChangedFields();
+
+        if (publishBtn) {
+            if (entryStatus === 'draft') {
+                publishBtn.textContent = 'Publish';
+                publishBtn.disabled = false;
+            } else if (entryStatus === 'published' && !isDirty) {
+                publishBtn.textContent = 'Published';
+                publishBtn.disabled = true;
+            } else if (changedFieldCount > 0 && selectedFieldCount === 0) {
+                publishBtn.textContent = 'Publish Changes';
+                publishBtn.disabled = true;
+            } else if (changedFieldCount > 0 && selectedFieldCount < changedFieldCount) {
+                publishBtn.textContent = 'Publish ' + selectedFieldCount + '/' + changedFieldCount;
+                publishBtn.disabled = false;
+            } else {
+                publishBtn.textContent = 'Publish Changes';
+                publishBtn.disabled = false;
+            }
+        }
+
+        if (discardBtn) {
+            if (entryStatus === 'changed' || (entryStatus === 'published' && isDirty)) {
+                discardBtn.classList.remove('hidden');
+            } else {
+                discardBtn.classList.add('hidden');
+            }
+        }
+
+        if (releaseTrigger) {
+            releaseTrigger.disabled = !entryId || (entryStatus === 'published' && !isDirty);
+        }
+
+        // Update release trigger text
+        if (releaseTriggerText) {
+            if (changedFieldCount > 0 && selectedFieldCount < changedFieldCount && selectedFieldCount > 0) {
+                releaseTriggerText.textContent = 'Add ' + selectedFieldCount + '/' + changedFieldCount + ' to Release';
+            } else {
+                releaseTriggerText.textContent = 'Add to Release';
+            }
+        }
+    }
+
+    // Checkbox change handler
+    form.addEventListener('change', function(e) {
+        if (e.target.classList.contains('field-publish-check')) {
+            updateButtons();
+        }
+    });
+
+    updateButtons();
+
+    // Sync title input with nav title
+    var titleInput = document.getElementById('title');
+    var navTitle = document.querySelector('.edit-nav-title');
+    if (titleInput && navTitle) {
+        titleInput.addEventListener('input', function() {
+            navTitle.textContent = titleInput.value || 'Untitled';
+        });
     }
 
     // Listen for changes
@@ -561,19 +793,40 @@
         });
     }
 
-    // Release dropdown: clicking a release item submits main form
+    // Populate fields hidden input with selected field names
+    function populateFields() {
+        if (!publishFieldsInput) return;
+        if (changedFieldCount > 0 && selectedFieldCount < changedFieldCount) {
+            var selected = [];
+            form.querySelectorAll('.field-publish-check:checked').forEach(function(cb) {
+                var group = cb.closest('.form-group[data-field]');
+                if (group && group.classList.contains('field-changed')) {
+                    selected.push(group.dataset.field);
+                }
+            });
+            publishFieldsInput.value = selected.length > 0 ? JSON.stringify(selected) : '';
+        } else {
+            publishFieldsInput.value = '';
+        }
+    }
+
+    // Release dropdown: bind directly to items (content is portalled to body)
     if (releaseDropdown) {
-        releaseDropdown.addEventListener('click', function(e) {
-            var item = e.target.closest('[data-release-id]');
-            if (item && releaseAction && releaseIdField) {
-                e.preventDefault();
-                e.stopPropagation();
-                releaseAction.value = 'add_to_release';
-                releaseIdField.value = item.dataset.releaseId;
-                releaseNameField.value = '';
-                form.submit();
-            }
-        });
+        var releaseContent = releaseDropdown.querySelector('[data-publr-part="content"]');
+        if (releaseContent) {
+            releaseContent.addEventListener('click', function(e) {
+                var item = e.target.closest('[data-release-id]');
+                if (item && releaseAction && releaseIdField) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    releaseAction.value = 'add_to_release';
+                    releaseIdField.value = item.dataset.releaseId;
+                    releaseNameField.value = '';
+                    populateFields();
+                    form.submit();
+                }
+            });
+        }
 
         // Create release button
         var createBtn = document.getElementById('release-create-btn');
@@ -587,6 +840,7 @@
                 releaseAction.value = 'create_release';
                 releaseIdField.value = '';
                 releaseNameField.value = name;
+                populateFields();
                 form.submit();
             });
             nameInput.addEventListener('keydown', function(e) {
@@ -598,11 +852,9 @@
         }
     }
 
-    // Ensure action field is cleared on normal form submit
+    // Populate fields hidden input on form submit (publish button)
     form.addEventListener('submit', function() {
-        if (releaseAction && !releaseAction.value) {
-            releaseAction.value = '';
-        }
+        populateFields();
     });
 })();
 

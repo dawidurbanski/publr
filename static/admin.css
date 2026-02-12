@@ -792,6 +792,36 @@ a.version-item:hover {
     font-weight: 600;
 }
 
+.version-avatars {
+    display: flex;
+    flex-shrink: 0;
+}
+
+.version-avatar-stacked {
+    border: 2px solid var(--bg-primary);
+    margin-left: -12px;
+}
+
+.version-avatar-stacked:first-child {
+    margin-left: 0;
+}
+
+.version-avatar-overflow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-full);
+    background: var(--bg-control);
+    color: var(--text-tertiary);
+    font-size: 10px;
+    font-weight: 600;
+    border: 2px solid var(--bg-primary);
+    margin-left: -8px;
+    flex-shrink: 0;
+}
+
 .version-info {
     display: flex;
     flex-direction: column;
@@ -939,7 +969,7 @@ a.version-item:hover {
 /* ── Version Compare (side-by-side) ──────────────── */
 
 .version-compare {
-    max-width: 900px;
+    width: 100%;
     margin: 0 auto;
     padding: var(--space-3xl);
 }
@@ -954,6 +984,9 @@ a.version-item:hover {
 }
 
 .version-compare-col-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
     font-weight: 600;
     font-size: var(--text-sm);
     color: var(--text-primary);
@@ -1032,6 +1065,12 @@ a.version-item:hover {
     padding: 1px var(--space-md);
     border-radius: var(--radius-full);
     margin-left: var(--space-md);
+}
+
+.version-compare-author {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    margin-left: var(--space-xs);
 }
 
 .version-compare-cell {
@@ -1521,6 +1560,10 @@ a.version-item:hover {
 
 /* ── Buttons ────────────────────────────────────────── */
 
+.hidden {
+    display: none !important;
+}
+
 .btn {
     display: inline-flex;
     align-items: center;
@@ -1781,7 +1824,171 @@ a.version-item:hover {
 }
 
 .form-group {
-    margin-bottom: var(--space-xl);
+    margin-bottom: var(--space-md);
+    padding: 10px;
+    border-radius: 6px;
+    transition: background-color 0.15s;
+}
+
+.form-group.field-changed {
+    background: var(--accent-subtle);
+}
+
+.form-group.field-deselected {
+    background: var(--bg-control);
+}
+
+.form-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-xs);
+}
+
+.form-label-row label {
+    margin-bottom: 0;
+}
+
+.field-check-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.field-publish-check {
+    display: none;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.form-group.field-changed .field-publish-check,
+.form-group.field-deselected .field-publish-check {
+    display: block;
+}
+
+.field-editor-badge {
+    display: none;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.form-group.field-changed .field-editor-badge.field-editor-active,
+.form-group.field-deselected .field-editor-badge.field-editor-active {
+    display: flex;
+}
+
+.field-editor-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+}
+
+.form-group.field-in-release {
+    background: var(--color-warning-subtle);
+}
+
+.form-group.field-in-release .field-publish-check {
+    display: none;
+}
+
+.field-release-link {
+    display: none;
+    font-size: var(--text-xs);
+    color: var(--color-warning);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.field-release-link:hover {
+    text-decoration: underline;
+}
+
+.form-group.field-in-release .field-release-link {
+    display: block;
+}
+
+/* ── Field peek (show published value) ──── */
+
+.field-peek-wrapper {
+    position: relative;
+}
+
+.field-peek-wrapper .form-control {
+    padding-right: 36px;
+}
+
+.field-peek-btn {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-tertiary);
+    transition: color 0.15s, background 0.15s;
+}
+
+.field-peek-btn:hover {
+    background: var(--bg-control-hover);
+    color: var(--text-secondary);
+}
+
+.field-peek-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.field-peek-wrapper:has(textarea) .field-peek-btn {
+    top: 12px;
+    transform: none;
+}
+
+.field-peek-value {
+    display: flex;
+    padding: 0 var(--space-md);
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+    font-weight: 600;
+}
+
+.field-peek-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-md);
+    min-width: 0;
+}
+
+.field-peek-old {
+    color: var(--color-danger);
+}
+
+.field-peek-arrow {
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+}
+
+.field-peek-new {
+    color: var(--color-success);
 }
 
 .form-label,
