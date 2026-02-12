@@ -4,6 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const watch_mode = b.option(bool, "watch", "Skip preBuild hooks and init_db (used by --watch rebuilds)") orelse false;
+    const setup_bg_dark = b.option(bool, "setup-bg-dark", "Use dark background on setup page (comptime config demo)") orelse false;
 
     // External source tree options (for recompilation from ~/.publr/src/)
     const config_path = b.option([]const u8, "config-path", "Absolute path to publr.zon (external source tree builds)");
@@ -840,6 +841,16 @@ pub fn build(b: *std.Build) void {
     browser_wasm.root_module.addImport("wasm_storage", wasm_storage_module);
     browser_wasm.root_module.addImport("wasm_media_handler", wasm_media_handler_module);
     browser_wasm.root_module.addImport("schema_sync", schema_sync_module);
+
+    // Comptime config module (generated from build options)
+    const wasm_config_files = b.addWriteFiles();
+    const wasm_config_source = wasm_config_files.add("config.zig", std.fmt.allocPrint(
+        b.allocator,
+        "pub const setup_bg_dark: bool = {};",
+        .{setup_bg_dark},
+    ) catch unreachable);
+    const wasm_config_module = b.createModule(.{ .root_source_file = wasm_config_source });
+    browser_wasm.root_module.addImport("config", wasm_config_module);
 
     // Add wasm_storage to modules that conditionally import it
     media_module.addImport("wasm_storage", wasm_storage_module);

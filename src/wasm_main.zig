@@ -13,6 +13,8 @@ const auth_middleware = @import("auth_middleware");
 const csrf = @import("csrf");
 const wasm_storage = @import("wasm_storage");
 const wasm_media_handler = @import("wasm_media_handler");
+const schema_sync = @import("schema_sync");
+const config = @import("config");
 
 // Generated ZSX views
 const views = @import("views");
@@ -124,6 +126,7 @@ export fn cms_init() i32 {
 
     global_db = db.Db.init(allocator, ":memory:") catch return -1;
     global_db.?.exec(schema_sql) catch return -1;
+    schema_sync.syncIfNeeded(&global_db.?) catch return -1;
     global_auth = auth_mod.Auth.init(allocator, &global_db.?);
     tpl.init(false);
 
@@ -446,6 +449,7 @@ fn handleSetupGet(ctx: *mw.Context) !void {
     const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = "",
         .csrf_token = csrf_token,
+        .bg_dark = config.setup_bg_dark,
     }});
     ctx.html(content);
 }
@@ -505,6 +509,7 @@ fn renderSetupError(ctx: *mw.Context, message: []const u8) void {
     const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
+        .bg_dark = config.setup_bg_dark,
     }});
     ctx.html(content);
 }

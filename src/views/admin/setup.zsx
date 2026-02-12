@@ -2,6 +2,7 @@
 pub fn Setup(props: struct {
     error_message: []const u8,
     csrf_token: []const u8,
+    bg_dark: bool,
 }) {
     <!DOCTYPE html>
     <html>
@@ -13,6 +14,9 @@ pub fn Setup(props: struct {
             />
             <title>Setup - Publr</title>
             <link rel="stylesheet" href="/static/admin.css" />
+            {if (props.bg_dark) (
+                <style>{"body { background: #0a0d12 !important; } .auth-container { min-height: 100vh; } .auth-card { background: #181d27; border: 1px solid #333; } .auth-title, .auth-logo { color: #e0e0e0; } .auth-subtitle, .form-label, .form-hint { color: #888; } .form-input { background: #252b37; color: #e0e0e0; border-color: #414651; } .auth-error { background: #3d1418; border-color: #7a271a; color: #fda29b; }"}</style>
+            )}
         </head>
         <body>
             <div class="auth-container">
@@ -70,8 +74,17 @@ pub fn Setup(props: struct {
 
                         <button type="submit" class="auth-button">Create Account</button>
                     </form>
+
+                    <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e9eaeb;">
+                        <button type="button" id="recompile-btn" style="width: 100%; padding: 0.6rem; border: 1px solid #d5d7da; border-radius: 8px; background: transparent; color: #535862; font-size: 0.875rem; cursor: pointer;">
+                            {"Recompile (Dark Mode)"}
+                        </button>
+                        <p id="recompile-status" style="margin-top: 0.5rem; font-size: 0.75rem; color: #717680; text-align: center;"></p>
+                    </div>
                 </div>
             </div>
+
+            <script>{@raw "document.getElementById('recompile-btn').addEventListener('click',async function(){var btn=this,status=document.getElementById('recompile-status');btn.disabled=true;btn.textContent='Loading compiler...';status.textContent='';try{var worker=new Worker('/compiler-worker.js',{type:'module'});worker.onmessage=async function(e){if(e.data.type==='status'){status.textContent=e.data.message}else if(e.data.type==='ready'){btn.textContent='Compiling full CMS...';worker.postMessage({type:'compile-full-cms',config:{setup_bg_dark:true}})}else if(e.data.type==='log'){if(e.data.message.startsWith('[stderr]'))status.textContent=e.data.message}else if(e.data.type==='compiled'){worker.terminate();btn.textContent='Uploading...';status.textContent='Compiled '+e.data.binary.byteLength+' bytes, swapping...';try{var resp=await fetch('/admin/system/swap-binary',{method:'POST',headers:{'Content-Type':'application/wasm'},body:e.data.binary});if(resp.ok){btn.textContent='Reloading...';setTimeout(function(){location.reload()},500)}else{var j=await resp.json();btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Swap failed: '+(j.error||resp.status)}}catch(err){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Upload failed: '+err.message}}else if(e.data.type==='error'){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Error: '+e.data.message;worker.terminate()}};worker.postMessage({type:'init'})}catch(e){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Error: '+e.message}});"}</script>
 
         </body>
     </html>

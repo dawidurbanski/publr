@@ -622,6 +622,7 @@ fn handleSetupGet(ctx: *Context) !void {
     const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = "",
         .csrf_token = csrf_token,
+        .bg_dark = false,
     }});
     ctx.html(content);
 }
@@ -706,6 +707,7 @@ fn renderSetupError(ctx: *Context, message: []const u8) void {
     const content = tpl.render(views.admin.setup.Setup, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
+        .bg_dark = false,
     }});
     ctx.html(content);
 }
