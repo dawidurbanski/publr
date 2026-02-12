@@ -104,7 +104,8 @@ pub const content_schema_sql =
     \\    data TEXT NOT NULL,
     \\    author_id TEXT REFERENCES users(id),
     \\    created_at INTEGER DEFAULT (unixepoch()),
-    \\    version_type TEXT NOT NULL DEFAULT 'edit'
+    \\    version_type TEXT NOT NULL DEFAULT 'edit',
+    \\    collaborators TEXT
     \\);
     \\
     \\CREATE INDEX IF NOT EXISTS idx_versions_entry ON entry_versions(entry_id, created_at DESC);
@@ -130,6 +131,7 @@ pub const content_schema_sql =
     \\    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
     \\    from_version TEXT REFERENCES entry_versions(id),
     \\    to_version TEXT NOT NULL REFERENCES entry_versions(id),
+    \\    fields TEXT,
     \\    PRIMARY KEY (release_id, entry_id)
     \\);
     \\

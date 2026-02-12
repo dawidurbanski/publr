@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS entries (
     status TEXT DEFAULT 'draft',
     version INTEGER DEFAULT 1,
     current_version_id TEXT REFERENCES entry_versions(id),
+    published_version_id TEXT REFERENCES entry_versions(id),
     published_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
@@ -148,11 +149,36 @@ CREATE TABLE IF NOT EXISTS entry_versions (
     data TEXT NOT NULL,
     author_id TEXT REFERENCES users(id),
     created_at INTEGER DEFAULT (unixepoch()),
-    version_type TEXT NOT NULL DEFAULT 'edit'
+    version_type TEXT NOT NULL DEFAULT 'edit',
+    collaborators TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_versions_entry ON entry_versions(entry_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_versions_parent ON entry_versions(parent_id);
+
+-- Releases (every publish = a release)
+CREATE TABLE IF NOT EXISTS releases (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    author_id TEXT REFERENCES users(id),
+    created_at INTEGER DEFAULT (unixepoch()),
+    released_at INTEGER,
+    scheduled_for INTEGER,
+    reverted_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_releases_status ON releases(status, created_at DESC);
+
+-- Release items (entries changed in a release)
+CREATE TABLE IF NOT EXISTS release_items (
+    release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+    from_version TEXT REFERENCES entry_versions(id),
+    to_version TEXT NOT NULL REFERENCES entry_versions(id),
+    fields TEXT,
+    PRIMARY KEY (release_id, entry_id)
+);
 
 -- Global settings (key-value store)
 CREATE TABLE IF NOT EXISTS settings (

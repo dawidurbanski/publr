@@ -1937,7 +1937,8 @@ fn setupTestDb() !*Db {
         \\    data TEXT NOT NULL,
         \\    author_id TEXT REFERENCES users(id),
         \\    created_at INTEGER DEFAULT (unixepoch()),
-        \\    version_type TEXT NOT NULL DEFAULT 'edit'
+        \\    version_type TEXT NOT NULL DEFAULT 'edit',
+        \\    collaborators TEXT
         \\);
         \\CREATE TABLE IF NOT EXISTS entries (
         \\    id TEXT PRIMARY KEY,
@@ -1948,6 +1949,7 @@ fn setupTestDb() !*Db {
         \\    status TEXT DEFAULT 'draft',
         \\    version INTEGER DEFAULT 1,
         \\    current_version_id TEXT REFERENCES entry_versions(id),
+        \\    published_version_id TEXT REFERENCES entry_versions(id),
         \\    published_at INTEGER,
         \\    created_at INTEGER DEFAULT (unixepoch()),
         \\    updated_at INTEGER DEFAULT (unixepoch()),
@@ -1974,6 +1976,7 @@ fn setupTestDb() !*Db {
         \\    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
         \\    from_version TEXT REFERENCES entry_versions(id),
         \\    to_version TEXT NOT NULL REFERENCES entry_versions(id),
+        \\    fields TEXT,
         \\    PRIMARY KEY (release_id, entry_id)
         \\);
         \\INSERT INTO content_types (id, slug, name, fields, source)
