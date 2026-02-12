@@ -9,6 +9,7 @@ const static = @import("static.zig");
 const error_pages = @import("error.zig");
 const tpl = @import("tpl");
 const dev = @import("dev.zig");
+const recompile = @import("recompile.zig");
 const db_mod = @import("db");
 const Auth = @import("auth").Auth;
 const auth_middleware = @import("auth_middleware");
@@ -124,6 +125,8 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     try router.post("/admin/logout", handleLogout);
     try router.get("/static/*", handleStatic);
     try router.get("/media/*", media_handler.handleMedia);
+    try router.post("/admin/system/recompile", recompile.handleRecompile);
+    try router.post("/admin/system/config", recompile.handleConfigUpdate);
 
     // Register plugin routes (arena freed on shutdown)
     var route_arena = std.heap.ArenaAllocator.init(allocator);
@@ -185,6 +188,13 @@ pub fn serve(port: u16, dev_mode: bool) !void {
             continue;
         };
         thread.detach();
+
+        // Check for restart request (recompile endpoint sets this after successful build)
+        if (recompile.restart_requested.load(.acquire)) {
+            waitForConnections(2000);
+            std.debug.print("[publr] Recompilation successful, restarting (exit 100)...\n", .{});
+            std.process.exit(100);
+        }
     }
 
     // Graceful shutdown: wait for active connections with timeout

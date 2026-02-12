@@ -16,6 +16,7 @@ const csrf = @import("csrf");
 const auth_middleware = @import("auth_middleware");
 const views = @import("views");
 const registry = @import("registry");
+const publr_config = @import("publr_config");
 
 /// Settings page - hidden from nav (accessed via sidebar footer)
 pub const page = admin.registerPage(.{
@@ -42,6 +43,9 @@ fn setup(app: *admin.PageApp) void {
     // Components and Design System
     app.get("/components", handleComponents);
     app.get("/design", handleDesign);
+
+    // System
+    app.get("/system", handleSystem);
 }
 
 // =============================================================================
@@ -57,6 +61,7 @@ const Tab = struct {
 const tabs = [_]Tab{
     .{ .label = "General", .path = "/admin/settings", .prefix = "/admin/settings" },
     .{ .label = "Users", .path = "/admin/settings/users", .prefix = "/admin/settings/users" },
+    .{ .label = "System", .path = "/admin/settings/system", .prefix = "/admin/settings/system" },
     .{ .label = "Components", .path = "/admin/settings/components", .prefix = "/admin/settings/components" },
     .{ .label = "Design", .path = "/admin/settings/design", .prefix = "/admin/settings/design" },
 };
@@ -312,6 +317,21 @@ fn renderNewError(ctx: *Context, message: []const u8) void {
     const content = tpl.render(views.admin.users.new.New, .{.{
         .error_message = message,
         .csrf_token = csrf_token,
+    }});
+    ctx.html(registry.renderPageWith(page, ctx, content, tab_bar));
+}
+
+// =============================================================================
+// System
+// =============================================================================
+
+fn handleSystem(ctx: *Context) !void {
+    const csrf_token = csrf.ensureToken(ctx);
+    const tab_bar = renderTabBar(ctx.allocator, "/admin/settings/system");
+    const config_text = if (@hasField(@TypeOf(publr_config), "configText")) publr_config.configText else "";
+    const content = tpl.render(views.admin.system.System, .{.{
+        .csrf_token = csrf_token,
+        .config_text = config_text,
     }});
     ctx.html(registry.renderPageWith(page, ctx, content, tab_bar));
 }
