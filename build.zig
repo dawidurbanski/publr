@@ -184,6 +184,12 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addAnonymousImport("static_media_selection_js", .{
         .root_source_file = b.path("static/media-selection.js"),
     });
+    exe.root_module.addAnonymousImport("static_interact_websocket_js", .{
+        .root_source_file = b.path("static/interact/websocket.js"),
+    });
+    exe.root_module.addAnonymousImport("static_interact_presence_js", .{
+        .root_source_file = b.path("static/interact/presence.js"),
+    });
     exe.root_module.addAnonymousImport("static_theme_css", .{
         .root_source_file = if (project_dir) |pd|
             .{ .cwd_relative = b.pathJoin(&.{ pd, "themes/demo/static/theme.css" }) }
@@ -442,6 +448,16 @@ pub fn build(b: *std.Build) void {
     const gravatar_module = b.createModule(.{
         .root_source_file = b.path("src/gravatar.zig"),
     });
+    const websocket_module = b.createModule(.{
+        .root_source_file = b.path("src/websocket.zig"),
+    });
+    const presence_module = b.createModule(.{
+        .root_source_file = b.path("src/presence.zig"),
+        .imports = &.{
+            .{ .name = "websocket", .module = websocket_module },
+            .{ .name = "gravatar", .module = gravatar_module },
+        },
+    });
 
     // Add icons to views module (layout.zsx needs icons for search/logout icons)
     views.addImport("icons", icons_module);
@@ -639,6 +655,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("media_sync", media_sync_module);
     exe.root_module.addImport("media_handler", media_handler_module);
     exe.root_module.addImport("image", image_module);
+    exe.root_module.addImport("websocket", websocket_module);
+    exe.root_module.addImport("presence", presence_module);
 
     // Add plugin modules to main exe
     exe.root_module.addImport("plugin_dashboard", plugin_dashboard);

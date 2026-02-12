@@ -60,10 +60,13 @@ pub fn LayoutEdit(props: struct {
             <div class="edit-body">
                 <div class="edit-area">
                     <div class="edit-nav">
-                        <a href={props.back_url} class="back-btn" aria-label="Back">
-                            <span class="back-btn-icon">{@raw icons.arrow_left}</span>
-                        </a>
-                        <span class="edit-nav-title">{props.title}</span>
+                        <div class="edit-nav-left">
+                            <a href={props.back_url} class="back-btn" aria-label="Back">
+                                <span class="back-btn-icon">{@raw icons.arrow_left}</span>
+                            </a>
+                            <span class="edit-nav-title">{props.title}</span>
+                        </div>
+                        <div class="edit-nav-presence" id="presence-users"></div>
                     </div>
                     <main class="edit-content">
                         {@raw props.content}
@@ -75,6 +78,7 @@ pub fn LayoutEdit(props: struct {
             </div>
             <script type="module" src="/static/publr-core.js"></script>
             <script type="module" src="/static/interact/index.js"></script>
+            <script type="module" src="/static/interact/presence.js"></script>
             <script src="/static/admin.js"></script>
             <script src="/static/media-selection.js"></script>
         </body>

@@ -645,9 +645,31 @@ body.admin {
 .edit-nav {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--space-lg);
     padding: var(--space-xl);
     flex-shrink: 0;
+}
+
+.edit-nav-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    min-width: 0;
+}
+
+.edit-nav-presence {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.edit-nav-presence .version-avatar-stacked:first-child {
+    margin-left: 0;
+}
+
+.presence-inactive {
+    opacity: 0.4;
 }
 
 .back-btn {

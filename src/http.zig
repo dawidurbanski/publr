@@ -17,6 +17,8 @@ const csrf = @import("csrf");
 const admin_api = @import("admin_api");
 const media_handler = @import("media_handler");
 const schema_sync = @import("schema_sync");
+const websocket = @import("websocket");
+const presence = @import("presence");
 
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
@@ -45,6 +47,8 @@ const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_d
 const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
 const InteractIndex = static.Asset("index.js", @embedFile("static_interact_index_js"));
 const MediaSelectionJs = static.Asset("media-selection.js", @embedFile("static_media_selection_js"));
+const InteractWebSocket = static.Asset("websocket.js", @embedFile("static_interact_websocket_js"));
+const InteractPresence = static.Asset("presence.js", @embedFile("static_interact_presence_js"));
 
 // Design system assets (from publr_ui amalgamation)
 const publr_ui = @import("publr_ui");
@@ -91,6 +95,10 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     // Initialize auth middleware
     auth_middleware.init(&auth);
 
+    // Initialize WebSocket registry and presence
+    websocket.initRegistry(allocator);
+    presence.init(allocator);
+
     var router = Router.init(allocator);
     defer router.deinit();
 
@@ -127,6 +135,7 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     try router.get("/media/*", media_handler.handleMedia);
     try router.post("/admin/system/recompile", recompile.handleRecompile);
     try router.post("/admin/system/config", recompile.handleConfigUpdate);
+    try router.get("/admin/ws", handleWebSocket);
 
     // Register plugin routes (arena freed on shutdown)
     var route_arena = std.heap.ArenaAllocator.init(allocator);
@@ -505,6 +514,10 @@ fn handleStatic(ctx: *Context) !void {
         InteractIndex.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "media-selection.js")) {
         MediaSelectionJs.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/websocket.js")) {
+        InteractWebSocket.serve(ctx, if_none_match);
+    } else if (std.mem.eql(u8, file, "interact/presence.js")) {
+        InteractPresence.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "publr.css")) {
         PublrCss.serve(ctx, if_none_match);
     } else if (std.mem.eql(u8, file, "publr-core.js")) {
@@ -545,6 +558,10 @@ fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
         "static/interact/index.js"
     else if (std.mem.eql(u8, file, "media-selection.js"))
         "static/media-selection.js"
+    else if (std.mem.eql(u8, file, "interact/websocket.js"))
+        "static/interact/websocket.js"
+    else if (std.mem.eql(u8, file, "interact/presence.js"))
+        "static/interact/presence.js"
     else {
         // Design system assets are embedded (no disk files) — serve from amalgamation
         const if_none_match = ctx.getRequestHeader("If-None-Match");
@@ -860,4 +877,182 @@ fn defaultDisplayName(email: []const u8) []const u8 {
     const at_pos = std.mem.indexOf(u8, email, "@") orelse return email;
     if (at_pos == 0) return email;
     return email[0..at_pos];
+}
+
+// =============================================================================
+// WebSocket Handler
+// =============================================================================
+
+fn handleWebSocket(ctx: *Context) !void {
+    // Validate WebSocket upgrade request
+    const upgrade_header = ctx.getRequestHeader("Upgrade") orelse {
+        ctx.response.setStatus("400 Bad Request");
+        ctx.response.setBody("Expected WebSocket upgrade");
+        return;
+    };
+    if (!std.ascii.eqlIgnoreCase(upgrade_header, "websocket")) {
+        ctx.response.setStatus("400 Bad Request");
+        ctx.response.setBody("Expected WebSocket upgrade");
+        return;
+    }
+
+    const ws_key = ctx.getRequestHeader("Sec-WebSocket-Key") orelse {
+        ctx.response.setStatus("400 Bad Request");
+        ctx.response.setBody("Missing Sec-WebSocket-Key");
+        return;
+    };
+
+    // Get user info from auth context (WS route is behind auth middleware)
+    const user_id = auth_middleware.getUserId(ctx) orelse return;
+    const user_email = auth_middleware.getUserEmail(ctx) orelse return;
+
+    // Look up display name from database
+    const auth_instance = auth_middleware.auth orelse return;
+    const display_name = blk: {
+        var maybe_user = auth_instance.getUserById(user_id) catch null;
+        if (maybe_user) |*user| {
+            const dn = std.heap.page_allocator.dupe(u8, user.display_name) catch "";
+            auth_instance.freeUser(user);
+            break :blk dn;
+        }
+        break :blk @as([]const u8, "");
+    };
+    defer if (display_name.len > 0) std.heap.page_allocator.free(display_name);
+
+    const user_info = presence.UserInfo{
+        .user_id = user_id,
+        .email = user_email,
+        .display_name = display_name,
+    };
+
+    const stream = ctx.stream orelse return error.NoStream;
+
+    // Perform upgrade handshake (sends 101 response)
+    try websocket.upgrade(stream, ws_key);
+    ctx.response.headers_sent = true;
+
+    // Heap-allocate connection (must outlive registry references from other threads)
+    const conn = try std.heap.page_allocator.create(websocket.Connection);
+    conn.* = .{
+        .stream = stream,
+        .allocator = std.heap.page_allocator,
+        .id = websocket.nextId(),
+    };
+
+    websocket.registry.add(conn);
+    defer {
+        presence.disconnect(conn.id);
+        websocket.registry.remove(conn);
+        std.heap.page_allocator.destroy(conn);
+    }
+
+    conn.sendJson("connected", null) catch return;
+    if (is_dev_mode) {
+        std.debug.print("[ws] Connection {d} opened (active: {d})\n", .{ conn.id, websocket.registry.count() });
+    }
+    defer {
+        if (is_dev_mode) {
+            std.debug.print("[ws] Connection {d} closed (active: {d})\n", .{ conn.id, websocket.registry.count() });
+        }
+    }
+
+    // Message loop — 10s poll timeout for heartbeat checking
+    var poll_fds = [_]posix.pollfd{
+        .{ .fd = stream.handle, .events = posix.POLL.IN, .revents = 0 },
+    };
+    var idle_ticks: u32 = 0;
+
+    while (!shutdown_requested.load(.acquire)) {
+        const poll_result = posix.poll(&poll_fds, 10_000) catch break;
+
+        if (poll_result == 0) {
+            idle_ticks += 1;
+            // Check heartbeat staleness (>20s without heartbeat)
+            if (presence.isHeartbeatStale(conn.id)) {
+                if (is_dev_mode) std.debug.print("[ws] #{d}: heartbeat stale, closing\n", .{conn.id});
+                break;
+            }
+            // 30s idle — send ping to verify TCP liveness
+            if (idle_ticks >= 3) {
+                websocket.writeFrame(stream, .ping, &.{}) catch break;
+                idle_ticks = 0;
+            }
+            continue;
+        }
+
+        idle_ticks = 0;
+
+        const frame = websocket.readFrame(stream, std.heap.page_allocator) catch break;
+        defer std.heap.page_allocator.free(frame.payload);
+
+        switch (frame.opcode) {
+            .text => {
+                if (is_dev_mode) {
+                    std.debug.print("[ws] #{d}: {s}\n", .{ conn.id, frame.payload });
+                }
+                dispatchMessage(conn, frame.payload, user_info);
+            },
+            .ping => {
+                websocket.writeFrame(stream, .pong, frame.payload) catch break;
+            },
+            .pong => {},
+            .close => {
+                conn.sendClose();
+                break;
+            },
+            else => {},
+        }
+    }
+}
+
+/// Dispatch a WebSocket JSON message to the appropriate handler.
+fn dispatchMessage(conn: *websocket.Connection, payload: []const u8, user: presence.UserInfo) void {
+    // Parse message type: {"type":"...","data":{...}}
+    const msg_type = extractJsonString(payload, "type") orelse return;
+
+    if (std.mem.eql(u8, msg_type, "subscribe")) {
+        const entry_id = extractJsonString(payload, "entry_id") orelse return;
+        presence.subscribe(entry_id, conn, user);
+    } else if (std.mem.eql(u8, msg_type, "unsubscribe")) {
+        presence.unsubscribe(conn.id);
+    } else if (std.mem.eql(u8, msg_type, "activity")) {
+        const active_str = extractJsonString(payload, "active") orelse return;
+        presence.setActivity(conn.id, std.mem.eql(u8, active_str, "true"));
+    } else if (std.mem.eql(u8, msg_type, "heartbeat")) {
+        presence.heartbeat(conn.id);
+    }
+}
+
+/// Extract a string value from flat or nested JSON by key name.
+/// Handles: {"key":"value"} and {"data":{"key":"value"}}
+/// For booleans, returns "true" or "false" as string.
+fn extractJsonString(json: []const u8, key: []const u8) ?[]const u8 {
+    // Search for "key": or "key":
+    var pos: usize = 0;
+    while (pos + key.len + 3 < json.len) {
+        if (json[pos] == '"' and pos + 1 + key.len + 1 < json.len) {
+            if (std.mem.eql(u8, json[pos + 1 .. pos + 1 + key.len], key) and
+                json[pos + 1 + key.len] == '"')
+            {
+                // Found "key" — skip to colon and value
+                var vpos = pos + 1 + key.len + 1;
+                while (vpos < json.len and (json[vpos] == ':' or json[vpos] == ' ')) : (vpos += 1) {}
+                if (vpos >= json.len) return null;
+
+                if (json[vpos] == '"') {
+                    // String value — find closing quote
+                    const start = vpos + 1;
+                    var end = start;
+                    while (end < json.len and json[end] != '"') : (end += 1) {}
+                    if (end < json.len) return json[start..end];
+                } else if (json[vpos] == 't') {
+                    return "true";
+                } else if (json[vpos] == 'f') {
+                    return "false";
+                }
+            }
+        }
+        pos += 1;
+    }
+    return null;
 }
