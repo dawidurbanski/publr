@@ -10,3 +10,4 @@ AGENTS.md
 data/
 browser/node_modules/
 *.wasm
+.publr/
