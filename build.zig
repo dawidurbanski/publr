@@ -410,15 +410,21 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // CMS query API
+    // Entry query builder
+    const query_module = b.createModule(.{
+        .root_source_file = b.path("src/query.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+        },
+    });
+
+    // CMS facade
     const cms_module = b.createModule(.{
         .root_source_file = b.path("src/cms.zig"),
         .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "schema_registry", .module = schema_registry_module },
             .{ .name = "db", .module = db_module },
-            .{ .name = "time_util", .module = time_util_module },
             .{ .name = "id_gen", .module = id_gen_module },
+            .{ .name = "query", .module = query_module },
             .{ .name = "version", .module = version_module },
             .{ .name = "release", .module = release_module },
         },
@@ -579,6 +585,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "gravatar", .module = gravatar_module },
             .{ .name = "views", .module = views },
             .{ .name = "time_util", .module = time_util_module },
+            .{ .name = "presence", .module = presence_module },
         },
     });
     const plugin_users = b.createModule(.{
