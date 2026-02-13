@@ -18,6 +18,16 @@ const ACTIVITY_CHECK_INTERVAL = 10000; // 10s
 // Current users on this entry (keyed by user_id)
 const users = new Map();
 
+// Field soft locks (keyed by field name)
+const fieldLocks = new Map();
+let focusedField = null;
+let focusDebounceTimer = null;
+const FOCUS_DEBOUNCE_MS = 75;
+
+// Field edit broadcasting (debounced per field)
+const editDebounceTimers = {};
+const EDIT_DEBOUNCE_MS = 300;
+
 // =========================================================================
 // Init — called on edit pages
 // =========================================================================
@@ -39,7 +49,18 @@ export function initPresence() {
     on('user_joined', handleUserJoined);
     on('user_left', handleUserLeft);
     on('user_activity', handleUserActivity);
+    on('field_focused', handleFieldFocused);
+    on('field_blurred', handleFieldBlurred);
+    on('field_lock_invalidated', handleFieldLockInvalidated);
+    on('field_edit', handleFieldEdit);
     on('open', handleWsOpen);
+
+    // Field focus/blur tracking (use focusin/focusout for event delegation)
+    form.addEventListener('focusin', onFieldFocus);
+    form.addEventListener('focusout', onFieldBlur);
+
+    // Field edit broadcasting (debounced oninput)
+    form.addEventListener('input', onFieldInput);
 
     // Connect WS (idempotent if already connected)
     connect();
@@ -76,6 +97,21 @@ function handlePresenceSync(data) {
         users.set(user.user_id, user);
     }
     renderPresence();
+
+    // Apply field locks from sync (skip our own focused field)
+    clearAllFieldLocks();
+    if (data.locks) {
+        for (const [field, lock] of Object.entries(data.locks)) {
+            if (field === focusedField) continue;
+            fieldLocks.set(field, lock);
+            applyFieldLock(field, lock);
+        }
+    }
+
+    // Re-acquire our focus if we had one (idempotent on server)
+    if (focusedField) {
+        send('focus', { field: focusedField });
+    }
 }
 
 function handleUserJoined(data) {
@@ -96,6 +132,46 @@ function handleUserActivity(data) {
     if (user) {
         user.active = data.active;
         renderPresence();
+    }
+}
+
+function handleFieldFocused(data) {
+    if (!data || !data.field) return;
+    fieldLocks.set(data.field, data);
+    applyFieldLock(data.field, data);
+}
+
+function handleFieldBlurred(data) {
+    if (!data || !data.field) return;
+    fieldLocks.delete(data.field);
+    removeFieldLock(data.field);
+}
+
+function handleFieldLockInvalidated(data) {
+    if (!data || !data.field) return;
+
+    // If we hold the lock, release it client-side
+    if (focusedField === data.field) {
+        focusedField = null;
+        const group = document.querySelector('.form-group[data-field="' + data.field + '"]');
+        if (group && group.contains(document.activeElement)) {
+            document.activeElement.blur();
+        }
+    }
+
+    fieldLocks.set(data.field, data);
+    applyFieldLock(data.field, data);
+}
+
+function handleFieldEdit(data) {
+    if (!data || !data.field || data.value === undefined) return;
+
+    const group = document.querySelector('.form-group[data-field="' + data.field + '"]');
+    if (!group) return;
+
+    const input = group.querySelector('.form-control');
+    if (input) {
+        input.value = data.value;
     }
 }
 
@@ -137,6 +213,104 @@ function checkActivity() {
         isActive = false;
         send('activity', { active: false });
     }
+}
+
+// =========================================================================
+// Field focus/blur — soft lock events
+// =========================================================================
+
+function onFieldFocus(e) {
+    const group = e.target.closest('.form-group[data-field]');
+    if (!group) return;
+    const field = group.dataset.field;
+    if (field === focusedField) return;
+
+    clearTimeout(focusDebounceTimer);
+    focusDebounceTimer = setTimeout(() => {
+        focusedField = field;
+        send('focus', { field });
+    }, FOCUS_DEBOUNCE_MS);
+}
+
+function onFieldBlur(e) {
+    const group = e.target.closest('.form-group[data-field]');
+    if (!group) return;
+    const field = group.dataset.field;
+    if (field !== focusedField) return;
+
+    clearTimeout(focusDebounceTimer);
+    focusedField = null;
+    send('blur', { field });
+}
+
+function onFieldInput(e) {
+    if (!e.target.classList.contains('form-control')) return;
+    const group = e.target.closest('.form-group[data-field]');
+    if (!group) return;
+    const field = group.dataset.field;
+    if (field !== focusedField) return;
+
+    clearTimeout(editDebounceTimers[field]);
+    editDebounceTimers[field] = setTimeout(() => {
+        send('field_edit', { field, value: e.target.value });
+    }, EDIT_DEBOUNCE_MS);
+}
+
+// =========================================================================
+// Field lock UI — disable fields + show indicator
+// =========================================================================
+
+function applyFieldLock(field, lockData) {
+    const group = document.querySelector('.form-group[data-field="' + field + '"]');
+    if (!group) return;
+
+    group.classList.add('field-soft-locked');
+
+    // Disable all inputs in the group
+    group.querySelectorAll('input, textarea, select').forEach(el => {
+        el.disabled = true;
+        el.dataset.softLocked = 'true';
+    });
+
+    // Add or update soft lock indicator
+    let indicator = group.querySelector('.field-soft-lock-indicator');
+    if (!indicator) {
+        indicator = document.createElement('span');
+        indicator.className = 'field-soft-lock-indicator';
+        const checkRow = group.querySelector('.field-check-row');
+        if (checkRow) {
+            checkRow.prepend(indicator);
+        }
+    }
+
+    const name = escapeAttr(lockData.name || '');
+    const url = escapeAttr(lockData.avatar_url || '');
+    indicator.innerHTML = '<img src="' + url + '" class="field-editor-avatar" alt="" />'
+        + name + ' is editing';
+}
+
+function removeFieldLock(field) {
+    const group = document.querySelector('.form-group[data-field="' + field + '"]');
+    if (!group) return;
+
+    group.classList.remove('field-soft-locked');
+
+    // Re-enable inputs
+    group.querySelectorAll('[data-soft-locked="true"]').forEach(el => {
+        el.disabled = false;
+        delete el.dataset.softLocked;
+    });
+
+    // Remove indicator
+    const indicator = group.querySelector('.field-soft-lock-indicator');
+    if (indicator) indicator.remove();
+}
+
+function clearAllFieldLocks() {
+    for (const field of fieldLocks.keys()) {
+        removeFieldLock(field);
+    }
+    fieldLocks.clear();
 }
 
 // =========================================================================
@@ -193,19 +367,38 @@ function cleanup() {
 
     if (activityTimer) clearInterval(activityTimer);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    clearTimeout(focusDebounceTimer);
 
     off('presence_sync', handlePresenceSync);
     off('user_joined', handleUserJoined);
     off('user_left', handleUserLeft);
     off('user_activity', handleUserActivity);
+    off('field_focused', handleFieldFocused);
+    off('field_blurred', handleFieldBlurred);
+    off('field_lock_invalidated', handleFieldLockInvalidated);
+    off('field_edit', handleFieldEdit);
     off('open', handleWsOpen);
+
+    const form = document.getElementById('post-form');
+    if (form) {
+        form.removeEventListener('focusin', onFieldFocus);
+        form.removeEventListener('focusout', onFieldBlur);
+        form.removeEventListener('input', onFieldInput);
+    }
+
+    for (const key of Object.keys(editDebounceTimers)) {
+        clearTimeout(editDebounceTimers[key]);
+        delete editDebounceTimers[key];
+    }
 
     const events = ['mousemove', 'keydown', 'touchstart', 'scroll'];
     for (const evt of events) {
         document.removeEventListener(evt, onUserInput);
     }
 
+    clearAllFieldLocks();
     users.clear();
+    focusedField = null;
     currentEntryId = null;
 }
 

@@ -36,6 +36,13 @@ const PendingLeave = struct {
     disconnect_time: i64,
 };
 
+const FieldLock = struct {
+    conn_id: u64,
+    user_id: []const u8, // owned
+    name: []const u8, // display name, owned
+    avatar_url: gravatar.GravatarUrl,
+};
+
 // =========================================================================
 // State
 // =========================================================================
@@ -53,6 +60,9 @@ var conn_map: std.ArrayListUnmanaged(ConnEntry) = .{};
 
 /// Pending leaves awaiting grace period expiry
 var pending_leaves: std.ArrayListUnmanaged(PendingLeave) = .{};
+
+/// entry_id → { field_name → FieldLock }
+var field_locks: std.StringHashMapUnmanaged(std.StringHashMapUnmanaged(FieldLock)) = .{};
 
 pub fn init(a: std.mem.Allocator) void {
     alloc = a;
@@ -116,8 +126,13 @@ pub fn subscribe(entry_id: []const u8, conn: *websocket.Connection, user: UserIn
         .entry_id = alloc.dupe(u8, entry_id) catch return,
     }) catch return;
 
-    // Send presence_sync to joiner (full user list)
-    sendPresenceSync(conn, gop.value_ptr.*);
+    // On silent restore, update lock conn_ids to the new connection
+    if (silent_restore) {
+        updateLockConnId(entry_id, user.user_id, conn.id);
+    }
+
+    // Send presence_sync to joiner (full user list + field lock state)
+    sendPresenceSync(conn, entry_id, gop.value_ptr.*);
 
     // Broadcast user_joined to others (unless silent restore from reconnect)
     if (!silent_restore) {
@@ -193,6 +208,10 @@ pub fn setActivity(conn_id: u64, active: bool) void {
     for (subs.items) |*s| {
         if (s.conn.id == conn_id) {
             s.active = active;
+            // Release all soft locks when going inactive
+            if (!active) {
+                releaseConnLocks(entry_id, conn_id);
+            }
             broadcastUserEvent("user_activity", s.*, subs.*, conn_id);
             return;
         }
@@ -244,6 +263,7 @@ pub fn isHeartbeatStale(conn_id: u64) bool {
 /// Unsubscribe a connection. If broadcast is true, sends user_left.
 fn unsubConnLocked(conn_id: u64, broadcast: bool) void {
     const entry_id = connEntryId(conn_id) orelse return;
+    releaseConnLocks(entry_id, conn_id);
     removeSubFromEntry(entry_id, conn_id, broadcast);
     removeConnMapping(conn_id);
 }
@@ -292,6 +312,8 @@ fn sweepLocked(now: i64) void {
     while (i < pending_leaves.items.len) {
         const pl = pending_leaves.items[i];
         if (now - pl.disconnect_time > GRACE_PERIOD_S) {
+            // Release field locks and broadcast user_left
+            releaseUserLocks(pl.entry_id, pl.user_id);
             if (entries.getPtr(pl.entry_id)) |subs| {
                 broadcastLeave(pl.user_id, subs.*, 0);
             }
@@ -315,10 +337,197 @@ fn freePendingLeave(pl: PendingLeave) void {
 }
 
 // =========================================================================
+// Field Locks — soft locking of individual fields
+// =========================================================================
+
+/// Claim a soft lock on a field. Rejected if already locked by another connection.
+pub fn focus(conn_id: u64, field_name: []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const entry_id = connEntryId(conn_id) orelse return;
+    const subs = entries.getPtr(entry_id) orelse return;
+
+    // Find the subscriber for this connection
+    var sub_info: ?Subscriber = null;
+    for (subs.items) |s| {
+        if (s.conn.id == conn_id) {
+            sub_info = s;
+            break;
+        }
+    }
+    const sub = sub_info orelse return;
+
+    // Get or create field lock map for this entry
+    const gop = field_locks.getOrPut(alloc, entry_id) catch return;
+    if (!gop.found_existing) {
+        gop.key_ptr.* = alloc.dupe(u8, entry_id) catch return;
+        gop.value_ptr.* = .{};
+    }
+
+    // Check if already locked
+    if (gop.value_ptr.get(field_name)) |existing| {
+        if (existing.conn_id != conn_id) {
+            // Locked by another user — reject silently (client should already disable)
+            return;
+        }
+        // Already locked by this connection — no-op
+        return;
+    }
+
+    // Acquire the lock
+    const display = if (sub.display_name.len > 0) sub.display_name else sub.email;
+    const lock = FieldLock{
+        .conn_id = conn_id,
+        .user_id = alloc.dupe(u8, sub.user_id) catch return,
+        .name = alloc.dupe(u8, display) catch return,
+        .avatar_url = sub.avatar_url,
+    };
+    const owned_field = alloc.dupe(u8, field_name) catch {
+        freeFieldLock(lock);
+        return;
+    };
+    gop.value_ptr.put(alloc, owned_field, lock) catch {
+        alloc.free(owned_field);
+        freeFieldLock(lock);
+        return;
+    };
+
+    broadcastFieldFocused(field_name, lock, subs.*, conn_id);
+}
+
+/// Release a soft lock on a field.
+pub fn blur(conn_id: u64, field_name: []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const entry_id = connEntryId(conn_id) orelse return;
+    const subs = entries.getPtr(entry_id) orelse return;
+    const locks = field_locks.getPtr(entry_id) orelse return;
+
+    // Verify this connection owns the lock
+    if (locks.get(field_name)) |lock| {
+        if (lock.conn_id != conn_id) return;
+    } else return;
+
+    if (locks.fetchRemove(field_name)) |kv| {
+        broadcastFieldBlurred(field_name, kv.value.user_id, subs.*, conn_id);
+        freeFieldLock(kv.value);
+        alloc.free(kv.key);
+    }
+
+    cleanupEntryLocks(entry_id);
+}
+
+/// Broadcast a field value edit to other subscribers (real-time sync).
+/// raw_value is already JSON-escaped by the client — forwarded as-is.
+pub fn fieldEdit(conn_id: u64, field_name: []const u8, raw_value: []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const entry_id = connEntryId(conn_id) orelse return;
+    const subs = entries.getPtr(entry_id) orelse return;
+
+    // Verify lock ownership (defense-in-depth)
+    const locks = field_locks.getPtr(entry_id) orelse return;
+    if (locks.get(field_name)) |lock| {
+        if (lock.conn_id != conn_id) return;
+    } else return;
+
+    broadcastFieldEditValue(field_name, raw_value, subs.*, conn_id);
+}
+
+// =========================================================================
+// Internal: field lock management
+// =========================================================================
+
+/// Release all field locks held by a connection, broadcasting field_blurred for each.
+fn releaseConnLocks(entry_id: []const u8, conn_id: u64) void {
+    const locks = field_locks.getPtr(entry_id) orelse return;
+    const subs = entries.getPtr(entry_id);
+
+    var to_release: std.ArrayListUnmanaged([]const u8) = .{};
+    defer to_release.deinit(alloc);
+
+    var iter = locks.iterator();
+    while (iter.next()) |kv| {
+        if (kv.value_ptr.conn_id == conn_id) {
+            to_release.append(alloc, kv.key_ptr.*) catch continue;
+        }
+    }
+
+    for (to_release.items) |field_name| {
+        if (locks.fetchRemove(field_name)) |kv| {
+            if (subs) |s| {
+                broadcastFieldBlurred(field_name, kv.value.user_id, s.*, conn_id);
+            }
+            freeFieldLock(kv.value);
+            alloc.free(kv.key);
+        }
+    }
+
+    cleanupEntryLocks(entry_id);
+}
+
+/// Release all field locks held by a user_id (used when grace period expires).
+fn releaseUserLocks(entry_id: []const u8, user_id: []const u8) void {
+    const locks = field_locks.getPtr(entry_id) orelse return;
+    const subs = entries.getPtr(entry_id);
+
+    var to_release: std.ArrayListUnmanaged([]const u8) = .{};
+    defer to_release.deinit(alloc);
+
+    var iter = locks.iterator();
+    while (iter.next()) |kv| {
+        if (std.mem.eql(u8, kv.value_ptr.user_id, user_id)) {
+            to_release.append(alloc, kv.key_ptr.*) catch continue;
+        }
+    }
+
+    for (to_release.items) |field_name| {
+        if (locks.fetchRemove(field_name)) |kv| {
+            if (subs) |s| {
+                broadcastFieldBlurred(field_name, kv.value.user_id, s.*, 0);
+            }
+            freeFieldLock(kv.value);
+            alloc.free(kv.key);
+        }
+    }
+
+    cleanupEntryLocks(entry_id);
+}
+
+/// Update conn_id on all locks for a user (used on silent reconnect restore).
+fn updateLockConnId(entry_id: []const u8, user_id: []const u8, new_conn_id: u64) void {
+    const locks = field_locks.getPtr(entry_id) orelse return;
+    var iter = locks.iterator();
+    while (iter.next()) |kv| {
+        if (std.mem.eql(u8, kv.value_ptr.user_id, user_id)) {
+            kv.value_ptr.conn_id = new_conn_id;
+        }
+    }
+}
+
+fn freeFieldLock(lock: FieldLock) void {
+    alloc.free(lock.user_id);
+    alloc.free(lock.name);
+}
+
+fn cleanupEntryLocks(entry_id: []const u8) void {
+    const locks = field_locks.getPtr(entry_id) orelse return;
+    if (locks.count() == 0) {
+        locks.deinit(alloc);
+        if (field_locks.fetchRemove(entry_id)) |kv| {
+            alloc.free(kv.key);
+        }
+    }
+}
+
+// =========================================================================
 // Internal: JSON building and sending
 // =========================================================================
 
-fn sendPresenceSync(conn: *websocket.Connection, subs: std.ArrayListUnmanaged(Subscriber)) void {
+fn sendPresenceSync(conn: *websocket.Connection, entry_id: []const u8, subs: std.ArrayListUnmanaged(Subscriber)) void {
     var buf: std.ArrayList(u8) = .{};
     defer buf.deinit(alloc);
 
@@ -330,7 +539,23 @@ fn sendPresenceSync(conn: *websocket.Connection, subs: std.ArrayListUnmanaged(Su
         writeUserJson(w, s) catch return;
     }
 
-    w.writeAll("]}") catch return;
+    w.writeAll("],\"locks\":{") catch return;
+
+    if (field_locks.getPtr(entry_id)) |locks| {
+        var iter = locks.iterator();
+        var first = true;
+        while (iter.next()) |kv| {
+            if (!first) w.writeByte(',') catch return;
+            first = false;
+            w.writeByte('"') catch return;
+            writeJsonStr(w, kv.key_ptr.*) catch return;
+            w.writeAll("\":{") catch return;
+            writeFieldLockJson(w, kv.value_ptr.*) catch return;
+            w.writeByte('}') catch return;
+        }
+    }
+
+    w.writeAll("}}") catch return;
     conn.sendJson("presence_sync", buf.items) catch {};
 }
 
@@ -373,6 +598,58 @@ fn writeUserJson(w: anytype, s: Subscriber) !void {
     try w.writeAll("\",\"active\":");
     try w.writeAll(if (s.active) "true" else "false");
     try w.writeByte('}');
+}
+
+fn broadcastFieldFocused(field_name: []const u8, lock: FieldLock, subs: std.ArrayListUnmanaged(Subscriber), exclude_id: u64) void {
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(alloc);
+
+    const w = buf.writer(alloc);
+    w.writeAll("{\"field\":\"") catch return;
+    writeJsonStr(w, field_name) catch return;
+    w.writeAll("\",") catch return;
+    writeFieldLockJson(w, lock) catch return;
+    w.writeByte('}') catch return;
+
+    broadcastToSubs("field_focused", buf.items, subs, exclude_id);
+}
+
+fn broadcastFieldEditValue(field_name: []const u8, raw_value: []const u8, subs: std.ArrayListUnmanaged(Subscriber), exclude_id: u64) void {
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(alloc);
+
+    const w = buf.writer(alloc);
+    w.writeAll("{\"field\":\"") catch return;
+    writeJsonStr(w, field_name) catch return;
+    w.writeAll("\",\"value\":\"") catch return;
+    w.writeAll(raw_value) catch return; // Already JSON-escaped by client
+    w.writeAll("\"}") catch return;
+
+    broadcastToSubs("field_edit", buf.items, subs, exclude_id);
+}
+
+fn broadcastFieldBlurred(field_name: []const u8, user_id: []const u8, subs: std.ArrayListUnmanaged(Subscriber), exclude_id: u64) void {
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(alloc);
+
+    const w = buf.writer(alloc);
+    w.writeAll("{\"field\":\"") catch return;
+    writeJsonStr(w, field_name) catch return;
+    w.writeAll("\",\"user_id\":\"") catch return;
+    writeJsonStr(w, user_id) catch return;
+    w.writeAll("\"}") catch return;
+
+    broadcastToSubs("field_blurred", buf.items, subs, exclude_id);
+}
+
+fn writeFieldLockJson(w: anytype, lock: FieldLock) !void {
+    try w.writeAll("\"user_id\":\"");
+    try writeJsonStr(w, lock.user_id);
+    try w.writeAll("\",\"name\":\"");
+    try writeJsonStr(w, lock.name);
+    try w.writeAll("\",\"avatar_url\":\"");
+    try writeJsonStr(w, lock.avatar_url.slice());
+    try w.writeByte('"');
 }
 
 fn writeJsonStr(w: anytype, s: []const u8) !void {

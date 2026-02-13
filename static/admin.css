@@ -672,6 +672,19 @@ body.admin {
     opacity: 0.4;
 }
 
+.form-group.field-soft-locked {
+    border-left: 3px solid var(--color-warning);
+}
+
+.field-soft-lock-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--text-xs);
+    color: var(--color-warning);
+    white-space: nowrap;
+}
+
 .back-btn {
     display: flex;
     align-items: center;
