@@ -673,7 +673,11 @@ body.admin {
 }
 
 .form-group.field-soft-locked {
-    border-left: 3px solid var(--color-warning);
+    opacity: 0.4;
+}
+
+.form-group.field-hard-locked {
+    opacity: 0.6;
 }
 
 .field-soft-lock-indicator {
@@ -683,6 +687,64 @@ body.admin {
     font-size: var(--text-xs);
     color: var(--color-warning);
     white-space: nowrap;
+}
+
+.field-hard-locked .field-soft-lock-indicator {
+    color: var(--brand-600);
+}
+
+/* Takeover hover — label and button both in DOM. Label always occupies space
+   (visibility not display), button overlays absolutely. No size change = no flicker. */
+.field-takeover-ready {
+    position: relative;
+    cursor: pointer;
+}
+
+.field-lock-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.field-takeover-ready .field-takeover-btn {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    visibility: hidden;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--brand-600);
+    white-space: nowrap;
+}
+
+.field-takeover-ready:not(.field-takeover-disabled):hover .field-lock-label {
+    visibility: hidden;
+}
+
+.field-takeover-ready:not(.field-takeover-disabled):hover .field-takeover-btn {
+    visibility: visible;
+}
+
+.field-takeover-ready:not(.field-takeover-disabled):hover .field-takeover-btn:hover {
+    color: var(--brand-700);
+}
+
+.field-takeover-btn.field-takeover-pending {
+    color: var(--text-tertiary);
+}
+
+.field-takeover-feedback {
+    font-size: var(--text-xs);
+    color: var(--color-warning);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.field-takeover-feedback-visible {
+    opacity: 1;
 }
 
 .back-btn {
@@ -767,6 +829,7 @@ body.admin {
 .autosave-status-saving { color: var(--text-tertiary); }
 .autosave-status-saved { color: var(--color-success); }
 .autosave-status-error { color: var(--color-danger); }
+.autosave-status-rejected { color: var(--color-warning); }
 
 .edit-sidebar-title {
     font-size: var(--text-sm);
@@ -1963,6 +2026,14 @@ a.version-item:hover {
 
 .field-peek-wrapper .form-control {
     padding-right: 36px;
+}
+
+.field-peek-hidden .form-control {
+    padding-right: 14px;
+}
+
+.field-peek-hidden .field-peek-btn {
+    display: none;
 }
 
 .field-peek-btn {

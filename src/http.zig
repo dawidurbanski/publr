@@ -943,5 +943,8 @@ fn dispatchMessage(conn: *websocket.Connection, payload: []const u8, user: prese
         const field = extractJsonString(payload, "field") orelse return;
         const value = extractJsonStringRaw(payload, "value") orelse return;
         presence.fieldEdit(conn.id, field, value);
+    } else if (std.mem.eql(u8, msg_type, "takeover")) {
+        const field = extractJsonString(payload, "field") orelse return;
+        plugin_posts.handleTakeover(conn, field, user);
     }
 }

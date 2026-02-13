@@ -15,6 +15,20 @@ const views = @import("views");
 const registry = @import("registry");
 const auth_middleware = @import("auth_middleware");
 const gravatar = @import("gravatar");
+const websocket = if (@import("builtin").target.os.tag != .wasi) @import("websocket") else struct {
+    pub const Connection = struct {};
+};
+const presence = if (@import("builtin").target.os.tag != .wasi) @import("presence") else struct {
+    pub fn notifyLockAcquired(_: []const u8, _: []const u8, _: []const u8, _: []const u8, _: []const u8) void {}
+    pub fn notifyLocksReleased(_: []const u8, _: []const []const u8) void {}
+    pub fn broadcastEntryMessage(_: []const u8, _: []const u8, _: []const u8) void {}
+    pub fn getConnEntryId(_: u64) ?[]const u8 { return null; }
+    pub fn checkTakeoverAllowed(_: []const u8, _: []const u8, _: []const u8) bool { return false; }
+    pub fn registerTakeover(_: []const u8, _: []const u8, _: []const u8, _: []const u8, _: []const u8) void {}
+    pub const OverrideCheck = enum { none, owner, not_owner };
+    pub fn checkOwnershipOverride(_: []const u8, _: []const u8, _: []const u8) OverrideCheck { return .none; }
+    pub fn clearOwnershipOverrides(_: []const u8, _: []const []const u8) void {}
+};
 
 const Post = schemas.Post;
 const pagination = @import("pagination");
@@ -770,15 +784,22 @@ fn handleAutosaveUpdate(ctx: *Context) !void {
         return;
     };
 
-    // For each field: use submitted value if present, keep existing if absent (disabled field)
-    const title = ctx.formValue("title") orelse entry.title;
-    const slug = ctx.formValue("slug") orelse entry.slug orelse "";
-    const body = ctx.formValue("content") orelse entry.data.body;
-    const featured_image_raw = ctx.formValue("featured_image") orelse entry.data.featured_image orelse "";
+    const author_id = auth_middleware.getUserId(ctx);
+
+    // Get field ownership for hard lock validation
+    const owners = getFieldOwnership(ctx.allocator, db, post_id) catch null;
+
+    // Validate each field: reject if owned by another user
+    var rejected: std.ArrayListUnmanaged(RejectedField) = .{};
+    var newly_acquired: std.ArrayListUnmanaged([]const u8) = .{};
+
+    const title = validateField(ctx, entry.title, "title", "title", author_id, post_id, owners, &rejected, &newly_acquired);
+    const slug = validateField(ctx, entry.slug orelse "", "slug", "slug", author_id, post_id, owners, &rejected, &newly_acquired);
+    const body = validateField(ctx, entry.data.body, "content", "body", author_id, post_id, owners, &rejected, &newly_acquired);
+    const featured_image_raw = validateField(ctx, entry.data.featured_image orelse "", "featured_image", "featured_image", author_id, post_id, owners, &rejected, &newly_acquired);
     const featured_image: ?[]const u8 = if (featured_image_raw.len > 0) featured_image_raw else null;
 
     // Determine status: drafts stay draft; published/changed become "changed"
-    // Only explicit publish or discard can set status back to "published"
     const status: []const u8 = if (entry.isDraft()) "draft" else "changed";
 
     const data = Post.Data{
@@ -795,7 +816,6 @@ fn handleAutosaveUpdate(ctx: *Context) !void {
         .meta_description = null,
     };
 
-    const author_id = auth_middleware.getUserId(ctx);
     _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
         .author_id = author_id,
         .autosave = true,
@@ -805,7 +825,34 @@ fn handleAutosaveUpdate(ctx: *Context) !void {
         return;
     };
 
-    const json = std.fmt.allocPrint(ctx.allocator, "{{\"status\":\"{s}\",\"saved\":true}}", .{status}) catch {
+    // Broadcast lock_acquired for newly acquired fields
+    if (newly_acquired.items.len > 0) {
+        const user_email = auth_middleware.getUserEmail(ctx) orelse "";
+        const user_name = getUserDisplayName(ctx.allocator, db, author_id) orelse user_email;
+        const avatar = gravatar.url(user_email, 24);
+        for (newly_acquired.items) |field_name| {
+            presence.notifyLockAcquired(post_id, field_name, author_id orelse "", user_name, avatar.slice());
+        }
+    }
+
+    // Detect fields that reverted to published value (no longer in ownership) → release hard locks
+    if (owners != null) {
+        const new_owners = getFieldOwnership(ctx.allocator, db, post_id) catch null;
+        var released_fields: std.ArrayListUnmanaged([]const u8) = .{};
+        var iter = owners.?.iterator();
+        while (iter.next()) |kv| {
+            const still_owned = if (new_owners) |new_own| new_own.contains(kv.key_ptr.*) else false;
+            if (!still_owned) {
+                released_fields.append(ctx.allocator, kv.key_ptr.*) catch {};
+            }
+        }
+        if (released_fields.items.len > 0) {
+            presence.notifyLocksReleased(post_id, released_fields.items);
+        }
+    }
+
+    // Build response with rejected fields info
+    const json = buildAutosaveResponse(ctx.allocator, status, rejected.items) catch {
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.response.setBody("{\"error\":\"format failed\"}");
         return;
@@ -909,11 +956,19 @@ fn handleUpdate(ctx: *Context) !void {
         return;
     };
 
-    // For each field: use submitted value if present, keep existing if absent (disabled field)
-    const title = ctx.formValue("title") orelse entry.title;
-    const slug = ctx.formValue("slug") orelse entry.slug orelse "";
-    const body = ctx.formValue("content") orelse entry.data.body;
-    const featured_image_raw = ctx.formValue("featured_image") orelse entry.data.featured_image orelse "";
+    const author_id = auth_middleware.getUserId(ctx);
+
+    // Get field ownership for hard lock validation
+    const owners = getFieldOwnership(ctx.allocator, db, post_id) catch null;
+
+    // Validate each field: reject if owned by another user
+    var rejected: std.ArrayListUnmanaged(RejectedField) = .{};
+    var newly_acquired: std.ArrayListUnmanaged([]const u8) = .{};
+
+    const title = validateField(ctx, entry.title, "title", "title", author_id, post_id, owners, &rejected, &newly_acquired);
+    const slug = validateField(ctx, entry.slug orelse "", "slug", "slug", author_id, post_id, owners, &rejected, &newly_acquired);
+    const body = validateField(ctx, entry.data.body, "content", "body", author_id, post_id, owners, &rejected, &newly_acquired);
+    const featured_image_raw = validateField(ctx, entry.data.featured_image orelse "", "featured_image", "featured_image", author_id, post_id, owners, &rejected, &newly_acquired);
     const featured_image: ?[]const u8 = if (featured_image_raw.len > 0) featured_image_raw else null;
 
     // Status: use form value if present (publish button), otherwise preserve existing status
@@ -933,8 +988,6 @@ fn handleUpdate(ctx: *Context) !void {
         .meta_description = null,
     };
 
-    const author_id = auth_middleware.getUserId(ctx);
-
     // Save entry (skips version creation if data unchanged)
     _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
         .author_id = author_id,
@@ -944,6 +997,16 @@ fn handleUpdate(ctx: *Context) !void {
         return;
     };
 
+    // Broadcast lock_acquired for newly acquired fields
+    if (newly_acquired.items.len > 0) {
+        const user_email = auth_middleware.getUserEmail(ctx) orelse "";
+        const user_name = getUserDisplayName(ctx.allocator, db, author_id) orelse user_email;
+        const avatar = gravatar.url(user_email, 24);
+        for (newly_acquired.items) |field_name| {
+            presence.notifyLockAcquired(post_id, field_name, author_id orelse "", user_name, avatar.slice());
+        }
+    }
+
     // Handle release actions — addToRelease reads version refs from entries table
     if (std.mem.eql(u8, action, "add_to_release")) {
         const release_id = ctx.formValue("release_id") orelse "";
@@ -952,6 +1015,7 @@ fn handleUpdate(ctx: *Context) !void {
                 std.debug.print("Error adding to release: {}\n", .{err});
             };
         }
+        broadcastReleaseUpdate(ctx.allocator, db, post_id);
         const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
         redirect(ctx, url);
         return;
@@ -967,6 +1031,7 @@ fn handleUpdate(ctx: *Context) !void {
             };
             cms.addToRelease(db, &rel_id, post_id, fields_json) catch {};
         }
+        broadcastReleaseUpdate(ctx.allocator, db, post_id);
         const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
         redirect(ctx, url);
         return;
@@ -977,6 +1042,7 @@ fn handleUpdate(ctx: *Context) !void {
         cms.publishEntry(ctx.allocator, db, post_id, author_id, fields_json) catch |err| {
             std.debug.print("Error publishing: {}\n", .{err});
         };
+        notifyPublishedFieldsReleased(ctx.allocator, db, post_id, fields_json);
     }
 
     const url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{post_id}) catch "/admin/posts";
@@ -1018,7 +1084,12 @@ fn handlePublish(ctx: *Context) !void {
 
     cms.publishEntry(ctx.allocator, db, post_id, author_id, fields_json) catch |err| {
         std.debug.print("Error publishing: {}\n", .{err});
+        redirect(ctx, "/admin/posts");
+        return;
     };
+
+    // Broadcast lock_released for published fields
+    notifyPublishedFieldsReleased(ctx.allocator, db, post_id, fields_json);
 
     redirect(ctx, "/admin/posts");
 }
@@ -1068,6 +1139,216 @@ fn formatDate(timestamp: i64, allocator: std.mem.Allocator) ![]const u8 {
 }
 
 const Db = @import("db").Db;
+
+// =============================================================================
+// Hard Lock Helpers
+// =============================================================================
+
+const RejectedField = struct {
+    field: []const u8,
+    owner_name: []const u8,
+};
+
+/// Get field ownership for an entry: JSON field key → owner user_id.
+/// Returns null if no ownership applies (fresh draft with no published version).
+fn getFieldOwnership(allocator: std.mem.Allocator, db: *Db, entry_id: []const u8) !?std.StringHashMapUnmanaged(cms.FieldComparison) {
+    var ver_stmt = try db.prepare(
+        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+    );
+    defer ver_stmt.deinit();
+    try ver_stmt.bindText(1, entry_id);
+    if (!try ver_stmt.step()) return null;
+
+    const current_vid_raw = ver_stmt.columnText(0) orelse return null;
+    const published_vid_raw = ver_stmt.columnText(1) orelse return null; // No published = fresh draft
+    if (std.mem.eql(u8, current_vid_raw, published_vid_raw)) return null; // No changes
+
+    const cur_vid = try allocator.dupe(u8, current_vid_raw);
+    defer allocator.free(cur_vid);
+    const pub_vid = try allocator.dupe(u8, published_vid_raw);
+    defer allocator.free(pub_vid);
+
+    // Get published and current data
+    const published_data = try cms.getPublishedData(allocator, db, entry_id) orelse return null;
+    defer allocator.free(published_data);
+
+    var data_stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+    defer data_stmt.deinit();
+    try data_stmt.bindText(1, cur_vid);
+    if (!try data_stmt.step()) return null;
+    const current_data = try allocator.dupe(u8, data_stmt.columnText(0) orelse "{}");
+    defer allocator.free(current_data);
+
+    // Compare fields and attribute authors
+    const fields = try cms.compareVersionFields(allocator, published_data, current_data);
+    cms.populateFieldAuthors(allocator, db, fields, cur_vid, pub_vid);
+
+    // Build map of changed field → FieldComparison (keyed by field name)
+    var map: std.StringHashMapUnmanaged(cms.FieldComparison) = .{};
+    for (fields) |f| {
+        if (f.changed and f.changed_by_id != null) {
+            map.put(allocator, f.key, f) catch continue;
+        }
+    }
+    return map;
+}
+
+/// Validate a single field against ownership. Returns the value to use.
+/// If the field is owned by another user, returns existing value and appends to rejected.
+/// If the field is newly acquired (unowned before, user is changing it), appends to newly_acquired.
+fn validateField(
+    ctx: *Context,
+    existing_value: []const u8,
+    form_name: []const u8,
+    json_key: []const u8,
+    author_id: ?[]const u8,
+    entry_id: []const u8,
+    owners: ?std.StringHashMapUnmanaged(cms.FieldComparison),
+    rejected: *std.ArrayListUnmanaged(RejectedField),
+    newly_acquired: *std.ArrayListUnmanaged([]const u8),
+) []const u8 {
+    const submitted = ctx.formValue(form_name) orelse return existing_value;
+
+    // Check takeover ownership override first
+    if (author_id) |aid| {
+        switch (presence.checkOwnershipOverride(entry_id, json_key, aid)) {
+            .owner => return submitted, // Takeover override: this user owns the field
+            .not_owner => {
+                // Someone else took over this field
+                rejected.append(ctx.allocator, .{
+                    .field = json_key,
+                    .owner_name = "another user",
+                }) catch {};
+                return existing_value;
+            },
+            .none => {}, // Fall through to normal check
+        }
+    }
+
+    if (owners) |own| {
+        if (own.get(json_key)) |field_info| {
+            // Field is owned by someone
+            if (author_id) |aid| {
+                if (field_info.changed_by_id) |owner_id| {
+                    if (!std.mem.eql(u8, owner_id, aid)) {
+                        // Owned by another user — reject
+                        rejected.append(ctx.allocator, .{
+                            .field = json_key,
+                            .owner_name = field_info.changed_by orelse "another user",
+                        }) catch {};
+                        return existing_value;
+                    }
+                }
+            }
+            // Owned by current user — accept
+            return submitted;
+        }
+    }
+
+    // Field is unowned — accept and track if value actually changes
+    if (!std.mem.eql(u8, submitted, existing_value)) {
+        newly_acquired.append(ctx.allocator, json_key) catch {};
+    }
+    return submitted;
+}
+
+/// Build autosave JSON response with optional rejected_fields info.
+fn buildAutosaveResponse(allocator: std.mem.Allocator, status: []const u8, rejected: []const RejectedField) ![]const u8 {
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeAll("{\"status\":\"");
+    try w.writeAll(status);
+    try w.writeAll("\",\"saved\":true");
+
+    if (rejected.len > 0) {
+        try w.writeAll(",\"rejected_fields\":[");
+        for (rejected, 0..) |r, i| {
+            if (i > 0) try w.writeByte(',');
+            try w.writeAll("{\"field\":\"");
+            try writeJsonEscaped(w, r.field);
+            try w.writeAll("\",\"owner\":\"");
+            try writeJsonEscaped(w, r.owner_name);
+            try w.writeAll("\"}");
+        }
+        try w.writeByte(']');
+    }
+
+    try w.writeByte('}');
+    return buf.toOwnedSlice(allocator);
+}
+
+/// Get a user's display_name from the DB. Falls back to null.
+fn getUserDisplayName(allocator: std.mem.Allocator, db: *Db, user_id: ?[]const u8) ?[]const u8 {
+    const uid = user_id orelse return null;
+    var stmt = db.prepare("SELECT display_name FROM users WHERE id = ?1") catch return null;
+    defer stmt.deinit();
+    stmt.bindText(1, uid) catch return null;
+    if (!(stmt.step() catch return null)) return null;
+    const dn = stmt.columnText(0) orelse return null;
+    if (dn.len == 0) return null;
+    return allocator.dupe(u8, dn) catch null;
+}
+
+/// Notify presence system that published fields had their hard locks released.
+/// For partial publish, releases only specified fields. For full publish, releases all data fields.
+fn notifyPublishedFieldsReleased(allocator: std.mem.Allocator, db: *Db, entry_id: []const u8, fields_json: ?[]const u8) void {
+    if (fields_json) |fj| {
+        // Partial publish: parse field names from JSON array
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, fj, .{}) catch return;
+        defer parsed.deinit();
+        if (parsed.value != .array) return;
+
+        var names: std.ArrayListUnmanaged([]const u8) = .{};
+        defer names.deinit(allocator);
+        for (parsed.value.array.items) |item| {
+            if (item == .string) names.append(allocator, item.string) catch continue;
+        }
+        if (names.items.len > 0) {
+            presence.notifyLocksReleased(entry_id, names.items);
+            presence.clearOwnershipOverrides(entry_id, names.items);
+        }
+    } else {
+        // Full publish: get all field names from entry data
+        var stmt = db.prepare("SELECT data FROM entries WHERE id = ?1") catch return;
+        defer stmt.deinit();
+        stmt.bindText(1, entry_id) catch return;
+        if (!(stmt.step() catch return)) return;
+        const data_str = stmt.columnText(0) orelse return;
+
+        const data_parsed = std.json.parseFromSlice(std.json.Value, allocator, data_str, .{}) catch return;
+        defer data_parsed.deinit();
+        if (data_parsed.value != .object) return;
+
+        var names: std.ArrayListUnmanaged([]const u8) = .{};
+        defer names.deinit(allocator);
+        var iter = data_parsed.value.object.iterator();
+        while (iter.next()) |kv| {
+            names.append(allocator, kv.key_ptr.*) catch continue;
+        }
+        if (names.items.len > 0) {
+            presence.notifyLocksReleased(entry_id, names.items);
+            presence.clearOwnershipOverrides(entry_id, names.items);
+        }
+    }
+}
+
+/// Broadcast updated fieldsInReleases to all subscribers of an entry.
+fn broadcastReleaseUpdate(allocator: std.mem.Allocator, db: *Db, entry_id: []const u8) void {
+    const release_field_info = cms.getEntryPendingReleaseFields(allocator, db, entry_id) catch return;
+    const json = buildFieldsInReleasesJson(allocator, release_field_info) catch return;
+
+    // Wrap in {"fields_in_releases": <json>}
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+    w.writeAll("{\"fields_in_releases\":") catch return;
+    w.writeAll(json) catch return;
+    w.writeByte('}') catch return;
+
+    presence.broadcastEntryMessage(entry_id, "release_updated", buf.items);
+}
 
 /// Build JSON for fields-in-releases data attribute.
 /// Output: [{"id":"...","name":"...","fields":["a","b"]},{"id":"...","name":"...","fields":null}]
@@ -1303,4 +1584,82 @@ fn buildVersionHistoryHtml(allocator: std.mem.Allocator, db: *Db, entry_id: []co
     try w.writeAll("</div></div>");
 
     return buf.toOwnedSlice(allocator);
+}
+
+// =============================================================================
+// Takeover — called from WebSocket dispatch
+// =============================================================================
+
+/// Handle a takeover request from a WebSocket connection.
+/// Checks authorization and transfers field ownership if allowed.
+pub fn handleTakeover(conn: *websocket.Connection, field_name: []const u8, user: presence.UserInfo) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const db = if (auth_middleware.auth) |a| a.db else return;
+    const entry_id = presence.getConnEntryId(conn.id) orelse return;
+
+    // 1. Check field has hard lock by another user
+    const owners = getFieldOwnership(allocator, db, entry_id) catch {
+        sendTakeoverResult(conn, field_name, false, "internal error");
+        return;
+    };
+
+    if (owners == null) {
+        sendTakeoverResult(conn, field_name, false, "no pending changes on this field");
+        return;
+    }
+
+    const field_info = owners.?.get(field_name) orelse {
+        sendTakeoverResult(conn, field_name, false, "no pending changes on this field");
+        return;
+    };
+
+    const owner_id = field_info.changed_by_id orelse {
+        sendTakeoverResult(conn, field_name, false, "field has no owner");
+        return;
+    };
+
+    // Can't take over your own field
+    if (std.mem.eql(u8, owner_id, user.user_id)) {
+        sendTakeoverResult(conn, field_name, false, "you already own this field");
+        return;
+    }
+
+    // 2. Check presence authorization
+    if (!presence.checkTakeoverAllowed(entry_id, owner_id, field_name)) {
+        sendTakeoverResult(conn, field_name, false, "user is currently editing this field");
+        return;
+    }
+
+    // 3. Register takeover (stores override, invalidates soft lock, broadcasts lock_acquired)
+    const display_name = if (user.display_name.len > 0) user.display_name else user.email;
+    const avatar = gravatar.url(user.email, 24);
+    presence.registerTakeover(entry_id, field_name, user.user_id, display_name, avatar.slice());
+
+    // 4. Send success to requester
+    sendTakeoverResult(conn, field_name, true, null);
+}
+
+fn sendTakeoverResult(conn: *websocket.Connection, field_name: []const u8, success: bool, reason: ?[]const u8) void {
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(std.heap.page_allocator);
+    const w = buf.writer(std.heap.page_allocator);
+
+    w.writeAll("{\"field\":\"") catch return;
+    writeJsonEscaped(w, field_name) catch return;
+    if (success) {
+        w.writeAll("\",\"success\":true}") catch return;
+    } else {
+        w.writeAll("\",\"success\":false") catch return;
+        if (reason) |r| {
+            w.writeAll(",\"reason\":\"") catch return;
+            writeJsonEscaped(w, r) catch return;
+            w.writeByte('"') catch return;
+        }
+        w.writeByte('}') catch return;
+    }
+
+    conn.sendJson("takeover_result", buf.items) catch {};
 }

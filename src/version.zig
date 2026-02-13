@@ -46,6 +46,7 @@ pub const FieldComparison = struct {
     changed: bool,
     changed_by: ?[]const u8 = null, // display name (or email) of who last changed this field
     changed_by_email: ?[]const u8 = null, // email of who last changed this field (for gravatar)
+    changed_by_id: ?[]const u8 = null, // user ID of who last changed this field (for hard lock validation)
 };
 
 /// List versions for an entry, newest first. Joins users for author email.
@@ -236,13 +237,14 @@ pub fn compareVersionFields(allocator: Allocator, old_data: []const u8, new_data
 /// who last changed each field. Populates `changed_by` on the FieldComparison items.
 pub fn populateFieldAuthors(allocator: Allocator, db: *Db, fields: []FieldComparison, current_version_id: []const u8, old_version_id: []const u8) void {
     // Walk parent_id chain from current to old, collecting (data, author_label) pairs
-    const ChainEntry = struct { data: []const u8, label: ?[]const u8, email: ?[]const u8 };
+    const ChainEntry = struct { data: []const u8, label: ?[]const u8, email: ?[]const u8, author_id: ?[]const u8 };
     var chain: std.ArrayListUnmanaged(ChainEntry) = .{};
     defer {
         for (chain.items) |item| {
             allocator.free(item.data);
             if (item.label) |l| allocator.free(l);
             if (item.email) |e| allocator.free(e);
+            if (item.author_id) |a| allocator.free(a);
         }
         chain.deinit(allocator);
     }
@@ -256,7 +258,7 @@ pub fn populateFieldAuthors(allocator: Allocator, db: *Db, fields: []FieldCompar
         steps += 1;
 
         var stmt = db.prepare(
-            \\SELECT ev.data, u.email, ev.parent_id, u.display_name
+            \\SELECT ev.data, u.email, ev.parent_id, u.display_name, ev.author_id
             \\FROM entry_versions ev
             \\LEFT JOIN users u ON u.id = ev.author_id
             \\WHERE ev.id = ?1
@@ -271,7 +273,8 @@ pub fn populateFieldAuthors(allocator: Allocator, db: *Db, fields: []FieldCompar
         const email = stmt.columnText(1);
         const label = if (display_name) |dn| (if (dn.len > 0) allocator.dupe(u8, dn) catch null else if (email) |e| allocator.dupe(u8, e) catch null else null) else if (email) |e| allocator.dupe(u8, e) catch null else null;
         const email_dupe = if (email) |e| allocator.dupe(u8, e) catch null else null;
-        chain.append(allocator, .{ .data = data, .label = label, .email = email_dupe }) catch break;
+        const aid = if (stmt.columnText(4)) |a| allocator.dupe(u8, a) catch null else null;
+        chain.append(allocator, .{ .data = data, .label = label, .email = email_dupe, .author_id = aid }) catch break;
 
         const at_old = std.mem.eql(u8, wid, old_version_id);
         if (at_old) break;
@@ -322,6 +325,9 @@ pub fn populateFieldAuthors(allocator: Allocator, db: *Db, fields: []FieldCompar
                 }
                 if (newer.email) |e| {
                     f.changed_by_email = allocator.dupe(u8, e) catch null;
+                }
+                if (newer.author_id) |a| {
+                    f.changed_by_id = allocator.dupe(u8, a) catch null;
                 }
             }
         }

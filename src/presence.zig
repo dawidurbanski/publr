@@ -64,6 +64,15 @@ var pending_leaves: std.ArrayListUnmanaged(PendingLeave) = .{};
 /// entry_id → { field_name → FieldLock }
 var field_locks: std.StringHashMapUnmanaged(std.StringHashMapUnmanaged(FieldLock)) = .{};
 
+/// Takeover ownership overrides: entry_id → { field_name → OwnershipOverride }
+/// Ephemeral, in-memory only. Cleared on publish or server restart.
+var ownership_overrides: std.StringHashMapUnmanaged(std.StringHashMapUnmanaged(OwnershipOverride)) = .{};
+
+const OwnershipOverride = struct {
+    user_id: []const u8, // owned
+    name: []const u8, // owned
+};
+
 pub fn init(a: std.mem.Allocator) void {
     alloc = a;
 }
@@ -524,6 +533,191 @@ fn cleanupEntryLocks(entry_id: []const u8) void {
 }
 
 // =========================================================================
+// Takeover — ownership transfer of hard-locked fields
+// =========================================================================
+
+/// Get the entry_id a connection is subscribed to. Thread-safe.
+pub fn getConnEntryId(conn_id: u64) ?[]const u8 {
+    mutex.lock();
+    defer mutex.unlock();
+    return connEntryId(conn_id);
+}
+
+/// Check if a takeover is allowed for a field.
+/// Returns true if the owner is absent, inactive, or focused on a different field.
+pub fn checkTakeoverAllowed(entry_id: []const u8, owner_user_id: []const u8, field_name: []const u8) bool {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const subs = entries.getPtr(entry_id) orelse return true; // Owner not subscribed
+
+    // Check if owner is present and active
+    var owner_present = false;
+    var owner_active = false;
+    for (subs.items) |s| {
+        if (std.mem.eql(u8, s.user_id, owner_user_id)) {
+            owner_present = true;
+            if (s.active) owner_active = true;
+        }
+    }
+
+    if (!owner_present) return true; // Owner absent
+    if (!owner_active) return true; // Owner present but inactive
+
+    // Owner is present and active — check if focused on THIS field
+    if (field_locks.getPtr(entry_id)) |locks| {
+        if (locks.get(field_name)) |lock| {
+            if (std.mem.eql(u8, lock.user_id, owner_user_id)) {
+                return false; // Owner is actively editing this field
+            }
+        }
+    }
+
+    return true; // Owner is active but focused on a different field
+}
+
+/// Register a successful takeover: store ownership override, invalidate soft lock, broadcast.
+pub fn registerTakeover(entry_id: []const u8, field_name: []const u8, taker_user_id: []const u8, taker_name: []const u8, taker_avatar_url: []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    // Store ownership override
+    const overrides_gop = ownership_overrides.getOrPut(alloc, entry_id) catch return;
+    if (!overrides_gop.found_existing) {
+        overrides_gop.key_ptr.* = alloc.dupe(u8, entry_id) catch return;
+        overrides_gop.value_ptr.* = .{};
+    }
+
+    // Free existing override for this field if any
+    if (overrides_gop.value_ptr.fetchRemove(field_name)) |existing| {
+        freeOwnershipOverride(existing.value);
+        alloc.free(existing.key);
+    }
+
+    const override = OwnershipOverride{
+        .user_id = alloc.dupe(u8, taker_user_id) catch return,
+        .name = alloc.dupe(u8, taker_name) catch return,
+    };
+    const owned_field = alloc.dupe(u8, field_name) catch {
+        freeOwnershipOverride(override);
+        return;
+    };
+    overrides_gop.value_ptr.put(alloc, owned_field, override) catch {
+        alloc.free(owned_field);
+        freeOwnershipOverride(override);
+        return;
+    };
+
+    // Invalidate soft lock on this field if held by another user
+    if (field_locks.getPtr(entry_id)) |locks| {
+        if (locks.get(field_name)) |lock| {
+            if (!std.mem.eql(u8, lock.user_id, taker_user_id)) {
+                if (locks.fetchRemove(field_name)) |kv| {
+                    freeFieldLock(kv.value);
+                    alloc.free(kv.key);
+                }
+            }
+        }
+        cleanupEntryLocks(entry_id);
+    }
+
+    // Broadcast lock_acquired to all subscribers (except taker)
+    const subs = entries.getPtr(entry_id) orelse return;
+    broadcastLockAcquired(field_name, taker_user_id, taker_name, taker_avatar_url, subs.*);
+}
+
+/// Check if a field has a takeover ownership override.
+/// Returns .owner if user_id is the override owner, .not_owner if someone else is, .none if no override.
+pub const OverrideCheck = enum { none, owner, not_owner };
+
+pub fn checkOwnershipOverride(entry_id: []const u8, field_name: []const u8, user_id: []const u8) OverrideCheck {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const entry_overrides = ownership_overrides.getPtr(entry_id) orelse return .none;
+    const override = entry_overrides.get(field_name) orelse return .none;
+    return if (std.mem.eql(u8, override.user_id, user_id)) .owner else .not_owner;
+}
+
+/// Clear ownership overrides for specific fields (called on publish).
+pub fn clearOwnershipOverrides(entry_id: []const u8, field_names: []const []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const entry_overrides = ownership_overrides.getPtr(entry_id) orelse return;
+    for (field_names) |field_name| {
+        if (entry_overrides.fetchRemove(field_name)) |kv| {
+            freeOwnershipOverride(kv.value);
+            alloc.free(kv.key);
+        }
+    }
+
+    if (entry_overrides.count() == 0) {
+        entry_overrides.deinit(alloc);
+        if (ownership_overrides.fetchRemove(entry_id)) |kv| {
+            alloc.free(kv.key);
+        }
+    }
+}
+
+fn freeOwnershipOverride(o: OwnershipOverride) void {
+    alloc.free(o.user_id);
+    alloc.free(o.name);
+}
+
+// =========================================================================
+// Hard lock notifications — called from HTTP save/publish handlers
+// =========================================================================
+
+/// Notify that a hard lock was acquired on a field (save established ownership).
+/// If another user holds a soft lock on this field, it gets invalidated.
+/// Broadcasts lock_acquired to all entry subscribers.
+pub fn notifyLockAcquired(entry_id: []const u8, field_name: []const u8, owner_user_id: []const u8, owner_name: []const u8, owner_avatar_url: []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const subs = entries.getPtr(entry_id) orelse return;
+
+    // Invalidate soft lock on this field if held by another user
+    if (field_locks.getPtr(entry_id)) |locks| {
+        if (locks.get(field_name)) |lock| {
+            if (!std.mem.eql(u8, lock.user_id, owner_user_id)) {
+                if (locks.fetchRemove(field_name)) |kv| {
+                    freeFieldLock(kv.value);
+                    alloc.free(kv.key);
+                }
+            }
+        }
+        cleanupEntryLocks(entry_id);
+    }
+
+    broadcastLockAcquired(field_name, owner_user_id, owner_name, owner_avatar_url, subs.*);
+}
+
+/// Notify that hard locks were released (publish cleared field ownership).
+/// Broadcasts lock_released for each field to all entry subscribers.
+pub fn notifyLocksReleased(entry_id: []const u8, field_names: []const []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const subs = entries.getPtr(entry_id) orelse return;
+
+    for (field_names) |field_name| {
+        broadcastLockReleased(field_name, subs.*);
+    }
+}
+
+/// Broadcast an arbitrary message to all subscribers of an entry.
+/// Used by HTTP handlers to push state updates (e.g. release_updated).
+pub fn broadcastEntryMessage(entry_id: []const u8, msg_type: []const u8, raw_json: []const u8) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    const subs = entries.getPtr(entry_id) orelse return;
+    broadcastToSubs(msg_type, raw_json, subs.*, 0);
+}
+
+// =========================================================================
 // Internal: JSON building and sending
 // =========================================================================
 
@@ -650,6 +844,41 @@ fn writeFieldLockJson(w: anytype, lock: FieldLock) !void {
     try w.writeAll("\",\"avatar_url\":\"");
     try writeJsonStr(w, lock.avatar_url.slice());
     try w.writeByte('"');
+}
+
+fn broadcastLockAcquired(field_name: []const u8, owner_user_id: []const u8, name: []const u8, avatar_url: []const u8, subs: std.ArrayListUnmanaged(Subscriber)) void {
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(alloc);
+
+    const w = buf.writer(alloc);
+    w.writeAll("{\"field\":\"") catch return;
+    writeJsonStr(w, field_name) catch return;
+    w.writeAll("\",\"user_id\":\"") catch return;
+    writeJsonStr(w, owner_user_id) catch return;
+    w.writeAll("\",\"name\":\"") catch return;
+    writeJsonStr(w, name) catch return;
+    w.writeAll("\",\"avatar_url\":\"") catch return;
+    writeJsonStr(w, avatar_url) catch return;
+    w.writeAll("\"}") catch return;
+
+    // Send to all subscribers EXCEPT the owner (they already know they own the field)
+    for (subs.items) |s| {
+        if (!std.mem.eql(u8, s.user_id, owner_user_id)) {
+            s.conn.sendJson("lock_acquired", buf.items) catch {};
+        }
+    }
+}
+
+fn broadcastLockReleased(field_name: []const u8, subs: std.ArrayListUnmanaged(Subscriber)) void {
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(alloc);
+
+    const w = buf.writer(alloc);
+    w.writeAll("{\"field\":\"") catch return;
+    writeJsonStr(w, field_name) catch return;
+    w.writeAll("\"}") catch return;
+
+    broadcastToSubs("lock_released", buf.items, subs, 0);
 }
 
 fn writeJsonStr(w: anytype, s: []const u8) !void {

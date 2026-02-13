@@ -586,6 +586,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "views", .module = views },
             .{ .name = "time_util", .module = time_util_module },
             .{ .name = "presence", .module = presence_module },
+            .{ .name = "websocket", .module = websocket_module },
         },
     });
     const plugin_users = b.createModule(.{

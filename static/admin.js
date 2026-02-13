@@ -477,9 +477,10 @@
         if (editor) {
             badge.innerHTML = '<img src="' + editor.avatar + '" alt="" class="field-editor-avatar" /><span>Edited by ' + editor.name + '</span>';
             badge.classList.add('field-editor-active');
-            // Disable the field — backend preserves existing value for absent fields
+            // Disable the field and mark as hard-locked — backend preserves existing value for absent fields
             var group = badge.closest('.form-group');
             if (group) {
+                group.classList.add('field-hard-locked');
                 var field = group.querySelector('.form-control');
                 if (field) field.disabled = true;
             }
@@ -506,12 +507,18 @@
 
     function ensurePeekWrapper(group) {
         var existing = group.querySelector('.field-peek-wrapper');
-        if (existing) return existing;
+        if (existing) {
+            existing.classList.remove('field-peek-hidden');
+            return existing;
+        }
         var control = group.querySelector('.form-control');
         if (!control) return null;
         var hadFocus = document.activeElement === control;
-        var selStart = control.selectionStart;
-        var selEnd = control.selectionEnd;
+        var selStart, selEnd;
+        if (hadFocus) {
+            try { selStart = control.selectionStart; selEnd = control.selectionEnd; } catch(e) {}
+            form.dataset.peekMutating = '1';
+        }
         var wrapper = document.createElement('div');
         wrapper.className = 'field-peek-wrapper';
         control.parentNode.insertBefore(wrapper, control);
@@ -519,6 +526,7 @@
         if (hadFocus) {
             control.focus();
             try { control.setSelectionRange(selStart, selEnd); } catch(e) {}
+            delete form.dataset.peekMutating;
         }
         var btn = document.createElement('button');
         btn.type = 'button';
@@ -546,13 +554,12 @@
     }
 
     function removePeekWrapper(group) {
-        var vb = group.querySelector('.field-peek-value');
-        if (vb) vb.remove();
         var wrapper = group.querySelector('.field-peek-wrapper');
         if (!wrapper) return;
-        var control = wrapper.querySelector('.form-control');
-        if (control) wrapper.parentNode.insertBefore(control, wrapper);
-        wrapper.remove();
+        // Hide peek UI without moving the control — avoids focus loss
+        wrapper.classList.add('field-peek-hidden');
+        var vb = group.querySelector('.field-peek-value');
+        if (vb) vb.style.display = 'none';
     }
 
     function updatePeek(group, publishedValue) {
@@ -600,6 +607,8 @@
         } else if (type === 'error') {
             statusEl.textContent = 'Save failed';
             statusEl.classList.add('autosave-status-error');
+        } else if (type === 'rejected') {
+            statusEl.classList.add('autosave-status-rejected');
         } else {
             statusEl.textContent = '';
         }
@@ -643,7 +652,17 @@
                 form.dataset.entryStatus = entryStatus;
             }
 
-            showStatus('saved');
+            // Handle rejected fields (hard lock enforcement)
+            if (data.rejected_fields && data.rejected_fields.length > 0) {
+                var names = data.rejected_fields.map(function(r) {
+                    return r.field + ' (locked by ' + r.owner + ')';
+                });
+                showStatus('rejected');
+                if (statusEl) statusEl.textContent = 'Rejected: ' + names.join(', ');
+            } else {
+                showStatus('saved');
+            }
+
             updateButtons();
         })
         .catch(function() {
@@ -782,6 +801,51 @@
     document.querySelectorAll('[form="post-form"]').forEach(function(el) {
         el.addEventListener('input', onFormChange);
         el.addEventListener('change', onFormChange);
+    });
+
+    // Presence events: update UI state without triggering autosave
+    form.addEventListener('publr:fields-updated', function() {
+        updateButtons();
+    });
+    form.addEventListener('publr:release-updated', function(e) {
+        if (!e.detail || !e.detail.fieldsInReleases) return;
+        // Re-parse fieldsInReleases from broadcast data
+        fieldsInReleases = {};
+        var items = e.detail.fieldsInReleases;
+        for (var ri = 0; ri < items.length; ri++) {
+            var item = items[ri];
+            if (item.fields === null) {
+                form.querySelectorAll('.form-group[data-field]').forEach(function(g) {
+                    if (!fieldsInReleases[g.dataset.field]) {
+                        fieldsInReleases[g.dataset.field] = { id: item.id, name: item.name };
+                    }
+                });
+            } else {
+                for (var fi = 0; fi < item.fields.length; fi++) {
+                    if (!fieldsInReleases[item.fields[fi]]) {
+                        fieldsInReleases[item.fields[fi]] = { id: item.id, name: item.name };
+                    }
+                }
+            }
+        }
+        // Update release link badges in the form
+        form.querySelectorAll('.field-release-link').forEach(function(link) { link.remove(); });
+        form.querySelectorAll('.form-group[data-field]').forEach(function(group) {
+            var rel = fieldsInReleases[group.dataset.field];
+            if (rel) {
+                var link = document.createElement('a');
+                link.href = '/admin/releases/' + rel.id;
+                link.className = 'field-release-link';
+                link.textContent = 'In release ' + rel.name;
+                var checkRow = group.querySelector('.field-check-row');
+                if (checkRow) checkRow.appendChild(link);
+                else {
+                    var labelRow = group.querySelector('.form-label-row');
+                    if (labelRow) labelRow.appendChild(link);
+                }
+            }
+        });
+        updateButtons();
     });
 
     // Discard changes button

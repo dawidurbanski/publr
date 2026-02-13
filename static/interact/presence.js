@@ -52,7 +52,11 @@ export function initPresence() {
     on('field_focused', handleFieldFocused);
     on('field_blurred', handleFieldBlurred);
     on('field_lock_invalidated', handleFieldLockInvalidated);
+    on('lock_acquired', handleLockAcquired);
+    on('lock_released', handleLockReleased);
+    on('takeover_result', handleTakeoverResult);
     on('field_edit', handleFieldEdit);
+    on('release_updated', handleReleaseUpdated);
     on('open', handleWsOpen);
 
     // Field focus/blur tracking (use focusin/focusout for event delegation)
@@ -112,6 +116,15 @@ function handlePresenceSync(data) {
     if (focusedField) {
         send('focus', { field: focusedField });
     }
+
+    // Set up takeover hover on page-load hard lock badges
+    const form = document.getElementById('post-form');
+    if (form) {
+        form.querySelectorAll('.field-editor-badge.field-editor-active').forEach(function(badge) {
+            const group = badge.closest('.form-group[data-field]');
+            if (group) setupBadgeTakeoverHover(group, group.dataset.field);
+        });
+    }
 }
 
 function handleUserJoined(data) {
@@ -137,12 +150,34 @@ function handleUserActivity(data) {
 
 function handleFieldFocused(data) {
     if (!data || !data.field) return;
+
+    // Track owner focus on hard-locked fields for takeover button visibility
+    if (isHardLocked(data.field)) {
+        const lock = fieldLocks.get(data.field);
+        if (lock && lock.hard && lock.user_id === data.user_id) {
+            lock.owner_focused = true;
+            updateTakeoverButton(data.field);
+        }
+        return;
+    }
+
     fieldLocks.set(data.field, data);
     applyFieldLock(data.field, data);
 }
 
 function handleFieldBlurred(data) {
     if (!data || !data.field) return;
+
+    // Track owner blur on hard-locked fields for takeover button visibility
+    if (isHardLocked(data.field)) {
+        const lock = fieldLocks.get(data.field);
+        if (lock && lock.hard && lock.user_id === data.user_id) {
+            lock.owner_focused = false;
+            updateTakeoverButton(data.field);
+        }
+        return;
+    }
+
     fieldLocks.delete(data.field);
     removeFieldLock(data.field);
 }
@@ -163,6 +198,55 @@ function handleFieldLockInvalidated(data) {
     applyFieldLock(data.field, data);
 }
 
+function handleLockAcquired(data) {
+    if (!data || !data.field) return;
+
+    // If we hold the soft lock on this field, release it
+    if (focusedField === data.field) {
+        focusedField = null;
+        const group = document.querySelector('.form-group[data-field="' + data.field + '"]');
+        if (group && group.contains(document.activeElement)) {
+            document.activeElement.blur();
+        }
+    }
+
+    // Store as hard lock
+    fieldLocks.set(data.field, { ...data, hard: true });
+    applyFieldLock(data.field, { ...data, hard: true });
+
+    // Trigger change detection (field value may have been updated by a prior field_edit)
+    const form = document.getElementById('post-form');
+    if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
+}
+
+function handleLockReleased(data) {
+    if (!data || !data.field) return;
+
+    const existing = fieldLocks.get(data.field);
+    if (existing && existing.hard) {
+        fieldLocks.delete(data.field);
+        removeFieldLock(data.field);
+    }
+
+    // Also clear page-load hard lock badges (field-editor-badge from initial render)
+    const group = document.querySelector('.form-group[data-field="' + data.field + '"]');
+    if (group) {
+        const badge = group.querySelector('.field-editor-badge.field-editor-active');
+        if (badge) {
+            badge.classList.remove('field-editor-active');
+            badge.innerHTML = '';
+            // Re-enable inputs disabled by badge (not marked with data-soft-locked)
+            group.querySelectorAll('.form-control:disabled').forEach(function(el) {
+                if (!el.dataset.softLocked) el.disabled = false;
+            });
+        }
+    }
+
+    // Trigger change detection (field may have reverted to published value)
+    const form = document.getElementById('post-form');
+    if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
+}
+
 function handleFieldEdit(data) {
     if (!data || !data.field || data.value === undefined) return;
 
@@ -172,6 +256,55 @@ function handleFieldEdit(data) {
     const input = group.querySelector('.form-control');
     if (input) {
         input.value = data.value;
+    }
+
+    // Notify admin.js to re-run change detection (adds field-changed class)
+    const form = document.getElementById('post-form');
+    if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
+}
+
+function handleReleaseUpdated(data) {
+    if (!data || !data.fields_in_releases) return;
+
+    // Notify admin.js with the new release field data
+    const form = document.getElementById('post-form');
+    if (form) {
+        form.dispatchEvent(new CustomEvent('publr:release-updated', {
+            detail: { fieldsInReleases: data.fields_in_releases }
+        }));
+    }
+}
+
+function handleTakeoverResult(data) {
+    if (!data || !data.field) return;
+
+    const group = document.querySelector('.form-group[data-field="' + data.field + '"]');
+    if (!group) return;
+
+    if (data.success) {
+        // Takeover succeeded — remove lock, enable field
+        fieldLocks.delete(data.field);
+        removeFieldLock(data.field);
+
+        // Also clear page-load hard lock badge
+        const badge = group.querySelector('.field-editor-badge.field-editor-active');
+        if (badge) {
+            badge.classList.remove('field-editor-active');
+            badge.innerHTML = '';
+        }
+
+        // Re-enable inputs
+        group.querySelectorAll('.form-control:disabled').forEach(function(el) {
+            el.disabled = false;
+            delete el.dataset.softLocked;
+        });
+
+        // Trigger change detection
+        const form = document.getElementById('post-form');
+        if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
+    } else {
+        // Takeover blocked — show brief feedback
+        showTakeoverFeedback(group, data.reason || 'Cannot take over this field');
     }
 }
 
@@ -220,19 +353,27 @@ function checkActivity() {
 // =========================================================================
 
 function onFieldFocus(e) {
+    // Ignore focus events caused by peek wrapper DOM mutations
+    const form = document.getElementById('post-form');
+    if (form && form.dataset.peekMutating) return;
+
     const group = e.target.closest('.form-group[data-field]');
     if (!group) return;
     const field = group.dataset.field;
     if (field === focusedField) return;
 
     clearTimeout(focusDebounceTimer);
+    focusedField = field;
     focusDebounceTimer = setTimeout(() => {
-        focusedField = field;
         send('focus', { field });
     }, FOCUS_DEBOUNCE_MS);
 }
 
 function onFieldBlur(e) {
+    // Ignore blur events caused by peek wrapper DOM mutations
+    const form = document.getElementById('post-form');
+    if (form && form.dataset.peekMutating) return;
+
     const group = e.target.closest('.form-group[data-field]');
     if (!group) return;
     const field = group.dataset.field;
@@ -264,15 +405,19 @@ function applyFieldLock(field, lockData) {
     const group = document.querySelector('.form-group[data-field="' + field + '"]');
     if (!group) return;
 
-    group.classList.add('field-soft-locked');
+    const isHard = lockData.hard === true;
+    group.classList.remove('field-soft-locked', 'field-hard-locked');
+    group.classList.add(isHard ? 'field-hard-locked' : 'field-soft-locked');
 
-    // Disable all inputs in the group
+    // Disable inputs — only mark as soft-locked if not already disabled (e.g. by hard lock)
     group.querySelectorAll('input, textarea, select').forEach(el => {
-        el.disabled = true;
-        el.dataset.softLocked = 'true';
+        if (!el.disabled) {
+            el.disabled = true;
+            el.dataset.softLocked = 'true';
+        }
     });
 
-    // Add or update soft lock indicator
+    // Add or update lock indicator
     let indicator = group.querySelector('.field-soft-lock-indicator');
     if (!indicator) {
         indicator = document.createElement('span');
@@ -285,15 +430,22 @@ function applyFieldLock(field, lockData) {
 
     const name = escapeAttr(lockData.name || '');
     const url = escapeAttr(lockData.avatar_url || '');
-    indicator.innerHTML = '<img src="' + url + '" class="field-editor-avatar" alt="" />'
-        + name + ' is editing';
+    if (isHard) {
+        indicator.innerHTML = '<img src="' + url + '" class="field-editor-avatar" alt="" />'
+            + 'Edited by ' + name;
+        // Set up takeover hover interaction
+        setupTakeoverHover(group, field);
+    } else {
+        indicator.innerHTML = '<img src="' + url + '" class="field-editor-avatar" alt="" />'
+            + name + ' is editing';
+    }
 }
 
 function removeFieldLock(field) {
     const group = document.querySelector('.form-group[data-field="' + field + '"]');
     if (!group) return;
 
-    group.classList.remove('field-soft-locked');
+    group.classList.remove('field-soft-locked', 'field-hard-locked');
 
     // Re-enable inputs
     group.querySelectorAll('[data-soft-locked="true"]').forEach(el => {
@@ -304,6 +456,107 @@ function removeFieldLock(field) {
     // Remove indicator
     const indicator = group.querySelector('.field-soft-lock-indicator');
     if (indicator) indicator.remove();
+}
+
+// =========================================================================
+// Takeover UI — hover interaction on hard-locked indicators
+// =========================================================================
+
+function setupTakeoverHover(group, field) {
+    const indicator = group.querySelector('.field-soft-lock-indicator');
+    if (!indicator || indicator.classList.contains('field-takeover-ready')) return;
+
+    // Wrap existing content in a label span, append a takeover button.
+    // CSS :hover swaps visibility — no DOM changes on hover, no size flicker.
+    const label = document.createElement('span');
+    label.className = 'field-lock-label';
+    while (indicator.firstChild) label.appendChild(indicator.firstChild);
+    indicator.appendChild(label);
+
+    const btn = document.createElement('span');
+    btn.className = 'field-takeover-btn';
+    btn.textContent = 'Take over';
+    indicator.appendChild(btn);
+
+    indicator.classList.add('field-takeover-ready');
+
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        send('takeover', { field: field });
+        btn.textContent = 'Taking over\u2026';
+        btn.classList.add('field-takeover-pending');
+    });
+}
+
+function setupBadgeTakeoverHover(group, field) {
+    const badge = group.querySelector('.field-editor-badge.field-editor-active');
+    if (!badge || badge.classList.contains('field-takeover-ready')) return;
+
+    const label = document.createElement('span');
+    label.className = 'field-lock-label';
+    while (badge.firstChild) label.appendChild(badge.firstChild);
+    badge.appendChild(label);
+
+    const btn = document.createElement('span');
+    btn.className = 'field-takeover-btn';
+    btn.textContent = 'Take over';
+    badge.appendChild(btn);
+
+    badge.classList.add('field-takeover-ready');
+
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        send('takeover', { field: field });
+        btn.textContent = 'Taking over\u2026';
+        btn.classList.add('field-takeover-pending');
+    });
+}
+
+function updateTakeoverButton(field) {
+    const group = document.querySelector('.form-group[data-field="' + field + '"]');
+    if (!group) return;
+
+    const lock = fieldLocks.get(field);
+    const disabled = lock && lock.owner_focused;
+
+    // Toggle disabled class — CSS handles the rest
+    const indicator = group.querySelector('.field-soft-lock-indicator.field-takeover-ready');
+    if (indicator) indicator.classList.toggle('field-takeover-disabled', !!disabled);
+
+    const badge = group.querySelector('.field-editor-badge.field-takeover-ready');
+    if (badge) badge.classList.toggle('field-takeover-disabled', !!disabled);
+}
+
+function showTakeoverFeedback(group, message) {
+    // Show temporary feedback tooltip
+    let feedback = group.querySelector('.field-takeover-feedback');
+    if (!feedback) {
+        feedback = document.createElement('span');
+        feedback.className = 'field-takeover-feedback';
+        const checkRow = group.querySelector('.field-check-row');
+        if (checkRow) checkRow.appendChild(feedback);
+        else return;
+    }
+    feedback.textContent = message;
+    feedback.classList.add('field-takeover-feedback-visible');
+    setTimeout(function() {
+        feedback.classList.remove('field-takeover-feedback-visible');
+        setTimeout(function() { if (feedback.parentNode) feedback.remove(); }, 300);
+    }, 2500);
+}
+
+function isHardLocked(field) {
+    // Check WebSocket-based hard lock (from lock_acquired message)
+    const lock = fieldLocks.get(field);
+    if (lock && lock.hard) return true;
+
+    // Check page-render hard lock (field_editors badge from initial load)
+    const group = document.querySelector('.form-group[data-field="' + field + '"]');
+    if (group && group.querySelector('.field-editor-badge.field-editor-active')) return true;
+
+    return false;
 }
 
 function clearAllFieldLocks() {
@@ -376,7 +629,11 @@ function cleanup() {
     off('field_focused', handleFieldFocused);
     off('field_blurred', handleFieldBlurred);
     off('field_lock_invalidated', handleFieldLockInvalidated);
+    off('lock_acquired', handleLockAcquired);
+    off('lock_released', handleLockReleased);
+    off('takeover_result', handleTakeoverResult);
     off('field_edit', handleFieldEdit);
+    off('release_updated', handleReleaseUpdated);
     off('open', handleWsOpen);
 
     const form = document.getElementById('post-form');
