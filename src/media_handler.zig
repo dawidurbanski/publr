@@ -400,43 +400,7 @@ fn serveBytes(ctx: *Context, data: []const u8, mime_type: []const u8, cache_head
     ctx.response.headers_sent = true;
 }
 
-// =============================================================================
-// MIME Type Lookup
-// =============================================================================
-
-const mime_map = .{
-    .{ ".jpg", "image/jpeg" },
-    .{ ".jpeg", "image/jpeg" },
-    .{ ".png", "image/png" },
-    .{ ".gif", "image/gif" },
-    .{ ".webp", "image/webp" },
-    .{ ".avif", "image/avif" },
-    .{ ".svg", "image/svg+xml" },
-    .{ ".ico", "image/x-icon" },
-    .{ ".pdf", "application/pdf" },
-    .{ ".mp4", "video/mp4" },
-    .{ ".webm", "video/webm" },
-    .{ ".mp3", "audio/mpeg" },
-    .{ ".ogg", "audio/ogg" },
-    .{ ".wav", "audio/wav" },
-    .{ ".txt", "text/plain" },
-    .{ ".css", "text/css" },
-    .{ ".js", "application/javascript" },
-    .{ ".json", "application/json" },
-    .{ ".xml", "application/xml" },
-    .{ ".html", "text/html" },
-};
-
-pub fn getMimeType(path: []const u8) []const u8 {
-    const ext = std.fs.path.extension(path);
-    if (ext.len == 0) return "application/octet-stream";
-
-    inline for (mime_map) |entry| {
-        if (std.mem.eql(u8, ext, entry[0])) return entry[1];
-    }
-
-    return "application/octet-stream";
-}
+pub const getMimeType = @import("mime").fromPath;
 
 // =============================================================================
 // Helpers
@@ -454,39 +418,7 @@ fn serverError(ctx: *Context) void {
     ctx.response.setBody("Internal Server Error");
 }
 
-/// Decode percent-encoded path segments (e.g. %20 → space).
-/// Does NOT decode '+' as space (path encoding, not form encoding).
-fn percentDecodePath(allocator: std.mem.Allocator, input: []const u8) []const u8 {
-    // Quick check: if no %, return as-is
-    if (std.mem.indexOfScalar(u8, input, '%') == null) return input;
-
-    var buf = allocator.alloc(u8, input.len) catch return input;
-    var out: usize = 0;
-    var i: usize = 0;
-    while (i < input.len) {
-        if (input[i] == '%' and i + 2 < input.len) {
-            const hi = hexVal(input[i + 1]);
-            const lo = hexVal(input[i + 2]);
-            if (hi != null and lo != null) {
-                buf[out] = (@as(u8, hi.?) << 4) | @as(u8, lo.?);
-                out += 1;
-                i += 3;
-                continue;
-            }
-        }
-        buf[out] = input[i];
-        out += 1;
-        i += 1;
-    }
-    return allocator.realloc(buf, out) catch buf[0..out];
-}
-
-fn hexVal(c: u8) ?u4 {
-    if (c >= '0' and c <= '9') return @intCast(c - '0');
-    if (c >= 'a' and c <= 'f') return @intCast(c - 'a' + 10);
-    if (c >= 'A' and c <= 'F') return @intCast(c - 'A' + 10);
-    return null;
-}
+const percentDecodePath = @import("url").pathDecode;
 
 // =============================================================================
 // Tests

@@ -178,46 +178,7 @@ pub const Context = struct {
         return null;
     }
 
-    /// Decode URL-encoded string (percent-encoding and + for spaces)
-    fn urlDecode(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
-        // Allocate max possible size (decoding only shrinks)
-        const output = try allocator.alloc(u8, input.len);
-        var out_i: usize = 0;
-        var i: usize = 0;
-
-        while (i < input.len) {
-            if (input[i] == '%' and i + 2 < input.len) {
-                // Try to decode %XX
-                const hi = hexDigit(input[i + 1]);
-                const lo = hexDigit(input[i + 2]);
-                if (hi != null and lo != null) {
-                    output[out_i] = (hi.? << 4) | lo.?;
-                    out_i += 1;
-                    i += 3;
-                    continue;
-                }
-            }
-            if (input[i] == '+') {
-                // + is space in form encoding
-                output[out_i] = ' ';
-            } else {
-                output[out_i] = input[i];
-            }
-            out_i += 1;
-            i += 1;
-        }
-
-        return output[0..out_i];
-    }
-
-    fn hexDigit(c: u8) ?u8 {
-        return switch (c) {
-            '0'...'9' => c - '0',
-            'a'...'f' => c - 'a' + 10,
-            'A'...'F' => c - 'A' + 10,
-            else => null,
-        };
-    }
+    const urlDecode = @import("url").formDecode;
 
     /// Set request body
     pub fn setBody(self: *Context, body_content: []const u8) void {

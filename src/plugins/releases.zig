@@ -320,8 +320,4 @@ fn handleRemoveItem(ctx: *Context) !void {
 // Helpers
 // =============================================================================
 
-fn redirect(ctx: *Context, location: []const u8) void {
-    ctx.response.setStatus("303 See Other");
-    ctx.response.setHeader("Location", location);
-    ctx.response.setBody("");
-}
+const redirect = @import("plugin_utils").redirect;

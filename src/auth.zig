@@ -415,5 +415,35 @@ pub const Auth = struct {
     }
 };
 
+// =============================================================================
+// Standalone Helpers (no Auth instance needed)
+// =============================================================================
+
+/// Basic email validation: contains @ with non-empty local and domain parts,
+/// and at least one dot after the @.
+pub fn isValidEmail(email: []const u8) bool {
+    const at_pos = std.mem.indexOf(u8, email, "@") orelse return false;
+    if (at_pos == 0 or at_pos == email.len - 1) return false;
+
+    const after_at = email[at_pos + 1 ..];
+    const dot_pos = std.mem.indexOf(u8, after_at, ".") orelse return false;
+    if (dot_pos == 0 or dot_pos == after_at.len - 1) return false;
+
+    return true;
+}
+
 // Note: Auth tests require integration testing with a full database.
 // These belong in a separate integration test suite, not unit tests.
+
+test "isValidEmail" {
+    const testing = std.testing;
+    try testing.expect(isValidEmail("user@example.com"));
+    try testing.expect(isValidEmail("a@b.c"));
+    try testing.expect(!isValidEmail(""));
+    try testing.expect(!isValidEmail("@example.com"));
+    try testing.expect(!isValidEmail("user@"));
+    try testing.expect(!isValidEmail("user@com"));
+    try testing.expect(!isValidEmail("userexample.com"));
+    try testing.expect(!isValidEmail("user@.com"));
+    try testing.expect(!isValidEmail("user@com."));
+}

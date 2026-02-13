@@ -339,41 +339,7 @@ fn flagMissingFiles(allocator: Allocator, db: *Db) !u32 {
     return missing_count;
 }
 
-/// Detect mime type from file extension
-pub fn mimeFromExtension(filename: []const u8) []const u8 {
-    const ext = std.fs.path.extension(filename);
-    if (ext.len == 0) return "application/octet-stream";
-
-    // Lowercase comparison
-    if (eqlCaseInsensitive(ext, ".jpg") or eqlCaseInsensitive(ext, ".jpeg")) return "image/jpeg";
-    if (eqlCaseInsensitive(ext, ".png")) return "image/png";
-    if (eqlCaseInsensitive(ext, ".gif")) return "image/gif";
-    if (eqlCaseInsensitive(ext, ".webp")) return "image/webp";
-    if (eqlCaseInsensitive(ext, ".svg")) return "image/svg+xml";
-    if (eqlCaseInsensitive(ext, ".bmp")) return "image/bmp";
-    if (eqlCaseInsensitive(ext, ".ico")) return "image/x-icon";
-    if (eqlCaseInsensitive(ext, ".pdf")) return "application/pdf";
-    if (eqlCaseInsensitive(ext, ".mp4")) return "video/mp4";
-    if (eqlCaseInsensitive(ext, ".webm")) return "video/webm";
-    if (eqlCaseInsensitive(ext, ".mp3")) return "audio/mpeg";
-    if (eqlCaseInsensitive(ext, ".wav")) return "audio/wav";
-    if (eqlCaseInsensitive(ext, ".ogg")) return "audio/ogg";
-    if (eqlCaseInsensitive(ext, ".txt")) return "text/plain";
-    if (eqlCaseInsensitive(ext, ".css")) return "text/css";
-    if (eqlCaseInsensitive(ext, ".html")) return "text/html";
-
-    return "application/octet-stream";
-}
-
-fn eqlCaseInsensitive(a: []const u8, b: []const u8) bool {
-    if (a.len != b.len) return false;
-    for (a, b) |ac, bc| {
-        const al = if (ac >= 'A' and ac <= 'Z') ac + 32 else ac;
-        const bl = if (bc >= 'A' and bc <= 'Z') bc + 32 else bc;
-        if (al != bl) return false;
-    }
-    return true;
-}
+pub const mimeFromExtension = @import("mime").fromPath;
 
 /// Count new files on disk without syncing.
 /// Walks directories like syncFilesystem but only counts files not in the DB.
@@ -496,8 +462,3 @@ test "mimeFromExtension: unknown extension" {
     try std.testing.expectEqualStrings("application/octet-stream", mimeFromExtension("noext"));
 }
 
-test "eqlCaseInsensitive" {
-    try std.testing.expect(eqlCaseInsensitive(".JPG", ".jpg"));
-    try std.testing.expect(eqlCaseInsensitive(".Png", ".png"));
-    try std.testing.expect(!eqlCaseInsensitive(".jpg", ".png"));
-}

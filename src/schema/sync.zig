@@ -8,6 +8,7 @@ const std = @import("std");
 const registry = @import("schema_registry");
 const field_mod = @import("field");
 const Db = @import("db").Db;
+const id_gen = @import("id_gen");
 
 /// SQL for creating content schema tables
 pub const content_schema_sql =
@@ -239,21 +240,7 @@ fn setStoredHash(db: *Db, hash: []const u8) !void {
 }
 
 /// Generate a version ID (v_ prefix + 16 random alphanumeric chars)
-pub fn generateVersionId() [18]u8 {
-    var id_buf: [18]u8 = undefined;
-    id_buf[0] = 'v';
-    id_buf[1] = '_';
-
-    var rand_buf: [16]u8 = undefined;
-    std.crypto.random.bytes(&rand_buf);
-
-    const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
-    for (rand_buf, 0..) |byte, i| {
-        id_buf[2 + i] = charset[byte % charset.len];
-    }
-
-    return id_buf;
-}
+pub const generateVersionId = id_gen.generateVersionId;
 
 /// Sync all content types and taxonomies to database
 fn syncSchemas(db: *Db) !void {

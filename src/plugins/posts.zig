@@ -17,6 +17,7 @@ const auth_middleware = @import("auth_middleware");
 const gravatar = @import("gravatar");
 
 const Post = schemas.Post;
+const pagination = @import("pagination");
 
 /// Posts list page (shows in nav)
 pub const page = admin.registerPage(.{
@@ -65,29 +66,20 @@ fn handleList(ctx: *Context) !void {
         preview_url: []const u8,
     };
 
-    const PageUrl = struct {
-        page_num: []const u8,
-        url: []const u8,
-        is_current: bool,
-        is_ellipsis: bool = false,
-    };
-
     // Pagination
-    const items_per_page: u32 = 20;
-    const current_page: u32 = @max(1, parseIntParam(ctx.query, "page", u32) orelse 1);
-    const offset: u32 = (current_page - 1) * items_per_page;
-
     const total_count = cms.countEntries(Post, db, .{}) catch 0;
-    const total_pages: u32 = if (total_count == 0) 1 else (total_count + items_per_page - 1) / items_per_page;
+    const pag = pagination.Paginator.init(ctx.query, total_count, 20);
 
     // Fetch posts from database
     const entries = cms.listEntries(Post, ctx.allocator, db, .{
-        .limit = items_per_page,
-        .offset = offset,
+        .limit = pag.items_per_page,
+        .offset = pag.offset(),
         .order_by = "created_at",
         .order_dir = .desc,
     }) catch |err| {
         std.debug.print("Error listing posts: {}\n", .{err});
+        const empty_pag = pagination.Paginator.init(null, 0, 20);
+        const empty_urls = empty_pag.buildTruncatedPageUrls(ctx.allocator, "/admin/posts");
         const content = tpl.render(views.admin.posts.list.List, .{.{
             .has_posts = false,
             .posts = &[_]ViewPost{},
@@ -95,7 +87,7 @@ fn handleList(ctx: *Context) !void {
             .total_pages = @as(u32, 1),
             .prev_page_url = "",
             .next_page_url = "",
-            .page_urls = &[_]PageUrl{},
+            .page_urls = empty_urls.items,
         }});
         ctx.html(registry.renderPage(page, ctx, content));
         return;
@@ -121,48 +113,7 @@ fn handleList(ctx: *Context) !void {
 
     // Build truncated pagination URLs: 1 ... 4 [5] 6 ... 251
     const base_url = "/admin/posts";
-    const page_urls = blk: {
-        var list: std.ArrayListUnmanaged(PageUrl) = .{};
-        const window = 1; // pages on each side of current
-
-        // Collect which page numbers to show
-        var pages_to_show: std.ArrayListUnmanaged(u32) = .{};
-        // Always page 1
-        pages_to_show.append(ctx.allocator, 1) catch break :blk &[_]PageUrl{};
-        // Window around current page
-        const win_start = @max(2, if (current_page > window) current_page - window else 1);
-        const win_end = @min(total_pages - 1, current_page + window);
-        var pg = win_start;
-        while (pg <= win_end) : (pg += 1) {
-            pages_to_show.append(ctx.allocator, pg) catch break :blk &[_]PageUrl{};
-        }
-        // Always last page (if > 1)
-        if (total_pages > 1) {
-            pages_to_show.append(ctx.allocator, total_pages) catch break :blk &[_]PageUrl{};
-        }
-
-        // Build PageUrl entries, inserting ellipsis between gaps
-        var prev_pg: u32 = 0;
-        for (pages_to_show.items) |p| {
-            if (prev_pg > 0 and p > prev_pg + 1) {
-                list.append(ctx.allocator, .{
-                    .page_num = "...",
-                    .url = "",
-                    .is_current = false,
-                    .is_ellipsis = true,
-                }) catch break :blk &[_]PageUrl{};
-            }
-            const num_str: []const u8 = std.fmt.allocPrint(ctx.allocator, "{d}", .{p}) catch "?";
-            list.append(ctx.allocator, .{
-                .page_num = num_str,
-                .url = buildPageUrl(ctx.allocator, base_url, p),
-                .is_current = p == current_page,
-            }) catch break :blk &[_]PageUrl{};
-            prev_pg = p;
-        }
-
-        break :blk list.items;
-    };
+    const page_urls = pag.buildTruncatedPageUrls(ctx.allocator, base_url);
 
     const total_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{total_count}) catch "0";
 
@@ -170,10 +121,10 @@ fn handleList(ctx: *Context) !void {
         .has_posts = posts.len > 0,
         .posts = posts,
         .total_count = total_count_str,
-        .total_pages = total_pages,
-        .prev_page_url = if (current_page > 1) buildPageUrl(ctx.allocator, base_url, current_page - 1) else "",
-        .next_page_url = if (current_page < total_pages) buildPageUrl(ctx.allocator, base_url, current_page + 1) else "",
-        .page_urls = page_urls,
+        .total_pages = pag.total_pages,
+        .prev_page_url = page_urls.prev_url,
+        .next_page_url = page_urls.next_url,
+        .page_urls = page_urls.items,
     }});
 
     const add_btn =
@@ -471,44 +422,8 @@ fn handleVersionPreview(ctx: *Context) !void {
         );
         // Current version: show collaborator avatars if available
         if (current_data) |cd| {
-            if (cd.collaborators) |collab_json| {
-                const parsed = std.json.parseFromSlice(std.json.Value, ctx.allocator, collab_json, .{}) catch null;
-                defer if (parsed) |p| p.deinit();
-                if (parsed) |p| {
-                    if (p.value == .array and p.value.array.items.len > 0) {
-                        try w.writeAll("<span class=\"version-avatars\">");
-                        const items = p.value.array.items;
-                        const max_show: usize = 3;
-                        const show_count = @min(items.len, max_show);
-                        for (items[0..show_count]) |item| {
-                            if (item == .object) {
-                                if (item.object.get("email")) |email_val| {
-                                    if (email_val == .string) {
-                                        const avatar = gravatar.url(email_val.string, 24);
-                                        const name_val = if (item.object.get("name")) |n| (if (n == .string and n.string.len > 0) n.string else email_val.string) else email_val.string;
-                                        try w.writeAll("<img src=\"");
-                                        try w.writeAll(avatar.slice());
-                                        try w.writeAll("\" alt=\"\" title=\"");
-                                        try cms.writeEscaped(w, name_val);
-                                        try w.writeAll("\" class=\"version-avatar version-avatar-stacked\" />");
-                                    }
-                                }
-                            }
-                        }
-                        if (items.len > max_show) {
-                            try w.print("<span class=\"version-avatar version-avatar-overflow\">+{d}</span>", .{items.len - max_show});
-                        }
-                        try w.writeAll("</span> ");
-                    }
-                }
-            } else if (cd.author_email) |email| {
-                const cur_avatar = gravatar.url(email, 24);
-                try w.writeAll("<img src=\"");
-                try w.writeAll(cur_avatar.slice());
-                try w.writeAll("\" alt=\"\" title=\"");
-                try cms.writeEscaped(w, cd.authorLabel());
-                try w.writeAll("\" class=\"version-avatar\" /> ");
-            }
+            try writeCollaboratorAvatars(w, ctx.allocator, cd.collaborators, cd.author_email, cd.authorLabel());
+            try w.writeByte(' ');
         }
         // Show "Published by X" or "Current version" label
         if (current_data) |cd| {
@@ -1145,39 +1060,11 @@ fn handleUnpublish(ctx: *Context) !void {
 // Helpers
 // =============================================================================
 
-fn redirect(ctx: *Context, location: []const u8) void {
-    ctx.response.setStatus("303 See Other");
-    ctx.response.setHeader("Location", location);
-    ctx.response.setBody("");
-}
+const pu = @import("plugin_utils");
+const redirect = pu.redirect;
 
 fn formatDate(timestamp: i64, allocator: std.mem.Allocator) ![]const u8 {
     return std.fmt.allocPrint(allocator, "{d}", .{timestamp});
-}
-
-fn parseQueryParam(query: ?[]const u8, name: []const u8) ?[]const u8 {
-    const q = query orelse return null;
-    var iter = std.mem.splitScalar(u8, q, '&');
-    while (iter.next()) |pair| {
-        if (std.mem.indexOf(u8, pair, "=")) |eq_pos| {
-            if (std.mem.eql(u8, pair[0..eq_pos], name)) {
-                return pair[eq_pos + 1 ..];
-            }
-        }
-    }
-    return null;
-}
-
-fn parseIntParam(query: ?[]const u8, name: []const u8, comptime T: type) ?T {
-    const raw = parseQueryParam(query, name) orelse return null;
-    if (raw.len == 0) return null;
-    return std.fmt.parseInt(T, raw, 10) catch null;
-}
-
-fn buildPageUrl(allocator: std.mem.Allocator, base_url: []const u8, page_num: u32) []const u8 {
-    if (page_num <= 1) return base_url;
-    const sep: []const u8 = if (std.mem.indexOf(u8, base_url, "?") != null) "&" else "?";
-    return std.fmt.allocPrint(allocator, "{s}{s}page={d}", .{ base_url, sep, page_num }) catch base_url;
 }
 
 const Db = @import("db").Db;
@@ -1260,16 +1147,65 @@ fn buildFieldEditorsJson(allocator: std.mem.Allocator, db: *Db, entry_id: []cons
     return buf.toOwnedSlice(allocator);
 }
 
-fn writeJsonEscaped(w: anytype, s: []const u8) !void {
-    for (s) |c| {
-        switch (c) {
-            '"' => try w.writeAll("\\\""),
-            '\\' => try w.writeAll("\\\\"),
-            '\n' => try w.writeAll("\\n"),
-            '\r' => try w.writeAll("\\r"),
-            '\t' => try w.writeAll("\\t"),
-            else => try w.writeByte(c),
+const writeJsonEscaped = pu.writeJsonEscaped;
+
+/// Render collaborator avatar stack from a JSON array of {email, name} objects.
+/// Used by both version preview and version history sidebar.
+/// Falls back to a single author avatar or system icon.
+fn writeCollaboratorAvatars(
+    w: anytype,
+    allocator: std.mem.Allocator,
+    collab_json: ?[]const u8,
+    author_email: ?[]const u8,
+    author_label: []const u8,
+) !void {
+    if (collab_json) |json| {
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, json, .{}) catch null;
+        defer if (parsed) |p| p.deinit();
+
+        if (parsed) |p| {
+            if (p.value == .array and p.value.array.items.len > 0) {
+                try w.writeAll("<span class=\"version-avatars\">");
+                const items = p.value.array.items;
+                const max_show: usize = 3;
+                const show_count = @min(items.len, max_show);
+                for (items[0..show_count]) |item| {
+                    if (item == .object) {
+                        if (item.object.get("email")) |email_val| {
+                            if (email_val == .string) {
+                                const avatar = gravatar.url(email_val.string, 24);
+                                const name_val = if (item.object.get("name")) |n| (if (n == .string and n.string.len > 0) n.string else email_val.string) else email_val.string;
+                                try w.writeAll("<img src=\"");
+                                try w.writeAll(avatar.slice());
+                                try w.writeAll("\" alt=\"\" title=\"");
+                                try cms.writeEscaped(w, name_val);
+                                try w.writeAll("\" class=\"version-avatar version-avatar-stacked\" />");
+                            }
+                        }
+                    }
+                }
+                if (items.len > max_show) {
+                    try w.print("<span class=\"version-avatar version-avatar-overflow\">+{d}</span>", .{items.len - max_show});
+                }
+                try w.writeAll("</span>");
+                return;
+            }
         }
+        // Parsed but empty/invalid — fall through to system icon
+        try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
+        return;
+    }
+
+    // No collaborators JSON — show single author avatar or system icon
+    if (author_email) |email| {
+        const avatar = gravatar.url(email, 24);
+        try w.writeAll("<img src=\"");
+        try w.writeAll(avatar.slice());
+        try w.writeAll("\" alt=\"\" title=\"");
+        try cms.writeEscaped(w, author_label);
+        try w.writeAll("\" class=\"version-avatar\" />");
+    } else {
+        try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
     }
 }
 
@@ -1341,51 +1277,7 @@ fn buildVersionHistoryHtml(allocator: std.mem.Allocator, db: *Db, entry_id: []co
         }
 
         // Avatars: show collaborators stack for published versions, single avatar otherwise
-        if (v.collaborators) |collab_json| {
-            const parsed = std.json.parseFromSlice(std.json.Value, allocator, collab_json, .{}) catch null;
-            defer if (parsed) |p| p.deinit();
-
-            if (parsed) |p| {
-                if (p.value == .array and p.value.array.items.len > 0) {
-                    try w.writeAll("<span class=\"version-avatars\">");
-                    const items = p.value.array.items;
-                    const max_show: usize = 3;
-                    const show_count = @min(items.len, max_show);
-                    for (items[0..show_count]) |item| {
-                        if (item == .object) {
-                            if (item.object.get("email")) |email_val| {
-                                if (email_val == .string) {
-                                    const avatar = gravatar.url(email_val.string, 24);
-                                    const name_val = if (item.object.get("name")) |n| (if (n == .string and n.string.len > 0) n.string else email_val.string) else email_val.string;
-                                    try w.writeAll("<img src=\"");
-                                    try w.writeAll(avatar.slice());
-                                    try w.writeAll("\" alt=\"\" title=\"");
-                                    try cms.writeEscaped(w, name_val);
-                                    try w.writeAll("\" class=\"version-avatar version-avatar-stacked\" />");
-                                }
-                            }
-                        }
-                    }
-                    if (items.len > max_show) {
-                        try w.print("<span class=\"version-avatar version-avatar-overflow\">+{d}</span>", .{items.len - max_show});
-                    }
-                    try w.writeAll("</span>");
-                } else {
-                    try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
-                }
-            } else {
-                try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
-            }
-        } else if (v.author_email) |email| {
-            const avatar = gravatar.url(email, 24);
-            try w.writeAll("<img src=\"");
-            try w.writeAll(avatar.slice());
-            try w.writeAll("\" alt=\"\" title=\"");
-            try cms.writeEscaped(w, v.authorLabel());
-            try w.writeAll("\" class=\"version-avatar\" />");
-        } else {
-            try w.writeAll("<span class=\"version-avatar version-avatar-system\">S</span>");
-        }
+        try writeCollaboratorAvatars(w, allocator, v.collaborators, v.author_email, v.authorLabel());
 
         // Info column: type + time + optional release name
         try w.writeAll("<span class=\"version-info\">");

@@ -19,6 +19,7 @@ const media_handler = @import("media_handler");
 const schema_sync = @import("schema_sync");
 const websocket = @import("websocket");
 const presence = @import("presence");
+const url_mod = @import("url");
 
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
@@ -475,6 +476,33 @@ fn handleErrorTest(_: *Context) !void {
     return error.TestError;
 }
 
+/// Comptime asset map: URL path -> embedded asset + optional dev-mode disk path.
+/// Design system assets have no disk path (always served from amalgamation, even in dev mode).
+const AssetEntry = struct {
+    asset: type,
+    disk_path: ?[]const u8,
+};
+
+const asset_map = .{
+    .{ "admin.css", AssetEntry{ .asset = AdminCss, .disk_path = "static/admin.css" } },
+    .{ "admin.js", AssetEntry{ .asset = AdminJs, .disk_path = "static/admin.js" } },
+    .{ "theme.css", AssetEntry{ .asset = ThemeCss, .disk_path = "themes/demo/static/theme.css" } },
+    .{ "interact/core.js", AssetEntry{ .asset = InteractCore, .disk_path = "static/interact/core.js" } },
+    .{ "interact/toggle.js", AssetEntry{ .asset = InteractToggle, .disk_path = "static/interact/toggle.js" } },
+    .{ "interact/portal.js", AssetEntry{ .asset = InteractPortal, .disk_path = "static/interact/portal.js" } },
+    .{ "interact/focus-trap.js", AssetEntry{ .asset = InteractFocusTrap, .disk_path = "static/interact/focus-trap.js" } },
+    .{ "interact/dismiss.js", AssetEntry{ .asset = InteractDismiss, .disk_path = "static/interact/dismiss.js" } },
+    .{ "interact/components.js", AssetEntry{ .asset = InteractComponents, .disk_path = "static/interact/components.js" } },
+    .{ "interact/index.js", AssetEntry{ .asset = InteractIndex, .disk_path = "static/interact/index.js" } },
+    .{ "media-selection.js", AssetEntry{ .asset = MediaSelectionJs, .disk_path = "static/media-selection.js" } },
+    .{ "interact/websocket.js", AssetEntry{ .asset = InteractWebSocket, .disk_path = "static/interact/websocket.js" } },
+    .{ "interact/presence.js", AssetEntry{ .asset = InteractPresence, .disk_path = "static/interact/presence.js" } },
+    .{ "publr.css", AssetEntry{ .asset = PublrCss, .disk_path = null } },
+    .{ "publr-core.js", AssetEntry{ .asset = PublrCoreJs, .disk_path = null } },
+    .{ "publr-dialog.js", AssetEntry{ .asset = PublrDialogJs, .disk_path = null } },
+    .{ "publr-dropdown.js", AssetEntry{ .asset = PublrDropdownJs, .disk_path = null } },
+};
+
 fn handleStatic(ctx: *Context) !void {
     const file = ctx.wildcard orelse {
         ctx.response.setStatus("404 Not Found");
@@ -483,115 +511,32 @@ fn handleStatic(ctx: *Context) !void {
         return;
     };
 
-    // In dev mode, serve from disk for instant updates
-    if (is_dev_mode) {
-        serveStaticFromDisk(ctx, file);
-        return;
-    }
-
-    // Production: use embedded assets
-    const if_none_match = ctx.getRequestHeader("If-None-Match");
-
-    if (std.mem.eql(u8, file, "admin.css")) {
-        AdminCss.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "admin.js")) {
-        AdminJs.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "theme.css")) {
-        ThemeCss.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/core.js")) {
-        InteractCore.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/toggle.js")) {
-        InteractToggle.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/portal.js")) {
-        InteractPortal.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/focus-trap.js")) {
-        InteractFocusTrap.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/dismiss.js")) {
-        InteractDismiss.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/components.js")) {
-        InteractComponents.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/index.js")) {
-        InteractIndex.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "media-selection.js")) {
-        MediaSelectionJs.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/websocket.js")) {
-        InteractWebSocket.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "interact/presence.js")) {
-        InteractPresence.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "publr.css")) {
-        PublrCss.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "publr-core.js")) {
-        PublrCoreJs.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "publr-dialog.js")) {
-        PublrDialogJs.serve(ctx, if_none_match);
-    } else if (std.mem.eql(u8, file, "publr-dropdown.js")) {
-        PublrDropdownJs.serve(ctx, if_none_match);
-    } else {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setContentType("text/plain");
-        ctx.response.setBody("Not Found");
-    }
-}
-
-/// Serve static files from disk (dev mode only)
-fn serveStaticFromDisk(ctx: *Context, file: []const u8) void {
-    // Map file names to disk paths
-    const path = if (std.mem.eql(u8, file, "admin.css"))
-        "static/admin.css"
-    else if (std.mem.eql(u8, file, "admin.js"))
-        "static/admin.js"
-    else if (std.mem.eql(u8, file, "theme.css"))
-        "themes/demo/static/theme.css"
-    else if (std.mem.eql(u8, file, "interact/core.js"))
-        "static/interact/core.js"
-    else if (std.mem.eql(u8, file, "interact/toggle.js"))
-        "static/interact/toggle.js"
-    else if (std.mem.eql(u8, file, "interact/portal.js"))
-        "static/interact/portal.js"
-    else if (std.mem.eql(u8, file, "interact/focus-trap.js"))
-        "static/interact/focus-trap.js"
-    else if (std.mem.eql(u8, file, "interact/dismiss.js"))
-        "static/interact/dismiss.js"
-    else if (std.mem.eql(u8, file, "interact/components.js"))
-        "static/interact/components.js"
-    else if (std.mem.eql(u8, file, "interact/index.js"))
-        "static/interact/index.js"
-    else if (std.mem.eql(u8, file, "media-selection.js"))
-        "static/media-selection.js"
-    else if (std.mem.eql(u8, file, "interact/websocket.js"))
-        "static/interact/websocket.js"
-    else if (std.mem.eql(u8, file, "interact/presence.js"))
-        "static/interact/presence.js"
-    else {
-        // Design system assets are embedded (no disk files) — serve from amalgamation
-        const if_none_match = ctx.getRequestHeader("If-None-Match");
-        if (std.mem.eql(u8, file, "publr.css")) {
-            PublrCss.serve(ctx, if_none_match);
-        } else if (std.mem.eql(u8, file, "publr-core.js")) {
-            PublrCoreJs.serve(ctx, if_none_match);
-        } else if (std.mem.eql(u8, file, "publr-dialog.js")) {
-            PublrDialogJs.serve(ctx, if_none_match);
-        } else if (std.mem.eql(u8, file, "publr-dropdown.js")) {
-            PublrDropdownJs.serve(ctx, if_none_match);
-        } else {
-            ctx.response.setStatus("404 Not Found");
-            ctx.response.setContentType("text/plain");
-            ctx.response.setBody("Not Found");
+    inline for (asset_map) |entry| {
+        if (std.mem.eql(u8, file, entry[0])) {
+            if (is_dev_mode) {
+                if (entry[1].disk_path) |disk_path| {
+                    // Dev mode: serve from disk for instant updates
+                    const content = std.fs.cwd().readFileAlloc(std.heap.page_allocator, disk_path, 1024 * 1024) catch {
+                        ctx.response.setStatus("404 Not Found");
+                        ctx.response.setContentType("text/plain");
+                        ctx.response.setBody("File not found");
+                        return;
+                    };
+                    // Note: memory leak in dev mode, acceptable for development
+                    ctx.response.setContentType(static.getMimeType(file));
+                    ctx.response.setBody(content);
+                    return;
+                }
+            }
+            // Production mode, or embedded-only asset (design system)
+            entry[1].asset.serve(ctx, ctx.getRequestHeader("If-None-Match"));
+            return;
         }
-        return;
-    };
+    }
 
-    // Read file from disk
-    const content = std.fs.cwd().readFileAlloc(std.heap.page_allocator, path, 1024 * 1024) catch {
-        ctx.response.setStatus("404 Not Found");
-        ctx.response.setContentType("text/plain");
-        ctx.response.setBody("File not found");
-        return;
-    };
-    // Note: memory leak in dev mode, acceptable for development
-
-    ctx.response.setContentType(static.getMimeType(file));
-    ctx.response.setBody(content);
+    ctx.response.setStatus("404 Not Found");
+    ctx.response.setContentType("text/plain");
+    ctx.response.setBody("Not Found");
 }
 
 fn sendResponse(
@@ -676,13 +621,13 @@ fn handleSetupPost(ctx: *Context) !void {
     };
 
     // URL decode (basic - handle + for spaces and %XX)
-    var email_buf: [256]u8 = undefined;
-    const decoded_email = urlDecode(email, &email_buf) orelse {
+    const decoded_email = url_mod.formDecode(ctx.allocator, email) catch {
         return renderSetupError(ctx, "Invalid email format");
     };
 
     // Validate
-    if (!isValidEmail(decoded_email)) {
+    const auth_mod = @import("auth");
+    if (!auth_mod.isValidEmail(decoded_email)) {
         return renderSetupError(ctx, "Invalid email format");
     }
 
@@ -729,41 +674,6 @@ fn renderSetupError(ctx: *Context, message: []const u8) void {
     ctx.html(content);
 }
 
-fn isValidEmail(email: []const u8) bool {
-    // Basic email validation: contains @ and at least one . after @
-    const at_pos = std.mem.indexOf(u8, email, "@") orelse return false;
-    if (at_pos == 0 or at_pos == email.len - 1) return false;
-
-    const after_at = email[at_pos + 1 ..];
-    const dot_pos = std.mem.indexOf(u8, after_at, ".") orelse return false;
-    if (dot_pos == 0 or dot_pos == after_at.len - 1) return false;
-
-    return true;
-}
-
-fn urlDecode(input: []const u8, buf: []u8) ?[]const u8 {
-    var i: usize = 0;
-    var out: usize = 0;
-
-    while (i < input.len and out < buf.len) {
-        if (input[i] == '+') {
-            buf[out] = ' ';
-            i += 1;
-            out += 1;
-        } else if (input[i] == '%' and i + 2 < input.len) {
-            const hex = input[i + 1 .. i + 3];
-            buf[out] = std.fmt.parseInt(u8, hex, 16) catch return null;
-            i += 3;
-            out += 1;
-        } else {
-            buf[out] = input[i];
-            i += 1;
-            out += 1;
-        }
-    }
-
-    return buf[0..out];
-}
 
 // =============================================================================
 // Login/Logout Handlers
@@ -815,8 +725,7 @@ fn handleLoginPost(ctx: *Context) !void {
     };
 
     // URL decode email
-    var email_buf: [256]u8 = undefined;
-    const decoded_email = urlDecode(email, &email_buf) orelse {
+    const decoded_email = url_mod.formDecode(ctx.allocator, email) catch {
         return renderLoginError(ctx, "Invalid email format");
     };
 
@@ -991,6 +900,7 @@ fn handleWebSocket(ctx: *Context) !void {
                     std.debug.print("[ws] #{d}: {s}\n", .{ conn.id, frame.payload });
                 }
                 dispatchMessage(conn, frame.payload, user_info);
+
             },
             .ping => {
                 websocket.writeFrame(stream, .pong, frame.payload) catch break;
@@ -1007,6 +917,9 @@ fn handleWebSocket(ctx: *Context) !void {
 
 /// Dispatch a WebSocket JSON message to the appropriate handler.
 fn dispatchMessage(conn: *websocket.Connection, payload: []const u8, user: presence.UserInfo) void {
+    const extractJsonString = websocket.extractJsonString;
+    const extractJsonStringRaw = websocket.extractJsonStringRaw;
+
     // Parse message type: {"type":"...","data":{...}}
     const msg_type = extractJsonString(payload, "type") orelse return;
 
@@ -1020,39 +933,15 @@ fn dispatchMessage(conn: *websocket.Connection, payload: []const u8, user: prese
         presence.setActivity(conn.id, std.mem.eql(u8, active_str, "true"));
     } else if (std.mem.eql(u8, msg_type, "heartbeat")) {
         presence.heartbeat(conn.id);
+    } else if (std.mem.eql(u8, msg_type, "focus")) {
+        const field = extractJsonString(payload, "field") orelse return;
+        presence.focus(conn.id, field);
+    } else if (std.mem.eql(u8, msg_type, "blur")) {
+        const field = extractJsonString(payload, "field") orelse return;
+        presence.blur(conn.id, field);
+    } else if (std.mem.eql(u8, msg_type, "field_edit")) {
+        const field = extractJsonString(payload, "field") orelse return;
+        const value = extractJsonStringRaw(payload, "value") orelse return;
+        presence.fieldEdit(conn.id, field, value);
     }
-}
-
-/// Extract a string value from flat or nested JSON by key name.
-/// Handles: {"key":"value"} and {"data":{"key":"value"}}
-/// For booleans, returns "true" or "false" as string.
-fn extractJsonString(json: []const u8, key: []const u8) ?[]const u8 {
-    // Search for "key": or "key":
-    var pos: usize = 0;
-    while (pos + key.len + 3 < json.len) {
-        if (json[pos] == '"' and pos + 1 + key.len + 1 < json.len) {
-            if (std.mem.eql(u8, json[pos + 1 .. pos + 1 + key.len], key) and
-                json[pos + 1 + key.len] == '"')
-            {
-                // Found "key" — skip to colon and value
-                var vpos = pos + 1 + key.len + 1;
-                while (vpos < json.len and (json[vpos] == ':' or json[vpos] == ' ')) : (vpos += 1) {}
-                if (vpos >= json.len) return null;
-
-                if (json[vpos] == '"') {
-                    // String value — find closing quote
-                    const start = vpos + 1;
-                    var end = start;
-                    while (end < json.len and json[end] != '"') : (end += 1) {}
-                    if (end < json.len) return json[start..end];
-                } else if (json[vpos] == 't') {
-                    return "true";
-                } else if (json[vpos] == 'f') {
-                    return "false";
-                }
-            }
-        }
-        pos += 1;
-    }
-    return null;
 }

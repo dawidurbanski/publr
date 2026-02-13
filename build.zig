@@ -281,11 +281,38 @@ pub fn build(b: *std.Build) void {
     // Note: schema_sync_module needs db_module, which is defined below.
     // We'll add the import after db_module is created.
 
+    // Shared URL encoding/decoding
+    const url_module = b.createModule(.{
+        .root_source_file = b.path("src/url.zig"),
+    });
+
+    // Shared MIME type detection
+    const mime_module = b.createModule(.{
+        .root_source_file = b.path("src/mime.zig"),
+    });
+
+    // Shared multipart form data parsing
+    const multipart_module = b.createModule(.{
+        .root_source_file = b.path("src/multipart.zig"),
+    });
+
     // =========================================================================
     // Core Modules (shared between main exe and plugins)
     // =========================================================================
     const middleware_module = b.createModule(.{
         .root_source_file = b.path("src/middleware.zig"),
+        .imports = &.{.{ .name = "url", .module = url_module }},
+    });
+
+    // Shared plugin utilities (redirect, query params, formatSize, etc.)
+    const plugin_utils_module = b.createModule(.{
+        .root_source_file = b.path("src/plugin_utils.zig"),
+        .imports = &.{.{ .name = "middleware", .module = middleware_module }},
+    });
+    // Shared pagination (page calculation, offset, URL generation)
+    const pagination_module = b.createModule(.{
+        .root_source_file = b.path("src/pagination.zig"),
+        .imports = &.{.{ .name = "plugin_utils", .module = plugin_utils_module }},
     });
     const router_module = b.createModule(.{
         .root_source_file = b.path("src/router.zig"),
@@ -296,6 +323,11 @@ pub fn build(b: *std.Build) void {
     });
     db_module.addIncludePath(b.path("vendor"));
 
+    // Shared ID generation
+    const id_gen_module = b.createModule(.{
+        .root_source_file = b.path("src/id_gen.zig"),
+    });
+
     // Schema sync (needs db_module)
     const schema_sync_module = b.createModule(.{
         .root_source_file = b.path("src/schema/sync.zig"),
@@ -303,6 +335,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "field", .module = field_module },
             .{ .name = "schema_registry", .module = schema_registry_module },
             .{ .name = "db", .module = db_module },
+            .{ .name = "id_gen", .module = id_gen_module },
         },
     });
 
@@ -354,6 +387,29 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/time_util.zig"),
     });
 
+    // Version history management
+    const version_module = b.createModule(.{
+        .root_source_file = b.path("src/version.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "time_util", .module = time_util_module },
+            .{ .name = "field", .module = field_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "id_gen", .module = id_gen_module },
+        },
+    });
+
+    // Release management
+    const release_module = b.createModule(.{
+        .root_source_file = b.path("src/release.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "id_gen", .module = id_gen_module },
+            .{ .name = "time_util", .module = time_util_module },
+            .{ .name = "version", .module = version_module },
+        },
+    });
+
     // CMS query API
     const cms_module = b.createModule(.{
         .root_source_file = b.path("src/cms.zig"),
@@ -362,6 +418,9 @@ pub fn build(b: *std.Build) void {
             .{ .name = "schema_registry", .module = schema_registry_module },
             .{ .name = "db", .module = db_module },
             .{ .name = "time_util", .module = time_util_module },
+            .{ .name = "id_gen", .module = id_gen_module },
+            .{ .name = "version", .module = version_module },
+            .{ .name = "release", .module = release_module },
         },
     });
     // Storage backend
@@ -375,6 +434,14 @@ pub fn build(b: *std.Build) void {
     const svg_sanitize_module = b.createModule(.{
         .root_source_file = b.path("src/svg_sanitize.zig"),
     });
+    // Taxonomy management (folders/tags)
+    const taxonomy_module = b.createModule(.{
+        .root_source_file = b.path("src/taxonomy.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "id_gen", .module = id_gen_module },
+        },
+    });
     // Media CRUD API
     const media_module = b.createModule(.{
         .root_source_file = b.path("src/media.zig"),
@@ -384,8 +451,22 @@ pub fn build(b: *std.Build) void {
             .{ .name = "schema_media", .module = schema_media_module },
             .{ .name = "storage", .module = storage_module },
             .{ .name = "svg_sanitize", .module = svg_sanitize_module },
+            .{ .name = "id_gen", .module = id_gen_module },
+            .{ .name = "taxonomy", .module = taxonomy_module },
         },
     });
+    // Media query/count functions
+    const media_query_module = b.createModule(.{
+        .root_source_file = b.path("src/media_query.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "media", .module = media_module },
+            .{ .name = "taxonomy", .module = taxonomy_module },
+        },
+    });
+    // Add media_query to media (circular: media re-exports media_query)
+    media_module.addImport("media_query", media_query_module);
     // Media filesystem sync
     const media_sync_module = b.createModule(.{
         .root_source_file = b.path("src/media_sync.zig"),
@@ -394,6 +475,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "media", .module = media_module },
             .{ .name = "storage", .module = storage_module },
             .{ .name = "svg_sanitize", .module = svg_sanitize_module },
+            .{ .name = "mime", .module = mime_module },
         },
     });
     media_sync_module.addIncludePath(b.path("vendor"));
@@ -440,6 +522,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "image", .module = image_module },
+            .{ .name = "url", .module = url_module },
+            .{ .name = "mime", .module = mime_module },
         },
     });
     const icons_module = b.createModule(.{
@@ -556,7 +640,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_media = b.createModule(.{
-        .root_source_file = b.path("src/plugins/media.zig"),
+        .root_source_file = b.path("src/plugins/media/main.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -571,6 +655,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "media_handler", .module = media_handler_module },
             .{ .name = "db", .module = db_module },
             .{ .name = "views", .module = views },
+            .{ .name = "multipart", .module = multipart_module },
         },
     });
 
@@ -626,6 +711,17 @@ pub fn build(b: *std.Build) void {
     plugin_content_types.addImport("registry", registry_module);
     plugin_releases.addImport("registry", registry_module);
 
+    // Add shared plugin utilities
+    plugin_posts.addImport("plugin_utils", plugin_utils_module);
+    plugin_media.addImport("plugin_utils", plugin_utils_module);
+    plugin_releases.addImport("plugin_utils", plugin_utils_module);
+    plugin_settings.addImport("plugin_utils", plugin_utils_module);
+    plugin_users.addImport("plugin_utils", plugin_utils_module);
+
+    // Add shared pagination
+    plugin_posts.addImport("pagination", pagination_module);
+    plugin_media.addImport("pagination", pagination_module);
+
     // Add views namespace and core imports to main executable
     exe.root_module.addImport("views", views);
     exe.root_module.addImport("admin_api", admin_api_module);
@@ -640,6 +736,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("csrf", csrf_module);
     exe.root_module.addImport("auth", auth_module);
     exe.root_module.addImport("auth_middleware", auth_middleware_module);
+    exe.root_module.addImport("url", url_module);
 
     // Add schema modules to main exe
     exe.root_module.addImport("field", field_module);
@@ -733,6 +830,7 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("media_sync", media_sync_module);
     exe_tests.root_module.addImport("media_handler", media_handler_module);
     exe_tests.root_module.addImport("image", image_module);
+    exe_tests.root_module.addImport("multipart", multipart_module);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");

@@ -233,3 +233,96 @@ pub var registry: Registry = undefined;
 pub fn initRegistry(allocator: std.mem.Allocator) void {
     registry = Registry.init(allocator);
 }
+
+// =========================================================================
+// JSON Message Parsing
+// =========================================================================
+
+/// Extract a string value from flat or nested JSON by key name.
+/// Handles: {"key":"value"} and {"data":{"key":"value"}}
+/// For booleans, returns "true" or "false" as string.
+pub fn extractJsonString(json: []const u8, key: []const u8) ?[]const u8 {
+    // Search for "key": or "key":
+    var pos: usize = 0;
+    while (pos + key.len + 3 < json.len) {
+        if (json[pos] == '"' and pos + 1 + key.len + 1 < json.len) {
+            if (std.mem.eql(u8, json[pos + 1 .. pos + 1 + key.len], key) and
+                json[pos + 1 + key.len] == '"')
+            {
+                // Found "key" — skip to colon and value
+                var vpos = pos + 1 + key.len + 1;
+                while (vpos < json.len and (json[vpos] == ':' or json[vpos] == ' ')) : (vpos += 1) {}
+                if (vpos >= json.len) return null;
+
+                if (json[vpos] == '"') {
+                    // String value — find closing quote
+                    const start = vpos + 1;
+                    var end = start;
+                    while (end < json.len and json[end] != '"') : (end += 1) {}
+                    if (end < json.len) return json[start..end];
+                } else if (json[vpos] == 't') {
+                    return "true";
+                } else if (json[vpos] == 'f') {
+                    return "false";
+                }
+            }
+        }
+        pos += 1;
+    }
+    return null;
+}
+
+/// Like extractJsonString but handles backslash escapes when finding the closing quote.
+/// Returns raw JSON-escaped content (safe to embed directly in outbound JSON strings).
+/// Use this for user-typed values that may contain quotes or special characters.
+pub fn extractJsonStringRaw(json: []const u8, key: []const u8) ?[]const u8 {
+    var pos: usize = 0;
+    while (pos + key.len + 3 < json.len) {
+        if (json[pos] == '"' and pos + 1 + key.len + 1 < json.len) {
+            if (std.mem.eql(u8, json[pos + 1 .. pos + 1 + key.len], key) and
+                json[pos + 1 + key.len] == '"')
+            {
+                var vpos = pos + 1 + key.len + 1;
+                while (vpos < json.len and (json[vpos] == ':' or json[vpos] == ' ')) : (vpos += 1) {}
+                if (vpos >= json.len) return null;
+
+                if (json[vpos] == '"') {
+                    const start = vpos + 1;
+                    var end = start;
+                    while (end < json.len) {
+                        if (json[end] == '\\' and end + 1 < json.len) {
+                            end += 2; // Skip escaped character
+                            continue;
+                        }
+                        if (json[end] == '"') break;
+                        end += 1;
+                    }
+                    if (end < json.len) return json[start..end];
+                }
+            }
+        }
+        pos += 1;
+    }
+    return null;
+}
+
+// =========================================================================
+// Tests
+// =========================================================================
+
+test "extractJsonString basic" {
+    const json = "{\"type\":\"subscribe\",\"entry_id\":\"e_123\"}";
+    try std.testing.expectEqualStrings("subscribe", extractJsonString(json, "type").?);
+    try std.testing.expectEqualStrings("e_123", extractJsonString(json, "entry_id").?);
+    try std.testing.expect(extractJsonString(json, "missing") == null);
+}
+
+test "extractJsonString boolean" {
+    const json = "{\"active\":true}";
+    try std.testing.expectEqualStrings("true", extractJsonString(json, "active").?);
+}
+
+test "extractJsonStringRaw with escapes" {
+    const json = "{\"value\":\"hello \\\"world\\\"\"}";
+    try std.testing.expectEqualStrings("hello \\\"world\\\"", extractJsonStringRaw(json, "value").?);
+}
