@@ -6,7 +6,7 @@ const content_type = @import("content_type");
 const field = @import("field");
 
 /// Author profile content type
-pub const Author = content_type.ContentType("author", "Author", &.{
+pub const Author = content_type.ContentType("author", .{ .name = "Author" }, &.{
     // Author display name
     field.String("name", .{ .required = true, .max_length = 100 }),
 

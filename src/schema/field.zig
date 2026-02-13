@@ -6,7 +6,7 @@
 //!
 //! Example:
 //! ```zig
-//! const Post = ContentType("post", "Blog Post", &.{
+//! const Post = ContentType("post", .{ .name = "Blog Post" }, &.{
 //!     field.String("title", .{ .required = true, .max_length = 200 }),
 //!     field.Slug("slug", .{ .source = "title" }),
 //!     field.Text("body", .{ .required = true }),
@@ -68,6 +68,11 @@ pub const FieldDef = struct {
 
     /// Whether field is required
     required: bool = false,
+
+    /// Whether this field's value varies per locale (i18n).
+    /// Default true for most fields. Ref and Image fields force false.
+    /// Inert until i18n epic — no runtime behavior change.
+    translatable: bool = true,
 
     /// Storage hint - where to persist this field's data
     storage: StorageHint = .data_only,
@@ -277,7 +282,11 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
     many: bool = false,
     required: bool = false,
     display: ?[]const u8 = null,
+    translatable: bool = false,
 }) FieldDef {
+    if (opts.translatable) {
+        @compileError("Ref fields cannot be translatable — references are locale-independent");
+    }
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
             if (opts.required and value.len == 0) {
@@ -320,6 +329,7 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
         .field_type_id = "reference",
         .zig_type = if (opts.many) []const []const u8 else []const u8,
         .required = opts.required,
+        .translatable = false,
         .storage = .data_only,
         .validate = S.validate,
         .render = S.render,
@@ -475,7 +485,11 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
 pub fn Image(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
+    translatable: bool = false,
 }) FieldDef {
+    if (opts.translatable) {
+        @compileError("Image fields cannot be translatable — media references are locale-independent");
+    }
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
             if (opts.required and value.len == 0) {
@@ -544,6 +558,7 @@ pub fn Image(comptime name: []const u8, comptime opts: struct {
         .field_type_id = "image",
         .zig_type = ?[]const u8,
         .required = opts.required,
+        .translatable = false,
         .storage = .data_only,
         .validate = S.validate,
         .render = S.render,
@@ -781,4 +796,25 @@ test "Boolean field always validates" {
     try std.testing.expect(field.validate("true") == null);
     try std.testing.expect(field.validate("false") == null);
     try std.testing.expect(field.validate("") == null);
+}
+
+test "fields default to translatable = true" {
+    const s = String("title", .{});
+    try std.testing.expect(s.translatable);
+
+    const t = Text("body", .{});
+    try std.testing.expect(t.translatable);
+
+    const sel = Select("status", .{ .options = &.{"draft"} });
+    try std.testing.expect(sel.translatable);
+}
+
+test "Ref fields are translatable = false" {
+    const r = Ref("author", .{ .to = "author" });
+    try std.testing.expect(!r.translatable);
+}
+
+test "Image fields are translatable = false" {
+    const img = Image("avatar", .{});
+    try std.testing.expect(!img.translatable);
 }

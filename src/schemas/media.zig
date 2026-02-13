@@ -7,7 +7,7 @@ const field = @import("field");
 const content_type = @import("content_type");
 
 /// Media metadata schema — fields stored in media.data JSON
-pub const Media = content_type.ContentType("media", "Media", &.{
+pub const Media = content_type.ContentType("media", .{ .name = "Media" }, &.{
     // Alt text for accessibility
     field.String("alt_text", .{ .display = "Alt Text" }),
 

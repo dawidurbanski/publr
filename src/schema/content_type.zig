@@ -6,13 +6,14 @@
 //!
 //! Example:
 //! ```zig
-//! const Post = ContentType("post", "Blog Post", &.{
+//! const Post = ContentType("post", .{ .name = "Blog Post", .localized = true }, &.{
 //!     field.String("title", .{ .required = true }),
 //!     field.Text("body", .{ .required = true }),
 //! });
 //!
 //! // Post.type_id == "post"
 //! // Post.display_name == "Blog Post"
+//! // Post.localized == true
 //! // Post.Data has fields: title: []const u8, body: []const u8
 //! ```
 
@@ -30,17 +31,25 @@ pub const SchemaSource = enum {
     instance,
 };
 
+/// Content type configuration
+pub const Config = struct {
+    /// Human-readable name (e.g., "Blog Post", "Author")
+    name: []const u8,
+    /// Whether this content type supports localization (i18n)
+    localized: bool = false,
+};
+
 /// Content type definition with metadata and generated Data struct
 pub fn ContentType(
     comptime id: []const u8,
-    comptime name: []const u8,
+    comptime config: Config,
     comptime fields: []const FieldDef,
 ) type {
     // Validate at comptime
     if (id.len == 0) {
         @compileError("Content type id cannot be empty");
     }
-    if (name.len == 0) {
+    if (config.name.len == 0) {
         @compileError("Content type display name cannot be empty");
     }
 
@@ -49,7 +58,10 @@ pub fn ContentType(
         pub const type_id = id;
 
         /// Human-readable name (e.g., "Blog Post", "Author")
-        pub const display_name = name;
+        pub const display_name = config.name;
+
+        /// Whether this content type supports localization
+        pub const localized = config.localized;
 
         /// Array of field definitions
         pub const schema = fields;
@@ -187,14 +199,20 @@ fn GenerateDataStruct(comptime fields: []const FieldDef) type {
 // =============================================================================
 
 test "ContentType generates correct type_id and display_name" {
-    const Post = ContentType("post", "Blog Post", &.{});
+    const Post = ContentType("post", .{ .name = "Blog Post" }, &.{});
     try std.testing.expectEqualStrings("post", Post.type_id);
     try std.testing.expectEqualStrings("Blog Post", Post.display_name);
+    try std.testing.expect(!Post.localized);
+}
+
+test "ContentType config with localized" {
+    const Post = ContentType("post", .{ .name = "Blog Post", .localized = true }, &.{});
+    try std.testing.expect(Post.localized);
 }
 
 test "ContentType Data struct has correct fields" {
     const field = field_mod;
-    const Post = ContentType("post", "Test Post", &.{
+    const Post = ContentType("post", .{ .name = "Test Post" }, &.{
         field.String("title", .{ .required = true }),
         field.Text("body", .{ .required = true }),
         field.Boolean("featured", .{}),
@@ -215,7 +233,7 @@ test "ContentType Data struct has correct fields" {
 
 test "ContentType Data parses JSON correctly" {
     const field = field_mod;
-    const Article = ContentType("article", "Article", &.{
+    const Article = ContentType("article", .{ .name = "Article" }, &.{
         field.String("title", .{ .required = true }),
         field.Integer("views", .{}),
     });
@@ -233,7 +251,7 @@ test "ContentType Data parses JSON correctly" {
 
 test "ContentType Data handles missing optional fields" {
     const field = field_mod;
-    const Article = ContentType("article", "Article", &.{
+    const Article = ContentType("article", .{ .name = "Article" }, &.{
         field.String("title", .{ .required = true }),
         field.Integer("views", .{}),
     });
@@ -251,7 +269,7 @@ test "ContentType Data handles missing optional fields" {
 
 test "getFilterableFields returns correct fields" {
     const field = field_mod;
-    const Car = ContentType("car", "Car", &.{
+    const Car = ContentType("car", .{ .name = "Car" }, &.{
         field.String("name", .{ .required = true }),
         field.Integer("year", .{ .filterable = true }),
         field.Number("price", .{ .filterable = true }),
@@ -266,7 +284,7 @@ test "getFilterableFields returns correct fields" {
 
 test "getTaxonomyFields returns correct fields" {
     const field = field_mod;
-    const Post = ContentType("post", "Post", &.{
+    const Post = ContentType("post", .{ .name = "Post" }, &.{
         field.String("title", .{ .required = true }),
         field.Taxonomy("category", .{}),
         field.Taxonomy("tag", .{}),
