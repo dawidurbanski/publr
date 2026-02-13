@@ -689,6 +689,154 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
     };
 }
 
+/// Rich text input with editor widget
+pub fn RichText(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    display: ?[]const u8 = null,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <textarea class="form-control" id="{s}" name="{s}" rows="12"
+                \\            data-widget="richtext"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name });
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.print(">{s}</textarea>\n</div>\n", .{ctx.value orelse ""});
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "richtext",
+        .zig_type = []const u8,
+        .required = opts.required,
+        .storage = .data_only,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Email input with basic format validation
+pub fn Email(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    display: ?[]const u8 = null,
+    filterable: bool = false,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            if (value.len > 0) {
+                // Basic format: something@something.something
+                const at_pos = std.mem.indexOfScalar(u8, value, '@') orelse {
+                    return "Invalid email address";
+                };
+                if (at_pos == 0) return "Invalid email address";
+                const domain = value[at_pos + 1 ..];
+                if (domain.len == 0) return "Invalid email address";
+                if (std.mem.indexOfScalar(u8, domain, '.') == null) {
+                    return "Invalid email address";
+                }
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <input type="email" class="form-control" id="{s}" name="{s}" value="{s}"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(" />\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "email",
+        .zig_type = []const u8,
+        .required = opts.required,
+        .storage = if (opts.filterable) .data_and_meta else .data_only,
+        .meta_type = .text,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// URL input with basic format validation
+pub fn Url(comptime name: []const u8, comptime opts: struct {
+    required: bool = false,
+    display: ?[]const u8 = null,
+    filterable: bool = false,
+}) FieldDef {
+    const S = struct {
+        pub fn validate(value: []const u8) ?[]const u8 {
+            if (opts.required and value.len == 0) {
+                return "This field is required";
+            }
+            if (value.len > 0) {
+                // Must start with http:// or https://
+                const has_scheme = std.mem.startsWith(u8, value, "http://") or
+                    std.mem.startsWith(u8, value, "https://");
+                if (!has_scheme) {
+                    return "URL must start with http:// or https://";
+                }
+                // Must have a host after the scheme
+                const after_scheme = if (std.mem.startsWith(u8, value, "https://"))
+                    value[8..]
+                else
+                    value[7..];
+                if (after_scheme.len == 0) {
+                    return "URL must include a host";
+                }
+            }
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            try writer.print(
+                \\<div class="form-group">
+                \\  <label class="form-label" for="{s}">{s}</label>
+                \\  <input type="url" class="form-control" id="{s}" name="{s}" value="{s}"
+                \\         placeholder="https://"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            if (ctx.required) {
+                try writer.writeAll(" required");
+            }
+            try writer.writeAll(" />\n</div>\n");
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = opts.display orelse humanize(name),
+        .field_type_id = "url",
+        .zig_type = []const u8,
+        .required = opts.required,
+        .storage = if (opts.filterable) .data_and_meta else .data_only,
+        .meta_type = .text,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
 /// Taxonomy field - categorical data stored in entry_terms
 pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
     required: bool = false,
@@ -817,4 +965,54 @@ test "Ref fields are translatable = false" {
 test "Image fields are translatable = false" {
     const img = Image("avatar", .{});
     try std.testing.expect(!img.translatable);
+}
+
+test "RichText field validates required" {
+    const rt = RichText("body", .{ .required = true });
+    try std.testing.expect(rt.validate("") != null);
+    try std.testing.expect(rt.validate("<p>Hello</p>") == null);
+    try std.testing.expect(rt.validate("plain text") == null);
+    try std.testing.expectEqualStrings("richtext", rt.field_type_id);
+}
+
+test "RichText field accepts any content when not required" {
+    const rt = RichText("body", .{});
+    try std.testing.expect(rt.validate("") == null);
+    try std.testing.expect(rt.validate("anything") == null);
+}
+
+test "Email field validates format" {
+    const e = Email("email", .{});
+    try std.testing.expect(e.validate("") == null); // not required
+    try std.testing.expect(e.validate("user@example.com") == null);
+    try std.testing.expect(e.validate("user@localhost") != null); // no dot in domain
+    try std.testing.expect(e.validate("noatsign") != null);
+    try std.testing.expect(e.validate("@example.com") != null); // nothing before @
+    try std.testing.expect(e.validate("user@") != null); // nothing after @
+    try std.testing.expectEqualStrings("email", e.field_type_id);
+}
+
+test "Email field validates required" {
+    const e = Email("email", .{ .required = true });
+    try std.testing.expect(e.validate("") != null);
+    try std.testing.expect(e.validate("user@example.com") == null);
+}
+
+test "Url field validates format" {
+    const u = Url("website", .{});
+    try std.testing.expect(u.validate("") == null); // not required
+    try std.testing.expect(u.validate("https://example.com") == null);
+    try std.testing.expect(u.validate("http://example.com") == null);
+    try std.testing.expect(u.validate("https://x") == null); // minimal valid
+    try std.testing.expect(u.validate("example.com") != null); // no scheme
+    try std.testing.expect(u.validate("ftp://example.com") != null); // wrong scheme
+    try std.testing.expect(u.validate("https://") != null); // no host
+    try std.testing.expect(u.validate("http://") != null); // no host
+    try std.testing.expectEqualStrings("url", u.field_type_id);
+}
+
+test "Url field validates required" {
+    const u = Url("website", .{ .required = true });
+    try std.testing.expect(u.validate("") != null);
+    try std.testing.expect(u.validate("https://example.com") == null);
 }

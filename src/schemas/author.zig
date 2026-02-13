@@ -14,7 +14,7 @@ pub const Author = content_type.ContentType("author", .{ .name = "Author" }, &.{
     field.Slug("slug", .{ .source = "name", .required = true }),
 
     // Email address (not displayed publicly by default)
-    field.String("email", .{ .display = "Email Address" }),
+    field.Email("email", .{ .display = "Email Address" }),
 
     // Short biography
     field.Text("bio", .{ .display = "Biography" }),
@@ -23,7 +23,7 @@ pub const Author = content_type.ContentType("author", .{ .name = "Author" }, &.{
     field.Image("avatar", .{}),
 
     // Social links
-    field.String("website", .{ .display = "Website URL" }),
+    field.Url("website", .{ .display = "Website URL" }),
     field.String("twitter", .{ .display = "Twitter Handle" }),
     field.String("github", .{ .display = "GitHub Username" }),
 
