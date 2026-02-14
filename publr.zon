@@ -1,18 +1,3 @@
 .{
     .name = "publr",
-    .build = .{
-        .preBuild = .{
-            .{ "./themes/demo/tailwindcss", "-i", "themes/demo/input.css", "-o", "themes/demo/static/theme.css", "-m" },
-        },
-    },
-    .dev = .{
-        .watchers = .{
-            .{
-                .watch = "src/views",
-                .ext = "zsx",
-                .input = "themes/demo/input.css",
-                .cmd = .{ "./themes/demo/tailwindcss", "-i", "themes/demo/input.css", "-o", "themes/demo/static/theme.css", "-m" },
-            },
-        },
-    },
 }
