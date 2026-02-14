@@ -142,11 +142,11 @@ pub fn saveEntry(
         }
     } else "";
 
-    // Extract slug from data if present (coerce to optional)
-    const slug: ?[]const u8 = if (@hasField(@TypeOf(data), "slug"))
-        @as(?[]const u8, data.slug)
-    else
-        null;
+    // Extract slug from data if present (coerce to optional, empty string → null)
+    const slug: ?[]const u8 = if (@hasField(@TypeOf(data), "slug")) blk: {
+        const s = @as(?[]const u8, data.slug);
+        break :blk if (s) |sv| if (sv.len == 0) @as(?[]const u8, null) else sv else null;
+    } else null;
 
     // Extract status: opts.status takes precedence, then data.status, then "draft"
     const status: []const u8 = if (opts.status) |s| s else if (@hasField(@TypeOf(data), "status")) blk: {

@@ -17,6 +17,7 @@ const csrf = @import("csrf");
 const admin_api = @import("admin_api");
 const media_handler = @import("media_handler");
 const schema_sync = @import("schema_sync");
+const seed = @import("seed");
 const websocket = @import("websocket");
 const presence = @import("presence");
 const url_mod = @import("url");
@@ -85,9 +86,15 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     };
     defer db.deinit();
 
-    // Ensure all schema tables exist and sync content types/taxonomies
-    schema_sync.syncIfNeeded(&db) catch |err| {
-        std.debug.print("Failed to sync schema: {}\n", .{err});
+    // Ensure all schema tables exist (safe to re-run — uses IF NOT EXISTS)
+    schema_sync.ensureSchema(&db) catch |err| {
+        std.debug.print("Failed to ensure schema: {}\n", .{err});
+        return err;
+    };
+
+    // Seed content types and taxonomies (idempotent — uses INSERT OR IGNORE)
+    db.exec(seed.seed_sql) catch |err| {
+        std.debug.print("Failed to seed data: {}\n", .{err});
         return err;
     };
 

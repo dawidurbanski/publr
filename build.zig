@@ -269,6 +269,15 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // Seed module (comptime INSERT generation, no db dependency)
+    const seed_module = b.createModule(.{
+        .root_source_file = b.path("src/schema/seed.zig"),
+        .imports = &.{
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "field", .module = field_module },
+        },
+    });
+
     // Note: schema_sync_module needs db_module, which is defined below.
     // We'll add the import after db_module is created.
 
@@ -319,16 +328,17 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/id_gen.zig"),
     });
 
-    // Schema sync (needs db_module)
+    // Schema DDL (needs db_module)
     const schema_sync_module = b.createModule(.{
         .root_source_file = b.path("src/schema/sync.zig"),
         .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "schema_registry", .module = schema_registry_module },
             .{ .name = "db", .module = db_module },
-            .{ .name = "id_gen", .module = id_gen_module },
         },
     });
+
+    // Add test-only imports to seed_module (db and sync defined above)
+    seed_module.addImport("db", db_module);
+    seed_module.addImport("sync", schema_sync_module);
 
     // =========================================================================
     // Database Initialization Tool (comptime schema generation)
@@ -358,6 +368,7 @@ pub fn build(b: *std.Build) void {
     // Add schema modules to init_db
     init_db.root_module.addImport("schema_registry", schema_registry_module);
     init_db.root_module.addImport("field", field_module);
+    init_db.root_module.addImport("seed", seed_module);
 
     // Run init_db as build step
     const init_db_cmd = b.addRunArtifact(init_db);
@@ -768,6 +779,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("schemas", schemas_module);
     exe.root_module.addImport("schema_registry", schema_registry_module);
     exe.root_module.addImport("schema_sync", schema_sync_module);
+    exe.root_module.addImport("seed", seed_module);
     exe.root_module.addImport("schema_media", schema_media_module);
     exe.root_module.addImport("cms", cms_module);
     exe.root_module.addImport("storage", storage_module);
@@ -981,7 +993,7 @@ pub fn build(b: *std.Build) void {
     browser_wasm.root_module.addImport("media_handler", media_handler_module);
     browser_wasm.root_module.addImport("wasm_storage", wasm_storage_module);
     browser_wasm.root_module.addImport("wasm_media_handler", wasm_media_handler_module);
-    browser_wasm.root_module.addImport("schema_sync", schema_sync_module);
+    browser_wasm.root_module.addImport("seed", seed_module);
 
     // Comptime config module (generated from build options)
     const wasm_config_files = b.addWriteFiles();

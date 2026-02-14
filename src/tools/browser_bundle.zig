@@ -462,7 +462,7 @@ const modules = [_]Module{
     .{ .name = "time_util", .src = "src/time_util.zig", .deps = &.{} },
     .{ .name = "middleware", .src = "src/middleware.zig", .deps = &.{} },
     .{ .name = "db", .src = "src/db.zig", .deps = &.{"sqlite3_c"} },
-    .{ .name = "schema_sync", .src = "src/schema/sync.zig", .deps = &.{ "field", "schema_registry", "db" } },
+    .{ .name = "seed", .src = "src/schema/seed.zig", .deps = &.{ "schema_registry", "field" } },
     .{ .name = "cms", .src = "src/cms.zig", .deps = &.{ "field", "schema_registry", "db", "time_util" } },
     .{ .name = "storage", .src = "src/storage.zig", .deps = &.{"time_util"} },
     .{ .name = "svg_sanitize", .src = "src/svg_sanitize.zig", .deps = &.{} },
@@ -486,7 +486,7 @@ const modules = [_]Module{
     .{ .name = "views", .src = "src/gen/views/views.zig", .deps = &.{ "zsx", "icons" } },
     // Plugins
     .{ .name = "plugin_dashboard", .src = "src/plugins/dashboard.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "db", "csrf", "auth_middleware", "media", "views", "registry" } },
-    .{ .name = "plugin_posts", .src = "src/plugins/posts.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "db", "csrf", "auth_middleware", "cms", "schemas", "schema_sync", "gravatar", "views", "registry", "time_util" } },
+    .{ .name = "plugin_posts", .src = "src/plugins/posts.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "db", "csrf", "auth_middleware", "cms", "schemas", "gravatar", "views", "registry", "time_util" } },
     .{ .name = "plugin_users", .src = "src/plugins/users.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "auth", "csrf", "auth_middleware", "views", "registry" } },
     .{ .name = "plugin_settings", .src = "src/plugins/settings.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth", "auth_middleware", "views", "registry" } },
     .{ .name = "plugin_components", .src = "src/plugins/components.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "views", "registry" } },
@@ -505,7 +505,7 @@ const root_deps = [_][]const u8{
     "auth_middleware", "csrf",   "icons",              "storage",
     "svg_sanitize", "cms",      "media",              "image",
     "schema_media", "media_handler", "wasm_storage",  "wasm_media_handler",
-    "views",       "schema_sync",
+    "views",       "seed",
 };
 
 fn writeManifest(alloc: Allocator, out_dir: []const u8) !void {

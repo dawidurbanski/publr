@@ -2,45 +2,17 @@
 //!
 //! Creates the database and schema if it doesn't exist.
 //! Run as a build step, not at runtime.
-//! Content types and taxonomies are generated from the schema registry at comptime.
+//! Content types and taxonomies are generated from the schema registry at comptime
+//! via the shared seed module.
 
 const std = @import("std");
 const c = @cImport({
     @cInclude("sqlite3.h");
 });
 
-const registry = @import("schema_registry");
-const field = @import("field");
+const seed = @import("seed");
 
 const schema_sql = @embedFile("schema.sql");
-
-/// Content types INSERT SQL - generated at comptime from registry
-const content_types_sql = generateContentTypesSql();
-
-/// Taxonomies INSERT SQL - generated at comptime from registry
-const taxonomies_sql = generateTaxonomiesSql();
-
-fn generateContentTypesSql() []const u8 {
-    comptime {
-        var sql: []const u8 = "";
-        for (registry.content_types) |ct| {
-            sql = sql ++ "INSERT OR IGNORE INTO content_types (id, slug, name, fields, source) VALUES ('" ++
-                ct.id ++ "', '" ++ ct.id ++ "', '" ++ ct.display_name ++ "', '[]', '" ++ @tagName(ct.source) ++ "');\n";
-        }
-        return sql;
-    }
-}
-
-fn generateTaxonomiesSql() []const u8 {
-    comptime {
-        var sql: []const u8 = "";
-        for (registry.all_taxonomy_ids) |tax_id| {
-            sql = sql ++ "INSERT OR IGNORE INTO taxonomies (id, slug, name, hierarchical) VALUES ('" ++
-                tax_id ++ "', '" ++ tax_id ++ "', '" ++ field.humanize(tax_id) ++ "', 0);\n";
-        }
-        return sql;
-    }
-}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -69,7 +41,7 @@ pub fn main() !void {
     };
 
     // Database exists, ensure schema is up to date
-    try ensureSchema(db_path);
+    try initDatabase(db_path);
 }
 
 fn initDatabase(path: []const u8) !void {
@@ -85,14 +57,11 @@ fn initDatabase(path: []const u8) !void {
     }
     defer _ = c.sqlite3_close(db);
 
-    // Execute base schema
+    // Execute base schema (DDL)
     try execSql(db, schema_sql);
 
-    // Insert content types (generated at comptime)
-    try execSql(db, content_types_sql);
-
-    // Insert taxonomies (generated at comptime)
-    try execSql(db, taxonomies_sql);
+    // Seed content types and taxonomies (comptime-generated, idempotent)
+    try execSql(db, seed.seed_sql);
 }
 
 fn execSql(db: ?*c.sqlite3, sql: []const u8) !void {
@@ -103,8 +72,4 @@ fn execSql(db: ?*c.sqlite3, sql: []const u8) !void {
         c.sqlite3_free(err_msg);
         return error.SqlFailed;
     }
-}
-
-fn ensureSchema(path: []const u8) !void {
-    try initDatabase(path);
 }

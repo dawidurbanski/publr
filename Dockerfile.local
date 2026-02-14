@@ -1,8 +1,9 @@
 FROM alpine:3.21 AS build
 
 RUN apk add --no-cache curl xz
-RUN curl -fsSL https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ -C /opt && \
-    ln -s /opt/zig-x86_64-linux-0.15.2/zig /usr/local/bin/zig
+RUN ARCH=$(uname -m | sed 's/arm64/aarch64/') && \
+    curl -fsSL https://ziglang.org/download/0.15.2/zig-${ARCH}-linux-0.15.2.tar.xz | tar -xJ -C /opt && \
+    ln -s /opt/zig-${ARCH}-linux-0.15.2/zig /usr/local/bin/zig
 
 WORKDIR /src
 COPY . .
