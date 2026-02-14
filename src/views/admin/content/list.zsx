@@ -4,9 +4,6 @@
 const icon_file =
     \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2.26946V6.4C14 6.96005 14 7.24008 14.109 7.45399C14.2049 7.64215 14.3578 7.79513 14.546 7.89101C14.7599 8 15.0399 8 15.6 8H19.7305M20 9.98822V17.2C20 18.8802 20 19.7202 19.673 20.362C19.3854 20.9265 18.9265 21.3854 18.362 21.673C17.7202 22 16.8802 22 15.2 22H8.8C7.11984 22 6.27976 22 5.63803 21.673C5.07354 21.3854 4.6146 20.9265 4.32698 20.362C4 19.7202 4 18.8802 4 17.2V6.8C4 5.11984 4 4.27976 4.32698 3.63803C4.6146 3.07354 5.07354 2.6146 5.63803 2.32698C6.27976 2 7.11984 2 8.8 2H12.0118C12.7455 2 13.1124 2 13.4577 2.08289C13.7638 2.15638 14.0564 2.27759 14.3249 2.44208C14.6276 2.6276 14.887 2.88703 15.4059 3.40589L18.5941 6.59411C19.113 7.11297 19.3724 7.3724 19.5579 7.67515C19.7224 7.94356 19.8436 8.2362 19.9171 8.5423C20 8.88757 20 9.25445 20 9.98822Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 ;
-const icon_users =
-    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 3.46776C17.4817 4.20411 18.5 5.73314 18.5 7.5C18.5 9.26686 17.4817 10.7959 16 11.5322M18 16.7664C19.5115 17.4503 20.8725 18.565 22 20M2 20C3.94649 17.5226 6.58918 16 9.5 16C12.4108 16 15.0535 17.5226 17 20M14 7.5C14 9.98528 11.9853 12 9.5 12C7.01472 12 5 9.98528 5 7.5C5 5.01472 7.01472 3 9.5 3C11.9853 3 14 5.01472 14 7.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
 const icon_more =
     \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 13C12.5523 13 13 12.5523 13 12C13 11.4477 12.5523 11 12 11C11.4477 11 11 11.4477 11 12C11 12.5523 11.4477 13 12 13Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 6C12.5523 6 13 5.55228 13 5C13 4.44772 12.5523 4 12 4C11.4477 4 11 4.44772 11 5C11 5.55228 11.4477 6 12 6Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 20C12.5523 20 13 19.5523 13 19C13 18.4477 12.5523 18 12 18C11.4477 18 11 18.4477 11 19C11 19.5523 11.4477 20 12 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 ;
@@ -28,6 +25,9 @@ const icon_chevron_left =
 const icon_chevron_right =
     \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 ;
+const icon_x =
+    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+;
 
 const PageUrl = struct {
     page_num: []const u8,
@@ -36,10 +36,16 @@ const PageUrl = struct {
     is_ellipsis: bool = false,
 };
 
+const AuthorOption = struct {
+    value: []const u8,
+    label: []const u8,
+    selected: bool,
+};
+
 pub const Entry = struct {
     id: []const u8,
     title: []const u8,
-    author: []const u8,
+    authors_html: []const u8,
     status: []const u8,
     date: []const u8,
     edit_url: []const u8,
@@ -55,7 +61,27 @@ pub fn List(props: struct {
     page_urls: []const PageUrl,
     new_url: []const u8,
     type_name: []const u8,
+    available_authors: []const AuthorOption,
+    active_author_filter: []const u8,
+    base_path: []const u8,
 }) {
+    {if (props.available_authors.len > 0) (
+        <div class="table-filters">
+            <form method="get" action={props.base_path} class="table-filter-form">
+                <select name="author" class="form-control form-control-sm" onchange="this.form.submit()" aria-label="Filter by author">
+                    <option value="">All authors</option>
+                    {for (props.available_authors) |author| (
+                        <option value={author.value} selected={author.selected}>{author.label}</option>
+                    )}
+                </select>
+            </form>
+            {if (props.active_author_filter.len > 0) (
+                <a href={props.base_path} class="btn btn-sm table-filter-clear" title="Clear filter">
+                    {@raw icon_x} Clear filter
+                </a>
+            )}
+        </div>
+    )}
     {if (props.has_entries) (
         <div>
             <table class="table">
@@ -89,8 +115,7 @@ pub fn List(props: struct {
                             </td>
                             <td>
                                 <span class="table-cell-icon">
-                                    <span class="table-cell-icon-prefix">{@raw icon_users}</span>
-                                    {entry.author}
+                                    {@raw entry.authors_html}
                                 </span>
                             </td>
                             <td>

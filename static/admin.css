@@ -1528,6 +1528,34 @@ a.version-item:hover {
 }
 
 /* Table footer */
+.table-filters {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-lg) var(--space-xl);
+}
+
+.table-filter-form {
+    display: inline;
+}
+
+.table-filter-clear {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--text-tertiary);
+    text-decoration: none;
+    font-size: var(--text-sm);
+}
+
+.table-filter-clear:hover {
+    color: var(--text-secondary);
+}
+
+.text-tertiary {
+    color: var(--text-tertiary);
+}
+
 .table-footer {
     display: flex;
     align-items: center;

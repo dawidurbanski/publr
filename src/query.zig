@@ -128,6 +128,8 @@ pub const ListOptions = struct {
     order_dir: OrderDir = .desc,
     /// Meta field filters (generates JOINs)
     meta_filters: []const MetaFilter = &.{},
+    /// Filter to specific entry IDs (e.g., from author filter)
+    entry_ids: ?[]const []const u8 = null,
 };
 
 /// Get a single entry by ID or slug
@@ -178,6 +180,7 @@ pub fn listEntries(
         .order_by = opts.order_by,
         .order_dir = opts.order_dir,
         .meta_filters = opts.meta_filters,
+        .entry_ids = opts.entry_ids,
         .parse_row = struct {
             fn parse(a: Allocator, stmt: *Statement) !Entry(CT) {
                 return parseEntryRow(CT, a, stmt);
@@ -208,6 +211,7 @@ pub fn listWithMeta(
         order_by: []const u8 = "created_at",
         order_dir: OrderDir = .desc,
         meta_filters: []const MetaFilter = &.{},
+        entry_ids: ?[]const []const u8 = null,
         parse_row: *const fn (Allocator, *Statement) anyerror!T,
     },
 ) ![]T {
@@ -266,6 +270,23 @@ pub fn listWithMeta(
     if (config.filename_search != null) {
         try w.print(" AND t.filename LIKE ?{}", .{bind_idx});
         bind_idx += 1;
+    }
+
+    // Entry ID filter (e.g., from author filtering)
+    const entry_ids_bind_start = bind_idx;
+    if (config.entry_ids) |ids| {
+        if (ids.len > 0) {
+            try w.writeAll(" AND t.id IN (");
+            for (ids, 0..) |_, i| {
+                if (i > 0) try w.writeByte(',');
+                try w.print("?{d}", .{bind_idx});
+                bind_idx += 1;
+            }
+            try w.writeByte(')');
+        } else {
+            // Empty ID list = no results
+            try w.writeAll(" AND 1=0");
+        }
     }
 
     // Meta filter WHERE conditions
@@ -329,6 +350,13 @@ pub fn listWithMeta(
     // Bind filename search
     if (config.filename_search) |search| {
         try stmt.bindText(search_bind_idx, search);
+    }
+
+    // Bind entry IDs
+    if (config.entry_ids) |ids| {
+        for (ids, 0..) |eid, i| {
+            try stmt.bindText(entry_ids_bind_start + @as(u32, @intCast(i)), eid);
+        }
     }
 
     // Bind meta filter values

@@ -861,7 +861,7 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
                     try v_stmt.bindText(2, eid);
                     try v_stmt.bindText(3, to_vid);
                     try v_stmt.bindText(4, merged_data);
-                    if (release_author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
+                    try v_stmt.bindNull(5);
                     if (collab_json) |cj| try v_stmt.bindText(6, cj) else try v_stmt.bindNull(6);
                     _ = try v_stmt.step();
                 }
@@ -947,12 +947,11 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
                     defer if (collab_json) |c| allocator.free(c);
 
                     var vt_stmt = try db.prepare(
-                        "UPDATE entry_versions SET version_type = 'published', collaborators = ?1, author_id = ?2 WHERE id = ?3",
+                        "UPDATE entry_versions SET version_type = 'published', collaborators = ?1 WHERE id = ?2",
                     );
                     defer vt_stmt.deinit();
                     if (collab_json) |cj| try vt_stmt.bindText(1, cj) else try vt_stmt.bindNull(1);
-                    if (release_author_id) |aid| try vt_stmt.bindText(2, aid) else try vt_stmt.bindNull(2);
-                    try vt_stmt.bindText(3, to_vid);
+                    try vt_stmt.bindText(2, to_vid);
                     _ = try vt_stmt.step();
                 }
             }

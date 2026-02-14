@@ -64,6 +64,12 @@ fn setup(app: *admin.PageApp) void {
 // Handlers
 // =============================================================================
 
+const AuthorOption = struct {
+    value: []const u8,
+    label: []const u8,
+    selected: bool,
+};
+
 fn handleList(ctx: *Context) !void {
     const db = if (auth_middleware.auth) |a| a.db else {
         ctx.html("Database not initialized");
@@ -73,15 +79,27 @@ fn handleList(ctx: *Context) !void {
     const ViewPost = struct {
         id: []const u8,
         title: []const u8,
-        author: []const u8,
+        authors_html: []const u8,
         status: []const u8,
         date: []const u8,
         edit_url: []const u8,
         preview_url: []const u8,
     };
 
-    // Pagination
-    const total_count = cms.countEntries(Post, db, .{}) catch 0;
+    // Author filter (treat empty string as no filter)
+    const author_filter: ?[]const u8 = if (pu.queryParam(ctx.query, "author")) |af| (if (af.len > 0) af else null) else null;
+    const filtered_entry_ids: ?[]const []const u8 = if (author_filter) |af|
+        blk: {
+            const ids = getEntryIdsByAuthor(ctx.allocator, db, af, Post.type_id);
+            break :blk if (ids.len > 0) ids else null;
+        }
+    else
+        null;
+
+    // Pagination — when filtered, count matching entries
+    const total_count: u32 = if (author_filter != null) blk: {
+        if (filtered_entry_ids) |ids| break :blk @intCast(ids.len) else break :blk 0;
+    } else cms.countEntries(Post, db, .{}) catch 0;
     const pag = pagination.Paginator.init(ctx.query, total_count, 20);
 
     // Fetch posts from database
@@ -90,6 +108,7 @@ fn handleList(ctx: *Context) !void {
         .offset = pag.offset(),
         .order_by = "created_at",
         .order_dir = .desc,
+        .entry_ids = filtered_entry_ids,
     }) catch |err| {
         std.debug.print("Error listing posts: {}\n", .{err});
         const empty_pag = pagination.Paginator.init(null, 0, 20);
@@ -102,10 +121,22 @@ fn handleList(ctx: *Context) !void {
             .prev_page_url = "",
             .next_page_url = "",
             .page_urls = empty_urls.items,
+            .available_authors = &[_]AuthorOption{},
+            .active_author_filter = "",
         }});
         ctx.html(registry.renderPage(page, ctx, content));
         return;
     };
+
+    // Resolve authors for all entries on this page
+    var entry_ids = ctx.allocator.alloc([]const u8, entries.len) catch {
+        ctx.html("Error allocating memory");
+        return;
+    };
+    for (entries, 0..) |entry, i| {
+        entry_ids[i] = entry.id;
+    }
+    const all_authors = resolveEntryAuthors(ctx.allocator, db, entry_ids);
 
     // Convert to view format
     var posts = ctx.allocator.alloc(ViewPost, entries.len) catch {
@@ -114,10 +145,11 @@ fn handleList(ctx: *Context) !void {
     };
 
     for (entries, 0..) |entry, i| {
+        const authors = findAuthorsForEntry(all_authors, entry.id);
         posts[i] = .{
             .id = entry.id,
             .title = entry.title,
-            .author = "Admin", // TODO: resolve author reference
+            .authors_html = renderAuthorCell(ctx.allocator, authors),
             .status = entry.status,
             .date = formatDate(entry.created_at, ctx.allocator) catch "Unknown",
             .edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{entry.id}) catch "/admin/posts",
@@ -125,11 +157,29 @@ fn handleList(ctx: *Context) !void {
         };
     }
 
-    // Build truncated pagination URLs: 1 ... 4 [5] 6 ... 251
-    const base_url = "/admin/posts";
+    // Build pagination URLs (preserve author filter in URL)
+    const base_url = if (author_filter) |af|
+        std.fmt.allocPrint(ctx.allocator, "/admin/posts?author={s}", .{af}) catch "/admin/posts"
+    else
+        "/admin/posts";
     const page_urls = pag.buildTruncatedPageUrls(ctx.allocator, base_url);
 
     const total_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{total_count}) catch "0";
+
+    // Get available authors for filter dropdown
+    const raw_authors = getAvailableAuthors(ctx.allocator, db, Post.type_id);
+    const author_options: []const AuthorOption = blk: {
+        if (raw_authors.len == 0) break :blk &[_]AuthorOption{};
+        const opts = ctx.allocator.alloc(AuthorOption, raw_authors.len) catch break :blk &[_]AuthorOption{};
+        for (raw_authors, 0..) |a, i| {
+            opts[i] = .{
+                .value = a.id,
+                .label = a.label(),
+                .selected = if (author_filter) |af| std.mem.eql(u8, a.id, af) else false,
+            };
+        }
+        break :blk opts;
+    };
 
     const content = tpl.render(views.admin.posts.list.List, .{.{
         .has_posts = posts.len > 0,
@@ -139,6 +189,8 @@ fn handleList(ctx: *Context) !void {
         .prev_page_url = page_urls.prev_url,
         .next_page_url = page_urls.next_url,
         .page_urls = page_urls.items,
+        .available_authors = author_options,
+        .active_author_filter = author_filter orelse "",
     }});
 
     const add_btn =
@@ -1289,6 +1341,209 @@ fn getUserDisplayName(allocator: std.mem.Allocator, db: *Db, user_id: ?[]const u
     const dn = stmt.columnText(0) orelse return null;
     if (dn.len == 0) return null;
     return allocator.dupe(u8, dn) catch null;
+}
+
+const AuthorInfo = struct {
+    id: []const u8,
+    display_name: []const u8,
+    email: []const u8,
+
+    fn label(self: AuthorInfo) []const u8 {
+        return if (self.display_name.len > 0) self.display_name else self.email;
+    }
+};
+
+const EntryAuthors = struct {
+    entry_id: []const u8,
+    authors: []const AuthorInfo,
+};
+
+/// Batch-query all distinct authors for a list of entry IDs.
+/// Returns one EntryAuthors per entry that has authors, in entry_id order.
+fn resolveEntryAuthors(allocator: std.mem.Allocator, db: *Db, entry_ids: []const []const u8) []const EntryAuthors {
+    if (entry_ids.len == 0) return &.{};
+
+    // Build: SELECT DISTINCT ev.entry_id, u.id, u.display_name, u.email
+    //        FROM entry_versions ev JOIN users u ON u.id = ev.author_id
+    //        WHERE ev.entry_id IN (?1, ?2, ...) AND ev.author_id IS NOT NULL
+    //          AND ev.version_type IN ('created', 'updated', 'published')
+    //        ORDER BY ev.entry_id, ev.created_at ASC
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+    const w = sql_buf.writer(allocator);
+
+    w.writeAll(
+        \\SELECT DISTINCT ev.entry_id, u.id, u.display_name, u.email
+        \\ FROM entry_versions ev JOIN users u ON u.id = ev.author_id
+        \\ WHERE ev.author_id IS NOT NULL AND ev.version_type IN ('created', 'updated', 'published')
+        \\ AND ev.entry_id IN (
+    ) catch return &.{};
+
+    for (entry_ids, 0..) |_, i| {
+        if (i > 0) w.writeByte(',') catch return &.{};
+        w.print("?{d}", .{i + 1}) catch return &.{};
+    }
+    w.writeAll(") ORDER BY ev.entry_id, ev.created_at ASC") catch return &.{};
+
+    const sql = sql_buf.toOwnedSlice(allocator) catch return &.{};
+    defer allocator.free(sql);
+
+    var stmt = db.prepare(sql) catch return &.{};
+    defer stmt.deinit();
+
+    for (entry_ids, 0..) |eid, i| {
+        stmt.bindText(@intCast(i + 1), eid) catch return &.{};
+    }
+
+    // Collect rows grouped by entry_id
+    var results: std.ArrayListUnmanaged(EntryAuthors) = .{};
+    var current_authors: std.ArrayListUnmanaged(AuthorInfo) = .{};
+    var current_entry_id: ?[]const u8 = null;
+
+    while (stmt.step() catch null) |has_row| {
+        if (!has_row) break;
+        const row_entry_id = stmt.columnText(0) orelse continue;
+        const user_id = stmt.columnText(1) orelse continue;
+        const display_name = stmt.columnText(2) orelse "";
+        const email = stmt.columnText(3) orelse continue;
+
+        // Check if we moved to a new entry
+        if (current_entry_id) |cur| {
+            if (!std.mem.eql(u8, cur, row_entry_id)) {
+                // Flush previous entry
+                const authors_slice = current_authors.toOwnedSlice(allocator) catch continue;
+                results.append(allocator, .{
+                    .entry_id = cur,
+                    .authors = authors_slice,
+                }) catch continue;
+                current_entry_id = allocator.dupe(u8, row_entry_id) catch continue;
+            }
+        } else {
+            current_entry_id = allocator.dupe(u8, row_entry_id) catch continue;
+        }
+
+        // Deduplicate by user_id within this entry
+        var duplicate = false;
+        for (current_authors.items) |existing| {
+            if (std.mem.eql(u8, existing.id, user_id)) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
+            current_authors.append(allocator, .{
+                .id = allocator.dupe(u8, user_id) catch continue,
+                .display_name = allocator.dupe(u8, display_name) catch continue,
+                .email = allocator.dupe(u8, email) catch continue,
+            }) catch continue;
+        }
+    }
+
+    // Flush last entry
+    if (current_entry_id) |cur| {
+        const authors_slice = current_authors.toOwnedSlice(allocator) catch return results.toOwnedSlice(allocator) catch &.{};
+        results.append(allocator, .{
+            .entry_id = cur,
+            .authors = authors_slice,
+        }) catch {};
+    }
+
+    return results.toOwnedSlice(allocator) catch &.{};
+}
+
+/// Find authors for a specific entry from the batch result.
+fn findAuthorsForEntry(all: []const EntryAuthors, entry_id: []const u8) []const AuthorInfo {
+    for (all) |ea| {
+        if (std.mem.eql(u8, ea.entry_id, entry_id)) return ea.authors;
+    }
+    return &.{};
+}
+
+/// Render author avatars + label HTML for a table cell.
+fn renderAuthorCell(allocator: std.mem.Allocator, authors: []const AuthorInfo) []const u8 {
+    var buf: std.ArrayList(u8) = .{};
+    const w = buf.writer(allocator);
+
+    if (authors.len == 0) {
+        w.writeAll("<span class=\"text-tertiary\">System</span>") catch return "System";
+        return buf.toOwnedSlice(allocator) catch "System";
+    }
+
+    if (authors.len == 1) {
+        // Single author: avatar + name
+        const a = authors[0];
+        const avatar = gravatar.url(a.email, 24);
+        w.writeAll("<img src=\"") catch return a.label();
+        w.writeAll(avatar.slice()) catch return a.label();
+        w.writeAll("\" alt=\"\" title=\"") catch return a.label();
+        cms.writeEscaped(w, a.label()) catch return a.label();
+        w.writeAll("\" class=\"version-avatar\" /> ") catch return a.label();
+        cms.writeEscaped(w, a.label()) catch return a.label();
+        return buf.toOwnedSlice(allocator) catch a.label();
+    }
+
+    // Multiple authors: stacked avatars + "N authors"
+    w.writeAll("<span class=\"version-avatars\">") catch return "Multiple authors";
+    const max_show: usize = 3;
+    const show_count = @min(authors.len, max_show);
+    for (authors[0..show_count]) |a| {
+        const avatar = gravatar.url(a.email, 24);
+        w.writeAll("<img src=\"") catch continue;
+        w.writeAll(avatar.slice()) catch continue;
+        w.writeAll("\" alt=\"\" title=\"") catch continue;
+        cms.writeEscaped(w, a.label()) catch continue;
+        w.writeAll("\" class=\"version-avatar version-avatar-stacked\" />") catch continue;
+    }
+    if (authors.len > max_show) {
+        w.print("<span class=\"version-avatar version-avatar-overflow\">+{d}</span>", .{authors.len - max_show}) catch {};
+    }
+    w.writeAll("</span> ") catch {};
+    w.print("{d} authors", .{authors.len}) catch {};
+    return buf.toOwnedSlice(allocator) catch "Multiple authors";
+}
+
+/// Query all users who have authored at least one version for a content type.
+fn getAvailableAuthors(allocator: std.mem.Allocator, db: *Db, content_type_id: []const u8) []const AuthorInfo {
+    var stmt = db.prepare(
+        \\SELECT DISTINCT u.id, u.display_name, u.email FROM users u
+        \\JOIN entry_versions ev ON ev.author_id = u.id
+        \\JOIN entries e ON e.id = ev.entry_id
+        \\WHERE e.content_type_id = ?1 AND ev.version_type IN ('created', 'updated', 'published')
+        \\ORDER BY u.display_name, u.email
+    ) catch return &.{};
+    defer stmt.deinit();
+    stmt.bindText(1, content_type_id) catch return &.{};
+
+    var results: std.ArrayListUnmanaged(AuthorInfo) = .{};
+    while (stmt.step() catch null) |has_row| {
+        if (!has_row) break;
+        results.append(allocator, .{
+            .id = allocator.dupe(u8, stmt.columnText(0) orelse continue) catch continue,
+            .display_name = allocator.dupe(u8, stmt.columnText(1) orelse "") catch continue,
+            .email = allocator.dupe(u8, stmt.columnText(2) orelse continue) catch continue,
+        }) catch continue;
+    }
+    return results.toOwnedSlice(allocator) catch &.{};
+}
+
+/// Query entry IDs that have at least one version by a specific author.
+fn getEntryIdsByAuthor(allocator: std.mem.Allocator, db: *Db, author_id: []const u8, content_type_id: []const u8) []const []const u8 {
+    var stmt = db.prepare(
+        \\SELECT DISTINCT ev.entry_id FROM entry_versions ev
+        \\JOIN entries e ON e.id = ev.entry_id
+        \\WHERE ev.author_id = ?1 AND e.content_type_id = ?2
+        \\AND ev.version_type IN ('created', 'updated', 'published')
+    ) catch return &.{};
+    defer stmt.deinit();
+    stmt.bindText(1, author_id) catch return &.{};
+    stmt.bindText(2, content_type_id) catch return &.{};
+
+    var results: std.ArrayListUnmanaged([]const u8) = .{};
+    while (stmt.step() catch null) |has_row| {
+        if (!has_row) break;
+        results.append(allocator, allocator.dupe(u8, stmt.columnText(0) orelse continue) catch continue) catch continue;
+    }
+    return results.toOwnedSlice(allocator) catch &.{};
 }
 
 /// Notify presence system that published fields had their hard locks released.
