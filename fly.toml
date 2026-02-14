@@ -1,0 +1,24 @@
+app = "publr-cms"
+primary_region = "waw"
+
+[build]
+
+[mounts]
+  source = "publr_data"
+  destination = "/app/data"
+
+[http_service]
+  internal_port = 80
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
