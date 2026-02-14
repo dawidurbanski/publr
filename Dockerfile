@@ -27,6 +27,6 @@ USER publr
 WORKDIR /app
 
 VOLUME /app/data
-EXPOSE 443 80
+EXPOSE 8080
 
-ENTRYPOINT ["sh", "-c", "nginx && exec /app/publr serve"]
+ENTRYPOINT ["sh", "-c", "nginx && exec /app/publr serve --port 3000"]
