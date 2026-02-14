@@ -33,7 +33,7 @@ const EDIT_DEBOUNCE_MS = 300;
 // =========================================================================
 
 export function initPresence() {
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (!form) return;
 
     const entryId = form.dataset.entryId;
@@ -63,8 +63,9 @@ export function initPresence() {
     form.addEventListener('focusin', onFieldFocus);
     form.addEventListener('focusout', onFieldBlur);
 
-    // Field edit broadcasting (debounced oninput)
+    // Field edit broadcasting (debounced oninput + onchange for checkboxes)
     form.addEventListener('input', onFieldInput);
+    form.addEventListener('change', onFieldChange);
 
     // Connect WS (idempotent if already connected)
     connect();
@@ -118,7 +119,7 @@ function handlePresenceSync(data) {
     }
 
     // Set up takeover hover on page-load hard lock badges
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form) {
         form.querySelectorAll('.field-editor-badge.field-editor-active').forEach(function(badge) {
             const group = badge.closest('.form-group[data-field]');
@@ -215,7 +216,7 @@ function handleLockAcquired(data) {
     applyFieldLock(data.field, { ...data, hard: true });
 
     // Trigger change detection (field value may have been updated by a prior field_edit)
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
 }
 
@@ -243,7 +244,7 @@ function handleLockReleased(data) {
     }
 
     // Trigger change detection (field may have reverted to published value)
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
 }
 
@@ -256,10 +257,16 @@ function handleFieldEdit(data) {
     const input = group.querySelector('.form-control');
     if (input) {
         input.value = data.value;
+    } else {
+        // Boolean fields use checkbox
+        const cb = group.querySelector('.form-check-input');
+        if (cb) {
+            cb.checked = (data.value === 'true' || data.value === '1');
+        }
     }
 
     // Notify admin.js to re-run change detection (adds field-changed class)
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
 }
 
@@ -267,7 +274,7 @@ function handleReleaseUpdated(data) {
     if (!data || !data.fields_in_releases) return;
 
     // Notify admin.js with the new release field data
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form) {
         form.dispatchEvent(new CustomEvent('publr:release-updated', {
             detail: { fieldsInReleases: data.fields_in_releases }
@@ -300,7 +307,7 @@ function handleTakeoverResult(data) {
         });
 
         // Trigger change detection
-        const form = document.getElementById('post-form');
+        const form = document.getElementById('entry-form');
         if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
     } else {
         // Takeover blocked — show brief feedback
@@ -354,7 +361,7 @@ function checkActivity() {
 
 function onFieldFocus(e) {
     // Ignore focus events caused by peek wrapper DOM mutations
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form && form.dataset.peekMutating) return;
 
     const group = e.target.closest('.form-group[data-field]');
@@ -371,7 +378,7 @@ function onFieldFocus(e) {
 
 function onFieldBlur(e) {
     // Ignore blur events caused by peek wrapper DOM mutations
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form && form.dataset.peekMutating) return;
 
     const group = e.target.closest('.form-group[data-field]');
@@ -394,6 +401,19 @@ function onFieldInput(e) {
     clearTimeout(editDebounceTimers[field]);
     editDebounceTimers[field] = setTimeout(() => {
         send('field_edit', { field, value: e.target.value });
+    }, EDIT_DEBOUNCE_MS);
+}
+
+function onFieldChange(e) {
+    if (!e.target.classList.contains('form-check-input')) return;
+    const group = e.target.closest('.form-group[data-field]');
+    if (!group) return;
+    const field = group.dataset.field;
+    if (field !== focusedField) return;
+
+    clearTimeout(editDebounceTimers[field]);
+    editDebounceTimers[field] = setTimeout(() => {
+        send('field_edit', { field, value: e.target.checked ? 'true' : 'false' });
     }, EDIT_DEBOUNCE_MS);
 }
 
@@ -636,11 +656,12 @@ function cleanup() {
     off('release_updated', handleReleaseUpdated);
     off('open', handleWsOpen);
 
-    const form = document.getElementById('post-form');
+    const form = document.getElementById('entry-form');
     if (form) {
         form.removeEventListener('focusin', onFieldFocus);
         form.removeEventListener('focusout', onFieldBlur);
         form.removeEventListener('input', onFieldInput);
+        form.removeEventListener('change', onFieldChange);
     }
 
     for (const key of Object.keys(editDebounceTimers)) {

@@ -22,6 +22,7 @@ const gravatar = @import("gravatar");
 // Import all plugins
 const dashboard = @import("plugin_dashboard");
 const posts = @import("plugin_posts");
+const content_plugin_mod = @import("plugin_content");
 const media_plugin = @import("plugin_media");
 const users = @import("plugin_users");
 const settings = @import("plugin_settings");
@@ -30,11 +31,14 @@ const design_system = @import("plugin_design_system");
 const content_types = @import("plugin_content_types");
 const releases = @import("plugin_releases");
 const icons = @import("icons");
+const schemas = @import("schemas");
 
-/// All registered admin pages, sorted by position
-pub const pages: []const admin.Page = &[_]admin.Page{
+/// All registered admin pages, sorted by position.
+/// Content type pages are auto-generated from schemas.content_types.
+const pages_arr = [_]admin.Page{
     dashboard.page,
     posts.page,
+} ++ content_plugin_mod.content_pages ++ [_]admin.Page{
     releases.page,
     content_types.page,
     media_plugin.page,
@@ -44,6 +48,8 @@ pub const pages: []const admin.Page = &[_]admin.Page{
     components.page,
     design_system.page,
 };
+
+pub const pages: []const admin.Page = &pages_arr;
 
 /// Get subpages for a parent page
 pub fn getSubPages(comptime parent_id: []const u8) []const admin.Page {
@@ -122,9 +128,9 @@ const topbar_entries = [_]struct {
     section: []const u8,
     icon: []const u8,
 }{
-    .{ .label = "Content", .path = "/admin/posts", .section = "content", .icon = icons.edit },
-    .{ .label = "Releases", .path = "/admin/releases", .section = "releases", .icon = icons.package },
-    .{ .label = "Content Types", .path = "/admin/content-types", .section = "content_types", .icon = icons.file },
+    .{ .label = "Content", .path = "/admin/content/" ++ schemas.content_types[0].type_id, .section = "content", .icon = icons.bookmark },
+    .{ .label = "Releases", .path = "/admin/releases", .section = "releases", .icon = icons.copy },
+    .{ .label = "Content Types", .path = "/admin/content-types", .section = "content_types", .icon = icons.package },
     .{ .label = "Media", .path = "/admin/media", .section = "media", .icon = icons.image },
 };
 
@@ -148,7 +154,10 @@ fn topbarNavItems(comptime current_id: []const u8) []const NavItem {
     }
 }
 
-/// Compute section sidebar items for the "content" section
+/// Compute section sidebar items for the "content" section.
+/// Content type pages (content.post, content.page, etc.) are included
+/// automatically — they're in the pages array with section="content".
+/// The old "posts" page is excluded (replaced by content.post).
 fn sectionSidebarItems(comptime current_id: []const u8) []const NavItem {
     comptime {
         const current_page = findById(current_id);
@@ -156,28 +165,32 @@ fn sectionSidebarItems(comptime current_id: []const u8) []const NavItem {
 
         if (!std.mem.eql(u8, current_section, "content")) return &.{};
 
-        var count: usize = 0;
-        for (pages) |page| {
-            const page_section = page.section orelse continue;
-            if (!std.mem.eql(u8, page_section, "content")) continue;
-            if (page.parent != null) continue;
-            count += 1;
+        // Count content section pages (exclude posts — replaced by generic admin)
+        var page_count: usize = 0;
+        for (pages) |pg| {
+            const pg_section = pg.section orelse continue;
+            if (!std.mem.eql(u8, pg_section, "content")) continue;
+            if (pg.parent != null) continue;
+            if (std.mem.eql(u8, pg.id, "posts")) continue;
+            page_count += 1;
         }
 
-        var items: [count]NavItem = undefined;
+        var items: [page_count]NavItem = undefined;
         var i: usize = 0;
-        for (pages) |page| {
-            const page_section = page.section orelse continue;
-            if (!std.mem.eql(u8, page_section, "content")) continue;
-            if (page.parent != null) continue;
 
-            const is_active = std.mem.eql(u8, page.id, current_id) or
-                (if (current_page) |p| if (p.parent) |pid| std.mem.eql(u8, pid, page.id) else false else false);
+        for (pages) |pg| {
+            const pg_section = pg.section orelse continue;
+            if (!std.mem.eql(u8, pg_section, "content")) continue;
+            if (pg.parent != null) continue;
+            if (std.mem.eql(u8, pg.id, "posts")) continue;
+
+            const is_active = std.mem.eql(u8, pg.id, current_id) or
+                (if (current_page) |p| if (p.parent) |pid| std.mem.eql(u8, pid, pg.id) else false else false);
 
             items[i] = .{
-                .label = page.title,
-                .path = admin.resolvePagePath(page, pages),
-                .icon = page.icon,
+                .label = pg.title,
+                .path = admin.resolvePagePath(pg, pages),
+                .icon = pg.icon,
                 .is_active = is_active,
             };
             i += 1;
@@ -190,6 +203,7 @@ fn sectionSidebarItems(comptime current_id: []const u8) []const NavItem {
 // Re-export plugin modules for handlers that need them
 pub const dashboard_plugin = dashboard;
 pub const posts_plugin = posts;
+pub const content_plugin = content_plugin_mod;
 pub const media_plugin_ref = media_plugin;
 pub const users_plugin = users;
 pub const settings_plugin = settings;

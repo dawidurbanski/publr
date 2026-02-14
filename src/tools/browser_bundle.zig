@@ -455,9 +455,8 @@ const modules = [_]Module{
     .{ .name = "content_type", .src = "src/schema/content_type.zig", .deps = &.{"field"} },
     .{ .name = "schema_post", .src = "src/schemas/post.zig", .deps = &.{ "field", "content_type" } },
     .{ .name = "schema_page", .src = "src/schemas/page.zig", .deps = &.{ "field", "content_type" } },
-    .{ .name = "schema_author", .src = "src/schemas/author.zig", .deps = &.{ "field", "content_type" } },
     .{ .name = "schema_media", .src = "src/schemas/media.zig", .deps = &.{ "field", "content_type" } },
-    .{ .name = "schemas", .src = "src/schemas/mod.zig", .deps = &.{ "field", "content_type", "schema_post", "schema_page", "schema_author", "schema_media" } },
+    .{ .name = "schemas", .src = "src/schemas/mod.zig", .deps = &.{ "field", "content_type", "schema_post", "schema_page", "schema_media" } },
     .{ .name = "schema_registry", .src = "src/schema/registry.zig", .deps = &.{ "field", "content_type", "schemas" } },
     // Core modules
     .{ .name = "time_util", .src = "src/time_util.zig", .deps = &.{} },

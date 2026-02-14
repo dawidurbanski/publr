@@ -239,14 +239,6 @@ pub fn build(b: *std.Build) void {
             .{ .name = "content_type", .module = content_type_module },
         },
     });
-    const schema_author_module = b.createModule(.{
-        .root_source_file = b.path("src/schemas/author.zig"),
-        .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "content_type", .module = content_type_module },
-        },
-    });
-
     const schema_media_module = b.createModule(.{
         .root_source_file = b.path("src/schemas/media.zig"),
         .imports = &.{
@@ -263,7 +255,6 @@ pub fn build(b: *std.Build) void {
             .{ .name = "content_type", .module = content_type_module },
             .{ .name = "schema_post", .module = schema_post_module },
             .{ .name = "schema_page", .module = schema_page_module },
-            .{ .name = "schema_author", .module = schema_author_module },
             .{ .name = "schema_media", .module = schema_media_module },
         },
     });
@@ -667,6 +658,26 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const plugin_content = b.createModule(.{
+        .root_source_file = b.path("src/plugins/content.zig"),
+        .imports = &.{
+            .{ .name = "admin_api", .module = admin_api_module },
+            .{ .name = "icons", .module = icons_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "tpl", .module = tpl_module },
+            .{ .name = "db", .module = db_module },
+            .{ .name = "csrf", .module = csrf_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "schemas", .module = schemas_module },
+            .{ .name = "views", .module = views },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "field", .module = field_module },
+            .{ .name = "gravatar", .module = gravatar_module },
+            .{ .name = "time_util", .module = time_util_module },
+            .{ .name = "presence", .module = presence_module },
+            .{ .name = "websocket", .module = websocket_module },
+        },
+    });
     const plugin_releases = b.createModule(.{
         .root_source_file = b.path("src/plugins/releases.zig"),
         .imports = &.{
@@ -695,8 +706,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "gravatar", .module = gravatar_module },
             .{ .name = "views", .module = views },
+            .{ .name = "schemas", .module = schemas_module },
             .{ .name = "plugin_dashboard", .module = plugin_dashboard },
             .{ .name = "plugin_posts", .module = plugin_posts },
+            .{ .name = "plugin_content", .module = plugin_content },
             .{ .name = "plugin_media", .module = plugin_media },
             .{ .name = "plugin_users", .module = plugin_users },
             .{ .name = "plugin_settings", .module = plugin_settings },
@@ -710,6 +723,7 @@ pub fn build(b: *std.Build) void {
     // Add registry to plugins (must be done after registry_module is created)
     plugin_dashboard.addImport("registry", registry_module);
     plugin_posts.addImport("registry", registry_module);
+    plugin_content.addImport("registry", registry_module);
     plugin_media.addImport("registry", registry_module);
     plugin_users.addImport("registry", registry_module);
     plugin_settings.addImport("registry", registry_module);
@@ -721,6 +735,7 @@ pub fn build(b: *std.Build) void {
 
     // Add shared plugin utilities
     plugin_posts.addImport("plugin_utils", plugin_utils_module);
+    plugin_content.addImport("plugin_utils", plugin_utils_module);
     plugin_media.addImport("plugin_utils", plugin_utils_module);
     plugin_releases.addImport("plugin_utils", plugin_utils_module);
     plugin_settings.addImport("plugin_utils", plugin_utils_module);
@@ -728,6 +743,7 @@ pub fn build(b: *std.Build) void {
 
     // Add shared pagination
     plugin_posts.addImport("pagination", pagination_module);
+    plugin_content.addImport("pagination", pagination_module);
     plugin_media.addImport("pagination", pagination_module);
 
     // Add views namespace and core imports to main executable
@@ -766,6 +782,7 @@ pub fn build(b: *std.Build) void {
     // Add plugin modules to main exe
     exe.root_module.addImport("plugin_dashboard", plugin_dashboard);
     exe.root_module.addImport("plugin_posts", plugin_posts);
+    exe.root_module.addImport("plugin_content", plugin_content);
     exe.root_module.addImport("plugin_media", plugin_media);
     exe.root_module.addImport("plugin_users", plugin_users);
     exe.root_module.addImport("plugin_settings", plugin_settings);

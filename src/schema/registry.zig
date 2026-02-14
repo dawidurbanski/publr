@@ -1,7 +1,7 @@
 //! Schema Registry
 //!
 //! Merges content types from all three layers:
-//! 1. Core schemas (src/schemas/) - reserved names like post, page, author
+//! 1. Core schemas (src/schemas/) - reserved names like post, page
 //! 2. Plugin schemas - auto-prefixed with plugin name (e.g., ecommerce:product)
 //! 3. Instance schemas (schema.zig in project root)
 //!
@@ -39,7 +39,7 @@ pub const content_types = buildContentTypeRegistry();
 /// Build the content type registry at comptime
 fn buildContentTypeRegistry() []const ContentTypeEntry {
     comptime {
-        var entries: [3]ContentTypeEntry = undefined;
+        var entries: [2]ContentTypeEntry = undefined;
         var count: usize = 0;
 
         // Add core schemas
@@ -56,14 +56,6 @@ fn buildContentTypeRegistry() []const ContentTypeEntry {
             .display_name = core_schemas.Page.display_name,
             .source = .core,
             .fields = core_schemas.Page.schema,
-        };
-        count += 1;
-
-        entries[count] = .{
-            .id = core_schemas.Author.type_id,
-            .display_name = core_schemas.Author.display_name,
-            .source = .core,
-            .fields = core_schemas.Author.schema,
         };
         count += 1;
 
@@ -182,12 +174,11 @@ pub fn getAllTaxonomyIds() []const []const u8 {
 // =============================================================================
 
 test "content_types includes core schemas" {
-    try std.testing.expect(content_types.len >= 3);
+    try std.testing.expect(content_types.len >= 2);
 
     // Check that core types are present
     try std.testing.expect(findById("post") != null);
     try std.testing.expect(findById("page") != null);
-    try std.testing.expect(findById("author") != null);
 }
 
 test "findById returns correct content type" {
@@ -209,7 +200,6 @@ test "getIds returns all content type IDs" {
 test "isReserved returns true for core types" {
     try std.testing.expect(isReserved("post"));
     try std.testing.expect(isReserved("page"));
-    try std.testing.expect(isReserved("author"));
 }
 
 test "isReserved returns false for non-core types" {
@@ -219,7 +209,7 @@ test "isReserved returns false for non-core types" {
 
 test "getBySource returns only core types" {
     const core = getBySource(.core);
-    try std.testing.expect(core.len == 3);
+    try std.testing.expect(core.len == 2);
     for (core) |ct| {
         try std.testing.expect(ct.source == .core);
     }

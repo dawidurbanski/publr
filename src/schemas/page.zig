@@ -17,13 +17,6 @@ pub const Page = content_type.ContentType("page", .{ .name = "Page" }, &.{
     // Main content body
     field.Text("body", .{ .required = true }),
 
-    // Publication status
-    field.Select("status", .{
-        .options = &.{ "draft", "published" },
-        .default_value = "draft",
-        .filterable = true,
-    }),
-
     // Featured image (media reference)
     field.Image("featured_image", .{}),
 

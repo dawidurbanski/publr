@@ -24,6 +24,7 @@ const url_mod = @import("url");
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
 const plugin_posts = @import("plugin_posts");
+const plugin_content = @import("plugin_content");
 const plugin_media = @import("plugin_media");
 const plugin_users = @import("plugin_users");
 const plugin_settings = @import("plugin_settings");
@@ -226,9 +227,10 @@ pub fn serve(port: u16, dev_mode: bool) !void {
 const all_pages = [_]admin_api.Page{
     plugin_dashboard.page,
     plugin_posts.page,
+} ++ plugin_content.content_pages ++ [_]admin_api.Page{
     plugin_releases.page,
     plugin_media.page,
-        // Users: only profile page remains, user management moved to Settings
+    // Users: only profile page remains, user management moved to Settings
     plugin_users.page_profile, // /admin/users/profile
     plugin_users.page, // /admin/users (parent, no routes)
     plugin_settings.page,

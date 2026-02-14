@@ -24,13 +24,6 @@ pub const Post = content_type.ContentType("post", .{ .name = "Blog Post" }, &.{
     field.Taxonomy("category", .{}),
     field.Taxonomy("tag", .{}),
 
-    // Publication status
-    field.Select("status", .{
-        .options = &.{ "draft", "published", "archived" },
-        .default_value = "draft",
-        .filterable = true,
-    }),
-
     // Publication date (filterable for queries)
     field.DateTime("published_at", .{ .filterable = true }),
 

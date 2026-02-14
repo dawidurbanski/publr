@@ -38,7 +38,7 @@ pub const page = admin.registerPage(.{
     .id = "posts",
     .title = "Posts",
     .path = "/posts",
-    .icon = icons.edit,
+    .icon = icons.bookmark,
     .position = 20,
     .section = "content",
     .setup = setup,
@@ -159,7 +159,6 @@ fn handleNew(ctx: *Context) !void {
         .title = "",
         .slug = "",
         .body = "",
-        .status = "draft",
         .author = null,
         .category = null,
         .tag = null,
@@ -172,6 +171,7 @@ fn handleNew(ctx: *Context) !void {
     const author_id = auth_middleware.getUserId(ctx);
     const entry = cms.saveEntry(Post, ctx.allocator, db, null, data, .{
         .author_id = author_id,
+        .status = "draft",
     }) catch {
         redirect(ctx, "/admin/posts");
         return;
@@ -731,7 +731,6 @@ fn handleAutosaveCreate(ctx: *Context) !void {
         .title = title,
         .slug = slug,
         .body = body,
-        .status = "draft",
         .author = null,
         .category = null,
         .tag = null,
@@ -744,6 +743,7 @@ fn handleAutosaveCreate(ctx: *Context) !void {
     const author_id = auth_middleware.getUserId(ctx);
     const entry = cms.saveEntry(Post, ctx.allocator, db, null, data, .{
         .author_id = author_id,
+        .status = "draft",
     }) catch {
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.response.setBody("{\"error\":\"save failed\"}");
@@ -806,7 +806,6 @@ fn handleAutosaveUpdate(ctx: *Context) !void {
         .title = title,
         .slug = slug,
         .body = body,
-        .status = status,
         .author = null,
         .category = null,
         .tag = null,
@@ -819,6 +818,7 @@ fn handleAutosaveUpdate(ctx: *Context) !void {
     _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
         .author_id = author_id,
         .autosave = true,
+        .status = status,
     }) catch {
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.response.setBody("{\"error\":\"save failed\"}");
@@ -903,7 +903,6 @@ fn handleCreate(ctx: *Context) !void {
         .title = title,
         .slug = slug,
         .body = body,
-        .status = status,
         .author = null,
         .category = null,
         .tag = null,
@@ -916,6 +915,7 @@ fn handleCreate(ctx: *Context) !void {
     const author_id = auth_middleware.getUserId(ctx);
     const entry = cms.saveEntry(Post, ctx.allocator, db, null, data, .{
         .author_id = author_id,
+        .status = status,
     }) catch |err| {
         std.debug.print("Error creating post: {}\n", .{err});
         redirect(ctx, "/admin/posts");
@@ -978,7 +978,6 @@ fn handleUpdate(ctx: *Context) !void {
         .title = title,
         .slug = slug,
         .body = body,
-        .status = status,
         .author = null,
         .category = null,
         .tag = null,
@@ -991,6 +990,7 @@ fn handleUpdate(ctx: *Context) !void {
     // Save entry (skips version creation if data unchanged)
     _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
         .author_id = author_id,
+        .status = status,
     }) catch |err| {
         std.debug.print("Error updating post: {}\n", .{err});
         redirect(ctx, "/admin/posts");
@@ -1115,11 +1115,11 @@ fn handleUnpublish(ctx: *Context) !void {
     };
 
     // Update status to draft
-    var data = entry.data;
-    data.status = "draft";
+    const data = entry.data;
 
     _ = cms.saveEntry(Post, ctx.allocator, db, post_id, data, .{
         .author_id = auth_middleware.getUserId(ctx),
+        .status = "draft",
     }) catch |err| {
         std.debug.print("Error unpublishing post: {}\n", .{err});
     };

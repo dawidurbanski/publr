@@ -416,7 +416,7 @@
 // ── Post Edit: Auto-save + Release Integration ──
 (function() {
     'use strict';
-    var form = document.getElementById('post-form');
+    var form = document.getElementById('entry-form');
     if (!form) return;
 
     var publishBtn = document.getElementById('publish-btn');
@@ -431,6 +431,7 @@
     // State from data attributes
     var entryId = form.dataset.entryId || '';
     var entryStatus = form.dataset.entryStatus || 'draft';
+    var baseUrl = form.dataset.baseUrl || '/admin/posts';
     var publishedState = form.dataset.publishedState || '';
 
     // Parse published state for field-level change detection
@@ -636,7 +637,7 @@
         isSaving = true;
         showStatus('saving');
 
-        fetch('/admin/posts/' + entryId + '/autosave', {
+        fetch(baseUrl + '/' + entryId + '/autosave', {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: new URLSearchParams(new FormData(form))
@@ -676,10 +677,19 @@
     var selectedFieldCount = 0;
 
     function getFieldValue(fieldKey) {
-        // Map JSON key to form field name
+        // Find .form-control inside the field's group (works regardless of input name)
+        var group = form.querySelector('.form-group[data-field="' + fieldKey + '"]');
+        if (group) {
+            var el = group.querySelector('.form-control');
+            if (el) return el.value || '';
+            // Boolean fields use form-check-input (checkbox) — use checked state
+            var cb = group.querySelector('.form-check-input');
+            if (cb) return cb.checked ? 'true' : 'false';
+        }
+        // Fallback: sidebar fields with form= attribute, or posts name="content" for body
         var formName = fieldKey === 'body' ? 'content' : fieldKey;
-        var el = form.querySelector('[name="' + formName + '"]') ||
-                 document.querySelector('[name="' + formName + '"][form="post-form"]');
+        var el = document.querySelector('[name="' + fieldKey + '"][form="entry-form"]') ||
+                 document.querySelector('[name="' + formName + '"][form="entry-form"]');
         return el ? (el.value || '') : '';
     }
 
@@ -798,7 +808,7 @@
     form.addEventListener('input', onFormChange);
     form.addEventListener('change', onFormChange);
 
-    document.querySelectorAll('[form="post-form"]').forEach(function(el) {
+    document.querySelectorAll('[form="entry-form"]').forEach(function(el) {
         el.addEventListener('input', onFormChange);
         el.addEventListener('change', onFormChange);
     });
@@ -855,7 +865,7 @@
             var csrfField = form.querySelector('input[name="_csrf"]');
             var discardForm = document.createElement('form');
             discardForm.method = 'POST';
-            discardForm.action = '/admin/posts/' + entryId + '/discard';
+            discardForm.action = baseUrl + '/' + entryId + '/discard';
             var csrf = document.createElement('input');
             csrf.type = 'hidden';
             csrf.name = '_csrf';

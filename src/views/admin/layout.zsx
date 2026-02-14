@@ -62,9 +62,15 @@ pub fn Layout(props: struct {
             <div class="admin-body">
                 {if (props.section_sidebar_html.len > 0) (
                     <aside class="section-sidebar">
-                        <nav class="section-sidebar-nav">
-                            {@raw props.section_sidebar_html}
-                        </nav>
+                        <div class="section-sidebar-group">
+                            <h6 class="section-sidebar-group-title">
+                                {@raw icons.folder}
+                                Content types
+                            </h6>
+                            <nav class="section-sidebar-nav">
+                                {@raw props.section_sidebar_html}
+                            </nav>
+                        </div>
                     </aside>
                 )}
                 <main class="main-content">

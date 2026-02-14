@@ -52,6 +52,14 @@ pub const MetaValueType = enum {
     real,
 };
 
+/// Field position in the edit layout
+pub const Position = enum {
+    /// Main editor area (left side)
+    main,
+    /// Sidebar (right side) — used for metadata, images, taxonomies
+    side,
+};
+
 /// Field definition - the unit of schema composition
 pub const FieldDef = struct {
     /// Field identifier (used as JSON key and form input name)
@@ -82,6 +90,9 @@ pub const FieldDef = struct {
 
     /// Taxonomy ID (only used when storage = .taxonomy)
     taxonomy_id: ?[]const u8 = null,
+
+    /// Position in edit layout: main editor or sidebar
+    position: Position = .main,
 
     /// Source field for auto-generation (e.g., slug from title)
     source_field: ?[]const u8 = null,
@@ -139,6 +150,7 @@ pub fn String(comptime name: []const u8, comptime opts: struct {
     min_length: ?usize = null,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -160,10 +172,16 @@ pub fn String(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <input type="text" class="form-control" id="{s}" name="{s}" value="{s}"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, ctx.value orelse "" });
 
             if (opts.max_length) |max| {
                 try writer.print(" maxlength=\"{}\"", .{max});
@@ -183,6 +201,7 @@ pub fn String(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -193,6 +212,7 @@ pub fn Text(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     rows: u8 = 5,
     display: ?[]const u8 = null,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -204,10 +224,16 @@ pub fn Text(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <textarea class="form-control" id="{s}" name="{s}" rows="{}"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, opts.rows });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, opts.rows });
             if (ctx.required) {
                 try writer.writeAll(" required");
             }
@@ -222,6 +248,7 @@ pub fn Text(comptime name: []const u8, comptime opts: struct {
         .zig_type = []const u8,
         .required = opts.required,
         .storage = .data_only,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -232,6 +259,7 @@ pub fn Slug(comptime name: []const u8, comptime opts: struct {
     source: ?[]const u8 = null,
     required: bool = false,
     display: ?[]const u8 = null,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -248,11 +276,17 @@ pub fn Slug(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <input type="text" class="form-control" id="{s}" name="{s}" value="{s}"
                 \\         data-widget="slug"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, ctx.value orelse "" });
             if (opts.source) |src| {
                 try writer.print(" data-source=\"{s}\"", .{src});
             }
@@ -270,6 +304,7 @@ pub fn Slug(comptime name: []const u8, comptime opts: struct {
         .zig_type = []const u8,
         .required = opts.required,
         .storage = .data_only,
+        .position = opts.position,
         .source_field = opts.source,
         .validate = S.validate,
         .render = S.render,
@@ -283,6 +318,7 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
     translatable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     if (opts.translatable) {
         @compileError("Ref fields cannot be translatable — references are locale-independent");
@@ -301,8 +337,14 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <div data-widget="ref-picker" data-ref-type="{s}" data-ref-many="{s}"
                 \\       data-name="{s}" data-value="{s}">
                 \\    <input type="hidden" name="{s}" value="{s}" />
@@ -311,7 +353,10 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
                 \\</div>
             , .{
                 ctx.name,
+                ctx.name,
                 ctx.display_name,
+                ctx.name,
+                ctx.name,
                 opts.to,
                 if (opts.many) "true" else "false",
                 ctx.name,
@@ -331,6 +376,7 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .translatable = false,
         .storage = .data_only,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -343,6 +389,7 @@ pub fn Select(comptime name: []const u8, comptime opts: struct {
     default_value: ?[]const u8 = null,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -360,10 +407,16 @@ pub fn Select(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <select class="form-control" id="{s}" name="{s}"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name });
             if (ctx.required) {
                 try writer.writeAll(" required");
             }
@@ -392,6 +445,7 @@ pub fn Select(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -401,6 +455,7 @@ pub fn Select(comptime name: []const u8, comptime opts: struct {
 pub fn Boolean(comptime name: []const u8, comptime opts: struct {
     default_value: bool = false,
     display: ?[]const u8 = null,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(_: []const u8) ?[]const u8 {
@@ -414,13 +469,24 @@ pub fn Boolean(comptime name: []const u8, comptime opts: struct {
                 opts.default_value;
 
             try writer.print(
-                \\<div class="form-group">
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <span class="form-label">{s}</span>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <label class="form-check">
                 \\    <input type="checkbox" class="form-check-input" name="{s}" value="true"{s} />
                 \\    <span class="form-check-label">{s}</span>
                 \\  </label>
                 \\</div>
             , .{
+                ctx.name,
+                ctx.display_name,
+                ctx.name,
+                ctx.name,
                 ctx.name,
                 if (checked) " checked" else "",
                 ctx.display_name,
@@ -435,6 +501,7 @@ pub fn Boolean(comptime name: []const u8, comptime opts: struct {
         .zig_type = bool,
         .required = false,
         .storage = .data_only,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -445,6 +512,7 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -457,10 +525,16 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <input type="datetime-local" class="form-control" id="{s}" name="{s}" value="{s}"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, ctx.value orelse "" });
             if (ctx.required) {
                 try writer.writeAll(" required");
             }
@@ -476,6 +550,7 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .int,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -486,6 +561,7 @@ pub fn Image(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
     translatable: bool = false,
+    position: Position = .side,
 }) FieldDef {
     if (opts.translatable) {
         @compileError("Image fields cannot be translatable — media references are locale-independent");
@@ -506,14 +582,23 @@ pub fn Image(comptime name: []const u8, comptime opts: struct {
             const value = ctx.value orelse "";
             const has_value = value.len > 0;
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <div class="image-picker" data-publr-component="image-picker" data-publr-state="{s}">
                 \\    <input type="hidden" name="{s}" value="{s}" data-publr-part="value" />
                 \\    <div class="image-picker-preview" data-publr-part="preview">
             , .{
                 ctx.name,
+                ctx.name,
                 ctx.display_name,
+                ctx.name,
+                ctx.name,
                 if (has_value) "selected" else "empty",
                 ctx.name,
                 value,
@@ -560,6 +645,7 @@ pub fn Image(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .translatable = false,
         .storage = .data_only,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -572,6 +658,7 @@ pub fn Integer(comptime name: []const u8, comptime opts: struct {
     max: ?i64 = null,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -594,10 +681,16 @@ pub fn Integer(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <input type="number" class="form-control" id="{s}" name="{s}" value="{s}"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, ctx.value orelse "" });
             if (opts.min) |min| {
                 try writer.print(" min=\"{}\"", .{min});
             }
@@ -619,6 +712,7 @@ pub fn Integer(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .int,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -632,6 +726,7 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
     step: ?f64 = null,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -654,10 +749,16 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <input type="number" class="form-control" id="{s}" name="{s}" value="{s}"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, ctx.value orelse "" });
             if (opts.min) |min| {
                 try writer.print(" min=\"{d}\"", .{min});
             }
@@ -684,6 +785,7 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .real,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -693,6 +795,7 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
 pub fn RichText(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -704,11 +807,17 @@ pub fn RichText(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <textarea class="form-control" id="{s}" name="{s}" rows="12"
                 \\            data-widget="richtext"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name });
             if (ctx.required) {
                 try writer.writeAll(" required");
             }
@@ -723,6 +832,7 @@ pub fn RichText(comptime name: []const u8, comptime opts: struct {
         .zig_type = []const u8,
         .required = opts.required,
         .storage = .data_only,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -733,6 +843,7 @@ pub fn Email(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -756,10 +867,16 @@ pub fn Email(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <input type="email" class="form-control" id="{s}" name="{s}" value="{s}"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, ctx.value orelse "" });
             if (ctx.required) {
                 try writer.writeAll(" required");
             }
@@ -775,6 +892,7 @@ pub fn Email(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -785,6 +903,7 @@ pub fn Url(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    position: Position = .main,
 }) FieldDef {
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
@@ -812,11 +931,17 @@ pub fn Url(comptime name: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <input type="url" class="form-control" id="{s}" name="{s}" value="{s}"
                 \\         placeholder="https://"
-            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.value orelse "" });
+            , .{ ctx.name, ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name, ctx.name, ctx.value orelse "" });
             if (ctx.required) {
                 try writer.writeAll(" required");
             }
@@ -832,6 +957,7 @@ pub fn Url(comptime name: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };
@@ -842,6 +968,7 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
     required: bool = false,
     many: bool = true,
     display: ?[]const u8 = null,
+    position: Position = .side,
 }) FieldDef {
     // Pre-compute humanized name at comptime
     const humanized_taxonomy = comptime humanize(taxonomy_id);
@@ -856,8 +983,14 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
             try writer.print(
-                \\<div class="form-group">
-                \\  <label class="form-label" for="{s}">{s}</label>
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label" for="{s}">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\    </div>
+                \\  </div>
                 \\  <div data-widget="taxonomy-picker" data-taxonomy="{s}" data-many="{s}"
                 \\       data-name="{s}" data-value="{s}">
                 \\    <input type="hidden" name="{s}" value="{s}" />
@@ -866,7 +999,10 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
                 \\</div>
             , .{
                 ctx.name,
+                ctx.name,
                 ctx.display_name,
+                ctx.name,
+                ctx.name,
                 taxonomy_id,
                 if (opts.many) "true" else "false",
                 ctx.name,
@@ -886,6 +1022,7 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
         .required = opts.required,
         .storage = .taxonomy,
         .taxonomy_id = taxonomy_id,
+        .position = opts.position,
         .validate = S.validate,
         .render = S.render,
     };

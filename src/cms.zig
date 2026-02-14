@@ -114,6 +114,10 @@ pub const SaveOptions = struct {
     /// When true, update existing version in-place instead of creating a new one.
     /// Used by autosave to avoid polluting version history.
     autosave: bool = false,
+    /// Entry status override. Takes precedence over data.status if set.
+    /// Status is an intrinsic entry attribute (draft/published/changed),
+    /// not a schema field.
+    status: ?[]const u8 = null,
 };
 
 /// Save an entry (create or update), creating a version in the history
@@ -144,8 +148,8 @@ pub fn saveEntry(
     else
         null;
 
-    // Extract status from data if present
-    const status: []const u8 = if (@hasField(@TypeOf(data), "status")) blk: {
+    // Extract status: opts.status takes precedence, then data.status, then "draft"
+    const status: []const u8 = if (opts.status) |s| s else if (@hasField(@TypeOf(data), "status")) blk: {
         const status_val = data.status;
         if (@typeInfo(@TypeOf(status_val)) == .optional) {
             break :blk status_val orelse "draft";

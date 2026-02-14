@@ -21,9 +21,9 @@ pub fn ReleaseMenu(props: struct {
     releases: []const ReleaseOption,
 }) {
     // Hidden fields associated with main post form
-    <input type="hidden" name="action" value="" form="post-form" id="release-action" />
-    <input type="hidden" name="release_id" value="" form="post-form" id="release-id" />
-    <input type="hidden" name="release_name" value="" form="post-form" id="release-name" />
+    <input type="hidden" name="action" value="" form="entry-form" id="release-action" />
+    <input type="hidden" name="release_id" value="" form="entry-form" id="release-id" />
+    <input type="hidden" name="release_name" value="" form="entry-form" id="release-name" />
 
     <div data-publr-component="dropdown" data-publr-state="closed" id="release-dropdown">
         <button type="button" data-publr-part="trigger" class="btn btn-full" aria-expanded="false" aria-haspopup="true" disabled="">
