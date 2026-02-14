@@ -12,6 +12,25 @@ const id_gen = @import("id_gen");
 
 /// SQL for creating content schema tables
 pub const content_schema_sql =
+    \\-- Auth tables
+    \\CREATE TABLE IF NOT EXISTS users (
+    \\    id TEXT PRIMARY KEY,
+    \\    email TEXT UNIQUE NOT NULL,
+    \\    display_name TEXT DEFAULT '',
+    \\    email_verified INTEGER DEFAULT 0,
+    \\    password_hash TEXT NOT NULL,
+    \\    created_at INTEGER DEFAULT (unixepoch())
+    \\);
+    \\CREATE TABLE IF NOT EXISTS sessions (
+    \\    id TEXT PRIMARY KEY,
+    \\    secret_hash BLOB NOT NULL,
+    \\    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    \\    expires_at INTEGER NOT NULL,
+    \\    created_at INTEGER DEFAULT (unixepoch())
+    \\);
+    \\CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    \\CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    \\
     \\-- Schema version tracking (for hash-based sync)
     \\CREATE TABLE IF NOT EXISTS _schema_version (
     \\    key TEXT PRIMARY KEY,
