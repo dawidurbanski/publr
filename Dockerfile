@@ -16,8 +16,8 @@ RUN apk add --no-cache nginx && \
     rm -rf /var/cache/apk/* /tmp/*
 
 RUN addgroup -S publr && adduser -S publr -G publr -h /app -s /sbin/nologin && \
-    mkdir -p /app/data /run/nginx && \
-    chown -R publr:publr /app /run/nginx /var/log/nginx
+    mkdir -p /app/data /run/nginx /var/lib/nginx /var/log/nginx && \
+    chown -R publr:publr /app /run/nginx /var/lib/nginx /var/log/nginx
 
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /src/zig-out/bin/publr /app/publr
