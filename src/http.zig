@@ -85,9 +85,9 @@ pub fn serve(port: u16, dev_mode: bool) !void {
     };
     defer db.deinit();
 
-    // Ensure all schema tables exist (safe to re-run — uses IF NOT EXISTS)
-    schema_sync.ensureSchema(&db) catch |err| {
-        std.debug.print("Failed to ensure schema: {}\n", .{err});
+    // Ensure all schema tables exist and sync content types/taxonomies
+    schema_sync.syncIfNeeded(&db) catch |err| {
+        std.debug.print("Failed to sync schema: {}\n", .{err});
         return err;
     };
 
@@ -230,7 +230,7 @@ const all_pages = [_]admin_api.Page{
 } ++ plugin_content.content_pages ++ [_]admin_api.Page{
     plugin_releases.page,
     plugin_media.page,
-    // Users: only profile page remains, user management moved to Settings
+        // Users: only profile page remains, user management moved to Settings
     plugin_users.page_profile, // /admin/users/profile
     plugin_users.page, // /admin/users (parent, no routes)
     plugin_settings.page,
@@ -676,7 +676,6 @@ fn renderSetupError(ctx: *Context, message: []const u8) void {
     ctx.html(content);
 }
 
-
 // =============================================================================
 // Login/Logout Handlers
 // =============================================================================
@@ -902,7 +901,6 @@ fn handleWebSocket(ctx: *Context) !void {
                     std.debug.print("[ws] #{d}: {s}\n", .{ conn.id, frame.payload });
                 }
                 dispatchMessage(conn, frame.payload, user_info);
-
             },
             .ping => {
                 websocket.writeFrame(stream, .pong, frame.payload) catch break;
