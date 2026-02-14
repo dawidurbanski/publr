@@ -136,7 +136,7 @@ pub fn build(b: *std.Build) void {
     for (0..124) |part| {
         var buf: [32]u8 = undefined;
         const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        vendor_lib.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+        vendor_lib.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{ flag, "-U__SSE2__", "-U__SSE4_1__", "-U__AVX2__" } });
     }
 
     // Link vendor lib + libc into exe
@@ -840,7 +840,7 @@ pub fn build(b: *std.Build) void {
     for (0..124) |part| {
         var buf: [32]u8 = undefined;
         const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        exe_tests.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+        exe_tests.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{ flag, "-U__SSE2__", "-U__SSE4_1__", "-U__AVX2__" } });
     }
 
     // Add imports to test executable
@@ -917,7 +917,7 @@ pub fn build(b: *std.Build) void {
     for (0..124) |part| {
         var buf: [32]u8 = undefined;
         const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        vendor_lib_wasm.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{flag} });
+        vendor_lib_wasm.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{ flag, "-U__SSE2__", "-U__SSE4_1__", "-U__AVX2__" } });
     }
 
     // Link vendor lib + libc into WASM build
