@@ -431,7 +431,7 @@
     // State from data attributes
     var entryId = form.dataset.entryId || '';
     var entryStatus = form.dataset.entryStatus || 'draft';
-    var baseUrl = form.dataset.baseUrl || '/admin/posts';
+    var baseUrl = form.dataset.baseUrl || '/admin/content/post';
     var publishedState = form.dataset.publishedState || '';
 
     // Parse published state for field-level change detection

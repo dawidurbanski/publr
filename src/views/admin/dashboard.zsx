@@ -57,7 +57,7 @@ pub fn Dashboard(props: struct {
                     </tbody>
                 </table>
             ) else (
-                <p class="empty-state">No posts yet. <a href="/admin/posts/new">Create your first post</a></p>
+                <p class="empty-state">No posts yet. <a href="/admin/content/post/new">Create your first post</a></p>
             )}
         </div>
     </div>

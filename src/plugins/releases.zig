@@ -181,7 +181,7 @@ fn handleDetail(ctx: *Context) !void {
             .entry_id = item.entry_id,
             .entry_title = item.entry_title,
             .entry_status = item.entry_status,
-            .edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/posts/{s}", .{item.entry_id}) catch "#",
+            .edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/content/{s}/{s}", .{ item.content_type_id, item.entry_id }) catch "#",
             .remove_url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}/remove/{s}", .{ release_id, item.entry_id }) catch "#",
         };
     }

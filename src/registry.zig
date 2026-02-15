@@ -21,7 +21,6 @@ const gravatar = @import("gravatar");
 
 // Import all plugins
 const dashboard = @import("plugin_dashboard");
-const posts = @import("plugin_posts");
 const content_plugin_mod = @import("plugin_content");
 const media_plugin = @import("plugin_media");
 const users = @import("plugin_users");
@@ -37,7 +36,6 @@ const schemas = @import("schemas");
 /// Content type pages are auto-generated from schemas.content_types.
 const pages_arr = [_]admin.Page{
     dashboard.page,
-    posts.page,
 } ++ content_plugin_mod.content_pages ++ [_]admin.Page{
     releases.page,
     content_types.page,
@@ -165,13 +163,12 @@ fn sectionSidebarItems(comptime current_id: []const u8) []const NavItem {
 
         if (!std.mem.eql(u8, current_section, "content")) return &.{};
 
-        // Count content section pages (exclude posts — replaced by generic admin)
+        // Count content section pages
         var page_count: usize = 0;
         for (pages) |pg| {
             const pg_section = pg.section orelse continue;
             if (!std.mem.eql(u8, pg_section, "content")) continue;
             if (pg.parent != null) continue;
-            if (std.mem.eql(u8, pg.id, "posts")) continue;
             page_count += 1;
         }
 
@@ -182,7 +179,6 @@ fn sectionSidebarItems(comptime current_id: []const u8) []const NavItem {
             const pg_section = pg.section orelse continue;
             if (!std.mem.eql(u8, pg_section, "content")) continue;
             if (pg.parent != null) continue;
-            if (std.mem.eql(u8, pg.id, "posts")) continue;
 
             const is_active = std.mem.eql(u8, pg.id, current_id) or
                 (if (current_page) |p| if (p.parent) |pid| std.mem.eql(u8, pid, pg.id) else false else false);
@@ -202,7 +198,6 @@ fn sectionSidebarItems(comptime current_id: []const u8) []const NavItem {
 
 // Re-export plugin modules for handlers that need them
 pub const dashboard_plugin = dashboard;
-pub const posts_plugin = posts;
 pub const content_plugin = content_plugin_mod;
 pub const media_plugin_ref = media_plugin;
 pub const users_plugin = users;
@@ -289,7 +284,7 @@ test "getSubPages returns child pages" {
 }
 
 test "findById returns correct page" {
-    const page = findById("posts");
+    const page = findById("content.post");
     try std.testing.expect(page != null);
 }
 

@@ -486,7 +486,6 @@ const modules = [_]Module{
     .{ .name = "views", .src = "src/gen/views/views.zig", .deps = &.{ "zsx", "icons" } },
     // Plugins
     .{ .name = "plugin_dashboard", .src = "src/plugins/dashboard.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "db", "csrf", "auth_middleware", "media", "views", "registry" } },
-    .{ .name = "plugin_posts", .src = "src/plugins/posts.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "db", "csrf", "auth_middleware", "cms", "schemas", "gravatar", "views", "registry", "time_util" } },
     .{ .name = "plugin_users", .src = "src/plugins/users.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "auth", "csrf", "auth_middleware", "views", "registry" } },
     .{ .name = "plugin_settings", .src = "src/plugins/settings.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth", "auth_middleware", "views", "registry" } },
     .{ .name = "plugin_components", .src = "src/plugins/components.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "views", "registry" } },
@@ -495,7 +494,7 @@ const modules = [_]Module{
     .{ .name = "plugin_media", .src = "src/plugins/media.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "media", "media_sync", "storage", "schema_media", "media_handler", "db", "views", "wasm_storage", "registry" } },
     .{ .name = "plugin_releases", .src = "src/plugins/releases.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "cms", "views", "registry" } },
     // Registry (imports all plugins)
-    .{ .name = "registry", .src = "src/registry.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "gravatar", "views", "plugin_dashboard", "plugin_posts", "plugin_media", "plugin_users", "plugin_settings", "plugin_components", "plugin_design_system", "plugin_content_types", "plugin_releases" } },
+    .{ .name = "registry", .src = "src/registry.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "gravatar", "views", "plugin_dashboard", "plugin_media", "plugin_users", "plugin_settings", "plugin_components", "plugin_design_system", "plugin_content_types", "plugin_releases" } },
 };
 
 // Root module deps — what wasm_main.zig imports

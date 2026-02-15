@@ -24,7 +24,6 @@ const url_mod = @import("url");
 
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
-const plugin_posts = @import("plugin_posts");
 const plugin_content = @import("plugin_content");
 const plugin_media = @import("plugin_media");
 const plugin_users = @import("plugin_users");
@@ -233,7 +232,6 @@ pub fn serve(port: u16, dev_mode: bool) !void {
 /// must come BEFORE parent pages that register parameterized routes (like /:id)
 const all_pages = [_]admin_api.Page{
     plugin_dashboard.page,
-    plugin_posts.page,
 } ++ plugin_content.content_pages ++ [_]admin_api.Page{
     plugin_releases.page,
     plugin_media.page,
@@ -952,6 +950,6 @@ fn dispatchMessage(conn: *websocket.Connection, payload: []const u8, user: prese
         presence.fieldEdit(conn.id, field, value);
     } else if (std.mem.eql(u8, msg_type, "takeover")) {
         const field = extractJsonString(payload, "field") orelse return;
-        plugin_posts.handleTakeover(conn, field, user);
+        plugin_content.handleTakeover(conn, field, user);
     }
 }

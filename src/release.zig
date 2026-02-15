@@ -47,6 +47,7 @@ pub const ReleaseDetailItem = struct {
     entry_id: []const u8,
     entry_title: []const u8,
     entry_status: []const u8,
+    content_type_id: []const u8,
     from_version: ?[]const u8,
     to_version: []const u8,
     fields: ?[]const u8,
@@ -1053,7 +1054,7 @@ pub fn getRelease(allocator: Allocator, db: *Db, release_id: []const u8) !?Relea
     // Fetch items
     var i_stmt = try db.prepare(
         \\SELECT ri.entry_id, COALESCE(e.title, '(untitled)'), COALESCE(e.status, ''),
-        \\  ri.from_version, ri.to_version, ri.fields
+        \\  COALESCE(e.content_type_id, 'post'), ri.from_version, ri.to_version, ri.fields
         \\FROM release_items ri
         \\LEFT JOIN entries e ON e.id = ri.entry_id
         \\WHERE ri.release_id = ?1
@@ -1069,9 +1070,10 @@ pub fn getRelease(allocator: Allocator, db: *Db, release_id: []const u8) !?Relea
             .entry_id = try allocator.dupe(u8, i_stmt.columnText(0) orelse ""),
             .entry_title = try allocator.dupe(u8, i_stmt.columnText(1) orelse "(untitled)"),
             .entry_status = try allocator.dupe(u8, i_stmt.columnText(2) orelse ""),
-            .from_version = if (i_stmt.columnText(3)) |v| try allocator.dupe(u8, v) else null,
-            .to_version = try allocator.dupe(u8, i_stmt.columnText(4) orelse ""),
-            .fields = if (i_stmt.columnText(5)) |f| try allocator.dupe(u8, f) else null,
+            .content_type_id = try allocator.dupe(u8, i_stmt.columnText(3) orelse "post"),
+            .from_version = if (i_stmt.columnText(4)) |v| try allocator.dupe(u8, v) else null,
+            .to_version = try allocator.dupe(u8, i_stmt.columnText(5) orelse ""),
+            .fields = if (i_stmt.columnText(6)) |f| try allocator.dupe(u8, f) else null,
         });
     }
 
