@@ -5,6 +5,7 @@ const publr_config = @import("publr_config");
 const db_mod = @import("db");
 const media_sync = @import("media_sync");
 const storage = @import("storage");
+const collaboration_config = @import("collaboration_config.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -74,6 +75,9 @@ fn runMedia(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void 
 
 fn runServe(args: *std.process.ArgIterator) !void {
     var cli_port: ?u16 = null;
+    var cli_db_path: ?[]const u8 = null;
+    var cli_lock_timeout_ms: ?u32 = null;
+    var cli_heartbeat_interval_ms: ?u32 = null;
     var dev_mode: bool = false;
     var watch_mode: bool = false;
 
@@ -87,6 +91,29 @@ fn runServe(args: *std.process.ArgIterator) !void {
                 std.debug.print("Error: invalid port number: {s}\n", .{port_str});
                 return;
             };
+        } else if (std.mem.eql(u8, arg, "--db")) {
+            cli_db_path = args.next() orelse {
+                std.debug.print("Error: --db requires a value\n", .{});
+                return;
+            };
+        } else if (std.mem.eql(u8, arg, "--lock-timeout")) {
+            const timeout_str = args.next() orelse {
+                std.debug.print("Error: --lock-timeout requires a value (milliseconds)\n", .{});
+                return;
+            };
+            cli_lock_timeout_ms = std.fmt.parseInt(u32, timeout_str, 10) catch {
+                std.debug.print("Error: invalid --lock-timeout value: {s}\n", .{timeout_str});
+                return;
+            };
+        } else if (std.mem.eql(u8, arg, "--heartbeat-interval")) {
+            const interval_str = args.next() orelse {
+                std.debug.print("Error: --heartbeat-interval requires a value (milliseconds)\n", .{});
+                return;
+            };
+            cli_heartbeat_interval_ms = std.fmt.parseInt(u32, interval_str, 10) catch {
+                std.debug.print("Error: invalid --heartbeat-interval value: {s}\n", .{interval_str});
+                return;
+            };
         } else if (std.mem.eql(u8, arg, "--dev") or std.mem.eql(u8, arg, "-d")) {
             dev_mode = true;
         } else if (std.mem.eql(u8, arg, "--watch") or std.mem.eql(u8, arg, "-w")) {
@@ -98,13 +125,16 @@ fn runServe(args: *std.process.ArgIterator) !void {
     }
 
     const port = resolvePort(cli_port);
+    const db_path = resolveDbPath(cli_db_path);
+    const lock_timeout_ms = resolveLockTimeoutMs(cli_lock_timeout_ms);
+    const heartbeat_interval_ms = resolveHeartbeatIntervalMs(cli_heartbeat_interval_ms);
 
     if (watch_mode) {
         if (builtin.os.tag == .windows) {
             printWatchNotSupportedWindows();
             return;
         }
-        runWithWatchers(port, dev_mode) catch |err| {
+        runWithWatchers(port, db_path, lock_timeout_ms, heartbeat_interval_ms, dev_mode) catch |err| {
             if (err == error.FileNotFound) {
                 printWatchexecMissing();
                 return;
@@ -114,7 +144,7 @@ fn runServe(args: *std.process.ArgIterator) !void {
         return;
     }
 
-    try http.serve(port, dev_mode);
+    try http.serve(port, db_path, lock_timeout_ms, heartbeat_interval_ms, dev_mode);
 }
 
 /// Resolves port with precedence: CLI flag > PORT env var > default (8080)
@@ -134,11 +164,36 @@ fn resolvePort(cli_port: ?u16) u16 {
     return 8080;
 }
 
+/// Resolves database path with precedence: CLI flag > PUBLR_DB env var > default (data/publr.db)
+fn resolveDbPath(cli_db_path: ?[]const u8) []const u8 {
+    if (cli_db_path) |path| return path;
+
+    if (std.posix.getenv("PUBLR_DB")) |path| {
+        if (path.len > 0) return path;
+    }
+
+    return "data/publr.db";
+}
+
+fn resolveLockTimeoutMs(cli_lock_timeout_ms: ?u32) u32 {
+    return cli_lock_timeout_ms orelse collaboration_config.default_lock_timeout_ms;
+}
+
+fn resolveHeartbeatIntervalMs(cli_heartbeat_interval_ms: ?u32) u32 {
+    return cli_heartbeat_interval_ms orelse collaboration_config.default_heartbeat_interval_ms;
+}
+
 /// Runs the server with two watchexec processes:
 /// 1. Build watcher — watches sources, runs `zig build -Dwatch` (server stays up during build)
 /// 2. Server watcher — watches `zig-out/bin/publr`, restarts server when binary changes
 /// Server downtime = just the process restart, not the entire build.
-fn runWithWatchers(port: u16, dev_mode: bool) !void {
+fn runWithWatchers(
+    port: u16,
+    db_path: []const u8,
+    lock_timeout_ms: u32,
+    heartbeat_interval_ms: u32,
+    dev_mode: bool,
+) !void {
     // Build command for build watcher (tailwind + zig build)
     var cmd_buf: [512]u8 = undefined;
     var cmd_offset: usize = 0;
@@ -182,6 +237,15 @@ fn runWithWatchers(port: u16, dev_mode: bool) !void {
     const port_str = std.fmt.bufPrint(port_buf[0..5], "{d}", .{port}) catch unreachable;
     port_buf[port_str.len] = 0;
 
+    const db_path_z = try std.heap.page_allocator.dupeZ(u8, db_path);
+    defer std.heap.page_allocator.free(db_path_z);
+    var lock_timeout_buf: [16]u8 = undefined;
+    const lock_timeout_str = std.fmt.bufPrint(lock_timeout_buf[0..15], "{d}", .{lock_timeout_ms}) catch unreachable;
+    lock_timeout_buf[lock_timeout_str.len] = 0;
+    var heartbeat_interval_buf: [16]u8 = undefined;
+    const heartbeat_interval_str = std.fmt.bufPrint(heartbeat_interval_buf[0..15], "{d}", .{heartbeat_interval_ms}) catch unreachable;
+    heartbeat_interval_buf[heartbeat_interval_str.len] = 0;
+
     // Server watcher: watches binary, restarts on change (no shell layer)
     const dev_flag: ?[*:0]const u8 = if (dev_mode) "--dev" else null;
     const server_argv = [_:null]?[*:0]const u8{
@@ -196,6 +260,12 @@ fn runWithWatchers(port: u16, dev_mode: bool) !void {
         "serve",
         "--port",
         @ptrCast(&port_buf),
+        "--db",
+        db_path_z.ptr,
+        "--lock-timeout",
+        @ptrCast(&lock_timeout_buf),
+        "--heartbeat-interval",
+        @ptrCast(&heartbeat_interval_buf),
         dev_flag,
     };
 
@@ -267,15 +337,22 @@ fn printUsage() void {
         \\
         \\Serve options:
         \\  --port, -p <port>    Port to listen on (default: 8080, or PORT env var)
+        \\  --db <path>          Database path (default: data/publr.db, or PUBLR_DB env var)
+        \\  --lock-timeout <ms>  Soft-lock inactivity timeout in milliseconds (default: 60000)
+        \\  --heartbeat-interval <ms>
+        \\                       Client/server heartbeat interval in milliseconds (default: 10000)
         \\  --dev, -d            Enable development mode (hot reload)
         \\  --watch, -w          Auto-rebuild on file changes (requires watchexec)
         \\
         \\Environment variables:
         \\  PORT                 Default port (overridden by --port flag)
+        \\  PUBLR_DB             Default database path (overridden by --db flag)
         \\
         \\Examples:
         \\  publr serve
         \\  publr serve --port 3000
+        \\  publr serve --db /tmp/publr-test.db
+        \\  publr serve --lock-timeout 1000 --heartbeat-interval 500
         \\  publr serve --dev
         \\  publr serve --watch --dev
         \\

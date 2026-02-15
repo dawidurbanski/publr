@@ -49,14 +49,26 @@ const websocket = if (@import("builtin").target.os.tag != .wasi) @import("websoc
     pub const Connection = struct {};
 };
 const presence = if (@import("builtin").target.os.tag != .wasi) @import("presence") else struct {
+    pub fn getLockTimeoutMs() u32 {
+        return 60_000;
+    }
+    pub fn getHeartbeatIntervalMs() u32 {
+        return 10_000;
+    }
     pub fn notifyLockAcquired(_: []const u8, _: []const u8, _: []const u8, _: []const u8, _: []const u8) void {}
     pub fn notifyLocksReleased(_: []const u8, _: []const []const u8) void {}
     pub fn broadcastEntryMessage(_: []const u8, _: []const u8, _: []const u8) void {}
-    pub fn getConnEntryId(_: u64) ?[]const u8 { return null; }
-    pub fn checkTakeoverAllowed(_: []const u8, _: []const u8, _: []const u8) bool { return false; }
+    pub fn getConnEntryId(_: u64) ?[]const u8 {
+        return null;
+    }
+    pub fn checkTakeoverAllowed(_: []const u8, _: []const u8, _: []const u8) bool {
+        return false;
+    }
     pub fn registerTakeover(_: []const u8, _: []const u8, _: []const u8, _: []const u8, _: []const u8) void {}
     pub const OverrideCheck = enum { none, owner, not_owner };
-    pub fn checkOwnershipOverride(_: []const u8, _: []const u8, _: []const u8) OverrideCheck { return .none; }
+    pub fn checkOwnershipOverride(_: []const u8, _: []const u8, _: []const u8) OverrideCheck {
+        return .none;
+    }
     pub fn clearOwnershipOverrides(_: []const u8, _: []const []const u8) void {}
 };
 
@@ -207,13 +219,10 @@ fn listFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
 
     // Author filter (treat empty string as no filter)
     const author_filter: ?[]const u8 = if (pu.queryParam(ctx.query, "author")) |af| (if (af.len > 0) af else null) else null;
-    const filtered_entry_ids: ?[]const []const u8 = if (author_filter) |af|
-        blk: {
-            const ids = getEntryIdsByAuthor(ctx.allocator, db, af, CT.type_id);
-            break :blk if (ids.len > 0) ids else null;
-        }
-    else
-        null;
+    const filtered_entry_ids: ?[]const []const u8 = if (author_filter) |af| blk: {
+        const ids = getEntryIdsByAuthor(ctx.allocator, db, af, CT.type_id);
+        break :blk if (ids.len > 0) ids else null;
+    } else null;
 
     const total_count: u32 = if (author_filter != null) blk: {
         if (filtered_entry_ids) |ids| break :blk @intCast(ids.len) else break :blk 0;
@@ -1216,6 +1225,13 @@ fn renderFieldsHtml(
             \\ data-fields-in-releases="{s}"
             \\ data-field-editors="{s}"
         , .{ fir_escaped, fe_escaped }) catch {};
+        w.print(
+            \\ data-lock-timeout-ms="{d}"
+            \\ data-heartbeat-interval-ms="{d}"
+        , .{
+            presence.getLockTimeoutMs(),
+            presence.getHeartbeatIntervalMs(),
+        }) catch {};
 
         w.writeAll(">") catch return "";
 
@@ -1727,7 +1743,6 @@ fn buildFieldsInReleasesJson(allocator: Allocator, items: []const cms.EntryRelea
     try w.writeByte(']');
     return buf.toOwnedSlice(allocator);
 }
-
 
 // =============================================================================
 // Hard Lock / Field Ownership

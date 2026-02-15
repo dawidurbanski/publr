@@ -48,9 +48,14 @@ const FieldLock = struct {
 // =========================================================================
 
 const GRACE_PERIOD_S: i64 = 5;
+const default_lock_timeout_ms: u32 = 60_000;
+const default_heartbeat_interval_ms: u32 = 10_000;
 
 var mutex: std.Thread.Mutex = .{};
 var alloc: std.mem.Allocator = undefined;
+var lock_timeout_ms: u32 = default_lock_timeout_ms;
+var heartbeat_interval_ms: u32 = default_heartbeat_interval_ms;
+var heartbeat_stale_seconds: i64 = 20;
 
 /// entry_id → list of subscribers
 var entries: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(Subscriber)) = .{};
@@ -75,6 +80,40 @@ const OwnershipOverride = struct {
 
 pub fn init(a: std.mem.Allocator) void {
     alloc = a;
+}
+
+pub fn setTiming(lock_timeout: u32, heartbeat_interval: u32) void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    lock_timeout_ms = if (lock_timeout < 250) 250 else lock_timeout;
+    heartbeat_interval_ms = if (heartbeat_interval < 100) 100 else heartbeat_interval;
+    heartbeat_stale_seconds = heartbeatToStaleSeconds(heartbeat_interval_ms);
+}
+
+pub fn setHeartbeatStaleSeconds(seconds: i64) void {
+    mutex.lock();
+    defer mutex.unlock();
+    heartbeat_stale_seconds = if (seconds < 1) 1 else seconds;
+}
+
+pub fn getLockTimeoutMs() u32 {
+    mutex.lock();
+    defer mutex.unlock();
+    return lock_timeout_ms;
+}
+
+pub fn getHeartbeatIntervalMs() u32 {
+    mutex.lock();
+    defer mutex.unlock();
+    return heartbeat_interval_ms;
+}
+
+fn heartbeatToStaleSeconds(heartbeat_interval: u32) i64 {
+    const stale_ms: u64 = @as(u64, heartbeat_interval) * 3;
+    const secs = (stale_ms + 999) / 1000;
+    const bounded = @max(secs, 1);
+    return @intCast(bounded);
 }
 
 // =========================================================================
@@ -249,7 +288,7 @@ pub fn heartbeat(conn_id: u64) void {
     }
 }
 
-/// Returns true if connection has missed 2+ heartbeats (>20s stale).
+/// Returns true if connection has exceeded the configured stale threshold.
 pub fn isHeartbeatStale(conn_id: u64) bool {
     mutex.lock();
     defer mutex.unlock();
@@ -259,7 +298,7 @@ pub fn isHeartbeatStale(conn_id: u64) bool {
 
     for (subs.items) |s| {
         if (s.conn.id == conn_id) {
-            return (std.time.timestamp() - s.last_heartbeat) > 20;
+            return (std.time.timestamp() - s.last_heartbeat) > heartbeat_stale_seconds;
         }
     }
     return false;

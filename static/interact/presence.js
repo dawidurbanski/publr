@@ -11,9 +11,15 @@ let heartbeatTimer = null;
 let lastInputTime = Date.now();
 let isActive = true;
 
-const INACTIVE_THRESHOLD = 60000; // 60s
-const HEARTBEAT_INTERVAL = 10000; // 10s
-const ACTIVITY_CHECK_INTERVAL = 10000; // 10s
+const DEFAULT_INACTIVE_THRESHOLD = 60000; // 60s
+const DEFAULT_HEARTBEAT_INTERVAL = 10000; // 10s
+const MIN_INACTIVE_THRESHOLD = 250;
+const MIN_HEARTBEAT_INTERVAL = 100;
+const MIN_ACTIVITY_CHECK_INTERVAL = 100;
+
+let inactiveThreshold = DEFAULT_INACTIVE_THRESHOLD;
+let heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
+let activityCheckInterval = DEFAULT_HEARTBEAT_INTERVAL;
 
 // Current users on this entry (keyed by user_id)
 const users = new Map();
@@ -35,6 +41,9 @@ const EDIT_DEBOUNCE_MS = 300;
 export function initPresence() {
     const form = document.getElementById('entry-form');
     if (!form) return;
+    configureTiming(form);
+    lastInputTime = Date.now();
+    isActive = true;
 
     const entryId = form.dataset.entryId;
     if (!entryId) return;
@@ -79,7 +88,7 @@ export function initPresence() {
     startActivityDetection();
 
     // Start heartbeat
-    heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
+    heartbeatTimer = setInterval(sendHeartbeat, heartbeatInterval);
 
     // Clean up on page unload
     window.addEventListener('beforeunload', cleanup);
@@ -337,7 +346,7 @@ function startActivityDetection() {
         document.addEventListener(evt, onUserInput, { passive: true });
     }
 
-    activityTimer = setInterval(checkActivity, ACTIVITY_CHECK_INTERVAL);
+    activityTimer = setInterval(checkActivity, activityCheckInterval);
 }
 
 function onUserInput() {
@@ -349,10 +358,31 @@ function onUserInput() {
 }
 
 function checkActivity() {
-    if (isActive && (Date.now() - lastInputTime > INACTIVE_THRESHOLD)) {
+    if (isActive && (Date.now() - lastInputTime > inactiveThreshold)) {
         isActive = false;
         send('activity', { active: false });
     }
+}
+
+function configureTiming(form) {
+    const lockTimeoutMs = parsePositiveInt(form.dataset.lockTimeoutMs);
+    const heartbeatMs = parsePositiveInt(form.dataset.heartbeatIntervalMs);
+
+    inactiveThreshold = Math.max(lockTimeoutMs ?? DEFAULT_INACTIVE_THRESHOLD, MIN_INACTIVE_THRESHOLD);
+    heartbeatInterval = Math.max(heartbeatMs ?? DEFAULT_HEARTBEAT_INTERVAL, MIN_HEARTBEAT_INTERVAL);
+    activityCheckInterval = deriveActivityCheckInterval(inactiveThreshold, heartbeatInterval);
+}
+
+function parsePositiveInt(value) {
+    if (!value) return null;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+}
+
+function deriveActivityCheckInterval(inactiveMs, heartbeatMs) {
+    const halfInactive = Math.max(Math.floor(inactiveMs / 2), MIN_ACTIVITY_CHECK_INTERVAL);
+    return Math.min(heartbeatMs, halfInactive);
 }
 
 // =========================================================================

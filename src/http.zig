@@ -21,6 +21,7 @@ const seed = @import("seed");
 const websocket = @import("websocket");
 const presence = @import("presence");
 const url_mod = @import("url");
+const collaboration_config = @import("collaboration_config.zig");
 
 // Import plugins directly
 const plugin_dashboard = @import("plugin_dashboard");
@@ -71,15 +72,27 @@ var global_router: ?Router = null;
 // Global dev mode flag for handlers
 var is_dev_mode: bool = false;
 
-pub fn serve(port: u16, dev_mode: bool) !void {
+pub fn serve(
+    port: u16,
+    db_path: []const u8,
+    lock_timeout_ms: u32,
+    heartbeat_interval_ms: u32,
+    dev_mode: bool,
+) !void {
     is_dev_mode = dev_mode;
+    collaboration_config.setTiming(lock_timeout_ms, heartbeat_interval_ms);
+    presence.setTiming(
+        collaboration_config.getLockTimeoutMs(),
+        collaboration_config.getHeartbeatIntervalMs(),
+    );
+
     // Initialize router
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Open database (created at build time by init_db)
-    var db = db_mod.Db.init(allocator, "data/publr.db") catch |err| {
+    var db = db_mod.Db.init(allocator, db_path) catch |err| {
         std.debug.print("Failed to open database: {}\n", .{err});
         return err;
     };
@@ -871,23 +884,28 @@ fn handleWebSocket(ctx: *Context) !void {
         }
     }
 
-    // Message loop — 10s poll timeout for heartbeat checking
+    const poll_timeout_ms: i32 = @intCast(@min(
+        collaboration_config.getHeartbeatIntervalMs(),
+        @as(u32, @intCast(std.math.maxInt(i32))),
+    ));
+
+    // Message loop — poll at configured heartbeat interval
     var poll_fds = [_]posix.pollfd{
         .{ .fd = stream.handle, .events = posix.POLL.IN, .revents = 0 },
     };
     var idle_ticks: u32 = 0;
 
     while (!shutdown_requested.load(.acquire)) {
-        const poll_result = posix.poll(&poll_fds, 10_000) catch break;
+        const poll_result = posix.poll(&poll_fds, poll_timeout_ms) catch break;
 
         if (poll_result == 0) {
             idle_ticks += 1;
-            // Check heartbeat staleness (>20s without heartbeat)
+            // Check heartbeat staleness using configured threshold.
             if (presence.isHeartbeatStale(conn.id)) {
                 if (is_dev_mode) std.debug.print("[ws] #{d}: heartbeat stale, closing\n", .{conn.id});
                 break;
             }
-            // 30s idle — send ping to verify TCP liveness
+            // After 3 poll windows with no traffic, ping for TCP liveness.
             if (idle_ticks >= 3) {
                 websocket.writeFrame(stream, .ping, &.{}) catch break;
                 idle_ticks = 0;
