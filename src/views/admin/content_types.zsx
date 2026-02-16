@@ -1,8 +1,77 @@
-// Content types management page
+const TypeRow = struct {
+    id: []const u8,
+    name: []const u8,
+    name_plural: []const u8,
+    icon: []const u8,
+    localized: []const u8,
+    locales: []const u8,
+    workflow: []const u8,
+    internal: bool,
+    taxonomy: bool,
+    fields_count: []const u8,
+    synced_count: []const u8,
+    fallback_count: []const u8,
+    permissions_count: []const u8,
+};
 
-pub fn ContentTypes(props: struct {}) {
-    _ = props;
-    <div class="empty-state-container">
-        <p class="empty-state">Content types management coming soon.</p>
+pub fn ContentTypes(props: struct {
+    has_types: bool,
+    total_count: []const u8,
+    rows: []const TypeRow,
+}) {
+    <div class="panel">
+        <div class="panel-header">
+            <h2>Content Types</h2>
+            <span class="badge">{props.total_count}</span>
+        </div>
+        <div class="panel-body">
+            {if (!props.has_types) (
+                <p class="empty-state">No content types registered.</p>
+            ) else (
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>i18n</th>
+                            <th>Workflow</th>
+                            <th>Fields</th>
+                            <th>Synced</th>
+                            <th>Fallback</th>
+                            <th>Permissions</th>
+                            <th>Flags</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {for (props.rows) |row| (
+                            <tr>
+                                <td><code>{row.id}</code></td>
+                                <td>
+                                    <div>{row.name}</div>
+                                    <div class="text-muted">{row.name_plural}</div>
+                                </td>
+                                <td>
+                                    <div>{row.localized}</div>
+                                    <div class="text-muted">{row.locales}</div>
+                                </td>
+                                <td>{row.workflow}</td>
+                                <td>{row.fields_count}</td>
+                                <td>{row.synced_count}</td>
+                                <td>{row.fallback_count}</td>
+                                <td>{row.permissions_count}</td>
+                                <td>
+                                    {if (row.internal) (
+                                        <span class="badge">internal</span>
+                                    )}
+                                    {if (row.taxonomy) (
+                                        <span class="badge">taxonomy</span>
+                                    )}
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            )}
+        </div>
     </div>
 }

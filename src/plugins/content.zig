@@ -13,7 +13,8 @@
 //!   GET  /admin/content/{type_id}                        — list entries
 //!   GET  /admin/content/{type_id}/new                    — create new entry
 //!   GET  /admin/content/{type_id}/:id                    — edit entry form
-//!   GET  /admin/content/{type_id}/:id/versions/:vid      — version comparison
+//!   GET  /admin/content/{type_id}/:id/versions/:vid/compare — version comparison
+//!   GET  /admin/content/{type_id}/:id/versions/:vid/flow — version flow audit
 //!   POST /admin/content/{type_id}                        — save new entry
 //!   POST /admin/content/{type_id}/autosave               — autosave create
 //!   POST /admin/content/{type_id}/:id                    — update existing entry
@@ -93,6 +94,8 @@ fn ContentHandlers(comptime CT: type) type {
             app.get("/new", handleNew);
             app.get("/:id", handleEdit);
             app.get("/:id/versions/:vid", handleVersionPreview);
+            app.get("/:id/versions/:vid/compare", handleVersionCompare);
+            app.get("/:id/versions/:vid/flow", handleVersionFlow);
             app.post(handleCreate);
             app.postAt("/autosave", handleAutosaveCreate);
             app.postAt("/:id", handleUpdate);
@@ -151,8 +154,17 @@ fn ContentHandlers(comptime CT: type) type {
         }
 
         fn handleVersionPreview(ctx: *Context) !void {
+            return versionPreviewRedirectFor(CT, ctx);
+        }
+
+        fn handleVersionCompare(ctx: *Context) !void {
             const pg = comptime getPage();
-            return versionPreviewFor(CT, pg, ctx);
+            return versionCompareFor(CT, pg, ctx);
+        }
+
+        fn handleVersionFlow(ctx: *Context) !void {
+            const pg = comptime getPage();
+            return versionFlowFor(CT, pg, ctx);
         }
 
         fn handleRestore(ctx: *Context) !void {
@@ -763,7 +775,21 @@ fn autosaveUpdateFor(comptime CT: type, ctx: *Context) !void {
 // Version Preview & Restore
 // =============================================================================
 
-fn versionPreviewFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
+fn versionPreviewRedirectFor(comptime CT: type, ctx: *Context) !void {
+    const base_url = "/admin/content/" ++ CT.type_id;
+    const entry_id = ctx.param("id") orelse {
+        redirect(ctx, base_url);
+        return;
+    };
+    const version_id = ctx.param("vid") orelse {
+        redirect(ctx, base_url);
+        return;
+    };
+    const compare_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}/versions/{s}/compare", .{ entry_id, version_id }) catch base_url;
+    redirect(ctx, compare_url);
+}
+
+fn versionCompareFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
     const base_url = "/admin/content/" ++ CT.type_id;
     const db = if (auth_middleware.auth) |a| a.db else {
         redirect(ctx, base_url);
@@ -791,12 +817,17 @@ fn versionPreviewFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
         redirect(ctx, entry_url);
         return;
     };
+    if (version.is_current) {
+        const flow_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}/versions/{s}/flow", .{ entry_id, version_id }) catch entry_url;
+        redirect(ctx, flow_url);
+        return;
+    }
 
     const back_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
 
     // Get entry title
     const entry_title = blk: {
-        var t_stmt = try db.prepare("SELECT title FROM entries WHERE id = ?1");
+        var t_stmt = try db.prepare("SELECT title FROM content_entries WHERE id = ?1");
         defer t_stmt.deinit();
         try t_stmt.bindText(1, entry_id);
         if (!try t_stmt.step()) break :blk "Untitled";
@@ -805,7 +836,7 @@ fn versionPreviewFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
 
     // Get current version data
     const current_version_id = blk: {
-        var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+        var cur_stmt = try db.prepare("SELECT current_version_id FROM content_entries WHERE id = ?1");
         defer cur_stmt.deinit();
         try cur_stmt.bindText(1, entry_id);
         _ = try cur_stmt.step();
@@ -832,169 +863,150 @@ fn versionPreviewFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
     var buf: std.ArrayList(u8) = .{};
     const w = buf.writer(ctx.allocator);
 
-    if (version.is_current) {
-        try w.writeAll(
-            \\<div class="version-preview">
-            \\  <div class="version-preview-header">
-            \\    <div class="version-preview-meta">
-            \\      <span class="version-preview-author">
-        );
-        try w.writeAll(author_str);
-        try w.writeAll("</span><span class=\"version-preview-time\">");
-        try w.writeAll(time_str);
-        try w.writeAll(
-            \\</span>
-            \\    </div>
-            \\    <span class="badge-current">Current version</span>
-            \\  </div>
-            \\</div>
-        );
-    } else {
-        try w.writeAll("<form method=\"POST\" action=\"");
-        try w.writeAll(restore_url);
-        try w.writeAll("\" class=\"version-compare\">");
-        try w.writeAll("<input type=\"hidden\" name=\"_csrf\" value=\"");
-        try w.writeAll(csrf_token);
-        try w.writeAll("\"/>");
-        try w.writeAll("<input type=\"hidden\" name=\"_partial\" value=\"1\"/>");
+    try w.writeAll("<form method=\"POST\" action=\"");
+    try w.writeAll(restore_url);
+    try w.writeAll("\" class=\"version-compare\">");
+    try w.writeAll("<input type=\"hidden\" name=\"_csrf\" value=\"");
+    try w.writeAll(csrf_token);
+    try w.writeAll("\"/>");
+    try w.writeAll("<input type=\"hidden\" name=\"_partial\" value=\"1\"/>");
 
-        // Header row
-        try w.writeAll(
-            \\<div class="version-compare-header">
-            \\  <div class="version-compare-col-old">
-            \\    <span class="version-compare-col-title">
-        );
-        if (version.author_email) |email| {
-            const old_avatar = gravatar.url(email, 24);
-            try w.writeAll("<img src=\"");
-            try w.writeAll(old_avatar.slice());
-            try w.writeAll("\" alt=\"\" title=\"");
-            try cms.writeEscaped(w, version.authorLabel());
-            try w.writeAll("\" class=\"version-avatar\" /> ");
-        }
-        if (std.mem.eql(u8, version.version_type, "published")) {
+    // Header row
+    try w.writeAll(
+        \\<div class="version-compare-header">
+        \\  <div class="version-compare-col-old">
+        \\    <span class="version-compare-col-title">
+    );
+    if (version.author_email) |email| {
+        const old_avatar = gravatar.url(email, 24);
+        try w.writeAll("<img src=\"");
+        try w.writeAll(old_avatar.slice());
+        try w.writeAll("\" alt=\"\" title=\"");
+        try cms.writeEscaped(w, version.authorLabel());
+        try w.writeAll("\" class=\"version-avatar\" /> ");
+    }
+    if (std.mem.eql(u8, version.version_type, "published")) {
+        try w.writeAll("Published by ");
+    }
+    try w.writeAll(author_str);
+    try w.writeAll(" &middot; ");
+    try w.writeAll(time_str);
+    try w.writeAll(
+        \\</span>
+        \\    <a href="#" id="select-all-old" class="version-compare-select-all">Select all from this version</a>
+        \\  </div>
+        \\  <div class="version-compare-col-current">
+        \\    <span class="version-compare-col-title">
+    );
+    if (current_data) |cd| {
+        try writeCollaboratorAvatars(w, ctx.allocator, cd.collaborators, cd.author_email, cd.authorLabel());
+        try w.writeByte(' ');
+    }
+    if (current_data) |cd| {
+        if (std.mem.eql(u8, cd.version_type, "published")) {
             try w.writeAll("Published by ");
-        }
-        try w.writeAll(author_str);
-        try w.writeAll(" &middot; ");
-        try w.writeAll(time_str);
-        try w.writeAll(
-            \\</span>
-            \\    <a href="#" id="select-all-old" class="version-compare-select-all">Select all from this version</a>
-            \\  </div>
-            \\  <div class="version-compare-col-current">
-            \\    <span class="version-compare-col-title">
-        );
-        if (current_data) |cd| {
-            try writeCollaboratorAvatars(w, ctx.allocator, cd.collaborators, cd.author_email, cd.authorLabel());
-            try w.writeByte(' ');
-        }
-        if (current_data) |cd| {
-            if (std.mem.eql(u8, cd.version_type, "published")) {
-                try w.writeAll("Published by ");
-                try cms.writeEscaped(w, cd.authorLabel());
-            } else {
-                try w.writeAll("Current version");
-            }
+            try cms.writeEscaped(w, cd.authorLabel());
         } else {
             try w.writeAll("Current version");
         }
-        try w.writeAll(
-            \\</span>
-            \\  </div>
-            \\</div>
-        );
-
-        // Toolbar
-        try w.writeAll(
-            \\<div class="version-compare-toolbar">
-            \\  <label class="version-compare-toggle">
-            \\    <input type="checkbox" id="show-diff-only" />
-            \\    Show only differences (
-        );
-        try w.print("{d}", .{changed_count});
-        try w.writeAll(
-            \\)
-            \\  </label>
-            \\</div>
-        );
-
-        // Field rows
-        try w.writeAll("<div class=\"version-compare-fields\" id=\"version-compare-fields\">");
-
-        for (fields) |f| {
-            const status_attr: []const u8 = if (f.changed) "changed" else "unchanged";
-
-            try w.writeAll("<div class=\"version-compare-row\" data-field-status=\"");
-            try w.writeAll(status_attr);
-            try w.writeAll("\">");
-
-            try w.writeAll("<div class=\"version-compare-label\">");
-            try cms.writeEscaped(w, f.key);
-            if (f.changed) {
-                try w.writeAll(" <span class=\"version-compare-badge\">changed</span>");
-                if (f.changed_by) |email| {
-                    try w.writeAll(" <span class=\"version-compare-author\">by ");
-                    try cms.writeEscaped(w, email);
-                    try w.writeAll("</span>");
-                }
-            }
-            try w.writeAll("</div>");
-
-            // Old value cell
-            try w.writeAll("<div class=\"version-compare-cell version-compare-cell-old\">");
-            try w.writeAll("<label class=\"version-compare-radio\">");
-            try w.writeAll("<input type=\"radio\" name=\"field_");
-            try cms.writeEscaped(w, f.key);
-            try w.writeAll("\" value=\"old\"");
-            if (!f.changed) try w.writeAll(" disabled");
-            try w.writeAll(" />");
-            try w.writeAll("<span class=\"version-compare-value");
-            if (f.changed) try w.writeAll(" version-compare-value-old");
-            try w.writeAll("\">");
-            if (f.old_value.len > 0) {
-                try cms.writeEscaped(w, f.old_value);
-            } else {
-                try w.writeAll("<em class=\"version-compare-empty\">(empty)</em>");
-            }
-            try w.writeAll("</span></label></div>");
-
-            // Current value cell
-            try w.writeAll("<div class=\"version-compare-cell version-compare-cell-current\">");
-            try w.writeAll("<label class=\"version-compare-radio\">");
-            try w.writeAll("<input type=\"radio\" name=\"field_");
-            try cms.writeEscaped(w, f.key);
-            try w.writeAll("\" value=\"current\" checked");
-            if (!f.changed) try w.writeAll(" disabled");
-            try w.writeAll(" />");
-            try w.writeAll("<span class=\"version-compare-value");
-            if (f.changed) try w.writeAll(" version-compare-value-current");
-            try w.writeAll("\">");
-            if (f.new_value.len > 0) {
-                try cms.writeEscaped(w, f.new_value);
-            } else {
-                try w.writeAll("<em class=\"version-compare-empty\">(empty)</em>");
-            }
-            try w.writeAll("</span></label></div>");
-
-            try w.writeAll("</div>"); // row
-        }
-
-        try w.writeAll("</div>"); // fields
-
-        // Actions
-        try w.writeAll(
-            \\<div class="version-compare-actions">
-            \\  <a href="
-        );
-        try w.writeAll(back_url);
-        try w.writeAll(
-            \\" class="btn">Cancel</a>
-            \\  <button type="submit" class="btn btn-primary" id="apply-changes-btn" disabled>Apply changes</button>
-            \\</div>
-            \\</form>
-        );
+    } else {
+        try w.writeAll("Current version");
     }
+    try w.writeAll(
+        \\</span>
+        \\  </div>
+        \\</div>
+    );
+
+    // Toolbar
+    try w.writeAll(
+        \\<div class="version-compare-toolbar">
+        \\  <label class="version-compare-toggle">
+        \\    <input type="checkbox" id="show-diff-only" />
+        \\    Show only differences (
+    );
+    try w.print("{d}", .{changed_count});
+    try w.writeAll(
+        \\)
+        \\  </label>
+        \\</div>
+    );
+
+    // Field rows
+    try w.writeAll("<div class=\"version-compare-fields\" id=\"version-compare-fields\">");
+
+    for (fields) |f| {
+        const status_attr: []const u8 = if (f.changed) "changed" else "unchanged";
+
+        try w.writeAll("<div class=\"version-compare-row\" data-field-status=\"");
+        try w.writeAll(status_attr);
+        try w.writeAll("\">");
+
+        try w.writeAll("<div class=\"version-compare-label\">");
+        try cms.writeEscaped(w, f.key);
+        if (f.changed) {
+            try w.writeAll(" <span class=\"version-compare-badge\">changed</span>");
+            if (f.changed_by) |email| {
+                try w.writeAll(" <span class=\"version-compare-author\">by ");
+                try cms.writeEscaped(w, email);
+                try w.writeAll("</span>");
+            }
+        }
+        try w.writeAll("</div>");
+
+        // Old value cell
+        try w.writeAll("<div class=\"version-compare-cell version-compare-cell-old\">");
+        try w.writeAll("<label class=\"version-compare-radio\">");
+        try w.writeAll("<input type=\"radio\" name=\"field_");
+        try cms.writeEscaped(w, f.key);
+        try w.writeAll("\" value=\"old\"");
+        if (!f.changed) try w.writeAll(" disabled");
+        try w.writeAll(" />");
+        try w.writeAll("<span class=\"version-compare-value");
+        if (f.changed) try w.writeAll(" version-compare-value-old");
+        try w.writeAll("\">");
+        if (f.old_value.len > 0) {
+            try cms.writeEscaped(w, f.old_value);
+        } else {
+            try w.writeAll("<em class=\"version-compare-empty\">(empty)</em>");
+        }
+        try w.writeAll("</span></label></div>");
+
+        // Current value cell
+        try w.writeAll("<div class=\"version-compare-cell version-compare-cell-current\">");
+        try w.writeAll("<label class=\"version-compare-radio\">");
+        try w.writeAll("<input type=\"radio\" name=\"field_");
+        try cms.writeEscaped(w, f.key);
+        try w.writeAll("\" value=\"current\" checked");
+        if (!f.changed) try w.writeAll(" disabled");
+        try w.writeAll(" />");
+        try w.writeAll("<span class=\"version-compare-value");
+        if (f.changed) try w.writeAll(" version-compare-value-current");
+        try w.writeAll("\">");
+        if (f.new_value.len > 0) {
+            try cms.writeEscaped(w, f.new_value);
+        } else {
+            try w.writeAll("<em class=\"version-compare-empty\">(empty)</em>");
+        }
+        try w.writeAll("</span></label></div>");
+
+        try w.writeAll("</div>"); // row
+    }
+
+    try w.writeAll("</div>"); // fields
+
+    // Actions
+    try w.writeAll(
+        \\<div class="version-compare-actions">
+        \\  <a href="
+    );
+    try w.writeAll(back_url);
+    try w.writeAll(
+        \\" class="btn">Cancel</a>
+        \\  <button type="submit" class="btn btn-primary" id="apply-changes-btn" disabled>Apply changes</button>
+        \\</div>
+        \\</form>
+    );
 
     const preview_content = buf.toOwnedSlice(ctx.allocator) catch "";
 
@@ -1019,6 +1031,115 @@ fn versionPreviewFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
     };
 
     ctx.html(registry.renderEditPage(pg, ctx, entry_title, preview_content, .{
+        .back_url = back_url,
+        .back_label = "Back",
+        .sidebar = sidebar_html,
+    }));
+}
+
+fn versionFlowFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
+    const base_url = "/admin/content/" ++ CT.type_id;
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, base_url);
+        return;
+    };
+
+    const entry_id = ctx.param("id") orelse {
+        redirect(ctx, base_url);
+        return;
+    };
+
+    const entry_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
+
+    const version_id = ctx.param("vid") orelse {
+        redirect(ctx, entry_url);
+        return;
+    };
+
+    const version = cms.getVersion(ctx.allocator, db, version_id) catch {
+        redirect(ctx, entry_url);
+        return;
+    } orelse {
+        redirect(ctx, entry_url);
+        return;
+    };
+
+    const back_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
+    const compare_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}/versions/{s}/compare", .{ entry_id, version_id }) catch back_url;
+
+    const entry_title = blk: {
+        var t_stmt = try db.prepare("SELECT title FROM content_entries WHERE id = ?1");
+        defer t_stmt.deinit();
+        try t_stmt.bindText(1, entry_id);
+        if (!try t_stmt.step()) break :blk "Untitled";
+        break :blk try ctx.allocator.dupe(u8, t_stmt.columnText(0) orelse "Untitled");
+    };
+
+    const time_opt = cms.formatRelativeTime(ctx.allocator, version.created_at) catch null;
+    defer if (time_opt) |t| ctx.allocator.free(t);
+    const time_str = time_opt orelse "Unknown";
+    const author_str = version.authorLabel();
+
+    const flow_html_opt = buildVersionFlowAuditHtml(ctx.allocator, db, entry_id, version_id) catch null;
+    defer if (flow_html_opt) |fh| ctx.allocator.free(fh);
+    const flow_html = flow_html_opt orelse "";
+
+    var buf: std.ArrayList(u8) = .{};
+    const w = buf.writer(ctx.allocator);
+    try w.writeAll(
+        \\<div class="version-flow-view">
+        \\  <div class="version-preview-header">
+        \\    <div class="version-preview-meta">
+        \\      <span class="version-preview-author">
+    );
+    try cms.writeEscaped(w, author_str);
+    try w.writeAll("</span><span class=\"version-preview-time\">");
+    try cms.writeEscaped(w, time_str);
+    try w.writeAll(" · ");
+    try cms.writeEscaped(w, version.version_type);
+    try w.writeAll(
+        \\</span>
+        \\    </div>
+    );
+    if (version.is_current) {
+        try w.writeAll("<span class=\"badge-current\">Current version</span>");
+    } else {
+        try w.writeAll("<a href=\"");
+        try w.writeAll(compare_url);
+        try w.writeAll("\" class=\"btn btn-sm\">Compare</a>");
+    }
+    try w.writeAll(
+        \\  </div>
+        \\  <h3 class="version-preview-subtitle">Flow history</h3>
+    );
+    if (flow_html.len > 0) {
+        try w.writeAll(flow_html);
+    } else {
+        try w.writeAll("<p class=\"diff-error\">No flow events recorded for this version.</p>");
+    }
+    try w.writeAll("</div>");
+    const flow_content = buf.toOwnedSlice(ctx.allocator) catch "";
+
+    const history_html = buildVersionHistoryHtml(ctx.allocator, db, entry_id, base_url) catch "";
+    const sidebar_html = blk: {
+        var sb: std.ArrayList(u8) = .{};
+        const sw = sb.writer(ctx.allocator);
+        try sw.writeAll(
+            \\<div class="edit-sidebar-section">
+            \\  <div class="edit-sidebar-actions">
+            \\    <a href="
+        );
+        try sw.writeAll(back_url);
+        try sw.writeAll(
+            \\" class="btn btn-full">Back to Editor</a>
+            \\  </div>
+            \\</div>
+        );
+        try sw.writeAll(history_html);
+        break :blk sb.toOwnedSlice(ctx.allocator) catch "";
+    };
+
+    ctx.html(registry.renderEditPage(pg, ctx, entry_title, flow_content, .{
         .back_url = back_url,
         .back_label = "Back",
         .sidebar = sidebar_html,
@@ -1062,7 +1183,7 @@ fn restoreFor(comptime CT: type, ctx: *Context) !void {
         // Get current entry data
         const current_data_json = blk: {
             const current_vid = cv_blk: {
-                var cur_stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+                var cur_stmt = try db.prepare("SELECT current_version_id FROM content_entries WHERE id = ?1");
                 defer cur_stmt.deinit();
                 try cur_stmt.bindText(1, entry_id);
                 if (!try cur_stmt.step()) break :cv_blk null;
@@ -1544,16 +1665,21 @@ fn buildVersionHistoryHtml(allocator: Allocator, db: *Db, entry_id: []const u8, 
     );
 
     for (versions) |v| {
-        const time_str = cms.formatRelativeTime(allocator, v.created_at) catch "Unknown";
-        const version_url = std.fmt.allocPrint(allocator, "{s}/{s}/versions/{s}", .{ base_url, entry_id, v.id }) catch "";
+        const time_opt = cms.formatRelativeTime(allocator, v.created_at) catch null;
+        defer if (time_opt) |ts| allocator.free(ts);
+        const time_str = time_opt orelse "Unknown";
 
-        if (v.is_current) {
-            try w.writeAll("<div class=\"version-item version-current\">");
-        } else {
-            try w.writeAll("<a href=\"");
-            try w.writeAll(version_url);
-            try w.writeAll("\" class=\"version-item\">");
-        }
+        const compare_url_opt = std.fmt.allocPrint(allocator, "{s}/{s}/versions/{s}/compare", .{ base_url, entry_id, v.id }) catch null;
+        defer if (compare_url_opt) |url| allocator.free(url);
+        const compare_url = compare_url_opt orelse "";
+
+        const flow_url_opt = std.fmt.allocPrint(allocator, "{s}/{s}/versions/{s}/flow", .{ base_url, entry_id, v.id }) catch null;
+        defer if (flow_url_opt) |url| allocator.free(url);
+        const flow_url = flow_url_opt orelse "";
+
+        try w.writeAll("<div class=\"version-item version-history-item");
+        if (v.is_current) try w.writeAll(" version-current");
+        try w.writeAll("\">");
 
         // Avatars
         try writeCollaboratorAvatars(w, allocator, v.collaborators, v.author_email, v.authorLabel());
@@ -1570,17 +1696,145 @@ fn buildVersionHistoryHtml(allocator: Allocator, db: *Db, entry_id: []const u8, 
         }
         try w.writeAll("<span class=\"version-time\">");
         try w.writeAll(time_str);
-        try w.writeAll("</span></span>");
+        try w.writeAll("</span>");
+        try w.writeAll("</span>");
 
-        if (v.is_current) {
-            try w.writeAll("<span class=\"version-badge\">current</span></div>");
-        } else {
-            try w.writeAll("</a>");
+        try w.writeAll("<span class=\"version-item-actions\">");
+        if (!v.is_current) {
+            try w.writeAll("<a href=\"");
+            try w.writeAll(compare_url);
+            try w.writeAll("\" class=\"version-action\">Compare</a>");
         }
+        try w.writeAll("<a href=\"");
+        try w.writeAll(flow_url);
+        try w.writeAll("\" class=\"version-action\">Flow</a>");
+        if (v.is_current) {
+            try w.writeAll("<span class=\"version-badge\">current</span>");
+        }
+        try w.writeAll("</span></div>");
     }
 
     try w.writeAll("</div></div>");
+    return buf.toOwnedSlice(allocator);
+}
 
+fn buildVersionFlowAuditHtml(allocator: Allocator, db: *Db, entry_id: []const u8, version_id: []const u8) ![]const u8 {
+    var stmt = try db.prepare(
+        \\SELECT h.action,
+        \\       COALESCE(u.display_name, ''),
+        \\       COALESCE(u.email, ''),
+        \\       h.created_at,
+        \\       COALESCE(datetime(h.created_at, 'unixepoch'), ''),
+        \\       h.from_step,
+        \\       h.to_step,
+        \\       h.details
+        \\FROM entry_flow_history h
+        \\LEFT JOIN users u ON u.id = h.user_id
+        \\WHERE h.anchor_id = ?1
+        \\  AND h.version_id = ?2
+        \\ORDER BY h.created_at ASC, h.id ASC
+        \\LIMIT 20
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, entry_id);
+    try stmt.bindText(2, version_id);
+
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    var has_rows = false;
+    while (try stmt.step()) {
+        if (!has_rows) {
+            has_rows = true;
+            try w.writeAll("<div class=\"version-flow-audit\">");
+        }
+
+        const action = stmt.columnText(0) orelse "event";
+        const display_name = stmt.columnText(1) orelse "";
+        const email = stmt.columnText(2) orelse "";
+        const actor = if (display_name.len > 0) display_name else if (email.len > 0) email else "System";
+        const created_at = stmt.columnInt(3);
+        const timestamp_utc = stmt.columnText(4) orelse "";
+        const details = stmt.columnText(7);
+        const relative_opt = cms.formatRelativeTime(allocator, created_at) catch null;
+        defer if (relative_opt) |r| allocator.free(r);
+        const relative = relative_opt orelse timestamp_utc;
+
+        try w.writeAll("<div class=\"version-flow-event\">");
+        try w.writeAll("<span class=\"version-flow-action\">");
+
+        if (std.mem.eql(u8, action, "flow_entered")) {
+            var flow_label: []const u8 = "Flow Entered";
+            var owns_flow_label = false;
+            if (details) |d| {
+                const parsed = std.json.parseFromSlice(std.json.Value, allocator, d, .{}) catch null;
+                defer if (parsed) |p| p.deinit();
+                if (parsed) |p| {
+                    if (p.value == .object) {
+                        if (p.value.object.get("flow_id")) |f| {
+                            if (f == .string and f.string.len > 0) {
+                                flow_label = try std.fmt.allocPrint(allocator, "Flow Entered ({s})", .{f.string});
+                                owns_flow_label = true;
+                            }
+                        }
+                    }
+                }
+            }
+            defer if (owns_flow_label) allocator.free(flow_label);
+            try cms.writeEscaped(w, flow_label);
+        } else if (std.mem.eql(u8, action, "step_started")) {
+            try w.writeAll("Step Started");
+        } else if (std.mem.eql(u8, action, "step_completed")) {
+            try w.writeAll("Step Completed");
+        } else if (std.mem.eql(u8, action, "terminal_action")) {
+            var terminal_label: []const u8 = "Terminal Action";
+            var owns_terminal_label = false;
+            if (details) |d| {
+                const parsed = std.json.parseFromSlice(std.json.Value, allocator, d, .{}) catch null;
+                defer if (parsed) |p| p.deinit();
+                if (parsed) |p| {
+                    if (p.value == .object) {
+                        if (p.value.object.get("terminal_action")) |t| {
+                            if (t == .string and t.string.len > 0) {
+                                terminal_label = try std.fmt.allocPrint(allocator, "Terminal: {s}", .{t.string});
+                                owns_terminal_label = true;
+                            }
+                        }
+                    }
+                }
+            }
+            defer if (owns_terminal_label) allocator.free(terminal_label);
+            try cms.writeEscaped(w, terminal_label);
+        } else if (std.mem.eql(u8, action, "flow_completed")) {
+            try w.writeAll("Flow Completed");
+        } else {
+            try cms.writeEscaped(w, action);
+        }
+        try w.writeAll("</span>");
+
+        if (!stmt.columnIsNull(5)) {
+            const from_step = stmt.columnInt(5);
+            if (!stmt.columnIsNull(6)) {
+                const to_step = stmt.columnInt(6);
+                try w.print("<span class=\"version-flow-step\">Step {d} -> {d}</span>", .{ from_step, to_step });
+            } else {
+                try w.print("<span class=\"version-flow-step\">Step {d}</span>", .{from_step});
+            }
+        }
+
+        try w.writeAll("<span class=\"version-flow-time\" title=\"");
+        try cms.writeEscaped(w, timestamp_utc);
+        try w.writeAll(" UTC\">");
+        try cms.writeEscaped(w, relative);
+        try w.writeAll(" · ");
+        try cms.writeEscaped(w, actor);
+        try w.writeAll("</span>");
+        try w.writeAll("</div>");
+    }
+
+    if (!has_rows) return try allocator.dupe(u8, "");
+    try w.writeAll("</div>");
     return buf.toOwnedSlice(allocator);
 }
 
@@ -1643,7 +1897,7 @@ fn writeCollaboratorAvatars(
 /// Build JSON mapping field keys to their last editor info.
 fn buildFieldEditorsJson(allocator: Allocator, db: *Db, entry_id: []const u8, current_user_id: []const u8) ![]const u8 {
     var ver_stmt = try db.prepare(
-        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+        "SELECT current_version_id, published_version_id FROM content_entries WHERE id = ?1",
     );
     defer ver_stmt.deinit();
     try ver_stmt.bindText(1, entry_id);
@@ -1661,7 +1915,7 @@ fn buildFieldEditorsJson(allocator: Allocator, db: *Db, entry_id: []const u8, cu
     const published_data = try cms.getPublishedData(allocator, db, entry_id) orelse return try allocator.dupe(u8, "{}");
     defer allocator.free(published_data);
 
-    var data_stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+    var data_stmt = try db.prepare("SELECT data_json FROM content_versions WHERE id = ?1");
     defer data_stmt.deinit();
     try data_stmt.bindText(1, cur_vid);
     if (!try data_stmt.step()) return try allocator.dupe(u8, "{}");
@@ -1756,7 +2010,7 @@ const RejectedField = struct {
 /// Get field ownership for an entry: field key -> owner info.
 fn getFieldOwnership(allocator: Allocator, db: *Db, entry_id: []const u8) !?std.StringHashMapUnmanaged(cms.FieldComparison) {
     var ver_stmt = try db.prepare(
-        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+        "SELECT current_version_id, published_version_id FROM content_entries WHERE id = ?1",
     );
     defer ver_stmt.deinit();
     try ver_stmt.bindText(1, entry_id);
@@ -1774,7 +2028,7 @@ fn getFieldOwnership(allocator: Allocator, db: *Db, entry_id: []const u8) !?std.
     const published_data = try cms.getPublishedData(allocator, db, entry_id) orelse return null;
     defer allocator.free(published_data);
 
-    var data_stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+    var data_stmt = try db.prepare("SELECT data_json FROM content_versions WHERE id = ?1");
     defer data_stmt.deinit();
     try data_stmt.bindText(1, cur_vid);
     if (!try data_stmt.step()) return null;
@@ -1894,7 +2148,7 @@ fn notifyPublishedFieldsReleased(allocator: Allocator, db: *Db, entry_id: []cons
             presence.clearOwnershipOverrides(entry_id, names.items);
         }
     } else {
-        var stmt = db.prepare("SELECT data FROM entries WHERE id = ?1") catch return;
+        var stmt = db.prepare("SELECT data FROM content_entries WHERE id = ?1") catch return;
         defer stmt.deinit();
         stmt.bindText(1, entry_id) catch return;
         if (!(stmt.step() catch return)) return;
@@ -1962,7 +2216,7 @@ fn resolveEntryAuthors(allocator: Allocator, db: *Db, entry_ids: []const []const
 
     w.writeAll(
         \\SELECT DISTINCT ev.entry_id, u.id, u.display_name, u.email
-        \\ FROM entry_versions ev JOIN users u ON u.id = ev.author_id
+        \\ FROM content_versions ev JOIN users u ON u.id = ev.author_id
         \\ WHERE ev.author_id IS NOT NULL AND ev.version_type IN ('created', 'updated', 'published')
         \\ AND ev.entry_id IN (
     ) catch return &.{};
@@ -2078,8 +2332,8 @@ fn renderAuthorCell(allocator: Allocator, authors: []const AuthorInfo) []const u
 fn getAvailableAuthors(allocator: Allocator, db: *Db, content_type_id: []const u8) []const AuthorInfo {
     var stmt = db.prepare(
         \\SELECT DISTINCT u.id, u.display_name, u.email FROM users u
-        \\JOIN entry_versions ev ON ev.author_id = u.id
-        \\JOIN entries e ON e.id = ev.entry_id
+        \\JOIN content_versions ev ON ev.author_id = u.id
+        \\JOIN content_entries e ON e.id = ev.entry_id
         \\WHERE e.content_type_id = ?1 AND ev.version_type IN ('created', 'updated', 'published')
         \\ORDER BY u.display_name, u.email
     ) catch return &.{};
@@ -2179,8 +2433,8 @@ fn sendTakeoverResult(conn: *websocket.Connection, field_name: []const u8, succe
 
 fn getEntryIdsByAuthor(allocator: Allocator, db: *Db, author_id: []const u8, content_type_id: []const u8) []const []const u8 {
     var stmt = db.prepare(
-        \\SELECT DISTINCT ev.entry_id FROM entry_versions ev
-        \\JOIN entries e ON e.id = ev.entry_id
+        \\SELECT DISTINCT ev.entry_id FROM content_versions ev
+        \\JOIN content_entries e ON e.id = ev.entry_id
         \\WHERE ev.author_id = ?1 AND e.content_type_id = ?2
         \\AND ev.version_type IN ('created', 'updated', 'published')
     ) catch return &.{};
