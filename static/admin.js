@@ -941,3 +941,161 @@
     });
 })();
 
+// ── Recompile Nanobar ────────────────────────────
+(function() {
+    'use strict';
+
+    var STORAGE_KEY = 'publr_recompile';
+    var bar = document.getElementById('recompile-bar');
+    var barText = document.getElementById('recompile-bar-text');
+    var barAction = document.getElementById('recompile-bar-action');
+    if (!bar || !barText || !barAction) return;
+
+    function showBar(text, state) {
+        barText.textContent = text;
+        bar.style.display = '';
+        bar.className = 'recompile-bar' + (state ? ' recompile-bar-' + state : '');
+        document.body.classList.add('has-recompile-bar');
+        barAction.style.display = 'none';
+        barAction.onclick = null;
+    }
+
+    function showAction(label, onClick) {
+        barAction.textContent = label;
+        barAction.style.display = '';
+        barAction.onclick = function(e) {
+            e.preventDefault();
+            onClick();
+        };
+    }
+
+    function hideBar() {
+        bar.style.display = 'none';
+        document.body.classList.remove('has-recompile-bar');
+    }
+
+    function clearState() {
+        sessionStorage.removeItem(STORAGE_KEY);
+    }
+
+    function getState() {
+        try {
+            return JSON.parse(sessionStorage.getItem(STORAGE_KEY));
+        } catch(e) {
+            return null;
+        }
+    }
+
+    function setState(obj) {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+    }
+
+    function poll(expected, startTime) {
+        fetch('/admin/system/health', { cache: 'no-store' })
+            .then(function(r) {
+                if (!r.ok) throw new Error();
+                return r.json();
+            })
+            .then(function(d) {
+                if (d.configText === expected) {
+                    setState({ state: 'done' });
+                    showBar('Site rebuilt successfully.', 'success');
+                    showAction('Refresh page', function() {
+                        clearState();
+                        location.reload();
+                    });
+                } else {
+                    schedulePoll(expected, startTime);
+                }
+            })
+            .catch(function() {
+                schedulePoll(expected, startTime);
+            });
+    }
+
+    function schedulePoll(expected, startTime) {
+        setTimeout(function() {
+            var elapsed = Math.round((Date.now() - startTime) / 1000);
+            if (elapsed >= 5) {
+                showBar('Rebuilding site\u2026 (' + elapsed + 's)', null);
+            }
+            poll(expected, startTime);
+        }, 500);
+    }
+
+    // Resume state on every page load
+    var saved = getState();
+    if (saved) {
+        if (saved.state === 'building') {
+            showBar('Rebuilding site\u2026', null);
+            poll(saved.configText, saved.startTime);
+        } else if (saved.state === 'done') {
+            showBar('Site rebuilt successfully.', 'success');
+            showAction('Refresh page', function() {
+                clearState();
+                location.reload();
+            });
+        } else if (saved.state === 'error') {
+            showBar(saved.message || 'Build failed.', 'error');
+            showAction('Dismiss', function() {
+                clearState();
+                hideBar();
+            });
+        }
+    }
+
+    // Bind recompile button (only exists on system page)
+    var btn = document.getElementById('recompile-btn');
+    var input = document.getElementById('config-text');
+    var csrfEl = document.querySelector('input[name="_csrf"]');
+    if (!btn || !input || !csrfEl) return;
+
+    btn.addEventListener('click', function() {
+        var configText = input.value;
+        var csrf = csrfEl.value;
+        var startTime = Date.now();
+
+        btn.disabled = true;
+        btn.textContent = 'Compiling\u2026';
+        setState({ state: 'building', configText: configText, startTime: startTime });
+        showBar('Rebuilding site\u2026', null);
+
+        fetch('/admin/system/config', {
+            method: 'POST',
+            headers: {
+                'X-CSRF-Token': csrf,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'key=configText&value=' + encodeURIComponent(configText)
+        })
+        .then(function(r) {
+            return r.text().then(function(text) {
+                var data;
+                try { data = JSON.parse(text); } catch(e) {
+                    setState({ state: 'error', message: text || 'Unknown error' });
+                    showBar(text || 'Unknown error', 'error');
+                    showAction('Dismiss', function() { clearState(); hideBar(); });
+                    btn.disabled = false;
+                    btn.textContent = 'Save & Recompile';
+                    return;
+                }
+                if (!data.success) {
+                    setState({ state: 'error', message: data.error });
+                    showBar(data.error || 'Build failed.', 'error');
+                    showAction('Dismiss', function() { clearState(); hideBar(); });
+                    btn.disabled = false;
+                    btn.textContent = 'Save & Recompile';
+                    return;
+                }
+                btn.textContent = 'Restarting\u2026';
+                poll(configText, startTime);
+            });
+        })
+        .catch(function() {
+            // Connection lost — server is restarting, start polling
+            btn.textContent = 'Restarting\u2026';
+            poll(configText, startTime);
+        });
+    });
+})();
+

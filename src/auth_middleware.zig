@@ -13,6 +13,7 @@ pub const SESSION_COOKIE = "publr_session";
 const public_routes = [_][]const u8{
     "/admin/login",
     "/admin/setup",
+    "/admin/system/health",
 };
 
 /// Auth middleware state (must be initialized before use)

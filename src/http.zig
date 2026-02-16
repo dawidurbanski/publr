@@ -156,6 +156,7 @@ pub fn serve(
     try router.get("/media/*", media_handler.handleMedia);
     try router.post("/admin/system/recompile", recompile.handleRecompile);
     try router.post("/admin/system/config", recompile.handleConfigUpdate);
+    try router.get("/admin/system/health", recompile.handleHealth);
     try router.get("/admin/ws", handleWebSocket);
 
     // Register plugin routes (arena freed on shutdown)

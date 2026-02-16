@@ -9,12 +9,31 @@ const mw = @import("middleware");
 
 const Context = mw.Context;
 
+const publr_config = @import("publr_config");
+
 /// Set by handleRecompile on success — checked by main accept loop to trigger exit(100).
 pub var restart_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
+/// GET /admin/system/health — lightweight check for polling after recompile
+pub fn handleHealth(ctx: *Context) !void {
+    const config_text = if (@hasField(@TypeOf(publr_config), "configText")) publr_config.configText else "";
+    ctx.response.setContentType("application/json");
+    var json: std.ArrayList(u8) = .{};
+    const w = json.writer(ctx.allocator);
+    try w.writeAll("{\"configText\":");
+    try writeJsonString(w, config_text);
+    try w.writeByte('}');
+    ctx.response.setBody(json.items);
+}
 
 /// POST /admin/system/recompile
 pub fn handleRecompile(ctx: *Context) !void {
     const allocator = ctx.allocator;
+
+    // Check for remote build runner first
+    if (readConfigValue(allocator, "buildRunner")) |runner| {
+        return handleRemoteBuild(ctx, allocator, runner);
+    }
 
     // Read zigExecutable from publr.zon — if absent, this is agency mode
     const zig_path = readConfigValue(allocator, "zigExecutable") orelse {
@@ -144,6 +163,121 @@ pub fn handleRecompile(ctx: *Context) !void {
 
     // Signal main accept loop to exit(100) after this response is sent
     restart_requested.store(true, .release);
+}
+
+/// Remote build: SCP config to build runner, SSH build, SCP binary back
+fn handleRemoteBuild(ctx: *Context, allocator: std.mem.Allocator, runner: []const u8) !void {
+    const cwd_path = std.fs.cwd().realpathAlloc(allocator, ".") catch {
+        return jsonError(ctx, "Cannot resolve working directory");
+    };
+    const config_path = std.fs.path.join(allocator, &.{ cwd_path, "publr.zon" }) catch {
+        return jsonError(ctx, "Path allocation failed");
+    };
+    const remote_dest = std.fmt.allocPrint(allocator, "{s}:/opt/publr/src/publr-remote.zon", .{runner}) catch {
+        return jsonError(ctx, "Allocation failed");
+    };
+    const remote_binary = std.fmt.allocPrint(allocator, "{s}:/opt/publr/src/.publr-remote/bin/publr", .{runner}) catch {
+        return jsonError(ctx, "Allocation failed");
+    };
+    const tmp_binary = std.fs.path.join(allocator, &.{ cwd_path, "publr-remote-build" }) catch {
+        return jsonError(ctx, "Path allocation failed");
+    };
+
+    // SSH options: explicit key + known_hosts paths (systemd ProtectHome hides /root)
+    const ssh_key = std.fs.path.join(allocator, &.{ cwd_path, ".ssh/id_ed25519" }) catch {
+        return jsonError(ctx, "Path allocation failed");
+    };
+    const known_hosts = std.fs.path.join(allocator, &.{ cwd_path, ".ssh/known_hosts" }) catch {
+        return jsonError(ctx, "Path allocation failed");
+    };
+    const known_hosts_opt = std.fmt.allocPrint(allocator, "UserKnownHostsFile={s}", .{known_hosts}) catch {
+        return jsonError(ctx, "Allocation failed");
+    };
+
+    // Step 1: SCP publr.zon to build runner
+    std.debug.print("[publr] Remote build: sending config to {s}...\n", .{runner});
+    if (runCommand(allocator, &.{
+        "/usr/bin/scp",
+        "-i",  ssh_key,
+        "-o",  "StrictHostKeyChecking=no",
+        "-o",  "BatchMode=yes",
+        "-o",  known_hosts_opt,
+        config_path, remote_dest,
+    })) |stderr| {
+        std.debug.print("[publr] SCP config failed: {s}\n", .{stderr});
+        return jsonError(ctx, "Failed to send config to build runner");
+    }
+
+    // Step 2: SSH to build runner and compile
+    std.debug.print("[publr] Remote build: compiling on {s}...\n", .{runner});
+    if (runCommand(allocator, &.{
+        "/usr/bin/ssh",
+        "-i",  ssh_key,
+        "-o",  "StrictHostKeyChecking=no",
+        "-o",  "BatchMode=yes",
+        "-o",  known_hosts_opt,
+        runner,
+        "cd /opt/publr/src && /usr/local/bin/zig build --prefix /opt/publr/src/.publr-remote -Dconfig-path=/opt/publr/src/publr-remote.zon -Dtarget=x86_64-linux",
+    })) |stderr| {
+        std.debug.print("[publr] Remote build failed\n", .{});
+        return jsonBuildError(ctx, allocator, stderr);
+    }
+
+    // Step 3: SCP binary back
+    std.debug.print("[publr] Remote build: fetching binary...\n", .{});
+    if (runCommand(allocator, &.{
+        "/usr/bin/scp",
+        "-i",  ssh_key,
+        "-o",  "StrictHostKeyChecking=no",
+        "-o",  "BatchMode=yes",
+        "-o",  known_hosts_opt,
+        remote_binary, tmp_binary,
+    })) |stderr| {
+        std.debug.print("[publr] SCP binary failed: {s}\n", .{stderr});
+        return jsonError(ctx, "Failed to fetch binary from build runner");
+    }
+
+    std.debug.print("[publr] Remote build succeeded, swapping binary...\n", .{});
+    binarySwap(allocator, tmp_binary) catch |err| {
+        std.debug.print("[publr] Binary swap failed: {}\n", .{err});
+        return jsonError(ctx, "Binary swap failed");
+    };
+
+    // Clean up temp file
+    std.fs.cwd().deleteFile("publr-remote-build") catch {};
+
+    ctx.response.setContentType("application/json");
+    ctx.response.setBody("{\"success\":true}");
+    restart_requested.store(true, .release);
+}
+
+/// Run a command, return null on success or stderr content on failure.
+fn runCommand(allocator: std.mem.Allocator, argv: []const []const u8) ?[]const u8 {
+    var child = std.process.Child.init(argv, allocator);
+    child.stderr_behavior = .Pipe;
+    child.stdout_behavior = .Inherit;
+    child.stdin_behavior = .Ignore;
+
+    child.spawn() catch return "Failed to spawn process";
+
+    // Read all stderr before wait() to avoid pipe deadlock
+    var stderr_buf: std.ArrayList(u8) = .{};
+    if (child.stderr) |stderr_file| {
+        var read_buf: [4096]u8 = undefined;
+        while (true) {
+            const n = stderr_file.read(&read_buf) catch break;
+            if (n == 0) break;
+            stderr_buf.appendSlice(allocator, read_buf[0..n]) catch break;
+        }
+    }
+
+    const term = child.wait() catch return "Failed to wait for process";
+    const code: u8 = switch (term) {
+        .Exited => |c| c,
+        else => 1,
+    };
+    if (code != 0) return if (stderr_buf.items.len > 0) stderr_buf.items else "Command failed";
+    return null;
 }
 
 /// POST /admin/system/config — update a config value in publr.zon, then recompile

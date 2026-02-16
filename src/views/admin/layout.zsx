@@ -26,6 +26,10 @@ pub fn Layout(props: struct {
             <link rel="stylesheet" href="/static/admin.css" />
         </head>
         <body class="admin">
+            <div id="recompile-bar" class="recompile-bar" style="display:none;">
+                <span id="recompile-bar-text"></span>
+                <a id="recompile-bar-action" href="#" style="display:none;"></a>
+            </div>
             <header class="top-bar">
                 <div class="top-bar-meta">
                     <div class="top-bar-left">
