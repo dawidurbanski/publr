@@ -27,8 +27,22 @@ pub const ContentTypeEntry = struct {
     id: []const u8,
     /// Human-readable name
     display_name: []const u8,
+    /// Human-readable plural name
+    display_name_plural: []const u8 = "",
     /// Source layer
     source: SchemaSource,
+    /// Whether this content type is localized
+    localized: bool = false,
+    /// Available locales for this content type
+    available_locales: []const []const u8 = &.{},
+    /// Workflow identifier (null means default)
+    workflow: ?[]const u8 = null,
+    /// Hidden from content creation menus
+    internal: bool = false,
+    /// Taxonomy marker
+    is_taxonomy: bool = false,
+    /// Icon id used in admin navigation
+    icon: []const u8 = "bookmark",
     /// Field definitions
     fields: []const FieldDef,
 };
@@ -46,7 +60,14 @@ fn buildContentTypeRegistry() []const ContentTypeEntry {
         entries[count] = .{
             .id = core_schemas.Post.type_id,
             .display_name = core_schemas.Post.display_name,
+            .display_name_plural = core_schemas.Post.display_name_plural,
             .source = .core,
+            .localized = core_schemas.Post.localized,
+            .available_locales = core_schemas.Post.available_locales,
+            .workflow = core_schemas.Post.workflow,
+            .internal = core_schemas.Post.internal,
+            .is_taxonomy = core_schemas.Post.is_taxonomy,
+            .icon = core_schemas.Post.icon,
             .fields = core_schemas.Post.schema,
         };
         count += 1;
@@ -54,7 +75,14 @@ fn buildContentTypeRegistry() []const ContentTypeEntry {
         entries[count] = .{
             .id = core_schemas.Page.type_id,
             .display_name = core_schemas.Page.display_name,
+            .display_name_plural = core_schemas.Page.display_name_plural,
             .source = .core,
+            .localized = core_schemas.Page.localized,
+            .available_locales = core_schemas.Page.available_locales,
+            .workflow = core_schemas.Page.workflow,
+            .internal = core_schemas.Page.internal,
+            .is_taxonomy = core_schemas.Page.is_taxonomy,
+            .icon = core_schemas.Page.icon,
             .fields = core_schemas.Page.schema,
         };
         count += 1;

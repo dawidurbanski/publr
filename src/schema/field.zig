@@ -60,6 +60,16 @@ pub const Position = enum {
     side,
 };
 
+/// Locale behavior for a field
+pub const TranslatableMode = enum {
+    /// One canonical value synced across locale entries
+    synced,
+    /// Independent values per locale
+    independent,
+    /// Independent values with default-locale fallback on read
+    with_fallback,
+};
+
 /// Field definition - the unit of schema composition
 pub const FieldDef = struct {
     /// Field identifier (used as JSON key and form input name)
@@ -77,10 +87,8 @@ pub const FieldDef = struct {
     /// Whether field is required
     required: bool = false,
 
-    /// Whether this field's value varies per locale (i18n).
-    /// Default true for most fields. Ref and Image fields force false.
-    /// Inert until i18n epic — no runtime behavior change.
-    translatable: bool = true,
+    /// Explicit i18n mode for unified content lifecycle semantics.
+    translatable_mode: TranslatableMode = .independent,
 
     /// Storage hint - where to persist this field's data
     storage: StorageHint = .data_only,
@@ -317,10 +325,12 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
     many: bool = false,
     required: bool = false,
     display: ?[]const u8 = null,
-    translatable: bool = false,
+    translatable_mode: TranslatableMode = .synced,
     position: Position = .main,
 }) FieldDef {
-    if (opts.translatable) {
+    const resolved_mode = opts.translatable_mode;
+
+    if (resolved_mode != .synced) {
         @compileError("Ref fields cannot be translatable — references are locale-independent");
     }
     const S = struct {
@@ -374,7 +384,7 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
         .field_type_id = "reference",
         .zig_type = if (opts.many) []const []const u8 else []const u8,
         .required = opts.required,
-        .translatable = false,
+        .translatable_mode = .synced,
         .storage = .data_only,
         .position = opts.position,
         .validate = S.validate,
@@ -560,12 +570,11 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
 pub fn Image(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
-    translatable: bool = false,
+    translatable_mode: TranslatableMode = .synced,
     position: Position = .side,
 }) FieldDef {
-    if (opts.translatable) {
-        @compileError("Image fields cannot be translatable — media references are locale-independent");
-    }
+    const resolved_mode = opts.translatable_mode;
+
     const S = struct {
         pub fn validate(value: []const u8) ?[]const u8 {
             if (opts.required and value.len == 0) {
@@ -643,7 +652,7 @@ pub fn Image(comptime name: []const u8, comptime opts: struct {
         .field_type_id = "image",
         .zig_type = ?[]const u8,
         .required = opts.required,
-        .translatable = false,
+        .translatable_mode = resolved_mode,
         .storage = .data_only,
         .position = opts.position,
         .validate = S.validate,
@@ -1083,25 +1092,30 @@ test "Boolean field always validates" {
     try std.testing.expect(field.validate("") == null);
 }
 
-test "fields default to translatable = true" {
+test "fields default to independent translatable mode" {
     const s = String("title", .{});
-    try std.testing.expect(s.translatable);
+    try std.testing.expect(s.translatable_mode == .independent);
 
     const t = Text("body", .{});
-    try std.testing.expect(t.translatable);
+    try std.testing.expect(t.translatable_mode == .independent);
 
     const sel = Select("status", .{ .options = &.{"draft"} });
-    try std.testing.expect(sel.translatable);
+    try std.testing.expect(sel.translatable_mode == .independent);
 }
 
-test "Ref fields are translatable = false" {
+test "Ref fields are always synced (non-translatable)" {
     const r = Ref("author", .{ .to = "author" });
-    try std.testing.expect(!r.translatable);
+    try std.testing.expect(r.translatable_mode == .synced);
 }
 
-test "Image fields are translatable = false" {
+test "Image fields default to synced mode" {
     const img = Image("avatar", .{});
-    try std.testing.expect(!img.translatable);
+    try std.testing.expect(img.translatable_mode == .synced);
+}
+
+test "Image fields support with_fallback mode" {
+    const img = Image("hero", .{ .translatable_mode = .with_fallback });
+    try std.testing.expect(img.translatable_mode == .with_fallback);
 }
 
 test "RichText field validates required" {

@@ -22,6 +22,7 @@ fn generateSeedSql() []const u8 {
 
         // Content types
         for (registry.content_types) |ct| {
+            // Keep insert shape backward-compatible with pre-migration databases.
             sql = sql ++
                 "INSERT OR IGNORE INTO content_types (id, slug, name, fields, source) VALUES ('" ++
                 ct.id ++ "', '" ++ ct.id ++ "', '" ++ ct.display_name ++ "', '" ++
@@ -40,7 +41,8 @@ fn generateSeedSql() []const u8 {
 }
 
 /// Serialize field definitions to JSON at comptime.
-/// Produces: [{"name":"title","display_name":"Title","type":"string","required":true},...]
+/// Produces:
+/// [{"name":"title","display_name":"Title","type":"string","required":true,...},...]
 fn fieldsJson(comptime fields: []const field_mod.FieldDef) []const u8 {
     comptime {
         var json: []const u8 = "[";
@@ -51,7 +53,8 @@ fn fieldsJson(comptime fields: []const field_mod.FieldDef) []const u8 {
                 "\",\"display_name\":\"" ++ f.display_name ++
                 "\",\"type\":\"" ++ f.field_type_id ++
                 "\",\"required\":" ++ (if (f.required) "true" else "false") ++
-                "}";
+                "\",\"translatable_mode\":\"" ++ @tagName(f.translatable_mode) ++
+                "\"}";
         }
         json = json ++ "]";
         return json;
@@ -73,6 +76,7 @@ test "seed_sql contains content type inserts" {
 test "seed_sql contains fields JSON" {
     // Should have real field data, not empty '[]'
     try std.testing.expect(std.mem.indexOf(u8, seed_sql, "\"name\":\"title\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, seed_sql, "\"translatable_mode\"") != null);
 }
 
 test "seed_sql contains taxonomy inserts" {
