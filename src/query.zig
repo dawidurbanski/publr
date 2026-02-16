@@ -139,19 +139,34 @@ pub fn getEntry(
     db: *Db,
     id_or_slug: []const u8,
 ) !?Entry(CT) {
-    // Determine if this is an ID (e_xxx) or slug
-    const is_id = std.mem.startsWith(u8, id_or_slug, "e_");
-
-    const sql = if (is_id)
-        "SELECT id, slug, title, data, status, published_at, created_at, updated_at FROM entries WHERE id = ?1 AND content_type_id = ?2"
-    else
-        "SELECT id, slug, title, data, status, published_at, created_at, updated_at FROM entries WHERE slug = ?1 AND content_type_id = ?2";
-
-    var stmt = try db.prepare(sql);
+    const locale = defaultLocaleFor(CT);
+    var stmt = try db.prepare(
+        \\SELECT a.id,
+        \\       json_extract(cv.data_json, '$.slug') AS slug,
+        \\       COALESCE(json_extract(cv.data_json, '$.title'), '') AS title,
+        \\       cv.data_json AS data,
+        \\       CASE
+        \\         WHEN ce.archived = 1 THEN 'archived'
+        \\         WHEN ce.published_version_id IS NULL THEN 'draft'
+        \\         WHEN ce.published_version_id = ce.current_version_id THEN 'published'
+        \\         ELSE 'changed'
+        \\       END AS status,
+        \\       CAST(json_extract(pv.data_json, '$.published_at') AS INTEGER) AS published_at,
+        \\       ce.created_at,
+        \\       ce.updated_at
+        \\FROM content_anchors a
+        \\JOIN content_entries ce ON ce.anchor_id = a.id AND ce.locale = ?1
+        \\JOIN content_versions cv ON cv.id = ce.current_version_id
+        \\LEFT JOIN content_versions pv ON pv.id = ce.published_version_id
+        \\WHERE a.content_type = ?2
+        \\  AND (a.id = ?3 OR json_extract(cv.data_json, '$.slug') = ?3)
+        \\LIMIT 1
+    );
     defer stmt.deinit();
 
-    try stmt.bindText(1, id_or_slug);
+    try stmt.bindText(1, locale);
     try stmt.bindText(2, CT.type_id);
+    try stmt.bindText(3, id_or_slug);
 
     if (!try stmt.step()) {
         return null;
@@ -167,26 +182,128 @@ pub fn listEntries(
     db: *Db,
     opts: ListOptions,
 ) ![]Entry(CT) {
-    return listWithMeta(Entry(CT), allocator, db, .{
-        .table = "entries",
-        .id_column = "id",
-        .meta_table = "entry_meta",
-        .meta_fk = "entry_id",
-        .type_filter = .{ .column = "content_type_id", .value = CT.type_id },
-        .select_cols = "id, slug, title, data, status, published_at, created_at, updated_at",
-        .status = opts.status,
-        .limit = opts.limit,
-        .offset = opts.offset,
-        .order_by = opts.order_by,
-        .order_dir = opts.order_dir,
-        .meta_filters = opts.meta_filters,
-        .entry_ids = opts.entry_ids,
-        .parse_row = struct {
-            fn parse(a: Allocator, stmt: *Statement) !Entry(CT) {
-                return parseEntryRow(CT, a, stmt);
+    if (opts.meta_filters.len > max_meta_filters) return error.TooManyFilters;
+
+    const locale = defaultLocaleFor(CT);
+    var sql: std.ArrayList(u8) = .{};
+    defer sql.deinit(allocator);
+    const w = sql.writer(allocator);
+
+    try w.writeAll(
+        \\SELECT a.id,
+        \\       json_extract(cv.data_json, '$.slug') AS slug,
+        \\       COALESCE(json_extract(cv.data_json, '$.title'), '') AS title,
+        \\       cv.data_json AS data,
+        \\       CASE
+        \\         WHEN ce.archived = 1 THEN 'archived'
+        \\         WHEN ce.published_version_id IS NULL THEN 'draft'
+        \\         WHEN ce.published_version_id = ce.current_version_id THEN 'published'
+        \\         ELSE 'changed'
+        \\       END AS status,
+        \\       CAST(json_extract(pv.data_json, '$.published_at') AS INTEGER) AS published_at,
+        \\       ce.created_at,
+        \\       ce.updated_at
+        \\FROM content_anchors a
+        \\JOIN content_entries ce ON ce.anchor_id = a.id AND ce.locale = ?1
+        \\JOIN content_versions cv ON cv.id = ce.current_version_id
+        \\LEFT JOIN content_versions pv ON pv.id = ce.published_version_id
+    );
+
+    var bind_idx: u32 = 3; // 1 locale, 2 content_type
+    for (opts.meta_filters, 0..) |_, i| {
+        try w.print(
+            " JOIN content_meta m{} ON m{}.entry_id = ce.id AND m{}.version_id = ce.current_version_id AND m{}.field_name = ?{}",
+            .{ i, i, i, i, bind_idx },
+        );
+        bind_idx += 1;
+    }
+
+    try w.writeAll(" WHERE a.content_type = ?2");
+
+    if (opts.status) |status| {
+        try appendUnifiedStatusFilter(w, status);
+    }
+
+    const entry_ids_bind_start = bind_idx;
+    if (opts.entry_ids) |ids| {
+        if (ids.len > 0) {
+            try w.writeAll(" AND a.id IN (");
+            for (ids, 0..) |_, i| {
+                if (i > 0) try w.writeByte(',');
+                try w.print("?{d}", .{bind_idx});
+                bind_idx += 1;
             }
-        }.parse,
+            try w.writeByte(')');
+        } else {
+            try w.writeAll(" AND 1=0");
+        }
+    }
+
+    var meta_value_bind_indices: [max_meta_filters]u32 = undefined;
+    for (opts.meta_filters, 0..) |mf, i| {
+        switch (mf.value) {
+            .text => try w.print(" AND m{}.{s} {s} ?{}", .{ i, "value", mf.op.toSql(), bind_idx }),
+            .int, .real => try w.print(" AND CAST(m{}.value AS REAL) {s} ?{}", .{ i, mf.op.toSql(), bind_idx }),
+        }
+        meta_value_bind_indices[i] = bind_idx;
+        bind_idx += 1;
+    }
+
+    const order_expr = if (std.mem.eql(u8, opts.order_by, "updated_at"))
+        "ce.updated_at"
+    else if (std.mem.eql(u8, opts.order_by, "title"))
+        "title"
+    else if (std.mem.eql(u8, opts.order_by, "status"))
+        "status"
+    else
+        "ce.created_at";
+
+    try w.print(" ORDER BY {s} {s}", .{
+        order_expr,
+        if (opts.order_dir == .asc) "ASC" else "DESC",
     });
+
+    if (opts.limit) |limit| {
+        try w.print(" LIMIT {d}", .{limit});
+    }
+    if (opts.offset) |offset| {
+        try w.print(" OFFSET {d}", .{offset});
+    }
+
+    const sql_slice = try sql.toOwnedSlice(allocator);
+    defer allocator.free(sql_slice);
+
+    var stmt = try db.prepare(sql_slice);
+    defer stmt.deinit();
+    try stmt.bindText(1, locale);
+    try stmt.bindText(2, CT.type_id);
+
+    var key_bind: u32 = 3;
+    for (opts.meta_filters) |mf| {
+        try stmt.bindText(key_bind, mf.key);
+        key_bind += 1;
+    }
+
+    if (opts.entry_ids) |ids| {
+        for (ids, 0..) |eid, i| {
+            try stmt.bindText(entry_ids_bind_start + @as(u32, @intCast(i)), eid);
+        }
+    }
+
+    for (opts.meta_filters, 0..) |mf, i| {
+        switch (mf.value) {
+            .text => |v| try stmt.bindText(meta_value_bind_indices[i], v),
+            .int => |v| try stmt.bindInt(meta_value_bind_indices[i], v),
+            .real => |_| try stmt.bindNull(meta_value_bind_indices[i]), // TODO: bindReal in db wrapper
+        }
+    }
+
+    var items: std.ArrayListUnmanaged(Entry(CT)) = .{};
+    errdefer items.deinit(allocator);
+    while (try stmt.step()) {
+        try items.append(allocator, try parseEntryRow(CT, allocator, &stmt));
+    }
+    return items.toOwnedSlice(allocator);
 }
 
 /// Generic list query builder with MetaFilter JOIN support.
@@ -411,19 +528,49 @@ fn parseEntryRow(comptime CT: type, allocator: Allocator, stmt: *Statement) !Ent
 pub fn countEntries(comptime CT: type, db: *Db, opts: struct {
     status: ?[]const u8 = null,
 }) !u32 {
-    const sql = if (opts.status != null)
-        "SELECT COUNT(*) FROM entries WHERE content_type_id = ?1 AND status = ?2"
-    else
-        "SELECT COUNT(*) FROM entries WHERE content_type_id = ?1";
+    const locale = defaultLocaleFor(CT);
+    var sql: std.ArrayList(u8) = .{};
+    defer sql.deinit(db.allocator);
+    const w = sql.writer(db.allocator);
 
-    var stmt = try db.prepare(sql);
+    try w.writeAll(
+        \\SELECT COUNT(*)
+        \\FROM content_anchors a
+        \\JOIN content_entries ce ON ce.anchor_id = a.id AND ce.locale = ?1
+        \\WHERE a.content_type = ?2
+    );
+    if (opts.status) |status| {
+        try appendUnifiedStatusFilter(w, status);
+    }
+
+    const sql_slice = try sql.toOwnedSlice(db.allocator);
+    defer db.allocator.free(sql_slice);
+
+    var stmt = try db.prepare(sql_slice);
     defer stmt.deinit();
 
-    try stmt.bindText(1, CT.type_id);
-    if (opts.status) |status| {
-        try stmt.bindText(2, status);
-    }
+    try stmt.bindText(1, locale);
+    try stmt.bindText(2, CT.type_id);
 
     _ = try stmt.step();
     return @intCast(stmt.columnInt(0));
+}
+
+fn appendUnifiedStatusFilter(w: anytype, status: []const u8) !void {
+    if (std.mem.eql(u8, status, "archived")) {
+        try w.writeAll(" AND ce.archived = 1");
+    } else if (std.mem.eql(u8, status, "draft")) {
+        try w.writeAll(" AND ce.archived = 0 AND ce.published_version_id IS NULL");
+    } else if (std.mem.eql(u8, status, "published")) {
+        try w.writeAll(" AND ce.archived = 0 AND ce.published_version_id IS NOT NULL AND ce.published_version_id = ce.current_version_id");
+    } else if (std.mem.eql(u8, status, "changed")) {
+        try w.writeAll(" AND ce.archived = 0 AND ce.published_version_id IS NOT NULL AND ce.published_version_id != ce.current_version_id");
+    }
+}
+
+fn defaultLocaleFor(comptime CT: type) []const u8 {
+    if (@hasDecl(CT, "available_locales") and CT.available_locales.len > 0) {
+        return CT.available_locales[0];
+    }
+    return "en";
 }

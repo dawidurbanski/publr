@@ -118,6 +118,8 @@ pub const SaveOptions = struct {
     /// Status is an intrinsic entry attribute (draft/published/changed),
     /// not a schema field.
     status: ?[]const u8 = null,
+    /// Optional locale for localized content writes. Defaults to content type default locale.
+    locale: ?[]const u8 = null,
 };
 
 /// Save an entry (create or update), creating a version in the history
@@ -130,7 +132,6 @@ pub fn saveEntry(
     opts: SaveOptions,
 ) !Entry(CT) {
     const entry_id = id orelse try generateId(allocator);
-    const is_update = id != null;
 
     // Extract title from data if present
     const title: []const u8 = if (@hasField(@TypeOf(data), "title")) blk: {
@@ -142,7 +143,7 @@ pub fn saveEntry(
         }
     } else "";
 
-    // Extract slug from data if present (coerce to optional, empty string → null)
+    // Extract slug from data if present (coerce to optional, empty string -> null)
     const slug: ?[]const u8 = if (@hasField(@TypeOf(data), "slug")) blk: {
         const s = @as(?[]const u8, data.slug);
         break :blk if (s) |sv| if (sv.len == 0) @as(?[]const u8, null) else sv else null;
@@ -162,39 +163,52 @@ pub fn saveEntry(
     const data_json = try CT.stringifyData(allocator, data);
     defer allocator.free(data_json);
 
+    const locales = comptime localesFor(CT);
+    const default_locale = comptime defaultLocaleFor(CT);
+    var resolved_locale = default_locale;
+    if (opts.locale) |requested| {
+        for (locales) |loc| {
+            if (std.mem.eql(u8, loc, requested)) {
+                resolved_locale = requested;
+                break;
+            }
+        }
+    }
+
+    const target_entry_id = try makeLocaleEntryId(allocator, entry_id, resolved_locale, default_locale);
+    defer allocator.free(target_entry_id);
+
     // Get previous version id, data, author (for change detection + author tracking)
+    var has_existing_entry = false;
     var prev_version_id: ?[]const u8 = null;
     var prev_data: ?[]const u8 = null;
     var published_vid: ?[]const u8 = null;
     var prev_author_id: ?[]const u8 = null;
-    if (is_update) {
+    var prev_version_type: ?[]const u8 = null;
+    {
         var pv_stmt = try db.prepare(
-            \\SELECT e.current_version_id, e.data, e.published_version_id, ev.author_id
-            \\FROM entries e
-            \\LEFT JOIN entry_versions ev ON ev.id = e.current_version_id
-            \\WHERE e.id = ?1
+            \\SELECT ce.current_version_id, cv.data_json, ce.published_version_id, cv.author_id, cv.version_type
+            \\FROM content_entries ce
+            \\LEFT JOIN content_versions cv ON cv.id = ce.current_version_id
+            \\WHERE ce.id = ?1
         );
         defer pv_stmt.deinit();
-        try pv_stmt.bindText(1, entry_id);
+        try pv_stmt.bindText(1, target_entry_id);
         if (try pv_stmt.step()) {
-            if (pv_stmt.columnText(0)) |v| {
-                prev_version_id = try allocator.dupe(u8, v);
-            }
-            if (pv_stmt.columnText(1)) |d| {
-                prev_data = try allocator.dupe(u8, d);
-            }
-            if (pv_stmt.columnText(2)) |v| {
-                published_vid = try allocator.dupe(u8, v);
-            }
-            if (pv_stmt.columnText(3)) |v| {
-                prev_author_id = try allocator.dupe(u8, v);
-            }
+            has_existing_entry = true;
+            if (pv_stmt.columnText(0)) |v| prev_version_id = try allocator.dupe(u8, v);
+            if (pv_stmt.columnText(1)) |d| prev_data = try allocator.dupe(u8, d);
+            if (pv_stmt.columnText(2)) |v| published_vid = try allocator.dupe(u8, v);
+            if (pv_stmt.columnText(3)) |v| prev_author_id = try allocator.dupe(u8, v);
+            if (pv_stmt.columnText(4)) |v| prev_version_type = try allocator.dupe(u8, v);
         }
     }
     defer if (prev_version_id) |v| allocator.free(v);
     defer if (prev_data) |d| allocator.free(d);
     defer if (published_vid) |v| allocator.free(v);
     defer if (prev_author_id) |v| allocator.free(v);
+    defer if (prev_version_type) |v| allocator.free(v);
+    const is_update = has_existing_entry;
 
     // Skip version creation if data hasn't changed
     const data_changed = if (prev_data) |pd| !std.mem.eql(u8, pd, data_json) else true;
@@ -215,148 +229,96 @@ pub fn saveEntry(
         if (opts.author_id) |oa| std.mem.eql(u8, pa, oa) else true
     else
         true;
-    const can_autosave_inplace = opts.autosave and !is_published_version and same_author;
+    const prev_is_autosave = if (prev_version_type) |vt| std.mem.eql(u8, vt, "autosave") else false;
+    const can_autosave_inplace = opts.autosave and !is_published_version and same_author and prev_is_autosave;
+    const promote_autosave_on_save = !opts.autosave and is_update and prev_is_autosave;
+    const version_created = (!is_update) or promote_autosave_on_save or (data_changed and !can_autosave_inplace);
+    const current_version_id: []const u8 = if (version_created)
+        &version_id
+    else if (prev_version_id) |pv|
+        pv
+    else
+        &version_id;
 
-    if (is_update) {
-        if (data_changed and !can_autosave_inplace) {
-            // Create new version (explicit save, or autosave that would corrupt published)
-            const version_type: []const u8 = if (opts.autosave) "autosave" else "updated";
-            var v_stmt = try db.prepare(
-                \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
-                \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            );
-            defer v_stmt.deinit();
+    try syncUnifiedLifecycle(CT, allocator, db, .{
+        .entry_id = entry_id,
+        .target_entry_id = target_entry_id,
+        .title = title,
+        .slug = slug,
+        .current_version_id = current_version_id,
+        .prev_version_id = prev_version_id,
+        .version_type = if (!is_update) "created" else if (opts.autosave) "autosave" else "updated",
+        .data_json = data_json,
+        .prev_data_json = prev_data,
+        .status = status,
+        .is_update = is_update,
+        .data_changed = data_changed,
+        .version_created = version_created,
+        .can_autosave_inplace = can_autosave_inplace,
+        .author_id = opts.author_id,
+        .requested_locale = opts.locale,
+    });
 
-            try v_stmt.bindText(1, &version_id);
-            try v_stmt.bindText(2, entry_id);
-            if (prev_version_id) |pv| try v_stmt.bindText(3, pv) else try v_stmt.bindNull(3);
-            try v_stmt.bindText(4, data_json);
-            if (opts.author_id) |aid| try v_stmt.bindText(5, aid) else try v_stmt.bindNull(5);
-            try v_stmt.bindText(6, version_type);
+    // Enforce version retention limit.
+    try pruneVersions(db, target_entry_id);
 
-            _ = try v_stmt.step();
-        } else if (data_changed and can_autosave_inplace) {
-            // Autosave: update existing version in-place (no history entry)
-            if (prev_version_id) |pv| {
-                var v_stmt = try db.prepare(
-                    "UPDATE entry_versions SET data = ?1 WHERE id = ?2",
-                );
-                defer v_stmt.deinit();
+    // Sync filterable fields to unified content_meta.
+    try syncEntryMeta(CT, db, target_entry_id, current_version_id, data);
 
-                try v_stmt.bindText(1, data_json);
-                try v_stmt.bindText(2, pv);
+    // Sync taxonomy relationships to unified content_term_assignments.
+    try syncEntryTerms(CT, db, target_entry_id, data);
 
-                _ = try v_stmt.step();
+    if (@hasDecl(CT, "hooks")) {
+        if (CT.hooks.on_save) |hook| {
+            try hook(allocator, .{
+                .entry_id = entry_id,
+                .content_type = CT.type_id,
+                .locale = resolved_locale,
+                .status = status,
+                .author_id = opts.author_id,
+            }, data_json);
+        }
+        if (std.mem.eql(u8, status, "published")) {
+            if (CT.hooks.on_publish) |hook| {
+                try hook(allocator, .{
+                    .entry_id = entry_id,
+                    .content_type = CT.type_id,
+                    .locale = resolved_locale,
+                    .status = status,
+                    .author_id = opts.author_id,
+                }, data_json);
+            }
+        } else if (std.mem.eql(u8, status, "archived")) {
+            if (CT.hooks.on_archive) |hook| {
+                try hook(allocator, .{
+                    .entry_id = entry_id,
+                    .content_type = CT.type_id,
+                    .locale = resolved_locale,
+                    .status = status,
+                    .author_id = opts.author_id,
+                }, data_json);
             }
         }
-
-        // Update entry
-        {
-            var stmt = try db.prepare(
-                \\UPDATE entries SET slug = ?2, title = ?3, data = ?4,
-                \\    status = ?5, updated_at = unixepoch()
-                \\WHERE id = ?1
-            );
-            defer stmt.deinit();
-
-            try stmt.bindText(1, entry_id);
-            if (slug) |s| try stmt.bindText(2, s) else try stmt.bindNull(2);
-            try stmt.bindText(3, title);
-            try stmt.bindText(4, data_json);
-            try stmt.bindText(5, status);
-
-            _ = try stmt.step();
-        }
-
-        // Point to new version if data changed (skip for in-place autosave)
-        if (data_changed and !can_autosave_inplace) {
-            var cv_stmt = try db.prepare(
-                "UPDATE entries SET current_version_id = ?1 WHERE id = ?2",
-            );
-            defer cv_stmt.deinit();
-
-            try cv_stmt.bindText(1, &version_id);
-            try cv_stmt.bindText(2, entry_id);
-
-            _ = try cv_stmt.step();
-        }
-    } else {
-        // Create entry first (so FK on entry_versions.entry_id is satisfied)
-        {
-            var stmt = try db.prepare(
-                \\INSERT INTO entries (id, content_type_id, slug, title, data, status)
-                \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            );
-            defer stmt.deinit();
-
-            try stmt.bindText(1, entry_id);
-            try stmt.bindText(2, CT.type_id);
-            if (slug) |s| try stmt.bindText(3, s) else try stmt.bindNull(3);
-            try stmt.bindText(4, title);
-            try stmt.bindText(5, data_json);
-            try stmt.bindText(6, status);
-
-            _ = try stmt.step();
-        }
-
-        // Then create version
-        {
-            var v_stmt = try db.prepare(
-                \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
-                \\VALUES (?1, ?2, NULL, ?3, ?4, 'created')
-            );
-            defer v_stmt.deinit();
-
-            try v_stmt.bindText(1, &version_id);
-            try v_stmt.bindText(2, entry_id);
-            try v_stmt.bindText(3, data_json);
-            if (opts.author_id) |aid| try v_stmt.bindText(4, aid) else try v_stmt.bindNull(4);
-
-            _ = try v_stmt.step();
-        }
-
-        // Update entry with version pointer
-        {
-            var u_stmt = try db.prepare(
-                "UPDATE entries SET current_version_id = ?1 WHERE id = ?2",
-            );
-            defer u_stmt.deinit();
-
-            try u_stmt.bindText(1, &version_id);
-            try u_stmt.bindText(2, entry_id);
-
-            _ = try u_stmt.step();
-        }
     }
-
-    // Enforce version retention limit
-    try pruneVersions(db, entry_id);
-
-    // Sync filterable fields to entry_meta
-    try syncEntryMeta(CT, db, entry_id, data);
-
-    // Sync taxonomy fields to entry_terms
-    try syncEntryTerms(CT, db, entry_id, data);
 
     // Return the saved entry
     return try getEntry(CT, allocator, db, entry_id) orelse error.EntryNotFound;
 }
 
-/// Sync filterable fields to entry_meta table
-fn syncEntryMeta(comptime CT: type, db: *Db, entry_id: []const u8, data: anytype) !void {
-    // Delete existing meta for this entry
-    var del_stmt = try db.prepare("DELETE FROM entry_meta WHERE entry_id = ?1");
+/// Sync filterable fields to unified content_meta table.
+fn syncEntryMeta(comptime CT: type, db: *Db, entry_id: []const u8, version_id: []const u8, data: anytype) !void {
+    var del_stmt = try db.prepare("DELETE FROM content_meta WHERE entry_id = ?1 AND version_id = ?2");
     defer del_stmt.deinit();
     try del_stmt.bindText(1, entry_id);
+    try del_stmt.bindText(2, version_id);
     _ = try del_stmt.step();
 
-    // Insert new meta values for filterable fields
     const filterable = CT.getFilterableFields();
     if (filterable.len == 0) return;
 
     var stmt = try db.prepare(
-        \\INSERT INTO entry_meta (entry_id, key, value_text, value_int, value_real)
-        \\VALUES (?1, ?2, ?3, ?4, ?5)
+        \\INSERT INTO content_meta (entry_id, version_id, field_name, value)
+        \\VALUES (?1, ?2, ?3, ?4)
     );
     defer stmt.deinit();
 
@@ -365,33 +327,34 @@ fn syncEntryMeta(comptime CT: type, db: *Db, entry_id: []const u8, data: anytype
             const value = @field(data, f.name);
 
             try stmt.bindText(1, entry_id);
-            try stmt.bindText(2, f.name);
+            try stmt.bindText(2, version_id);
+            try stmt.bindText(3, f.name);
 
-            // Bind appropriate value column based on meta type
             switch (f.meta_type) {
                 .text => {
                     if (value) |v| {
-                        try stmt.bindText(3, v);
-                    } else {
-                        try stmt.bindNull(3);
-                    }
-                    try stmt.bindNull(4);
-                    try stmt.bindNull(5);
-                },
-                .int => {
-                    try stmt.bindNull(3);
-                    if (value) |v| {
-                        try stmt.bindInt(4, v);
+                        try stmt.bindText(4, v);
                     } else {
                         try stmt.bindNull(4);
                     }
-                    try stmt.bindNull(5);
+                },
+                .int => {
+                    if (value) |v| {
+                        const buf = try std.fmt.allocPrint(db.allocator, "{d}", .{v});
+                        defer db.allocator.free(buf);
+                        try stmt.bindText(4, buf);
+                    } else {
+                        try stmt.bindNull(4);
+                    }
                 },
                 .real => {
-                    try stmt.bindNull(3);
-                    try stmt.bindNull(4);
-                    // TODO: bind real value
-                    try stmt.bindNull(5);
+                    if (value) |v| {
+                        const buf = try std.fmt.allocPrint(db.allocator, "{d}", .{v});
+                        defer db.allocator.free(buf);
+                        try stmt.bindText(4, buf);
+                    } else {
+                        try stmt.bindNull(4);
+                    }
                 },
             }
 
@@ -401,21 +364,19 @@ fn syncEntryMeta(comptime CT: type, db: *Db, entry_id: []const u8, data: anytype
     }
 }
 
-/// Sync taxonomy fields to entry_terms table
+/// Sync taxonomy fields to unified content_term_assignments table.
 fn syncEntryTerms(comptime CT: type, db: *Db, entry_id: []const u8, data: anytype) !void {
-    // Delete existing terms for this entry
-    var del_stmt = try db.prepare("DELETE FROM entry_terms WHERE entry_id = ?1");
+    var del_stmt = try db.prepare("DELETE FROM content_term_assignments WHERE entry_id = ?1");
     defer del_stmt.deinit();
     try del_stmt.bindText(1, entry_id);
     _ = try del_stmt.step();
 
-    // Insert new term relationships
     const taxonomies = CT.getTaxonomyFields();
     if (taxonomies.len == 0) return;
 
     var stmt = try db.prepare(
-        \\INSERT INTO entry_terms (entry_id, term_id)
-        \\VALUES (?1, ?2)
+        \\INSERT INTO content_term_assignments (entry_id, taxonomy_id, field_name, term_anchor_id, sort_order)
+        \\VALUES (?1, ?2, ?3, ?4, ?5)
     );
     defer stmt.deinit();
 
@@ -424,39 +385,48 @@ fn syncEntryTerms(comptime CT: type, db: *Db, entry_id: []const u8, data: anytyp
             const value = @field(data, f.name);
             const ValueType = @TypeOf(value);
 
-            // Handle different taxonomy field types
             if (ValueType == []const []const u8) {
-                // Array of term IDs
-                for (value) |term_id| {
+                for (value, 0..) |term_id, idx| {
+                    const taxonomy_id = f.taxonomy_id orelse continue;
                     try stmt.bindText(1, entry_id);
-                    try stmt.bindText(2, term_id);
+                    try stmt.bindText(2, taxonomy_id);
+                    try stmt.bindText(3, f.name);
+                    try stmt.bindText(4, term_id);
+                    try stmt.bindInt(5, @intCast(idx));
                     _ = try stmt.step();
                     stmt.reset();
                 }
             } else if (@typeInfo(ValueType) == .optional) {
-                // Optional taxonomy field - check child type
                 const ChildType = @typeInfo(ValueType).optional.child;
                 if (value) |unwrapped| {
+                    const taxonomy_id = f.taxonomy_id orelse continue;
                     if (ChildType == []const []const u8) {
-                        // Optional array of term IDs
-                        for (unwrapped) |term_id| {
+                        for (unwrapped, 0..) |term_id, idx| {
                             try stmt.bindText(1, entry_id);
-                            try stmt.bindText(2, term_id);
+                            try stmt.bindText(2, taxonomy_id);
+                            try stmt.bindText(3, f.name);
+                            try stmt.bindText(4, term_id);
+                            try stmt.bindInt(5, @intCast(idx));
                             _ = try stmt.step();
                             stmt.reset();
                         }
                     } else {
-                        // Optional single term ID
                         try stmt.bindText(1, entry_id);
-                        try stmt.bindText(2, unwrapped);
+                        try stmt.bindText(2, taxonomy_id);
+                        try stmt.bindText(3, f.name);
+                        try stmt.bindText(4, unwrapped);
+                        try stmt.bindInt(5, 0);
                         _ = try stmt.step();
                         stmt.reset();
                     }
                 }
             } else if (ValueType == []const u8) {
-                // Non-optional single term ID
+                const taxonomy_id = f.taxonomy_id orelse continue;
                 try stmt.bindText(1, entry_id);
-                try stmt.bindText(2, value);
+                try stmt.bindText(2, taxonomy_id);
+                try stmt.bindText(3, f.name);
+                try stmt.bindText(4, value);
+                try stmt.bindInt(5, 0);
                 _ = try stmt.step();
                 stmt.reset();
             }
@@ -464,12 +434,385 @@ fn syncEntryTerms(comptime CT: type, db: *Db, entry_id: []const u8, data: anytyp
     }
 }
 
+const UnifiedSyncOpts = struct {
+    entry_id: []const u8,
+    target_entry_id: []const u8,
+    title: []const u8,
+    slug: ?[]const u8,
+    current_version_id: []const u8,
+    prev_version_id: ?[]const u8,
+    version_type: []const u8,
+    data_json: []const u8,
+    prev_data_json: ?[]const u8,
+    status: []const u8,
+    is_update: bool,
+    data_changed: bool,
+    version_created: bool,
+    can_autosave_inplace: bool,
+    author_id: ?[]const u8,
+    requested_locale: ?[]const u8,
+};
+
+fn defaultLocaleFor(comptime CT: type) []const u8 {
+    if (@hasDecl(CT, "available_locales") and CT.available_locales.len > 0) {
+        return CT.available_locales[0];
+    }
+    return "en";
+}
+
+fn localesFor(comptime CT: type) []const []const u8 {
+    if (@hasDecl(CT, "available_locales") and CT.available_locales.len > 0) {
+        return CT.available_locales;
+    }
+    return &.{"en"};
+}
+
+fn lifecycleTablesAvailable(db: *Db) !bool {
+    var stmt = try db.prepare(
+        \\SELECT COUNT(*) FROM sqlite_master
+        \\WHERE type = 'table'
+        \\  AND name IN ('content_anchors', 'content_entries', 'content_versions', 'entry_flow_state', 'entry_flow_history')
+    );
+    defer stmt.deinit();
+    if (!try stmt.step()) return false;
+    return stmt.columnInt(0) == 5;
+}
+
+fn makeLocaleEntryId(allocator: Allocator, anchor_id: []const u8, locale: []const u8, default_locale: []const u8) ![]u8 {
+    if (std.mem.eql(u8, locale, default_locale)) {
+        return try allocator.dupe(u8, anchor_id);
+    }
+    return try std.fmt.allocPrint(allocator, "{s}::{s}", .{ anchor_id, locale });
+}
+
+fn appendFlowHistory(
+    db: *Db,
+    anchor_id: []const u8,
+    version_id: ?[]const u8,
+    action: []const u8,
+    user_id: ?[]const u8,
+    from_step: ?i64,
+    to_step: ?i64,
+    details: ?[]const u8,
+) !void {
+    const history_id = id_gen.generatePrefixedId("fh_", 16);
+    var stmt = try db.prepare(
+        \\INSERT INTO entry_flow_history (id, anchor_id, version_id, action, user_id, from_step, to_step, details, created_at)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, unixepoch())
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, &history_id);
+    try stmt.bindText(2, anchor_id);
+    if (version_id) |vid| try stmt.bindText(3, vid) else try stmt.bindNull(3);
+    try stmt.bindText(4, action);
+    if (user_id) |uid| try stmt.bindText(5, uid) else try stmt.bindNull(5);
+    if (from_step) |s| try stmt.bindInt(6, s) else try stmt.bindNull(6);
+    if (to_step) |s| try stmt.bindInt(7, s) else try stmt.bindNull(7);
+    if (details) |d| try stmt.bindText(8, d) else try stmt.bindNull(8);
+    _ = try stmt.step();
+}
+
+fn ensureFlowState(db: *Db, anchor_id: []const u8, flow_id: []const u8, author_id: ?[]const u8, version_id: []const u8) !void {
+    var active_flow_id: []const u8 = flow_id;
+    var current_step: i64 = 0;
+    var state_exists = false;
+    {
+        var exists_stmt = try db.prepare("SELECT flow_id, current_step FROM entry_flow_state WHERE anchor_id = ?1");
+        defer exists_stmt.deinit();
+        try exists_stmt.bindText(1, anchor_id);
+        if (try exists_stmt.step()) {
+            state_exists = true;
+            active_flow_id = exists_stmt.columnText(0) orelse flow_id;
+            current_step = exists_stmt.columnInt(1);
+        }
+    }
+
+    if (!state_exists) {
+        var stmt = try db.prepare(
+            \\INSERT OR IGNORE INTO entry_flow_state (anchor_id, flow_id, current_step, started_at, started_by)
+            \\VALUES (?1, ?2, 0, unixepoch(), ?3)
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, anchor_id);
+        try stmt.bindText(2, flow_id);
+        if (author_id) |aid| try stmt.bindText(3, aid) else try stmt.bindNull(3);
+        _ = try stmt.step();
+    }
+
+    const details = try std.fmt.allocPrint(db.allocator, "{{\"flow_id\":\"{s}\"}}", .{active_flow_id});
+    defer db.allocator.free(details);
+    try appendFlowHistory(db, anchor_id, version_id, "flow_entered", author_id, null, current_step, details);
+    try appendFlowHistory(db, anchor_id, version_id, "step_started", author_id, current_step, current_step, null);
+}
+
+fn completeFlowStateIfExists(db: *Db, anchor_id: []const u8, author_id: ?[]const u8, terminal_action: []const u8, version_id: []const u8) !void {
+    var flow_stmt = try db.prepare("SELECT flow_id, current_step FROM entry_flow_state WHERE anchor_id = ?1");
+    defer flow_stmt.deinit();
+    try flow_stmt.bindText(1, anchor_id);
+    var flow_id: []const u8 = "default_publish";
+    var current_step: i64 = 0;
+    const had_state = try flow_stmt.step();
+    if (had_state) {
+        flow_id = flow_stmt.columnText(0) orelse "default_publish";
+        current_step = flow_stmt.columnInt(1);
+    }
+
+    const details = try std.fmt.allocPrint(db.allocator, "{{\"flow_id\":\"{s}\",\"terminal_action\":\"{s}\"}}", .{ flow_id, terminal_action });
+    defer db.allocator.free(details);
+    try appendFlowHistory(db, anchor_id, version_id, "flow_entered", author_id, null, current_step, details);
+    try appendFlowHistory(db, anchor_id, version_id, "step_started", author_id, current_step, current_step, null);
+    try appendFlowHistory(db, anchor_id, version_id, "step_completed", author_id, current_step, current_step, null);
+    try appendFlowHistory(db, anchor_id, version_id, "terminal_action", author_id, current_step, null, details);
+    try appendFlowHistory(db, anchor_id, version_id, "flow_completed", author_id, current_step, null, details);
+
+    if (had_state) {
+        var del_claims = try db.prepare("DELETE FROM entry_flow_claims WHERE anchor_id = ?1");
+        defer del_claims.deinit();
+        try del_claims.bindText(1, anchor_id);
+        _ = try del_claims.step();
+
+        var del_flow = try db.prepare("DELETE FROM entry_flow_state WHERE anchor_id = ?1");
+        defer del_flow.deinit();
+        try del_flow.bindText(1, anchor_id);
+        _ = try del_flow.step();
+    }
+}
+
+fn jsonOptionalEqual(allocator: Allocator, lhs: ?std.json.Value, rhs: ?std.json.Value) bool {
+    if (lhs == null and rhs == null) return true;
+    if (lhs == null or rhs == null) return false;
+
+    const l = std.json.Stringify.valueAlloc(allocator, lhs.?, .{}) catch return false;
+    defer allocator.free(l);
+    const r = std.json.Stringify.valueAlloc(allocator, rhs.?, .{}) catch return false;
+    defer allocator.free(r);
+    return std.mem.eql(u8, l, r);
+}
+
+fn collectChangedSyncedFields(comptime CT: type, allocator: Allocator, old_json: []const u8, new_json: []const u8) ![][]const u8 {
+    const synced = CT.getSyncedFields();
+    if (synced.len == 0) return allocator.alloc([]const u8, 0);
+
+    var old_parsed_opt = std.json.parseFromSlice(std.json.Value, allocator, old_json, .{}) catch null;
+    defer if (old_parsed_opt) |*p| p.deinit();
+    var new_parsed_opt = std.json.parseFromSlice(std.json.Value, allocator, new_json, .{}) catch null;
+    defer if (new_parsed_opt) |*p| p.deinit();
+
+    const old_obj = if (old_parsed_opt) |p|
+        if (p.value == .object) p.value.object else null
+    else
+        null;
+    const new_obj = if (new_parsed_opt) |p|
+        if (p.value == .object) p.value.object else null
+    else
+        null;
+
+    var changed: std.ArrayListUnmanaged([]const u8) = .{};
+    errdefer changed.deinit(allocator);
+
+    inline for (synced) |f| {
+        const old_val = if (old_obj) |obj| obj.get(f.name) else null;
+        const new_val = if (new_obj) |obj| obj.get(f.name) else null;
+        if (!jsonOptionalEqual(allocator, old_val, new_val)) {
+            try changed.append(allocator, try allocator.dupe(u8, f.name));
+        }
+    }
+
+    return changed.toOwnedSlice(allocator);
+}
+
+fn syncUnifiedLifecycle(comptime CT: type, allocator: Allocator, db: *Db, opts: UnifiedSyncOpts) !void {
+    if (!try lifecycleTablesAvailable(db)) return;
+
+    const locales = comptime localesFor(CT);
+    const default_locale = comptime defaultLocaleFor(CT);
+
+    var resolved_locale = default_locale;
+    if (opts.requested_locale) |requested| {
+        for (locales) |loc| {
+            if (std.mem.eql(u8, loc, requested)) {
+                resolved_locale = requested;
+                break;
+            }
+        }
+    }
+
+    {
+        var stmt = try db.prepare(
+            \\INSERT OR IGNORE INTO content_anchors (id, content_type, created_at, created_by)
+            \\VALUES (?1, ?2, unixepoch(), ?3)
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, opts.entry_id);
+        try stmt.bindText(2, CT.type_id);
+        if (opts.author_id) |aid| try stmt.bindText(3, aid) else try stmt.bindNull(3);
+        _ = try stmt.step();
+    }
+
+    for (locales) |locale| {
+        const locale_entry_id = try makeLocaleEntryId(allocator, opts.entry_id, locale, default_locale);
+        defer allocator.free(locale_entry_id);
+
+        var stmt = try db.prepare(
+            \\INSERT OR IGNORE INTO content_entries (id, anchor_id, locale, content_type_id, data, status, archived, created_at, updated_at)
+            \\VALUES (?1, ?2, ?3, ?4, '{}', 'draft', 0, unixepoch(), unixepoch())
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, locale_entry_id);
+        try stmt.bindText(2, opts.entry_id);
+        try stmt.bindText(3, locale);
+        try stmt.bindText(4, CT.type_id);
+        _ = try stmt.step();
+    }
+
+    if (opts.version_created) {
+        var stmt = try db.prepare(
+            \\INSERT OR REPLACE INTO content_versions (id, entry_id, parent_id, data_json, author_id, created_at, version_type)
+            \\VALUES (?1, ?2, ?3, ?4, ?5, unixepoch(), ?6)
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, opts.current_version_id);
+        try stmt.bindText(2, opts.target_entry_id);
+        if (opts.prev_version_id) |pv| try stmt.bindText(3, pv) else try stmt.bindNull(3);
+        try stmt.bindText(4, opts.data_json);
+        if (opts.author_id) |aid| try stmt.bindText(5, aid) else try stmt.bindNull(5);
+        try stmt.bindText(6, opts.version_type);
+        _ = try stmt.step();
+    } else {
+        var exists_stmt = try db.prepare("SELECT 1 FROM content_versions WHERE id = ?1");
+        defer exists_stmt.deinit();
+        try exists_stmt.bindText(1, opts.current_version_id);
+        const exists = try exists_stmt.step();
+
+        if (!exists) {
+            var insert_stmt = try db.prepare(
+                \\INSERT INTO content_versions (id, entry_id, parent_id, data_json, author_id, created_at, version_type)
+                \\VALUES (?1, ?2, ?3, ?4, ?5, unixepoch(), ?6)
+            );
+            defer insert_stmt.deinit();
+            try insert_stmt.bindText(1, opts.current_version_id);
+            try insert_stmt.bindText(2, opts.target_entry_id);
+            if (opts.prev_version_id) |pv| try insert_stmt.bindText(3, pv) else try insert_stmt.bindNull(3);
+            try insert_stmt.bindText(4, opts.data_json);
+            if (opts.author_id) |aid| try insert_stmt.bindText(5, aid) else try insert_stmt.bindNull(5);
+            try insert_stmt.bindText(6, opts.version_type);
+            _ = try insert_stmt.step();
+        } else if (opts.data_changed and opts.can_autosave_inplace) {
+            var update_stmt = try db.prepare("UPDATE content_versions SET data_json = ?1 WHERE id = ?2");
+            defer update_stmt.deinit();
+            try update_stmt.bindText(1, opts.data_json);
+            try update_stmt.bindText(2, opts.current_version_id);
+            _ = try update_stmt.step();
+        }
+    }
+
+    {
+        var stmt = try db.prepare(
+            \\UPDATE content_entries
+            \\SET content_type_id = ?2,
+            \\    slug = ?3,
+            \\    title = ?4,
+            \\    data = ?5,
+            \\    status = ?6,
+            \\    current_version_id = ?7,
+            \\    archived = ?8,
+            \\    updated_at = unixepoch()
+            \\WHERE id = ?1
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, opts.target_entry_id);
+        try stmt.bindText(2, CT.type_id);
+        if (opts.slug) |s| try stmt.bindText(3, s) else try stmt.bindNull(3);
+        try stmt.bindText(4, opts.title);
+        try stmt.bindText(5, opts.data_json);
+        try stmt.bindText(6, opts.status);
+        try stmt.bindText(7, opts.current_version_id);
+        try stmt.bindInt(8, if (std.mem.eql(u8, opts.status, "archived")) 1 else 0);
+        _ = try stmt.step();
+    }
+
+    if (std.mem.eql(u8, opts.status, "published")) {
+        var stmt = try db.prepare(
+            "UPDATE content_entries SET published_version_id = ?1, published_at = unixepoch() WHERE id = ?2",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, opts.current_version_id);
+        try stmt.bindText(2, opts.target_entry_id);
+        _ = try stmt.step();
+    }
+
+    if (opts.data_changed and std.mem.eql(u8, resolved_locale, default_locale)) {
+        const changed_synced = try collectChangedSyncedFields(CT, allocator, opts.prev_data_json orelse "{}", opts.data_json);
+        defer {
+            for (changed_synced) |field_name| allocator.free(field_name);
+            allocator.free(changed_synced);
+        }
+
+        if (changed_synced.len > 0 and locales.len > 1) {
+            for (locales) |locale| {
+                if (std.mem.eql(u8, locale, default_locale)) continue;
+
+                const locale_entry_id = try makeLocaleEntryId(allocator, opts.entry_id, locale, default_locale);
+                defer allocator.free(locale_entry_id);
+
+                var get_stmt = try db.prepare(
+                    \\SELECT ce.current_version_id, cv.data_json
+                    \\FROM content_entries ce
+                    \\LEFT JOIN content_versions cv ON cv.id = ce.current_version_id
+                    \\WHERE ce.id = ?1
+                );
+                defer get_stmt.deinit();
+                try get_stmt.bindText(1, locale_entry_id);
+                const existing_parent = if (try get_stmt.step()) get_stmt.columnText(0) else null;
+                const existing_json = if (get_stmt.columnText(1)) |j| j else "{}";
+
+                const merged = try mergeJsonFields(allocator, existing_json, opts.data_json, changed_synced);
+                defer allocator.free(merged);
+
+                const sync_version_id = id_gen.generateVersionId();
+                {
+                    var v_stmt = try db.prepare(
+                        \\INSERT INTO content_versions (id, entry_id, parent_id, data_json, author_id, created_at, version_type)
+                        \\VALUES (?1, ?2, ?3, ?4, NULL, unixepoch(), 'synced')
+                    );
+                    defer v_stmt.deinit();
+                    try v_stmt.bindText(1, &sync_version_id);
+                    try v_stmt.bindText(2, locale_entry_id);
+                    if (existing_parent) |p| try v_stmt.bindText(3, p) else try v_stmt.bindNull(3);
+                    try v_stmt.bindText(4, merged);
+                    _ = try v_stmt.step();
+                }
+
+                {
+                    var u_stmt = try db.prepare(
+                        "UPDATE content_entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch() WHERE id = ?3",
+                    );
+                    defer u_stmt.deinit();
+                    try u_stmt.bindText(1, &sync_version_id);
+                    try u_stmt.bindText(2, merged);
+                    try u_stmt.bindText(3, locale_entry_id);
+                    _ = try u_stmt.step();
+                }
+            }
+        }
+    }
+
+    if (!std.mem.eql(u8, opts.status, "published") and !std.mem.eql(u8, opts.status, "archived")) {
+        try ensureFlowState(db, opts.entry_id, CT.workflow orelse "default_publish", opts.author_id, opts.current_version_id);
+    } else {
+        try completeFlowStateIfExists(db, opts.entry_id, opts.author_id, if (std.mem.eql(u8, opts.status, "archived")) "archive" else "publish", opts.current_version_id);
+    }
+}
+
 /// Delete an entry
 pub fn deleteEntry(db: *Db, entry_id: []const u8) !void {
-    var stmt = try db.prepare("DELETE FROM entries WHERE id = ?1");
-    defer stmt.deinit();
-    try stmt.bindText(1, entry_id);
-    _ = try stmt.step();
+    // Unified lifecycle source of truth (cascades to locale entries, versions, flow state, release_entries).
+    {
+        var u_stmt = try db.prepare("DELETE FROM content_anchors WHERE id = ?1");
+        defer u_stmt.deinit();
+        try u_stmt.bindText(1, entry_id);
+        _ = try u_stmt.step();
+    }
 }
 
 // =============================================================================
@@ -498,1081 +841,4 @@ test "generateVersionId produces valid IDs" {
     try std.testing.expect(id[0] == 'v');
     try std.testing.expect(id[1] == '_');
     try std.testing.expectEqual(@as(usize, 18), id.len);
-}
-
-/// Helper: set up a test database with schema for versioning tests
-fn setupTestDb() !*Db {
-    var db = try Db.init(std.testing.allocator, ":memory:");
-    errdefer db.deinit();
-
-    // Create minimal schema
-    try db.exec(
-        \\CREATE TABLE IF NOT EXISTS users (
-        \\    id TEXT PRIMARY KEY,
-        \\    email TEXT UNIQUE NOT NULL,
-        \\    display_name TEXT DEFAULT '',
-        \\    email_verified INTEGER DEFAULT 0,
-        \\    password_hash TEXT NOT NULL,
-        \\    created_at INTEGER DEFAULT (unixepoch())
-        \\);
-        \\CREATE TABLE IF NOT EXISTS content_types (
-        \\    id TEXT PRIMARY KEY,
-        \\    slug TEXT UNIQUE NOT NULL,
-        \\    name TEXT NOT NULL,
-        \\    fields TEXT NOT NULL,
-        \\    source TEXT NOT NULL,
-        \\    created_at INTEGER DEFAULT (unixepoch())
-        \\);
-        \\CREATE TABLE IF NOT EXISTS entry_versions (
-        \\    id TEXT PRIMARY KEY,
-        \\    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-        \\    parent_id TEXT REFERENCES entry_versions(id),
-        \\    data TEXT NOT NULL,
-        \\    author_id TEXT REFERENCES users(id),
-        \\    created_at INTEGER DEFAULT (unixepoch()),
-        \\    version_type TEXT NOT NULL DEFAULT 'edit',
-        \\    collaborators TEXT
-        \\);
-        \\CREATE TABLE IF NOT EXISTS entries (
-        \\    id TEXT PRIMARY KEY,
-        \\    content_type_id TEXT NOT NULL REFERENCES content_types(id),
-        \\    slug TEXT,
-        \\    title TEXT,
-        \\    data TEXT NOT NULL,
-        \\    status TEXT DEFAULT 'draft',
-        \\    version INTEGER DEFAULT 1,
-        \\    current_version_id TEXT REFERENCES entry_versions(id),
-        \\    published_version_id TEXT REFERENCES entry_versions(id),
-        \\    published_at INTEGER,
-        \\    created_at INTEGER DEFAULT (unixepoch()),
-        \\    updated_at INTEGER DEFAULT (unixepoch()),
-        \\    UNIQUE(content_type_id, slug)
-        \\);
-        \\CREATE TABLE IF NOT EXISTS settings (
-        \\    key TEXT PRIMARY KEY,
-        \\    value TEXT NOT NULL,
-        \\    created_at INTEGER DEFAULT (unixepoch()),
-        \\    updated_at INTEGER DEFAULT (unixepoch())
-        \\);
-        \\CREATE TABLE IF NOT EXISTS releases (
-        \\    id TEXT PRIMARY KEY,
-        \\    name TEXT,
-        \\    status TEXT NOT NULL DEFAULT 'pending',
-        \\    author_id TEXT REFERENCES users(id),
-        \\    created_at INTEGER DEFAULT (unixepoch()),
-        \\    released_at INTEGER,
-        \\    scheduled_for INTEGER,
-        \\    reverted_at INTEGER
-        \\);
-        \\CREATE TABLE IF NOT EXISTS release_items (
-        \\    release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
-        \\    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-        \\    from_version TEXT REFERENCES entry_versions(id),
-        \\    to_version TEXT NOT NULL REFERENCES entry_versions(id),
-        \\    fields TEXT,
-        \\    PRIMARY KEY (release_id, entry_id)
-        \\);
-        \\INSERT INTO content_types (id, slug, name, fields, source)
-        \\VALUES ('test_ct', 'test_ct', 'Test', '[]', 'core');
-    );
-
-    // Need to return a pointer that outlives this function
-    const ptr = try std.testing.allocator.create(Db);
-    ptr.* = db;
-    return ptr;
-}
-
-fn destroyTestDb(db: **Db) void {
-    db.*.deinit();
-    std.testing.allocator.destroy(db.*);
-}
-
-/// Helper: insert a version and link it to an entry
-fn insertTestVersion(db: *Db, entry_id: []const u8, data: []const u8, parent_id: ?[]const u8) ![18]u8 {
-    const version_id = id_gen.generateVersionId();
-
-    var v_stmt = try db.prepare(
-        \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
-        \\VALUES (?1, ?2, ?3, ?4, NULL, 'edit')
-    );
-    defer v_stmt.deinit();
-
-    try v_stmt.bindText(1, &version_id);
-    try v_stmt.bindText(2, entry_id);
-    if (parent_id) |pid| try v_stmt.bindText(3, pid) else try v_stmt.bindNull(3);
-    try v_stmt.bindText(4, data);
-    _ = try v_stmt.step();
-
-    // Update entry's current_version_id
-    var u_stmt = try db.prepare(
-        "UPDATE entries SET current_version_id = ?1, data = ?2 WHERE id = ?3",
-    );
-    defer u_stmt.deinit();
-    try u_stmt.bindText(1, &version_id);
-    try u_stmt.bindText(2, data);
-    try u_stmt.bindText(3, entry_id);
-    _ = try u_stmt.step();
-
-    return version_id;
-}
-
-test "version is created on save and linked to entry" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    // Create an entry manually
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'draft')
-    );
-
-    // Insert a version (simulates what saveEntry does)
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-
-    // Verify version exists
-    {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions WHERE entry_id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqual(@as(i64, 1), stmt.columnInt(0));
-    }
-
-    // Verify entry points to version
-    {
-        var stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings(&v1, stmt.columnText(0) orelse "");
-    }
-
-    // Verify version data matches
-    {
-        var stmt = try db.prepare(
-            \\SELECT ev.data FROM entries e
-            \\JOIN entry_versions ev ON e.current_version_id = ev.id
-            \\WHERE e.id = 'e_test1'
-        );
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("{\"title\":\"v1\"}", stmt.columnText(0) orelse "");
-    }
-}
-
-test "sequential saves form a parent chain" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'draft')
-    );
-
-    // First version — no parent
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-    // Second version — parent is v1
-    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1);
-    // Third version — parent is v2
-    const v3 = try insertTestVersion(db, "e_test1", "{\"title\":\"v3\"}", &v2);
-
-    // Verify 3 versions exist
-    {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions WHERE entry_id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqual(@as(i64, 3), stmt.columnInt(0));
-    }
-
-    // Verify entry points to latest
-    {
-        var stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings(&v3, stmt.columnText(0) orelse "");
-    }
-
-    // Verify v1 has no parent
-    {
-        var stmt = try db.prepare("SELECT parent_id FROM entry_versions WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &v1);
-        _ = try stmt.step();
-        try std.testing.expect(stmt.columnIsNull(0));
-    }
-
-    // Verify v2 parent is v1
-    {
-        var stmt = try db.prepare("SELECT parent_id FROM entry_versions WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &v2);
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings(&v1, stmt.columnText(0) orelse "");
-    }
-
-    // Verify v3 parent is v2
-    {
-        var stmt = try db.prepare("SELECT parent_id FROM entry_versions WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &v3);
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings(&v2, stmt.columnText(0) orelse "");
-    }
-}
-
-test "pruneVersions does nothing without limit" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-
-    // Insert 5 versions
-    var prev: ?[]const u8 = null;
-    var prev_buf: [18]u8 = undefined;
-    for (0..5) |_| {
-        const vid = try insertTestVersion(db, "e_test1", "{}", prev);
-        prev_buf = vid;
-        prev = &prev_buf;
-    }
-
-    // No settings row — pruneVersions should be a no-op
-    try pruneVersions(db, "e_test1");
-
-    var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions WHERE entry_id = 'e_test1'");
-    defer stmt.deinit();
-    _ = try stmt.step();
-    try std.testing.expectEqual(@as(i64, 5), stmt.columnInt(0));
-}
-
-test "pruneVersions enforces retention limit" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-
-    // Insert 5 versions
-    var prev: ?[]const u8 = null;
-    var prev_buf: [18]u8 = undefined;
-    for (0..5) |_| {
-        const vid = try insertTestVersion(db, "e_test1", "{}", prev);
-        prev_buf = vid;
-        prev = &prev_buf;
-    }
-
-    // Set retention limit to 3
-    try db.exec("INSERT INTO settings (key, value) VALUES ('version_history_limit', '3')");
-
-    try pruneVersions(db, "e_test1");
-
-    // Should have 3 versions left
-    var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions WHERE entry_id = 'e_test1'");
-    defer stmt.deinit();
-    _ = try stmt.step();
-    try std.testing.expectEqual(@as(i64, 3), stmt.columnInt(0));
-}
-
-test "pruneVersions keeps most recent versions" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-
-    // Insert 3 versions with distinct data
-    _ = try insertTestVersion(db, "e_test1", "{\"v\":1}", null);
-    // Small sleep not possible in tests, but created_at defaults to unixepoch()
-    // which is the same second. Use explicit timestamps instead.
-    // Actually, all versions in the same second will have same created_at.
-    // The pruning uses ORDER BY created_at DESC, LIMIT — with ties,
-    // SQLite picks arbitrarily but consistently. We'll verify count only.
-
-    var prev_buf: [18]u8 = undefined;
-    prev_buf = try insertTestVersion(db, "e_test1", "{\"v\":1}", null);
-    const v2 = try insertTestVersion(db, "e_test1", "{\"v\":2}", &prev_buf);
-    prev_buf = v2;
-    _ = try insertTestVersion(db, "e_test1", "{\"v\":3}", &prev_buf);
-
-    // Set limit to 2
-    try db.exec("INSERT INTO settings (key, value) VALUES ('version_history_limit', '2')");
-
-    try pruneVersions(db, "e_test1");
-
-    var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions WHERE entry_id = 'e_test1'");
-    defer stmt.deinit();
-    _ = try stmt.step();
-    try std.testing.expectEqual(@as(i64, 2), stmt.columnInt(0));
-}
-
-test "listVersions returns versions in newest-first order" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-
-    const v1 = try insertTestVersion(db, "e_test1", "{\"v\":1}", null);
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    _ = try insertTestVersion(db, "e_test1", "{\"v\":2}", &v1_copy);
-
-    const versions = try listVersions(std.testing.allocator, db, "e_test1", .{});
-    defer std.testing.allocator.free(versions);
-
-    try std.testing.expectEqual(@as(usize, 2), versions.len);
-    // Newest first — v2 should be first (is_current = true)
-    try std.testing.expect(versions[0].is_current);
-}
-
-test "listVersions returns empty for nonexistent entry" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    const versions = try listVersions(std.testing.allocator, db, "e_nonexistent", .{});
-    defer std.testing.allocator.free(versions);
-
-    try std.testing.expectEqual(@as(usize, 0), versions.len);
-}
-
-test "getVersion returns correct version" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"hello\"}", null);
-
-    const ver = try getVersion(std.testing.allocator, db, &v1);
-    try std.testing.expect(ver != null);
-    try std.testing.expectEqualStrings("{\"title\":\"hello\"}", ver.?.data);
-    try std.testing.expect(ver.?.is_current);
-}
-
-test "getVersion returns null for nonexistent version" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    const ver = try getVersion(std.testing.allocator, db, "v_nonexistent12345");
-    try std.testing.expect(ver == null);
-}
-
-test "restoreVersion creates new version with old data" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-
-    // Create two versions
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"original\"}", null);
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"modified\"}", &v1_copy);
-
-    // Restore v1
-    try restoreVersion(std.testing.allocator, db, "e_test1", &v1, null);
-
-    // Should now have 3 versions
-    {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM entry_versions WHERE entry_id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqual(@as(i64, 3), stmt.columnInt(0));
-    }
-
-    // Current version data should be the original
-    {
-        var stmt = try db.prepare(
-            \\SELECT ev.data FROM entries e
-            \\JOIN entry_versions ev ON e.current_version_id = ev.id
-            \\WHERE e.id = 'e_test1'
-        );
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("{\"title\":\"original\"}", stmt.columnText(0) orelse "");
-    }
-
-    // entries.data should also be synced
-    {
-        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("{\"title\":\"original\"}", stmt.columnText(0) orelse "");
-    }
-}
-
-test "diffVersions shows changed fields" {
-    const result = try diffVersions(
-        std.testing.allocator,
-        "{\"title\":\"old title\",\"body\":\"same\"}",
-        "{\"title\":\"new title\",\"body\":\"same\"}",
-    );
-    defer std.testing.allocator.free(result);
-
-    // Should contain "title" as changed
-    try std.testing.expect(std.mem.indexOf(u8, result, "title") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "changed") != null);
-    // Should NOT contain "body" (unchanged)
-    try std.testing.expect(std.mem.indexOf(u8, result, "diff-key\">body") == null);
-}
-
-test "diffVersions shows added fields" {
-    const result = try diffVersions(
-        std.testing.allocator,
-        "{\"title\":\"hello\"}",
-        "{\"title\":\"hello\",\"extra\":\"new\"}",
-    );
-    defer std.testing.allocator.free(result);
-
-    try std.testing.expect(std.mem.indexOf(u8, result, "extra") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "added") != null);
-}
-
-test "diffVersions shows removed fields" {
-    const result = try diffVersions(
-        std.testing.allocator,
-        "{\"title\":\"hello\",\"old_field\":\"gone\"}",
-        "{\"title\":\"hello\"}",
-    );
-    defer std.testing.allocator.free(result);
-
-    try std.testing.expect(std.mem.indexOf(u8, result, "old_field") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "removed") != null);
-}
-
-test "generateReleaseId produces valid IDs" {
-    const id = generateReleaseId();
-    try std.testing.expect(id[0] == 'r');
-    try std.testing.expect(id[1] == 'e');
-    try std.testing.expect(id[2] == 'l');
-    try std.testing.expect(id[3] == '_');
-    try std.testing.expectEqual(@as(usize, 20), id.len);
-}
-
-test "publishEntry creates release and publishes" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'draft')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-
-    try publishEntry(std.testing.allocator, db, "e_test1", null, null);
-
-    // Verify entry is published with published_version_id set
-    {
-        var stmt = try db.prepare("SELECT status, published_version_id FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("published", stmt.columnText(0) orelse "");
-        try std.testing.expectEqualStrings(&v1, stmt.columnText(1) orelse "");
-    }
-
-    // Verify release exists and is released
-    {
-        var stmt = try db.prepare("SELECT status, released_at, name FROM releases");
-        defer stmt.deinit();
-        try std.testing.expect(try stmt.step());
-        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
-        try std.testing.expect(!stmt.columnIsNull(1));
-        try std.testing.expect(stmt.columnIsNull(2)); // instant release has null name
-    }
-
-    // Verify release item
-    {
-        var stmt = try db.prepare("SELECT entry_id, from_version, to_version FROM release_items");
-        defer stmt.deinit();
-        try std.testing.expect(try stmt.step());
-        try std.testing.expectEqualStrings("e_test1", stmt.columnText(0) orelse "");
-        try std.testing.expect(stmt.columnIsNull(1)); // from_version is NULL (first publish)
-        try std.testing.expectEqualStrings(&v1, stmt.columnText(2) orelse "");
-    }
-}
-
-test "publishEntry skips when already published with same version" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'published')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
-
-    // Set published_version_id = current_version_id (already published)
-    {
-        var stmt = try db.prepare("UPDATE entries SET published_version_id = ?1 WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        try stmt.bindText(1, &v1);
-        _ = try stmt.step();
-    }
-
-    try publishEntry(std.testing.allocator, db, "e_test1", null, null);
-
-    // No release should be created
-    {
-        var stmt = try db.prepare("SELECT COUNT(*) FROM releases");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqual(@as(i64, 0), stmt.columnInt(0));
-    }
-}
-
-test "publishEntry partial publish merges selected fields" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    // Start with published entry
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"old","slug":"old-slug"}', 'changed')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"old\",\"slug\":\"old-slug\"}", null);
-
-    // Set as published
-    {
-        var stmt = try db.prepare("UPDATE entries SET published_version_id = ?1 WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        try stmt.bindText(1, &v1);
-        _ = try stmt.step();
-    }
-
-    // Create draft with changes to both fields
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"new\",\"slug\":\"new-slug\"}", &v1_copy);
-
-    // Partial publish: only title
-    try publishEntry(std.testing.allocator, db, "e_test1", null, "[\"title\"]");
-
-    // Entry should still be changed (slug not published)
-    {
-        var stmt = try db.prepare("SELECT status FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("changed", stmt.columnText(0) orelse "");
-    }
-
-    // Published data should have new title but old slug
-    const pub_data = try getPublishedData(std.testing.allocator, db, "e_test1");
-    defer if (pub_data) |d| std.testing.allocator.free(d);
-    try std.testing.expect(pub_data != null);
-
-    // Parse and verify
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, pub_data.?, .{});
-    defer parsed.deinit();
-    const obj = parsed.value.object;
-    try std.testing.expectEqualStrings("new", obj.get("title").?.string);
-    try std.testing.expectEqualStrings("old-slug", obj.get("slug").?.string);
-}
-
-test "getEntryVersionId returns current version" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
-
-    const version_id = try getEntryVersionId(db, "e_test1");
-    try std.testing.expect(version_id != null);
-    defer db.allocator.free(version_id.?);
-    try std.testing.expectEqualStrings(&v1, version_id.?);
-}
-
-test "getEntryVersionId returns null for no version" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status, current_version_id)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft', NULL)
-    );
-
-    const version_id = try getEntryVersionId(db, "e_test1");
-    try std.testing.expect(version_id == null);
-}
-
-/// Helper: create a released release for testing revert/re-release
-fn createTestRelease(db: *Db, entry_id: []const u8, from_v: ?[]const u8, to_v: []const u8) ![20]u8 {
-    const release_id = generateReleaseId();
-    {
-        var stmt = try db.prepare(
-            \\INSERT INTO releases (id, name, status, author_id, created_at, released_at)
-            \\VALUES (?1, NULL, 'released', NULL, unixepoch(), unixepoch())
-        );
-        defer stmt.deinit();
-        try stmt.bindText(1, &release_id);
-        _ = try stmt.step();
-    }
-    {
-        var stmt = try db.prepare(
-            \\INSERT INTO release_items (release_id, entry_id, from_version, to_version)
-            \\VALUES (?1, ?2, ?3, ?4)
-        );
-        defer stmt.deinit();
-        try stmt.bindText(1, &release_id);
-        try stmt.bindText(2, entry_id);
-        if (from_v) |fv| try stmt.bindText(3, fv) else try stmt.bindNull(3);
-        try stmt.bindText(4, to_v);
-        _ = try stmt.step();
-    }
-    return release_id;
-}
-
-test "revertRelease restores from_version data" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
-    );
-
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
-
-    // Create release: v1 → v2
-    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
-
-    // Revert
-    try revertRelease(db, &rel_id, null);
-
-    // Verify entry data is restored to v1
-    {
-        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("{\"title\":\"v1\"}", stmt.columnText(0) orelse "");
-    }
-
-    // Verify release status is reverted
-    {
-        var stmt = try db.prepare("SELECT status, reverted_at FROM releases WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("reverted", stmt.columnText(0) orelse "");
-        try std.testing.expect(!stmt.columnIsNull(1)); // reverted_at set
-    }
-
-    // Verify a new 'reverted' version was created
-    {
-        var stmt = try db.prepare(
-            "SELECT version_type FROM entry_versions WHERE entry_id = 'e_test1' ORDER BY created_at DESC LIMIT 1",
-        );
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("reverted", stmt.columnText(0) orelse "");
-    }
-}
-
-test "revertRelease blocked when entry modified since release" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
-    );
-
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
-
-    // Create release: v1 → v2
-    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
-
-    // Modify entry after release (v3)
-    var v2_copy: [18]u8 = undefined;
-    @memcpy(&v2_copy, &v2);
-    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"v3\"}", &v2_copy);
-
-    // Revert should be blocked
-    const result = revertRelease(db, &rel_id, null);
-    try std.testing.expectError(ReleaseError.EntryModifiedSinceRelease, result);
-
-    // Verify release status unchanged
-    {
-        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
-    }
-}
-
-test "revertRelease fails on non-released status" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    // Create a pending release (not released)
-    const rel_id = generateReleaseId();
-    {
-        var stmt = try db.prepare(
-            "INSERT INTO releases (id, status) VALUES (?1, 'pending')",
-        );
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-    }
-
-    const result = revertRelease(db, &rel_id, null);
-    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
-}
-
-test "reReleaseReverted restores to_version data" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
-    );
-
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
-
-    // Create release and revert it
-    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
-    try revertRelease(db, &rel_id, null);
-
-    // Re-release
-    try reReleaseReverted(db, &rel_id, null);
-
-    // Verify entry data is back to v2
-    {
-        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("{\"title\":\"v2\"}", stmt.columnText(0) orelse "");
-    }
-
-    // Verify release status is released again
-    {
-        var stmt = try db.prepare("SELECT status, reverted_at FROM releases WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
-        try std.testing.expect(stmt.columnIsNull(1)); // reverted_at cleared
-    }
-}
-
-test "reReleaseReverted blocked when entry modified after revert" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"v1"}', 'published')
-    );
-
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"v1\"}", null);
-    var v1_copy: [18]u8 = undefined;
-    @memcpy(&v1_copy, &v1);
-    const v2 = try insertTestVersion(db, "e_test1", "{\"title\":\"v2\"}", &v1_copy);
-
-    // Create release, revert, then modify
-    const rel_id = try createTestRelease(db, "e_test1", &v1, &v2);
-    try revertRelease(db, &rel_id, null);
-
-    // Get current version (the revert version) and modify entry after revert
-    const revert_vid = (try getEntryVersionId(db, "e_test1")).?;
-    defer db.allocator.free(revert_vid);
-    var rv_copy: [18]u8 = undefined;
-    @memcpy(&rv_copy, revert_vid[0..18]);
-    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"v4\"}", &rv_copy);
-
-    // Re-release should be blocked
-    const result = reReleaseReverted(db, &rel_id, null);
-    try std.testing.expectError(ReleaseError.EntryModifiedSinceRelease, result);
-}
-
-test "scheduleRelease sets scheduled state" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    // Create a pending release
-    const rel_id = generateReleaseId();
-    {
-        var stmt = try db.prepare(
-            "INSERT INTO releases (id, status) VALUES (?1, 'pending')",
-        );
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-    }
-
-    const target_time: i64 = 1738800000; // some future timestamp
-    try scheduleRelease(db, &rel_id, target_time);
-
-    // Verify
-    {
-        var stmt = try db.prepare("SELECT status, scheduled_for FROM releases WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("scheduled", stmt.columnText(0) orelse "");
-        try std.testing.expectEqual(target_time, stmt.columnInt(1));
-    }
-}
-
-test "scheduleRelease fails on non-pending status" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    // Create a released release
-    const rel_id = generateReleaseId();
-    {
-        var stmt = try db.prepare(
-            "INSERT INTO releases (id, status) VALUES (?1, 'released')",
-        );
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-    }
-
-    const result = scheduleRelease(db, &rel_id, 1738800000);
-    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
-}
-
-test "revertRelease with null from_version restores empty data" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{"title":"first"}', 'published')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{\"title\":\"first\"}", null);
-
-    // Release with null from_version (new entry publish)
-    const rel_id = try createTestRelease(db, "e_test1", null, &v1);
-
-    try revertRelease(db, &rel_id, null);
-
-    // Entry data should be empty JSON
-    {
-        var stmt = try db.prepare("SELECT data FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("{}", stmt.columnText(0) orelse "");
-    }
-}
-
-test "createPendingRelease creates a pending release with name" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    const rel_id = try createPendingRelease(db, "Sprint 42", null);
-
-    var stmt = try db.prepare("SELECT name, status FROM releases WHERE id = ?1");
-    defer stmt.deinit();
-    try stmt.bindText(1, &rel_id);
-    try std.testing.expect(try stmt.step());
-    try std.testing.expectEqualStrings("Sprint 42", stmt.columnText(0) orelse "");
-    try std.testing.expectEqualStrings("pending", stmt.columnText(1) orelse "");
-}
-
-test "addToRelease inserts item into pending release" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-    const v1 = try insertTestVersion(db, "e_test1", "{}", null);
-
-    const rel_id = try createPendingRelease(db, "Batch 1", null);
-    try addToRelease(db, &rel_id, "e_test1", null);
-
-    var stmt = try db.prepare("SELECT entry_id, to_version FROM release_items WHERE release_id = ?1");
-    defer stmt.deinit();
-    try stmt.bindText(1, &rel_id);
-    try std.testing.expect(try stmt.step());
-    try std.testing.expectEqualStrings("e_test1", stmt.columnText(0) orelse "");
-    try std.testing.expectEqualStrings(&v1, stmt.columnText(1) orelse "");
-}
-
-test "addToRelease fails on non-pending release" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    const rel_id = generateReleaseId();
-    {
-        var stmt = try db.prepare("INSERT INTO releases (id, status) VALUES (?1, 'released')");
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-    }
-
-    const result = addToRelease(db, &rel_id, "e_test1", null);
-    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
-}
-
-test "removeFromRelease removes item" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-    _ = try insertTestVersion(db, "e_test1", "{}", null);
-
-    const rel_id = try createPendingRelease(db, "Batch 1", null);
-    try addToRelease(db, &rel_id, "e_test1", null);
-
-    // Remove
-    try removeFromRelease(db, &rel_id, "e_test1");
-
-    var stmt = try db.prepare("SELECT COUNT(*) FROM release_items WHERE release_id = ?1");
-    defer stmt.deinit();
-    try stmt.bindText(1, &rel_id);
-    _ = try stmt.step();
-    try std.testing.expectEqual(@as(i64, 0), stmt.columnInt(0));
-}
-
-test "publishBatchRelease sets entries to published" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, data, status)
-        \\VALUES ('e_test1', 'test_ct', '{}', 'draft')
-    );
-    _ = try insertTestVersion(db, "e_test1", "{\"title\":\"staged\"}", null);
-
-    const rel_id = try createPendingRelease(db, "Launch", null);
-    try addToRelease(db, &rel_id, "e_test1", null);
-
-    try publishBatchRelease(std.testing.allocator, db, &rel_id);
-
-    // Entry should be published
-    {
-        var stmt = try db.prepare("SELECT status FROM entries WHERE id = 'e_test1'");
-        defer stmt.deinit();
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("published", stmt.columnText(0) orelse "");
-    }
-
-    // Release should be released
-    {
-        var stmt = try db.prepare("SELECT status, released_at FROM releases WHERE id = ?1");
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-        try std.testing.expectEqualStrings("released", stmt.columnText(0) orelse "");
-        try std.testing.expect(!stmt.columnIsNull(1));
-    }
-}
-
-test "publishBatchRelease fails on non-pending" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    const rel_id = generateReleaseId();
-    {
-        var stmt = try db.prepare("INSERT INTO releases (id, status) VALUES (?1, 'released')");
-        defer stmt.deinit();
-        try stmt.bindText(1, &rel_id);
-        _ = try stmt.step();
-    }
-
-    const result = publishBatchRelease(std.testing.allocator, db, &rel_id);
-    try std.testing.expectError(ReleaseError.InvalidReleaseStatus, result);
-}
-
-test "listReleases returns releases" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    _ = try createPendingRelease(db, "Release A", null);
-    _ = try createPendingRelease(db, "Release B", null);
-
-    const releases = try listReleases(std.testing.allocator, db, .{});
-    defer std.testing.allocator.free(releases);
-    try std.testing.expectEqual(@as(usize, 2), releases.len);
-}
-
-test "listReleases filters by status" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    _ = try createPendingRelease(db, "Pending One", null);
-
-    // Create a released one directly
-    try db.exec("INSERT INTO releases (id, name, status) VALUES ('rel_released_test1', 'Done', 'released')");
-
-    const pending = try listReleases(std.testing.allocator, db, .{ .status = "pending" });
-    defer std.testing.allocator.free(pending);
-    try std.testing.expectEqual(@as(usize, 1), pending.len);
-    try std.testing.expectEqualStrings("Pending One", pending[0].name);
-}
-
-test "getRelease returns detail with items" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    try db.exec(
-        \\INSERT INTO entries (id, content_type_id, title, data, status)
-        \\VALUES ('e_test1', 'test_ct', 'My Post', '{}', 'draft')
-    );
-    _ = try insertTestVersion(db, "e_test1", "{}", null);
-
-    const rel_id = try createPendingRelease(db, "Detail Test", null);
-    try addToRelease(db, &rel_id, "e_test1", null);
-
-    const detail = try getRelease(std.testing.allocator, db, &rel_id);
-    try std.testing.expect(detail != null);
-    const d = detail.?;
-    defer std.testing.allocator.free(d.items);
-    try std.testing.expectEqualStrings("Detail Test", d.name);
-    try std.testing.expectEqualStrings("pending", d.status);
-    try std.testing.expectEqual(@as(usize, 1), d.items.len);
-    try std.testing.expectEqualStrings("My Post", d.items[0].entry_title);
-}
-
-test "getRelease returns null for nonexistent" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    const detail = try getRelease(std.testing.allocator, db, "rel_nonexistent12345");
-    try std.testing.expect(detail == null);
-}
-
-test "listPendingReleases returns only pending" {
-    var db = try setupTestDb();
-    defer destroyTestDb(&db);
-
-    _ = try createPendingRelease(db, "Active", null);
-    try db.exec("INSERT INTO releases (id, name, status) VALUES ('rel_released_test2', 'Done', 'released')");
-
-    const pending = try listPendingReleases(std.testing.allocator, db);
-    defer std.testing.allocator.free(pending);
-    try std.testing.expectEqual(@as(usize, 1), pending.len);
-    try std.testing.expectEqualStrings("Active", pending[0].name);
 }

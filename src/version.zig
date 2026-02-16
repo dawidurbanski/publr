@@ -54,15 +54,15 @@ pub fn listVersions(allocator: Allocator, db: *Db, entry_id: []const u8, opts: s
     limit: u32 = 50,
 }) ![]Version {
     var stmt = try db.prepare(
-        \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data,
+        \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data_json,
         \\       ev.author_id, u.email, ev.created_at, ev.version_type,
         \\       (e.current_version_id = ev.id) AS is_current,
         \\       r.name AS release_name,
         \\       ev.collaborators, u.display_name
-        \\FROM entry_versions ev
-        \\JOIN entries e ON e.id = ev.entry_id
+        \\FROM content_versions ev
+        \\JOIN content_entries e ON e.id = ev.entry_id
         \\LEFT JOIN users u ON u.id = ev.author_id
-        \\LEFT JOIN release_items ri ON ri.to_version = ev.id AND ri.entry_id = ev.entry_id
+        \\LEFT JOIN release_entries ri ON ri.to_version_id = ev.id AND ri.entry_id = ev.entry_id
         \\LEFT JOIN releases r ON r.id = ri.release_id AND r.name IS NOT NULL
         \\WHERE ev.entry_id = ?1
         \\  AND ev.version_type != 'autosave'
@@ -100,12 +100,12 @@ pub fn listVersions(allocator: Allocator, db: *Db, entry_id: []const u8, opts: s
 /// Get a single version by ID
 pub fn getVersion(allocator: Allocator, db: *Db, version_id: []const u8) !?Version {
     var stmt = try db.prepare(
-        \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data,
+        \\SELECT ev.id, ev.entry_id, ev.parent_id, ev.data_json,
         \\       ev.author_id, u.email, ev.created_at, ev.version_type,
         \\       (e.current_version_id = ev.id) AS is_current,
         \\       ev.collaborators, u.display_name
-        \\FROM entry_versions ev
-        \\JOIN entries e ON e.id = ev.entry_id
+        \\FROM content_versions ev
+        \\JOIN content_entries e ON e.id = ev.entry_id
         \\LEFT JOIN users u ON u.id = ev.author_id
         \\WHERE ev.id = ?1
     );
@@ -131,7 +131,7 @@ pub fn getVersion(allocator: Allocator, db: *Db, version_id: []const u8) !?Versi
 }
 
 /// Restore a previous version: creates a new 'restored' version with the old data,
-/// pointing parent_id to the current version. Updates entries.data and current_version_id.
+/// pointing parent_id to the current version. Updates content_entries.data and current_version_id.
 pub fn restoreVersion(
     allocator: Allocator,
     db: *Db,
@@ -258,8 +258,8 @@ pub fn populateFieldAuthors(allocator: Allocator, db: *Db, fields: []FieldCompar
         steps += 1;
 
         var stmt = db.prepare(
-            \\SELECT ev.data, u.email, ev.parent_id, u.display_name, ev.author_id
-            \\FROM entry_versions ev
+            \\SELECT ev.data_json, u.email, ev.parent_id, u.display_name, ev.author_id
+            \\FROM content_versions ev
             \\LEFT JOIN users u ON u.id = ev.author_id
             \\WHERE ev.id = ?1
         ) catch break;
@@ -335,7 +335,7 @@ pub fn populateFieldAuthors(allocator: Allocator, db: *Db, fields: []FieldCompar
 }
 
 /// Restore a version with arbitrary merged data. Creates a 'restored' version
-/// with the given data, updates entries.data, title, slug, status from the JSON.
+/// with the given data, updates content_entries.data, title, slug, status from the JSON.
 pub fn restoreVersionWithData(
     db: *Db,
     entry_id: []const u8,
@@ -344,7 +344,7 @@ pub fn restoreVersionWithData(
 ) !void {
     // Get current version id and check if entry is published
     var cur_stmt = try db.prepare(
-        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+        "SELECT current_version_id, published_version_id FROM content_entries WHERE id = ?1",
     );
     defer cur_stmt.deinit();
     try cur_stmt.bindText(1, entry_id);
@@ -357,7 +357,7 @@ pub fn restoreVersionWithData(
 
     {
         var v_stmt = try db.prepare(
-            \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+            \\INSERT INTO content_versions (id, entry_id, parent_id, data_json, author_id, version_type)
             \\VALUES (?1, ?2, ?3, ?4, ?5, 'restored')
         );
         defer v_stmt.deinit();
@@ -371,7 +371,7 @@ pub fn restoreVersionWithData(
         _ = try v_stmt.step();
     }
 
-    // Extract title, slug, status from data JSON for entries update
+    // Extract title, slug, status from data JSON for content_entries update
     const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, data, .{}) catch null;
     defer if (parsed) |p| p.deinit();
 
@@ -396,7 +396,7 @@ pub fn restoreVersionWithData(
     // Update entry — if published, also update published_version_id so restore goes live immediately
     if (is_published) {
         var u_stmt = try db.prepare(
-            \\UPDATE entries SET current_version_id = ?1, published_version_id = ?1, data = ?2,
+            \\UPDATE content_entries SET current_version_id = ?1, published_version_id = ?1, data = ?2,
             \\    title = ?3, slug = ?4, status = ?5, updated_at = unixepoch()
             \\WHERE id = ?6
         );
@@ -412,7 +412,7 @@ pub fn restoreVersionWithData(
         _ = try u_stmt.step();
     } else {
         var u_stmt = try db.prepare(
-            \\UPDATE entries SET current_version_id = ?1, data = ?2,
+            \\UPDATE content_entries SET current_version_id = ?1, data = ?2,
             \\    title = ?3, slug = ?4, status = ?5, updated_at = unixepoch()
             \\WHERE id = ?6
         );
@@ -544,10 +544,10 @@ pub fn pruneVersions(db: *Db, entry_id: []const u8) !void {
     // Delete oldest versions beyond the limit.
     // Keep the N most recent by created_at; delete the rest.
     var del_stmt = try db.prepare(
-        \\DELETE FROM entry_versions
+        \\DELETE FROM content_versions
         \\WHERE entry_id = ?1
         \\  AND id NOT IN (
-        \\    SELECT id FROM entry_versions
+        \\    SELECT id FROM content_versions
         \\    WHERE entry_id = ?1
         \\    ORDER BY created_at DESC
         \\    LIMIT ?2
