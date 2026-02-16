@@ -73,10 +73,88 @@ pub const EntryReleaseFieldInfo = struct {
     fields: ?[]const u8, // JSON array of field names, or null for full publish
 };
 
+fn appendFlowHistory(
+    db: *Db,
+    anchor_id: []const u8,
+    version_id: ?[]const u8,
+    action: []const u8,
+    user_id: ?[]const u8,
+    from_step: ?i64,
+    to_step: ?i64,
+    details: ?[]const u8,
+) !void {
+    const history_id = id_gen.generatePrefixedId("fh_", 16);
+    var stmt = try db.prepare(
+        \\INSERT INTO entry_flow_history (id, anchor_id, version_id, action, user_id, from_step, to_step, details, created_at)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, unixepoch())
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, &history_id);
+    try stmt.bindText(2, anchor_id);
+    if (version_id) |vid| try stmt.bindText(3, vid) else try stmt.bindNull(3);
+    try stmt.bindText(4, action);
+    if (user_id) |uid| try stmt.bindText(5, uid) else try stmt.bindNull(5);
+    if (from_step) |s| try stmt.bindInt(6, s) else try stmt.bindNull(6);
+    if (to_step) |s| try stmt.bindInt(7, s) else try stmt.bindNull(7);
+    if (details) |d| try stmt.bindText(8, d) else try stmt.bindNull(8);
+    _ = try stmt.step();
+}
+
+fn mirrorPublishedState(db: *Db, entry_id: []const u8, published_version: []const u8, status: []const u8, actor_id: ?[]const u8) !void {
+    var stmt = try db.prepare(
+        \\UPDATE content_entries
+        \\SET published_version_id = ?1, archived = ?2, updated_at = unixepoch()
+        \\WHERE id = ?3
+    );
+    defer stmt.deinit();
+    try stmt.bindText(1, published_version);
+    try stmt.bindInt(2, if (std.mem.eql(u8, status, "archived")) 1 else 0);
+    try stmt.bindText(3, entry_id);
+    _ = try stmt.step();
+
+    if (!std.mem.eql(u8, status, "published") and !std.mem.eql(u8, status, "archived")) return;
+
+    var flow_stmt = try db.prepare("SELECT flow_id, current_step FROM entry_flow_state WHERE anchor_id = ?1");
+    defer flow_stmt.deinit();
+    try flow_stmt.bindText(1, entry_id);
+
+    const terminal_action = if (std.mem.eql(u8, status, "archived")) "archive" else "publish";
+    if (try flow_stmt.step()) {
+        const flow_id = flow_stmt.columnText(0) orelse "default_publish";
+        const current_step = flow_stmt.columnInt(1);
+        const details = try std.fmt.allocPrint(db.allocator, "{{\"flow_id\":\"{s}\",\"terminal_action\":\"{s}\"}}", .{ flow_id, terminal_action });
+        defer db.allocator.free(details);
+
+        try appendFlowHistory(db, entry_id, published_version, "flow_entered", actor_id, null, current_step, details);
+        try appendFlowHistory(db, entry_id, published_version, "step_started", actor_id, current_step, current_step, null);
+        try appendFlowHistory(db, entry_id, published_version, "step_completed", actor_id, current_step, current_step, null);
+        try appendFlowHistory(db, entry_id, published_version, "terminal_action", actor_id, current_step, null, details);
+        try appendFlowHistory(db, entry_id, published_version, "flow_completed", actor_id, current_step, null, details);
+    } else {
+        const details = try std.fmt.allocPrint(db.allocator, "{{\"flow_id\":\"default_publish\",\"terminal_action\":\"{s}\"}}", .{terminal_action});
+        defer db.allocator.free(details);
+        try appendFlowHistory(db, entry_id, published_version, "flow_entered", actor_id, null, 0, details);
+        try appendFlowHistory(db, entry_id, published_version, "step_started", actor_id, 0, 0, null);
+        try appendFlowHistory(db, entry_id, published_version, "step_completed", actor_id, 0, 0, null);
+        try appendFlowHistory(db, entry_id, published_version, "terminal_action", actor_id, 0, null, details);
+        try appendFlowHistory(db, entry_id, published_version, "flow_completed", actor_id, 0, null, details);
+    }
+
+    var c_stmt = try db.prepare("DELETE FROM entry_flow_claims WHERE anchor_id = ?1");
+    defer c_stmt.deinit();
+    try c_stmt.bindText(1, entry_id);
+    _ = try c_stmt.step();
+
+    var f_stmt = try db.prepare("DELETE FROM entry_flow_state WHERE anchor_id = ?1");
+    defer f_stmt.deinit();
+    try f_stmt.bindText(1, entry_id);
+    _ = try f_stmt.step();
+}
+
 /// Get the current_version_id for an entry
 pub fn getEntryVersionId(db: *Db, entry_id: []const u8) !?[]const u8 {
     var stmt = try db.prepare(
-        "SELECT current_version_id FROM entries WHERE id = ?1",
+        "SELECT current_version_id FROM content_entries WHERE id = ?1",
     );
     defer stmt.deinit();
     try stmt.bindText(1, entry_id);
@@ -92,8 +170,8 @@ pub fn getEntryVersionId(db: *Db, entry_id: []const u8) !?[]const u8 {
 /// Returns null if no published version exists (i.e. entry was never published).
 pub fn getPublishedData(allocator: Allocator, db: *Db, entry_id: []const u8) !?[]const u8 {
     var stmt = try db.prepare(
-        \\SELECT ev.data FROM entries e
-        \\JOIN entry_versions ev ON ev.id = e.published_version_id
+        \\SELECT ev.data_json FROM content_entries e
+        \\JOIN content_versions ev ON ev.id = e.published_version_id
         \\WHERE e.id = ?1
     );
     defer stmt.deinit();
@@ -108,13 +186,13 @@ pub fn getPublishedData(allocator: Allocator, db: *Db, entry_id: []const u8) !?[
 
 /// Discard WIP changes by resetting an entry to its published version.
 /// No history entry is created -- this silently reverts current_version_id
-/// and entries.data back to the published snapshot.
+/// and content_entries.data back to the published snapshot.
 pub fn discardToPublished(db: *Db, entry_id: []const u8) !void {
     // Get published version id and data
     var stmt = try db.prepare(
-        \\SELECT e.published_version_id, ev.data
-        \\FROM entries e
-        \\JOIN entry_versions ev ON ev.id = e.published_version_id
+        \\SELECT e.published_version_id, ev.data_json
+        \\FROM content_entries e
+        \\JOIN content_versions ev ON ev.id = e.published_version_id
         \\WHERE e.id = ?1
     );
     defer stmt.deinit();
@@ -124,7 +202,7 @@ pub fn discardToPublished(db: *Db, entry_id: []const u8) !void {
     const published_vid = stmt.columnText(0) orelse return;
     const published_data = stmt.columnText(1) orelse return;
 
-    // Extract title and slug from published data for entries table
+    // Extract title and slug from published data for content_entries table
     const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, published_data, .{}) catch null;
     defer if (parsed) |p| p.deinit();
 
@@ -144,7 +222,7 @@ pub fn discardToPublished(db: *Db, entry_id: []const u8) !void {
 
     // Reset entry to published state
     var u_stmt = try db.prepare(
-        \\UPDATE entries SET current_version_id = ?1, data = ?2,
+        \\UPDATE content_entries SET current_version_id = ?1, data = ?2,
         \\    title = ?3, slug = ?4, status = 'published', updated_at = unixepoch()
         \\WHERE id = ?5
     );
@@ -275,7 +353,7 @@ fn writeJsonValue(w: anytype, value: std.json.Value) !void {
 pub fn publishEntry(allocator: Allocator, db: *Db, entry_id: []const u8, author_id: ?[]const u8, fields_json: ?[]const u8) !void {
     // Skip if already published with same version and no partial fields
     if (fields_json == null) {
-        var e_stmt = try db.prepare("SELECT current_version_id, published_version_id FROM entries WHERE id = ?1");
+        var e_stmt = try db.prepare("SELECT current_version_id, published_version_id FROM content_entries WHERE id = ?1");
         defer e_stmt.deinit();
         try e_stmt.bindText(1, entry_id);
         if (!try e_stmt.step()) return error.EntryNotFound;
@@ -298,7 +376,7 @@ pub fn publishEntry(allocator: Allocator, db: *Db, entry_id: []const u8, author_
         _ = try stmt.step();
     }
 
-    // Add single item -- addToRelease reads from/to versions from entries table
+    // Add single item -- addToRelease reads from/to versions from content_entries table
     try addToRelease(db, &release_id, entry_id, fields_json);
 
     // Publish through the single shared path
@@ -322,10 +400,10 @@ pub fn revertRelease(db: *Db, release_id: []const u8, author_id: ?[]const u8) (D
     // 2. Check blocking condition for all items
     {
         var stmt = try db.prepare(
-            \\SELECT ri.entry_id FROM release_items ri
-            \\JOIN entries e ON e.id = ri.entry_id
+            \\SELECT ri.entry_id FROM release_entries ri
+            \\JOIN content_entries e ON e.id = ri.entry_id
             \\WHERE ri.release_id = ?1
-            \\  AND e.current_version_id != ri.to_version
+            \\  AND e.current_version_id != ri.to_version_id
         );
         defer stmt.deinit();
         try stmt.bindText(1, release_id);
@@ -335,8 +413,8 @@ pub fn revertRelease(db: *Db, release_id: []const u8, author_id: ?[]const u8) (D
     // 3. For each item, create new version with from_version's data
     {
         var items_stmt = try db.prepare(
-            \\SELECT ri.entry_id, ri.from_version, ri.to_version
-            \\FROM release_items ri
+            \\SELECT ri.entry_id, ri.from_version_id, ri.to_version_id
+            \\FROM release_entries ri
             \\WHERE ri.release_id = ?1
         );
         defer items_stmt.deinit();
@@ -353,7 +431,7 @@ pub fn revertRelease(db: *Db, release_id: []const u8, author_id: ?[]const u8) (D
             defer if (data_stmt) |*s| s.deinit();
 
             if (from_version) |fv| {
-                var stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+                var stmt = try db.prepare("SELECT data_json FROM content_versions WHERE id = ?1");
                 try stmt.bindText(1, fv);
                 if (try stmt.step()) {
                     data = stmt.columnText(0) orelse "{}";
@@ -365,7 +443,7 @@ pub fn revertRelease(db: *Db, release_id: []const u8, author_id: ?[]const u8) (D
             const new_vid = id_gen.generateVersionId();
             {
                 var v_stmt = try db.prepare(
-                    \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+                    \\INSERT INTO content_versions (id, entry_id, parent_id, data_json, author_id, version_type)
                     \\VALUES (?1, ?2, ?3, ?4, ?5, 'reverted')
                 );
                 defer v_stmt.deinit();
@@ -382,7 +460,7 @@ pub fn revertRelease(db: *Db, release_id: []const u8, author_id: ?[]const u8) (D
             // Update entry
             {
                 var u_stmt = try db.prepare(
-                    \\UPDATE entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
+                    \\UPDATE content_entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
                     \\WHERE id = ?3
                 );
                 defer u_stmt.deinit();
@@ -426,11 +504,11 @@ pub fn reReleaseReverted(db: *Db, release_id: []const u8, author_id: ?[]const u8
     //    parent matches to_version for each item.
     {
         var stmt = try db.prepare(
-            \\SELECT ri.entry_id FROM release_items ri
-            \\JOIN entries e ON e.id = ri.entry_id
-            \\JOIN entry_versions ev ON ev.id = e.current_version_id
+            \\SELECT ri.entry_id FROM release_entries ri
+            \\JOIN content_entries e ON e.id = ri.entry_id
+            \\JOIN content_versions ev ON ev.id = e.current_version_id
             \\WHERE ri.release_id = ?1
-            \\  AND (ev.parent_id IS NULL OR ev.parent_id != ri.to_version)
+            \\  AND (ev.parent_id IS NULL OR ev.parent_id != ri.to_version_id)
         );
         defer stmt.deinit();
         try stmt.bindText(1, release_id);
@@ -440,8 +518,8 @@ pub fn reReleaseReverted(db: *Db, release_id: []const u8, author_id: ?[]const u8
     // 3. For each item, create new version with to_version's data
     {
         var items_stmt = try db.prepare(
-            \\SELECT ri.entry_id, ri.to_version
-            \\FROM release_items ri
+            \\SELECT ri.entry_id, ri.to_version_id
+            \\FROM release_entries ri
             \\WHERE ri.release_id = ?1
         );
         defer items_stmt.deinit();
@@ -456,7 +534,7 @@ pub fn reReleaseReverted(db: *Db, release_id: []const u8, author_id: ?[]const u8
             var data_stmt: ?Statement = null;
             defer if (data_stmt) |*s| s.deinit();
             {
-                var stmt = try db.prepare("SELECT data FROM entry_versions WHERE id = ?1");
+                var stmt = try db.prepare("SELECT data_json FROM content_versions WHERE id = ?1");
                 try stmt.bindText(1, to_version);
                 if (try stmt.step()) {
                     data = stmt.columnText(0) orelse "{}";
@@ -469,7 +547,7 @@ pub fn reReleaseReverted(db: *Db, release_id: []const u8, author_id: ?[]const u8
             var cv_stmt: ?Statement = null;
             defer if (cv_stmt) |*s| s.deinit();
             {
-                var stmt = try db.prepare("SELECT current_version_id FROM entries WHERE id = ?1");
+                var stmt = try db.prepare("SELECT current_version_id FROM content_entries WHERE id = ?1");
                 try stmt.bindText(1, entry_id);
                 if (try stmt.step()) {
                     current_vid = stmt.columnText(0);
@@ -481,7 +559,7 @@ pub fn reReleaseReverted(db: *Db, release_id: []const u8, author_id: ?[]const u8
             const new_vid = id_gen.generateVersionId();
             {
                 var v_stmt = try db.prepare(
-                    \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type)
+                    \\INSERT INTO content_versions (id, entry_id, parent_id, data_json, author_id, version_type)
                     \\VALUES (?1, ?2, ?3, ?4, ?5, 'restored')
                 );
                 defer v_stmt.deinit();
@@ -498,7 +576,7 @@ pub fn reReleaseReverted(db: *Db, release_id: []const u8, author_id: ?[]const u8
             // Update entry
             {
                 var u_stmt = try db.prepare(
-                    \\UPDATE entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
+                    \\UPDATE content_entries SET current_version_id = ?1, data = ?2, updated_at = unixepoch()
                     \\WHERE id = ?3
                 );
                 defer u_stmt.deinit();
@@ -562,7 +640,7 @@ pub fn createPendingRelease(db: *Db, name: []const u8, author_id: ?[]const u8) (
 /// Add an entry to a pending release. Uses INSERT OR REPLACE so
 /// re-adding the same entry updates the version references.
 /// Reads from_version (published_version_id) and to_version (current_version_id)
-/// directly from the entries table -- callers never supply these.
+/// directly from the content_entries table -- callers never supply these.
 pub fn addToRelease(
     db: *Db,
     release_id: []const u8,
@@ -579,9 +657,9 @@ pub fn addToRelease(
         if (!std.mem.eql(u8, status, "pending")) return ReleaseError.InvalidReleaseStatus;
     }
 
-    // Always read version refs from entries -- single source of truth
+    // Always read version refs from content_entries -- single source of truth
     var e_stmt = try db.prepare(
-        "SELECT current_version_id, published_version_id FROM entries WHERE id = ?1",
+        "SELECT current_version_id, published_version_id FROM content_entries WHERE id = ?1",
     );
     defer e_stmt.deinit();
     try e_stmt.bindText(1, entry_id);
@@ -590,7 +668,7 @@ pub fn addToRelease(
     const from_version = e_stmt.columnText(1);
 
     var stmt = try db.prepare(
-        \\INSERT OR REPLACE INTO release_items (release_id, entry_id, from_version, to_version, fields)
+        \\INSERT OR REPLACE INTO release_entries (release_id, entry_id, from_version_id, to_version_id, selected_fields)
         \\VALUES (?1, ?2, ?3, ?4, ?5)
     );
     defer stmt.deinit();
@@ -615,7 +693,7 @@ pub fn removeFromRelease(db: *Db, release_id: []const u8, entry_id: []const u8) 
     }
 
     var stmt = try db.prepare(
-        "DELETE FROM release_items WHERE release_id = ?1 AND entry_id = ?2",
+        "DELETE FROM release_entries WHERE release_id = ?1 AND entry_id = ?2",
     );
     defer stmt.deinit();
     try stmt.bindText(1, release_id);
@@ -657,7 +735,7 @@ fn collectCollaborators(
     // Get the created_at of from_version (0 if null = first publish, include all)
     var from_time: i64 = 0;
     if (from_version) |fv| {
-        var t_stmt = try db.prepare("SELECT created_at FROM entry_versions WHERE id = ?1");
+        var t_stmt = try db.prepare("SELECT created_at FROM content_versions WHERE id = ?1");
         defer t_stmt.deinit();
         try t_stmt.bindText(1, fv);
         if (try t_stmt.step()) {
@@ -668,7 +746,7 @@ fn collectCollaborators(
     // Get to_version's created_at as upper bound
     var to_time: i64 = std.math.maxInt(i32);
     {
-        var t_stmt = try db.prepare("SELECT created_at FROM entry_versions WHERE id = ?1");
+        var t_stmt = try db.prepare("SELECT created_at FROM content_versions WHERE id = ?1");
         defer t_stmt.deinit();
         try t_stmt.bindText(1, to_version);
         if (try t_stmt.step()) {
@@ -691,7 +769,7 @@ fn collectCollaborators(
     {
         var stmt = try db.prepare(
             \\SELECT DISTINCT ev.author_id, u.email, u.display_name
-            \\FROM entry_versions ev
+            \\FROM content_versions ev
             \\JOIN users u ON u.id = ev.author_id
             \\WHERE ev.entry_id = ?1
             \\  AND ev.author_id IS NOT NULL
@@ -795,9 +873,9 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
     // For each item: apply to_version data and set status/published_version_id
     {
         var items_stmt = try db.prepare(
-            \\SELECT ri.entry_id, ri.to_version, ev.data, ri.fields, ri.from_version
-            \\FROM release_items ri
-            \\JOIN entry_versions ev ON ev.id = ri.to_version
+            \\SELECT ri.entry_id, ri.to_version_id, ev.data_json, ri.selected_fields, ri.from_version_id
+            \\FROM release_entries ri
+            \\JOIN content_versions ev ON ev.id = ri.to_version_id
             \\WHERE ri.release_id = ?1
         );
         defer items_stmt.deinit();
@@ -854,7 +932,7 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
                 const new_vid = id_gen.generateVersionId();
                 {
                     var v_stmt = try db.prepare(
-                        \\INSERT INTO entry_versions (id, entry_id, parent_id, data, author_id, version_type, collaborators)
+                        \\INSERT INTO content_versions (id, entry_id, parent_id, data_json, author_id, version_type, collaborators)
                         \\VALUES (?1, ?2, ?3, ?4, ?5, 'published', ?6)
                     );
                     defer v_stmt.deinit();
@@ -867,10 +945,10 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
                     _ = try v_stmt.step();
                 }
 
-                // Update release_items.to_version to point to the new published version
+                // Update release_entries.to_version to point to the new published version
                 {
                     var ri_stmt = try db.prepare(
-                        "UPDATE release_items SET to_version = ?1 WHERE release_id = ?2 AND entry_id = ?3",
+                        "UPDATE release_entries SET to_version_id = ?1 WHERE release_id = ?2 AND entry_id = ?3",
                     );
                     defer ri_stmt.deinit();
                     try ri_stmt.bindText(1, &new_vid);
@@ -881,8 +959,8 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
 
                 // Determine status: compare merged (new published) vs current draft
                 var cur_stmt2 = try db.prepare(
-                    \\SELECT ev.data FROM entries e
-                    \\JOIN entry_versions ev ON ev.id = e.current_version_id
+                    \\SELECT ev.data_json FROM content_entries e
+                    \\JOIN content_versions ev ON ev.id = e.current_version_id
                     \\WHERE e.id = ?1
                 );
                 defer cur_stmt2.deinit();
@@ -897,7 +975,7 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
 
                 const new_status: []const u8 = if (still_changed) "changed" else "published";
                 var u_stmt = try db.prepare(
-                    \\UPDATE entries SET status = ?1, published_version_id = ?2,
+                    \\UPDATE content_entries SET status = ?1, published_version_id = ?2,
                     \\published_at = unixepoch(), updated_at = unixepoch()
                     \\WHERE id = ?3
                 );
@@ -906,11 +984,13 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
                 try u_stmt.bindText(2, &new_vid);
                 try u_stmt.bindText(3, eid);
                 _ = try u_stmt.step();
+
+                try mirrorPublishedState(db, eid, &new_vid, new_status, release_author_id);
             } else {
                 // Full publish: set published_version_id, determine status
                 var cur_stmt2 = try db.prepare(
-                    \\SELECT ev.data FROM entries e
-                    \\JOIN entry_versions ev ON ev.id = e.current_version_id
+                    \\SELECT ev.data_json FROM content_entries e
+                    \\JOIN content_versions ev ON ev.id = e.current_version_id
                     \\WHERE e.id = ?1
                 );
                 defer cur_stmt2.deinit();
@@ -925,7 +1005,7 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
 
                 const new_status: []const u8 = if (still_changed) "changed" else "published";
                 var u_stmt = try db.prepare(
-                    \\UPDATE entries SET status = ?1, published_version_id = ?2,
+                    \\UPDATE content_entries SET status = ?1, published_version_id = ?2,
                     \\published_at = unixepoch(), updated_at = unixepoch()
                     \\WHERE id = ?3
                 );
@@ -934,6 +1014,8 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
                 try u_stmt.bindText(2, to_vid);
                 try u_stmt.bindText(3, eid);
                 _ = try u_stmt.step();
+
+                try mirrorPublishedState(db, eid, to_vid, new_status, release_author_id);
 
                 // Mark the published version's type and store collaborators
                 {
@@ -948,7 +1030,7 @@ pub fn publishBatchRelease(allocator: Allocator, db: *Db, release_id: []const u8
                     defer if (collab_json) |c| allocator.free(c);
 
                     var vt_stmt = try db.prepare(
-                        "UPDATE entry_versions SET version_type = 'published', collaborators = ?1 WHERE id = ?2",
+                        "UPDATE content_versions SET version_type = 'published', collaborators = ?1 WHERE id = ?2",
                     );
                     defer vt_stmt.deinit();
                     if (collab_json) |cj| try vt_stmt.bindText(1, cj) else try vt_stmt.bindNull(1);
@@ -986,7 +1068,7 @@ pub fn listReleases(allocator: Allocator, db: *Db, opts: struct {
         \\  COUNT(ri.entry_id) as item_count,
         \\  u.email, r.created_at
         \\FROM releases r
-        \\LEFT JOIN release_items ri ON ri.release_id = r.id
+        \\LEFT JOIN release_entries ri ON ri.release_id = r.id
         \\LEFT JOIN users u ON u.id = r.author_id
         \\WHERE r.name IS NOT NULL
     );
@@ -1054,9 +1136,9 @@ pub fn getRelease(allocator: Allocator, db: *Db, release_id: []const u8) !?Relea
     // Fetch items
     var i_stmt = try db.prepare(
         \\SELECT ri.entry_id, COALESCE(e.title, '(untitled)'), COALESCE(e.status, ''),
-        \\  COALESCE(e.content_type_id, 'post'), ri.from_version, ri.to_version, ri.fields
-        \\FROM release_items ri
-        \\LEFT JOIN entries e ON e.id = ri.entry_id
+        \\  COALESCE(e.content_type_id, 'post'), ri.from_version_id, ri.to_version_id, ri.selected_fields
+        \\FROM release_entries ri
+        \\LEFT JOIN content_entries e ON e.id = ri.entry_id
         \\WHERE ri.release_id = ?1
     );
     defer i_stmt.deinit();
@@ -1113,7 +1195,7 @@ pub fn listPendingReleases(allocator: Allocator, db: *Db) ![]PendingReleaseOptio
 /// Get IDs of pending releases that contain a given entry.
 pub fn getEntryPendingReleaseIds(allocator: Allocator, db: *Db, entry_id: []const u8) ![][]const u8 {
     var stmt = try db.prepare(
-        \\SELECT ri.release_id FROM release_items ri
+        \\SELECT ri.release_id FROM release_entries ri
         \\JOIN releases r ON r.id = ri.release_id
         \\WHERE ri.entry_id = ?1 AND r.status = 'pending'
     );
@@ -1131,8 +1213,8 @@ pub fn getEntryPendingReleaseIds(allocator: Allocator, db: *Db, entry_id: []cons
 /// Get pending release items for an entry, with release name and field list.
 pub fn getEntryPendingReleaseFields(allocator: Allocator, db: *Db, entry_id: []const u8) ![]const EntryReleaseFieldInfo {
     var stmt = try db.prepare(
-        \\SELECT ri.release_id, r.name, ri.fields
-        \\FROM release_items ri
+        \\SELECT ri.release_id, r.name, ri.selected_fields
+        \\FROM release_entries ri
         \\JOIN releases r ON r.id = ri.release_id
         \\WHERE ri.entry_id = ?1 AND r.status = 'pending' AND r.name IS NOT NULL
     );
