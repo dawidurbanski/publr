@@ -627,6 +627,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "views", .module = views },
+            .{ .name = "schemas", .module = schemas_module },
         },
     });
     const plugin_media = b.createModule(.{

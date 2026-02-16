@@ -30,7 +30,7 @@ pub const page = admin.registerPage(.{
 
 fn setup(app: *admin.PageApp) void {
     // General settings
-    // app.render(handleGeneral);
+    app.render(handleGeneral);
 
     // User management routes
     app.get("/users", handleUserList);

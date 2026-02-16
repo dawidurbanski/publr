@@ -490,7 +490,7 @@ const modules = [_]Module{
     .{ .name = "plugin_settings", .src = "src/plugins/settings.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth", "auth_middleware", "views", "registry" } },
     .{ .name = "plugin_components", .src = "src/plugins/components.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "views", "registry" } },
     .{ .name = "plugin_design_system", .src = "src/plugins/design_system.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "views", "registry" } },
-    .{ .name = "plugin_content_types", .src = "src/plugins/content_types.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "views", "registry" } },
+    .{ .name = "plugin_content_types", .src = "src/plugins/content_types.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "views", "schemas", "registry" } },
     .{ .name = "plugin_media", .src = "src/plugins/media.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "media", "media_sync", "storage", "schema_media", "media_handler", "db", "views", "wasm_storage", "registry" } },
     .{ .name = "plugin_releases", .src = "src/plugins/releases.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "cms", "views", "registry" } },
     // Registry (imports all plugins)
