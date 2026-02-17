@@ -1,10 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const http = @import("http.zig");
+const cli_main = @import("cli_main");
 const publr_config = @import("publr_config");
-const db_mod = @import("db");
-const media_sync = @import("media_sync");
-const storage = @import("storage");
 const collaboration_config = @import("collaboration_config.zig");
 
 pub fn main() !void {
@@ -25,51 +23,14 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, command, "serve")) {
         try runServe(&args);
-    } else if (std.mem.eql(u8, command, "media")) {
-        try runMedia(allocator, &args);
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
         printUsage();
     } else {
-        std.debug.print("Unknown command: {s}\n\n", .{command});
-        printUsage();
-    }
-}
-
-fn runMedia(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void {
-    const subcommand = args.next() orelse {
-        std.debug.print("Usage: publr media <subcommand>\n\nSubcommands:\n  sync    Sync filesystem with database\n\n", .{});
-        return;
-    };
-
-    if (std.mem.eql(u8, subcommand, "sync")) {
-        // Ensure media directories exist
-        storage.initDirectories() catch |err| {
-            std.debug.print("Error creating media directories: {}\n", .{err});
-            return;
+        cli_main.run(allocator, command, &args) catch |err| {
+            std.debug.print("Error: {s}\n\n", .{@errorName(err)});
+            printUsage();
+            std.process.exit(1);
         };
-
-        // Open database
-        var db = db_mod.Db.init(allocator, "data/publr.db") catch |err| {
-            std.debug.print("Error opening database: {}\n", .{err});
-            return;
-        };
-        defer db.deinit();
-
-        std.debug.print("Syncing media files...\n", .{});
-
-        const result = media_sync.syncFilesystem(allocator, &db) catch |err| {
-            std.debug.print("Sync error: {}\n", .{err});
-            return;
-        };
-
-        std.debug.print("Sync complete:\n  New files: {d}\n  Missing files: {d}\n  Skipped: {d}\n  Errors: {d}\n", .{
-            result.new_count,
-            result.missing_count,
-            result.skipped_count,
-            result.error_count,
-        });
-    } else {
-        std.debug.print("Unknown media subcommand: {s}\n", .{subcommand});
     }
 }
 
@@ -325,39 +286,7 @@ fn printWatchNotSupportedWindows() void {
 }
 
 fn printUsage() void {
-    const usage =
-        \\Publr - Single-file CMS
-        \\
-        \\Usage: publr <command> [options]
-        \\
-        \\Commands:
-        \\  serve        Start the HTTP server
-        \\  media sync   Sync filesystem with media database
-        \\  help         Show this help message
-        \\
-        \\Serve options:
-        \\  --port, -p <port>    Port to listen on (default: 8080, or PORT env var)
-        \\  --db <path>          Database path (default: data/publr.db, or PUBLR_DB env var)
-        \\  --lock-timeout <ms>  Soft-lock inactivity timeout in milliseconds (default: 60000)
-        \\  --heartbeat-interval <ms>
-        \\                       Client/server heartbeat interval in milliseconds (default: 10000)
-        \\  --dev, -d            Enable development mode (hot reload)
-        \\  --watch, -w          Auto-rebuild on file changes (requires watchexec)
-        \\
-        \\Environment variables:
-        \\  PORT                 Default port (overridden by --port flag)
-        \\  PUBLR_DB             Default database path (overridden by --db flag)
-        \\
-        \\Examples:
-        \\  publr serve
-        \\  publr serve --port 3000
-        \\  publr serve --db /tmp/publr-test.db
-        \\  publr serve --lock-timeout 1000 --heartbeat-interval 500
-        \\  publr serve --dev
-        \\  publr serve --watch --dev
-        \\
-    ;
-    std.debug.print("{s}", .{usage});
+    cli_main.printUsage();
 }
 
 // Tests

@@ -267,7 +267,8 @@ test "authMiddleware: passes through non-admin routes" {
 
 test "authMiddleware: public routes are allowed" {
     // Verify public routes list
-    try std.testing.expect(public_routes.len == 2);
+    try std.testing.expect(public_routes.len == 3);
     try std.testing.expectEqualStrings("/admin/login", public_routes[0]);
     try std.testing.expectEqualStrings("/admin/setup", public_routes[1]);
+    try std.testing.expectEqualStrings("/admin/system/health", public_routes[2]);
 }

@@ -217,10 +217,10 @@ pub fn build(b: *std.Build) void {
     // Schema Modules
     // =========================================================================
     const field_module = b.createModule(.{
-        .root_source_file = b.path("src/schema/field.zig"),
+        .root_source_file = b.path("src/core/schema/field.zig"),
     });
     const content_type_module = b.createModule(.{
-        .root_source_file = b.path("src/schema/content_type.zig"),
+        .root_source_file = b.path("src/core/schema/content_type.zig"),
         .imports = &.{.{ .name = "field", .module = field_module }},
     });
 
@@ -261,7 +261,7 @@ pub fn build(b: *std.Build) void {
 
     // Schema registry (merges all layers)
     const schema_registry_module = b.createModule(.{
-        .root_source_file = b.path("src/schema/registry.zig"),
+        .root_source_file = b.path("src/core/schema/registry.zig"),
         .imports = &.{
             .{ .name = "field", .module = field_module },
             .{ .name = "content_type", .module = content_type_module },
@@ -271,7 +271,7 @@ pub fn build(b: *std.Build) void {
 
     // Seed module (comptime INSERT generation, no db dependency)
     const seed_module = b.createModule(.{
-        .root_source_file = b.path("src/schema/seed.zig"),
+        .root_source_file = b.path("src/core/schema/seed.zig"),
         .imports = &.{
             .{ .name = "schema_registry", .module = schema_registry_module },
             .{ .name = "field", .module = field_module },
@@ -319,20 +319,37 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "middleware", .module = middleware_module }},
     });
     const db_module = b.createModule(.{
-        .root_source_file = b.path("src/db.zig"),
+        .root_source_file = b.path("src/core/db.zig"),
     });
     db_module.addIncludePath(b.path("vendor"));
 
+    const modules_api_module = b.createModule(.{
+        .root_source_file = b.path("src/modules/mod.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "db", .module = db_module },
+        },
+    });
+
     // Shared ID generation
     const id_gen_module = b.createModule(.{
-        .root_source_file = b.path("src/id_gen.zig"),
+        .root_source_file = b.path("src/core/id_gen.zig"),
     });
 
     // Schema DDL (needs db_module)
     const schema_sync_module = b.createModule(.{
-        .root_source_file = b.path("src/schema/sync.zig"),
+        .root_source_file = b.path("src/core/schema/sync.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
+        },
+    });
+
+    const core_init_module = b.createModule(.{
+        .root_source_file = b.path("src/core/init.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "schema_sync", .module = schema_sync_module },
+            .{ .name = "seed", .module = seed_module },
         },
     });
 
@@ -389,9 +406,14 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/time_util.zig"),
     });
 
+    // Shared ISO-8601 timestamp parser (used by CLI/REST adapters)
+    const core_time_module = b.createModule(.{
+        .root_source_file = b.path("src/core/time.zig"),
+    });
+
     // Version history management
     const version_module = b.createModule(.{
-        .root_source_file = b.path("src/version.zig"),
+        .root_source_file = b.path("src/core/version.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "time_util", .module = time_util_module },
@@ -403,7 +425,7 @@ pub fn build(b: *std.Build) void {
 
     // Release management
     const release_module = b.createModule(.{
-        .root_source_file = b.path("src/release.zig"),
+        .root_source_file = b.path("src/core/release.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "id_gen", .module = id_gen_module },
@@ -414,7 +436,7 @@ pub fn build(b: *std.Build) void {
 
     // Entry query builder
     const query_module = b.createModule(.{
-        .root_source_file = b.path("src/query.zig"),
+        .root_source_file = b.path("src/core/query.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
         },
@@ -422,18 +444,20 @@ pub fn build(b: *std.Build) void {
 
     // CMS facade
     const cms_module = b.createModule(.{
-        .root_source_file = b.path("src/cms.zig"),
+        .root_source_file = b.path("src/core/content.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "id_gen", .module = id_gen_module },
             .{ .name = "query", .module = query_module },
             .{ .name = "version", .module = version_module },
             .{ .name = "release", .module = release_module },
+            .{ .name = "core_init", .module = core_init_module },
+            .{ .name = "schemas", .module = schemas_module },
         },
     });
     // Storage backend
     const storage_module = b.createModule(.{
-        .root_source_file = b.path("src/storage.zig"),
+        .root_source_file = b.path("src/core/storage.zig"),
         .imports = &.{
             .{ .name = "time_util", .module = time_util_module },
         },
@@ -444,7 +468,7 @@ pub fn build(b: *std.Build) void {
     });
     // Taxonomy management (folders/tags)
     const taxonomy_module = b.createModule(.{
-        .root_source_file = b.path("src/taxonomy.zig"),
+        .root_source_file = b.path("src/core/taxonomy.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "id_gen", .module = id_gen_module },
@@ -452,7 +476,7 @@ pub fn build(b: *std.Build) void {
     });
     // Media CRUD API
     const media_module = b.createModule(.{
-        .root_source_file = b.path("src/media.zig"),
+        .root_source_file = b.path("src/core/media.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "cms", .module = cms_module },
@@ -465,7 +489,7 @@ pub fn build(b: *std.Build) void {
     });
     // Media query/count functions
     const media_query_module = b.createModule(.{
-        .root_source_file = b.path("src/media_query.zig"),
+        .root_source_file = b.path("src/core/media_query.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "cms", .module = cms_module },
@@ -477,7 +501,7 @@ pub fn build(b: *std.Build) void {
     media_module.addImport("media_query", media_query_module);
     // Media filesystem sync
     const media_sync_module = b.createModule(.{
-        .root_source_file = b.path("src/media_sync.zig"),
+        .root_source_file = b.path("src/core/media_sync.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "media", .module = media_module },
@@ -492,7 +516,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/tpl.zig"),
     });
     const auth_module = b.createModule(.{
-        .root_source_file = b.path("src/auth.zig"),
+        .root_source_file = b.path("src/core/auth.zig"),
         .imports = &.{
             .{ .name = "db", .module = db_module },
             .{ .name = "time_util", .module = time_util_module },
@@ -544,7 +568,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/websocket.zig"),
     });
     const presence_module = b.createModule(.{
-        .root_source_file = b.path("src/presence.zig"),
+        .root_source_file = b.path("src/core/presence.zig"),
         .imports = &.{
             .{ .name = "websocket", .module = websocket_module },
             .{ .name = "gravatar", .module = gravatar_module },
@@ -555,10 +579,262 @@ pub fn build(b: *std.Build) void {
     views.addImport("icons", icons_module);
 
     // =========================================================================
+    // CLI Modules
+    // =========================================================================
+    const cli_test_helpers_module = b.createModule(.{
+        .root_source_file = b.path("src/tests/cli_helpers.zig"),
+    });
+    const rest_test_helpers_module = b.createModule(.{
+        .root_source_file = b.path("src/tests/rest_helpers.zig"),
+        .imports = &.{
+            .{ .name = "core_init", .module = core_init_module },
+            .{ .name = "auth", .module = auth_module },
+        },
+    });
+    const cli_format_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/format.zig"),
+    });
+    const cli_common_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/common.zig"),
+        .imports = &.{
+            .{ .name = "core_init", .module = core_init_module },
+            .{ .name = "core_time", .module = core_time_module },
+            .{ .name = "db", .module = db_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+        },
+    });
+    const cli_content_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/content.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "schemas", .module = schemas_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_version_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/version.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_release_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/release.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_media_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/media.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "media", .module = media_module },
+            .{ .name = "media_sync", .module = media_sync_module },
+            .{ .name = "mime", .module = mime_module },
+            .{ .name = "storage", .module = storage_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_taxonomy_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/taxonomy.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "taxonomy", .module = taxonomy_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_user_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/user.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "auth", .module = auth_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_schema_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/schema.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_db_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/db.zig"),
+        .imports = &.{
+            .{ .name = "core_init", .module = core_init_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_info_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/info.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_format", .module = cli_format_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+    const cli_main_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/main.zig"),
+        .imports = &.{
+            .{ .name = "cli_common", .module = cli_common_module },
+            .{ .name = "cli_content", .module = cli_content_module },
+            .{ .name = "cli_version", .module = cli_version_module },
+            .{ .name = "cli_release", .module = cli_release_module },
+            .{ .name = "cli_media", .module = cli_media_module },
+            .{ .name = "cli_taxonomy", .module = cli_taxonomy_module },
+            .{ .name = "cli_user", .module = cli_user_module },
+            .{ .name = "cli_schema", .module = cli_schema_module },
+            .{ .name = "cli_db", .module = cli_db_module },
+            .{ .name = "cli_info", .module = cli_info_module },
+            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
+        },
+    });
+
+    // =========================================================================
+    // REST Modules
+    // =========================================================================
+    const rest_json_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/json.zig"),
+        .imports = &.{
+            .{ .name = "middleware", .module = middleware_module },
+        },
+    });
+    const rest_auth_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/auth.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "auth", .module = auth_module },
+            .{ .name = "db", .module = db_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_content_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/content.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "schemas", .module = schemas_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_version_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/version.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_release_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/release.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "core_time", .module = core_time_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_media_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/media.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "media", .module = media_module },
+            .{ .name = "media_query", .module = media_query_module },
+            .{ .name = "mime", .module = mime_module },
+            .{ .name = "storage", .module = storage_module },
+            .{ .name = "multipart", .module = multipart_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_taxonomy_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/taxonomy.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "taxonomy", .module = taxonomy_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_user_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/user.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "auth", .module = auth_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_schema_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/schema.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+    const rest_info_module = b.createModule(.{
+        .root_source_file = b.path("src/rest/info.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = router_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "db", .module = db_module },
+            .{ .name = "rest_json", .module = rest_json_module },
+            .{ .name = "rest_auth", .module = rest_auth_module },
+            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+        },
+    });
+
+    // =========================================================================
     // Plugin Modules
     // =========================================================================
     const plugin_dashboard = b.createModule(.{
-        .root_source_file = b.path("src/plugins/dashboard.zig"),
+        .root_source_file = b.path("src/modules/admin/dashboard.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -572,7 +848,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_users = b.createModule(.{
-        .root_source_file = b.path("src/plugins/users.zig"),
+        .root_source_file = b.path("src/modules/admin/users.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -585,7 +861,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_settings = b.createModule(.{
-        .root_source_file = b.path("src/plugins/settings.zig"),
+        .root_source_file = b.path("src/modules/admin/settings.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -598,7 +874,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_components = b.createModule(.{
-        .root_source_file = b.path("src/plugins/components.zig"),
+        .root_source_file = b.path("src/modules/admin/components.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -609,7 +885,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_design_system = b.createModule(.{
-        .root_source_file = b.path("src/plugins/design_system.zig"),
+        .root_source_file = b.path("src/modules/admin/design_system.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -620,7 +896,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_content_types = b.createModule(.{
-        .root_source_file = b.path("src/plugins/content_types.zig"),
+        .root_source_file = b.path("src/modules/admin/content_types.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -631,7 +907,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_media = b.createModule(.{
-        .root_source_file = b.path("src/plugins/media/main.zig"),
+        .root_source_file = b.path("src/modules/admin/media/main.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -651,7 +927,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const plugin_content = b.createModule(.{
-        .root_source_file = b.path("src/plugins/content.zig"),
+        .root_source_file = b.path("src/modules/admin/content.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -671,7 +947,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const plugin_releases = b.createModule(.{
-        .root_source_file = b.path("src/plugins/releases.zig"),
+        .root_source_file = b.path("src/modules/admin/releases.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "icons", .module = icons_module },
@@ -681,6 +957,23 @@ pub fn build(b: *std.Build) void {
             .{ .name = "auth_middleware", .module = auth_middleware_module },
             .{ .name = "cms", .module = cms_module },
             .{ .name = "views", .module = views },
+        },
+    });
+
+    const module_admin_module = b.createModule(.{
+        .root_source_file = b.path("src/modules/admin/mod.zig"),
+        .imports = &.{
+            .{ .name = "admin_api", .module = admin_api_module },
+            .{ .name = "router", .module = router_module },
+            .{ .name = "modules", .module = modules_api_module },
+            .{ .name = "plugin_dashboard", .module = plugin_dashboard },
+            .{ .name = "plugin_content", .module = plugin_content },
+            .{ .name = "plugin_media", .module = plugin_media },
+            .{ .name = "plugin_users", .module = plugin_users },
+            .{ .name = "plugin_settings", .module = plugin_settings },
+            .{ .name = "plugin_components", .module = plugin_components },
+            .{ .name = "plugin_design_system", .module = plugin_design_system },
+            .{ .name = "plugin_releases", .module = plugin_releases },
         },
     });
 
@@ -739,6 +1032,19 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("admin_api", admin_api_module);
     exe.root_module.addImport("icons", icons_module);
     exe.root_module.addImport("publr_ui", publr_ui);
+    exe.root_module.addImport("modules", modules_api_module);
+    exe.root_module.addImport("module_admin", module_admin_module);
+    exe.root_module.addImport("cli_main", cli_main_module);
+    exe.root_module.addImport("rest_json", rest_json_module);
+    exe.root_module.addImport("rest_auth", rest_auth_module);
+    exe.root_module.addImport("rest_content", rest_content_module);
+    exe.root_module.addImport("rest_version", rest_version_module);
+    exe.root_module.addImport("rest_release", rest_release_module);
+    exe.root_module.addImport("rest_media", rest_media_module);
+    exe.root_module.addImport("rest_taxonomy", rest_taxonomy_module);
+    exe.root_module.addImport("rest_user", rest_user_module);
+    exe.root_module.addImport("rest_schema", rest_schema_module);
+    exe.root_module.addImport("rest_info", rest_info_module);
 
     // Add core modules to main exe
     exe.root_module.addImport("middleware", middleware_module);
@@ -757,6 +1063,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("schema_registry", schema_registry_module);
     exe.root_module.addImport("schema_sync", schema_sync_module);
     exe.root_module.addImport("seed", seed_module);
+    exe.root_module.addImport("core_init", core_init_module);
     exe.root_module.addImport("schema_media", schema_media_module);
     exe.root_module.addImport("cms", cms_module);
     exe.root_module.addImport("storage", storage_module);
@@ -833,10 +1140,25 @@ pub fn build(b: *std.Build) void {
 
     // Add imports to test executable
     exe_tests.root_module.addImport("views", views);
+    exe_tests.root_module.addImport("modules", modules_api_module);
+    exe_tests.root_module.addImport("module_admin", module_admin_module);
+    exe_tests.root_module.addImport("cli_main", cli_main_module);
+    exe_tests.root_module.addImport("rest_json", rest_json_module);
+    exe_tests.root_module.addImport("rest_auth", rest_auth_module);
+    exe_tests.root_module.addImport("rest_content", rest_content_module);
+    exe_tests.root_module.addImport("rest_version", rest_version_module);
+    exe_tests.root_module.addImport("rest_release", rest_release_module);
+    exe_tests.root_module.addImport("rest_media", rest_media_module);
+    exe_tests.root_module.addImport("rest_taxonomy", rest_taxonomy_module);
+    exe_tests.root_module.addImport("rest_user", rest_user_module);
+    exe_tests.root_module.addImport("rest_schema", rest_schema_module);
+    exe_tests.root_module.addImport("rest_info", rest_info_module);
     exe_tests.root_module.addImport("registry", registry_module);
     exe_tests.root_module.addImport("admin_api", admin_api_module);
     exe_tests.root_module.addImport("icons", icons_module);
     exe_tests.root_module.addImport("schema_media", schema_media_module);
+    exe_tests.root_module.addImport("core_init", core_init_module);
+    exe_tests.root_module.addImport("auth", auth_module);
     exe_tests.root_module.addImport("storage", storage_module);
     exe_tests.root_module.addImport("svg_sanitize", svg_sanitize_module);
     exe_tests.root_module.addImport("media", media_module);
@@ -846,12 +1168,32 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("multipart", multipart_module);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_exe_tests.step);
+    run_exe_tests.step.dependOn(b.getInstallStep());
 
-    // Verify step: runs tests + WASM build (use before completing tasks)
+    // Source-level tests now live alongside each pub fn file.
+    // Keep dedicated steps for compatibility; they run the same unified suite.
+    const run_core_tests = run_exe_tests;
+    const run_cli_tests = run_exe_tests;
+    const run_rest_tests = run_exe_tests;
+
+    const test_core_step = b.step("test-core", "Run core integration tests");
+    test_core_step.dependOn(&run_core_tests.step);
+
+    const test_cli_step = b.step("test-cli", "Run CLI e2e tests");
+    test_cli_step.dependOn(&run_cli_tests.step);
+
+    const test_rest_step = b.step("test-rest", "Run REST integration tests");
+    test_rest_step.dependOn(&run_rest_tests.step);
+
+    const test_step = b.step("test", "Run all tests");
+    test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_core_tests.step);
+    test_step.dependOn(&run_cli_tests.step);
+    test_step.dependOn(&run_rest_tests.step);
+
+    // Verify step: runs all tests + WASM build.
     const verify_step = b.step("verify", "Run tests and verify WASM build");
-    verify_step.dependOn(&run_exe_tests.step);
+    verify_step.dependOn(test_step);
 
     // =========================================================================
     // Browser WASM Build (full CMS with embedded SQLite)

@@ -11,6 +11,11 @@ pub const CSRF_FIELD = "_csrf";
 threadlocal var token_buf: [64]u8 = undefined;
 
 pub fn csrfMiddleware(ctx: *Context, next: NextFn) anyerror!void {
+    // API auth uses bearer tokens, not browser cookies/forms.
+    if (std.mem.startsWith(u8, ctx.path, "/api/")) {
+        return next(ctx);
+    }
+
     if (!isStateChanging(ctx.method)) {
         return next(ctx);
     }
