@@ -2,6 +2,7 @@
 
 const Icon = @import("publr_ui").icon.Icon;
 const IconName = @import("publr_ui").icon.Name;
+const Size = @import("publr_ui").icon.Size;
 
 pub fn Layout(props: struct {
     title: []const u8,
@@ -39,7 +40,7 @@ pub fn Layout(props: struct {
                     <div class="top-bar-right">
                         <div class="bottom-bar-left">
                             <a href="/admin/settings" class="settings-link">
-                                <span class="nav-icon"><Icon name={IconName.settings} size={20} /></span>
+                                <span class="nav-icon"><Icon name={IconName.settings} size={Size.md} /></span>
                             </a>
                         </div>
                         <div data-publr-component="dropdown" class="avatar-dropdown">
@@ -69,7 +70,7 @@ pub fn Layout(props: struct {
                     <aside class="section-sidebar">
                         <div class="section-sidebar-group">
                             <h6 class="section-sidebar-group-title">
-                                <Icon name={IconName.folder} size={16} />
+                                <Icon name={IconName.folder} size={Size.sm} />
                                 Content types
                             </h6>
                             <nav class="section-sidebar-nav">

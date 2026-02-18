@@ -1,6 +1,7 @@
 // Section sidebar — vertical nav items in the content section sidebar
 
 const Icon = @import("publr_ui").icon.Icon;
+const Size = @import("publr_ui").icon.Size;
 
 pub fn SectionSidebar(props: struct { items: anytype }) {
     {for (props.items) |item| (
@@ -8,7 +9,7 @@ pub fn SectionSidebar(props: struct { items: anytype }) {
             href={item.path}
             class={if (item.is_active) "section-nav-item active" else "section-nav-item"}
         >
-            <span class="nav-icon"><Icon name={item.icon} size={20} /></span>
+            <span class="nav-icon"><Icon name={item.icon} size={Size.md} /></span>
             {item.label}
         </a>
     )}

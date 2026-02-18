@@ -4,6 +4,7 @@ const std = @import("std");
 
 const Icon = @import("publr_ui").icon.Icon;
 const IconName = @import("publr_ui").icon.Name;
+const Size = @import("publr_ui").icon.Size;
 
 const MediaItem = struct {
     id: []const u8,
@@ -188,20 +189,20 @@ pub fn List(props: struct {
                 <div class="media-sidebar-header">
                     <h3 class="media-sidebar-title">Folders</h3>
                     <button type="button" class="btn-icon-sm" data-publr-action="create-toplevel" aria-label="New folder">
-                        <Icon name={IconName.folder_plus} size={16} />
+                        <Icon name={IconName.folder_plus} size={Size.sm} />
                     </button>
                 </div>
                 <ul class="media-folder-list">
                     <li class={if (std.mem.eql(u8, props.active_folder, "default")) ("media-folder-item active") else ("media-folder-item")}>
                         <div class="media-folder-row">
                             <a href={props.unsorted_url} class="media-folder-link">
-                                <Icon name={IconName.folder} size={16} />
+                                <Icon name={IconName.folder} size={Size.sm} />
                                 <span class="media-folder-name">Default</span>
                             </a>
                             <span class="media-folder-count">{props.unsorted_count}</span>
                             <span class="media-folder-controls">
                                 <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id="" title="New folder">
-                                    <Icon name={IconName.folder_plus} size={16} />
+                                    <Icon name={IconName.folder_plus} size={Size.sm} />
                                 </button>
                             </span>
                         </div>
@@ -211,12 +212,12 @@ pub fn List(props: struct {
                             <div class="media-folder-row" data-folder-id={folder.id} data-folder-name={folder.name} data-folder-depth={depth_strs[@min(folder.depth, depth_strs.len - 1)]}>
                                 {if (folder.is_disabled) (
                                     <span class="media-folder-link">
-                                        <Icon name={IconName.folder} size={16} />
+                                        <Icon name={IconName.folder} size={Size.sm} />
                                         <span class="media-folder-name">{folder.name}</span>
                                     </span>
                                 ) else (
                                     <a href={folder.url} class="media-folder-link">
-                                        <Icon name={IconName.folder} size={16} />
+                                        <Icon name={IconName.folder} size={Size.sm} />
                                         <span class="media-folder-name">{folder.name}</span>
                                     </a>
                                 )}
@@ -224,7 +225,7 @@ pub fn List(props: struct {
                                 <span class="media-folder-controls">
                                     {if (folder.depth < max_depth) (
                                         <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id={folder.id} title="New subfolder">
-                                            <Icon name={IconName.folder_plus} size={16} />
+                                            <Icon name={IconName.folder_plus} size={Size.sm} />
                                         </button>
                                     ) else (<span></span>)}
                                     <div data-publr-component="dropdown" class="media-folder-actions">
@@ -266,7 +267,7 @@ pub fn List(props: struct {
                 <div class="media-sidebar-header">
                     <h3 class="media-sidebar-title">Tags</h3>
                     <button type="button" class="btn-icon-sm" data-publr-component="inline-create" data-publr-part="trigger" data-publr-target="tag-create-form" aria-label="New tag">
-                        <Icon name={IconName.plus_circle} size={16} />
+                        <Icon name={IconName.plus_circle} size={Size.sm} />
                     </button>
                 </div>
                 <div class="media-tag-list">
@@ -292,7 +293,7 @@ pub fn List(props: struct {
                     <div class="inline-create-row">
                         <input type="text" name="tag_name" placeholder="Tag name..." class="form-control form-control-sm" />
                         <button type="submit" class="btn-icon-sm btn-icon-confirm" aria-label="Create tag">
-                            <Icon name={IconName.check} size={16} />
+                            <Icon name={IconName.check} size={Size.sm} />
                         </button>
                     </div>
                 </form>
@@ -379,7 +380,7 @@ pub fn List(props: struct {
                                             <div class="media-card-icon"><Icon name={IconName.file} /></div>
                                         )}
                                         {if (item.is_private) (
-                                            <span class="media-card-badge"><Icon name={IconName.lock} size={16} /></span>
+                                            <span class="media-card-badge"><Icon name={IconName.lock} size={Size.sm} /></span>
                                         ) else (<span></span>)}
                                     </div>
                                     <div class="media-card-info">
@@ -588,9 +589,9 @@ pub fn BottomBar(props: struct {
                 <nav class="pagination" aria-label="Media pagination">
                     <span class="pagination-label">Page:</span>
                     {if (props.prev_page_url.len > 0) (
-                        <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} /></a>
+                        <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></a>
                     ) else (
-                        <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} /></span>
+                        <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></span>
                     )}
                     {for (props.page_urls) |pg| (
                         {if (pg.is_current) (
@@ -600,9 +601,9 @@ pub fn BottomBar(props: struct {
                         )}
                     )}
                     {if (props.next_page_url.len > 0) (
-                        <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} /></a>
+                        <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></a>
                     ) else (
-                        <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} /></span>
+                        <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></span>
                     )}
                 </nav>
             ) else (<span></span>)}

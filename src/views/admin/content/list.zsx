@@ -3,6 +3,7 @@
 
 const Icon = @import("publr_ui").icon.Icon;
 const IconName = @import("publr_ui").icon.Name;
+const Size = @import("publr_ui").icon.Size;
 
 const PageUrl = struct {
     page_num: []const u8,
@@ -52,7 +53,7 @@ pub fn List(props: struct {
             </form>
             {if (props.active_author_filter.len > 0) (
                 <a href={props.base_path} class="btn btn-sm table-filter-clear" title="Clear filter">
-                    <Icon name={IconName.x_close} size={16} /> Clear filter
+                    <Icon name={IconName.x_close} size={Size.sm} /> Clear filter
                 </a>
             )}
         </div>
@@ -128,9 +129,9 @@ pub fn List(props: struct {
                     <nav class="pagination" aria-label="Content pagination">
                         <span class="pagination-label">Page:</span>
                         {if (props.prev_page_url.len > 0) (
-                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} /></a>
+                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></a>
                         ) else (
-                            <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} /></span>
+                            <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></span>
                         )}
                         {for (props.page_urls) |pg| (
                             {if (pg.is_ellipsis) (
@@ -142,9 +143,9 @@ pub fn List(props: struct {
                             )}
                         )}
                         {if (props.next_page_url.len > 0) (
-                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} /></a>
+                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></a>
                         ) else (
-                            <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} /></span>
+                            <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></span>
                         )}
                     </nav>
                 )}

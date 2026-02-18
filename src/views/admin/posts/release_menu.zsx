@@ -5,6 +5,7 @@ const std = @import("std");
 
 const Icon = @import("publr_ui").icon.Icon;
 const IconName = @import("publr_ui").icon.Name;
+const Size = @import("publr_ui").icon.Size;
 
 const ReleaseOption = struct {
     id: []const u8,
@@ -29,7 +30,7 @@ pub fn ReleaseMenu(props: struct {
             {for (props.releases) |rel| (
                 {if (rel.is_added) (
                     <span class="dropdown-item dropdown-item-added" role="menuitem">
-                        <Icon name={IconName.check} size={16} />
+                        <Icon name={IconName.check} size={Size.sm} />
                         {rel.name}
                     </span>
                 ) else (
