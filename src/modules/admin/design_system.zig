@@ -1,7 +1,6 @@
 //! Design System plugin - design tokens and documentation
 
 const admin = @import("admin_api");
-const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const views = @import("views");
@@ -11,7 +10,7 @@ pub const page = admin.registerPage(.{
     .id = "design_system",
     .title = "Design System",
     .path = "/design-system",
-    .icon = icons.file,
+    .icon = .file,
     .position = 60,
     .setup = setup,
 });

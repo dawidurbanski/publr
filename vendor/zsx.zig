@@ -1446,12 +1446,26 @@ const Parser = struct {
     }
 
     fn parseConstDecl(self: *Parser) Error!void {
-        // Copy const declaration verbatim until semicolon
+        // Copy const declaration verbatim until semicolon at depth 0.
+        // Track brace depth so multi-line struct/enum blocks are captured whole.
         const start = self.pos;
-        while (self.pos < self.source.len and self.source[self.pos] != ';') {
+        var depth: usize = 0;
+        while (self.pos < self.source.len) {
+            switch (self.source[self.pos]) {
+                '{' => depth += 1,
+                '}' => {
+                    if (depth > 0) depth -= 1;
+                },
+                ';' => {
+                    if (depth == 0) {
+                        self.pos += 1; // skip ;
+                        break;
+                    }
+                },
+                else => {},
+            }
             self.pos += 1;
         }
-        if (self.pos < self.source.len) self.pos += 1; // skip ;
 
         const decl = self.source[start..self.pos];
         // Ensure all const declarations are pub (for @typeInfo introspection)

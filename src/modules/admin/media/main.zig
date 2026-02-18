@@ -5,7 +5,6 @@
 //! database operations and storage backend for file management.
 
 const admin = @import("admin_api");
-const icons = @import("icons");
 const media = @import("media");
 const auth_middleware = @import("auth_middleware");
 
@@ -31,7 +30,7 @@ pub const page = admin.registerPage(.{
     .id = "media",
     .title = "Media",
     .path = "/media",
-    .icon = icons.image,
+    .icon = .image,
     .position = 25,
     .section = "media",
     .setup = setup,

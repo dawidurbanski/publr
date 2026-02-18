@@ -1,33 +1,7 @@
 // Posts list template
 
-// SVG Icons
-const icon_file =
-    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2.26946V6.4C14 6.96005 14 7.24008 14.109 7.45399C14.2049 7.64215 14.3578 7.79513 14.546 7.89101C14.7599 8 15.0399 8 15.6 8H19.7305M20 9.98822V17.2C20 18.8802 20 19.7202 19.673 20.362C19.3854 20.9265 18.9265 21.3854 18.362 21.673C17.7202 22 16.8802 22 15.2 22H8.8C7.11984 22 6.27976 22 5.63803 21.673C5.07354 21.3854 4.6146 20.9265 4.32698 20.362C4 19.7202 4 18.8802 4 17.2V6.8C4 5.11984 4 4.27976 4.32698 3.63803C4.6146 3.07354 5.07354 2.6146 5.63803 2.32698C6.27976 2 7.11984 2 8.8 2H12.0118C12.7455 2 13.1124 2 13.4577 2.08289C13.7638 2.15638 14.0564 2.27759 14.3249 2.44208C14.6276 2.6276 14.887 2.88703 15.4059 3.40589L18.5941 6.59411C19.113 7.11297 19.3724 7.3724 19.5579 7.67515C19.7224 7.94356 19.8436 8.2362 19.9171 8.5423C20 8.88757 20 9.25445 20 9.98822Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
-const icon_more =
-    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 13C12.5523 13 13 12.5523 13 12C13 11.4477 12.5523 11 12 11C11.4477 11 11 11.4477 11 12C11 12.5523 11.4477 13 12 13Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 6C12.5523 6 13 5.55228 13 5C13 4.44772 12.5523 4 12 4C11.4477 4 11 4.44772 11 5C11 5.55228 11.4477 6 12 6Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 20C12.5523 20 13 19.5523 13 19C13 18.4477 12.5523 18 12 18C11.4477 18 11 18.4477 11 19C11 19.5523 11.4477 20 12 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
-const icon_chevron_up =
-    \\<svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 15L12 9L6 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
-const icon_dot_filled =
-    \\<svg class="icon icon-dot" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="6"/></svg>
-;
-const icon_dot_outline =
-    \\<svg class="icon icon-dot" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/></svg>
-;
-const icon_dot_half =
-    \\<svg class="icon icon-dot" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 7a5 5 0 010 10V7z" fill="currentColor"/></svg>
-;
-const icon_chevron_left =
-    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
-const icon_chevron_right =
-    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
-const icon_x =
-    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
+const Icon = @import("publr_ui").icon.Icon;
+const IconName = @import("publr_ui").icon.Name;
 
 const PageUrl = struct {
     page_num: []const u8,
@@ -75,7 +49,7 @@ pub fn List(props: struct {
             </form>
             {if (props.active_author_filter.len > 0) (
                 <a href="/admin/posts" class="btn btn-sm table-filter-clear" title="Clear filter">
-                    {@raw icon_x} Clear filter
+                    <Icon name={IconName.x_close} size={16} class="icon" /> Clear filter
                 </a>
             )}
         </div>
@@ -91,7 +65,7 @@ pub fn List(props: struct {
                         <th class="table-col-thumb"></th>
                         <th class="table-sortable">
                             Title
-                            <span class="table-sort-icon">{@raw icon_chevron_up}</span>
+                            <span class="table-sort-icon"><Icon name={IconName.chevron_up} size={24} class="icon" /></span>
                         </th>
                         <th>Author</th>
                         <th>Status</th>
@@ -106,7 +80,7 @@ pub fn List(props: struct {
                                 <input type="checkbox" class="table-checkbox" aria-label="Select post" />
                             </td>
                             <td class="table-col-thumb">
-                                <div class="table-thumb">{@raw icon_file}</div>
+                                <div class="table-thumb"><Icon name={IconName.file} size={24} class="icon" /></div>
                             </td>
                             <td class="table-col-strong">
                                 <a href={post.edit_url}>{post.title}</a>
@@ -119,11 +93,11 @@ pub fn List(props: struct {
                             <td>
                                 <span class="table-cell-icon">
                                     {if (@import("std").mem.eql(u8, post.status, "published")) (
-                                        <span class="table-cell-icon-prefix" style="color: var(--color-success)">{@raw icon_dot_filled}</span>
+                                        <span class="table-cell-icon-prefix" style="color: var(--color-success)"><Icon name={IconName.dot_filled} size={24} class="icon icon-dot" /></span>
                                     ) else if (@import("std").mem.eql(u8, post.status, "changed")) (
-                                        <span class="table-cell-icon-prefix" style="color: var(--color-warning)">{@raw icon_dot_half}</span>
+                                        <span class="table-cell-icon-prefix" style="color: var(--color-warning)"><Icon name={IconName.dot_half} size={24} class="icon icon-dot" /></span>
                                     ) else (
-                                        <span class="table-cell-icon-prefix">{@raw icon_dot_outline}</span>
+                                        <span class="table-cell-icon-prefix"><Icon name={IconName.dot_outline} size={24} class="icon icon-dot" /></span>
                                     )}
                                     <span class={if (@import("std").mem.eql(u8, post.status, "published")) ("badge badge-published") else if (@import("std").mem.eql(u8, post.status, "changed")) ("badge badge-changed") else ("badge badge-draft")}>{post.status}</span>
                                 </span>
@@ -132,7 +106,7 @@ pub fn List(props: struct {
                             <td class="actions-col">
                                 <div data-publr-component="dropdown">
                                     <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        {@raw icon_more}
+                                        <Icon name={IconName.more} size={24} class="icon" />
                                     </button>
                                     <div class="dropdown-menu" data-publr-part="content">
                                         <a href={post.edit_url} class="dropdown-item">Edit</a>
@@ -152,9 +126,9 @@ pub fn List(props: struct {
                     <nav class="pagination" aria-label="Posts pagination">
                         <span class="pagination-label">Page:</span>
                         {if (props.prev_page_url.len > 0) (
-                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page">{@raw icon_chevron_left}</a>
+                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} class="icon" /></a>
                         ) else (
-                            <span class="pagination-btn disabled" aria-label="Previous page">{@raw icon_chevron_left}</span>
+                            <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} class="icon" /></span>
                         )}
                         {for (props.page_urls) |pg| (
                             {if (pg.is_ellipsis) (
@@ -166,9 +140,9 @@ pub fn List(props: struct {
                             )}
                         )}
                         {if (props.next_page_url.len > 0) (
-                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page">{@raw icon_chevron_right}</a>
+                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} class="icon" /></a>
                         ) else (
-                            <span class="pagination-btn disabled" aria-label="Next page">{@raw icon_chevron_right}</span>
+                            <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} class="icon" /></span>
                         )}
                     </nav>
                 )}

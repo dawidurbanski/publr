@@ -475,7 +475,6 @@ const modules = [_]Module{
     .{ .name = "admin_api", .src = "src/admin_api.zig", .deps = &.{"middleware"} },
     .{ .name = "image", .src = "src/image.zig", .deps = &.{"stb_c"} },
     .{ .name = "media_handler", .src = "src/media_handler.zig", .deps = &.{ "storage", "auth_middleware", "middleware", "image" } },
-    .{ .name = "icons", .src = "src/icons.zig", .deps = &.{} },
     .{ .name = "gravatar", .src = "src/gravatar.zig", .deps = &.{} },
     // WASM-specific modules
     .{ .name = "wasm_storage", .src = "src/wasm_storage.zig", .deps = &.{ "db", "storage" } },
@@ -483,25 +482,25 @@ const modules = [_]Module{
     .{ .name = "wasm_router", .src = "src/wasm_router.zig", .deps = &.{ "middleware", "admin_api" } },
     // Views
     .{ .name = "zsx", .src = "vendor/zsx.zig", .deps = &.{} },
-    .{ .name = "views", .src = "src/gen/views/views.zig", .deps = &.{ "zsx", "icons" } },
+    .{ .name = "views", .src = "src/gen/views/views.zig", .deps = &.{"zsx"} },
     // Plugins
-    .{ .name = "plugin_dashboard", .src = "src/plugins/dashboard.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "db", "csrf", "auth_middleware", "media", "views", "registry" } },
-    .{ .name = "plugin_users", .src = "src/plugins/users.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "auth", "csrf", "auth_middleware", "views", "registry" } },
-    .{ .name = "plugin_settings", .src = "src/plugins/settings.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth", "auth_middleware", "views", "registry" } },
-    .{ .name = "plugin_components", .src = "src/plugins/components.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "views", "registry" } },
-    .{ .name = "plugin_design_system", .src = "src/plugins/design_system.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "views", "registry" } },
-    .{ .name = "plugin_content_types", .src = "src/plugins/content_types.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "views", "schemas", "registry" } },
-    .{ .name = "plugin_media", .src = "src/plugins/media.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "media", "media_sync", "storage", "schema_media", "media_handler", "db", "views", "wasm_storage", "registry" } },
-    .{ .name = "plugin_releases", .src = "src/plugins/releases.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "cms", "views", "registry" } },
+    .{ .name = "plugin_dashboard", .src = "src/plugins/dashboard.zig", .deps = &.{ "admin_api", "middleware", "tpl", "db", "csrf", "auth_middleware", "media", "views", "registry" } },
+    .{ .name = "plugin_users", .src = "src/plugins/users.zig", .deps = &.{ "admin_api", "middleware", "tpl", "auth", "csrf", "auth_middleware", "views", "registry" } },
+    .{ .name = "plugin_settings", .src = "src/plugins/settings.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth", "auth_middleware", "views", "registry" } },
+    .{ .name = "plugin_components", .src = "src/plugins/components.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "views", "registry" } },
+    .{ .name = "plugin_design_system", .src = "src/plugins/design_system.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "views", "registry" } },
+    .{ .name = "plugin_content_types", .src = "src/plugins/content_types.zig", .deps = &.{ "admin_api", "middleware", "tpl", "views", "schemas", "registry" } },
+    .{ .name = "plugin_media", .src = "src/plugins/media.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "media", "media_sync", "storage", "schema_media", "media_handler", "db", "views", "wasm_storage", "registry" } },
+    .{ .name = "plugin_releases", .src = "src/plugins/releases.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "cms", "views", "registry" } },
     // Registry (imports all plugins)
-    .{ .name = "registry", .src = "src/registry.zig", .deps = &.{ "admin_api", "icons", "middleware", "tpl", "csrf", "auth_middleware", "gravatar", "views", "plugin_dashboard", "plugin_media", "plugin_users", "plugin_settings", "plugin_components", "plugin_design_system", "plugin_content_types", "plugin_releases" } },
+    .{ .name = "registry", .src = "src/registry.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "gravatar", "views", "plugin_dashboard", "plugin_media", "plugin_users", "plugin_settings", "plugin_components", "plugin_design_system", "plugin_content_types", "plugin_releases" } },
 };
 
 // Root module deps — what wasm_main.zig imports
 const root_deps = [_][]const u8{
     "config",      "db",        "tpl",               "auth",
     "middleware",   "admin_api", "registry",           "wasm_router",
-    "auth_middleware", "csrf",   "icons",              "storage",
+    "auth_middleware", "csrf",   "storage",
     "svg_sanitize", "cms",      "media",              "image",
     "schema_media", "media_handler", "wasm_storage",  "wasm_media_handler",
     "views",       "seed",

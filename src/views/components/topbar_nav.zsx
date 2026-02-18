@@ -1,12 +1,14 @@
 // Topbar navigation — horizontal nav items in the top bar
 
+const Icon = @import("publr_ui").icon.Icon;
+
 pub fn TopbarNav(props: struct { items: anytype }) {
     {for (props.items) |item| (
         <a
             href={item.path}
             class={if (item.is_active) "topbar-nav-item active" else "topbar-nav-item"}
         >
-            <span class="nav-icon">{@raw item.icon}</span>
+            <span class="nav-icon"><Icon name={item.icon} size={20} class="icon" /></span>
             {item.label}
         </a>
     )}

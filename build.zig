@@ -539,7 +539,10 @@ pub fn build(b: *std.Build) void {
     });
     const admin_api_module = b.createModule(.{
         .root_source_file = b.path("src/admin_api.zig"),
-        .imports = &.{.{ .name = "middleware", .module = middleware_module }},
+        .imports = &.{
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "publr_ui", .module = publr_ui },
+        },
     });
     // Image processing (stb + libwebp wrappers)
     const image_module = b.createModule(.{
@@ -558,9 +561,6 @@ pub fn build(b: *std.Build) void {
             .{ .name = "mime", .module = mime_module },
         },
     });
-    const icons_module = b.createModule(.{
-        .root_source_file = b.path("src/icons.zig"),
-    });
     const gravatar_module = b.createModule(.{
         .root_source_file = b.path("src/gravatar.zig"),
     });
@@ -575,8 +575,7 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // Add icons to views module (layout.zsx needs icons for search/logout icons)
-    views.addImport("icons", icons_module);
+    views.addImport("publr_ui", publr_ui);
 
     // =========================================================================
     // CLI Modules
@@ -837,7 +836,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/dashboard.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "db", .module = db_module },
@@ -851,7 +849,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/users.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "auth", .module = auth_module },
@@ -864,7 +861,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/settings.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
@@ -877,7 +873,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/components.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
@@ -888,7 +883,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/design_system.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
@@ -899,7 +893,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/content_types.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "views", .module = views },
@@ -910,7 +903,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/media/main.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
@@ -930,7 +922,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/content.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "db", .module = db_module },
@@ -950,7 +941,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/modules/admin/releases.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
@@ -984,7 +974,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/registry.zig"),
         .imports = &.{
             .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "icons", .module = icons_module },
+            .{ .name = "publr_ui", .module = publr_ui },
             .{ .name = "middleware", .module = middleware_module },
             .{ .name = "tpl", .module = tpl_module },
             .{ .name = "csrf", .module = csrf_module },
@@ -1030,7 +1020,6 @@ pub fn build(b: *std.Build) void {
     // Add views namespace and core imports to main executable
     exe.root_module.addImport("views", views);
     exe.root_module.addImport("admin_api", admin_api_module);
-    exe.root_module.addImport("icons", icons_module);
     exe.root_module.addImport("publr_ui", publr_ui);
     exe.root_module.addImport("modules", modules_api_module);
     exe.root_module.addImport("module_admin", module_admin_module);
@@ -1155,7 +1144,6 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addImport("rest_info", rest_info_module);
     exe_tests.root_module.addImport("registry", registry_module);
     exe_tests.root_module.addImport("admin_api", admin_api_module);
-    exe_tests.root_module.addImport("icons", icons_module);
     exe_tests.root_module.addImport("schema_media", schema_media_module);
     exe_tests.root_module.addImport("core_init", core_init_module);
     exe_tests.root_module.addImport("auth", auth_module);
@@ -1299,7 +1287,6 @@ pub fn build(b: *std.Build) void {
     browser_wasm.root_module.addImport("wasm_router", wasm_router_module);
     browser_wasm.root_module.addImport("auth_middleware", auth_middleware_module);
     browser_wasm.root_module.addImport("csrf", csrf_module);
-    browser_wasm.root_module.addImport("icons", icons_module);
 
     // Media/storage modules for WASM
     browser_wasm.root_module.addImport("storage", storage_module);

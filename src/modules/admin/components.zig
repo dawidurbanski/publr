@@ -1,7 +1,6 @@
 //! Components plugin - UI component showcase
 
 const admin = @import("admin_api");
-const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const views = @import("views");
@@ -11,7 +10,7 @@ pub const page = admin.registerPage(.{
     .id = "components",
     .title = "Components",
     .path = "/components",
-    .icon = icons.components,
+    .icon = .components,
     .position = 50,
     .setup = setup,
 });

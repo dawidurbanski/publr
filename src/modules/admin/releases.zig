@@ -5,7 +5,6 @@
 
 const std = @import("std");
 const admin = @import("admin_api");
-const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const csrf = @import("csrf");
@@ -19,7 +18,7 @@ pub const page = admin.registerPage(.{
     .id = "releases",
     .title = "Releases",
     .path = "/releases",
-    .icon = icons.copy,
+    .icon = .copy,
     .position = 25,
     .section = "releases",
     .setup = setup,

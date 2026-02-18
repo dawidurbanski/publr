@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const admin = @import("admin_api");
-const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const views = @import("views");
@@ -13,7 +12,7 @@ pub const page = admin.registerPage(.{
     .id = "content_types",
     .title = "Content Types",
     .path = "/content-types",
-    .icon = icons.package,
+    .icon = .package,
     .position = 22,
     .section = "content_types",
     .setup = setup,

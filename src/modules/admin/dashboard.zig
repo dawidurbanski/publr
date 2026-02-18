@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const admin = @import("admin_api");
-const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const views = @import("views");
@@ -14,7 +13,7 @@ pub const page = admin.registerPage(.{
     .id = "dashboard",
     .title = "Dashboard",
     .path = "/",
-    .icon = icons.home,
+    .icon = .home,
     .position = 10,
     .setup = setup,
 });

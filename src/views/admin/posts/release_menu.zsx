@@ -3,13 +3,8 @@
 
 const std = @import("std");
 
-const icon_chevron_down =
-    \\<svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
-
-const icon_check =
-    \\<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-;
+const Icon = @import("publr_ui").icon.Icon;
+const IconName = @import("publr_ui").icon.Name;
 
 const ReleaseOption = struct {
     id: []const u8,
@@ -28,13 +23,13 @@ pub fn ReleaseMenu(props: struct {
     <div data-publr-component="dropdown" data-publr-state="closed" id="release-dropdown">
         <button type="button" data-publr-part="trigger" class="btn btn-full" aria-expanded="false" aria-haspopup="true" disabled="">
             <span id="release-trigger-text">Add to Release</span>
-            {@raw icon_chevron_down}
+            <Icon name={IconName.chevron_down} size={24} class="icon" />
         </button>
         <div data-publr-part="content" class="dropdown-menu" role="menu">
             {for (props.releases) |rel| (
                 {if (rel.is_added) (
                     <span class="dropdown-item dropdown-item-added" role="menuitem">
-                        {@raw icon_check}
+                        <Icon name={IconName.check} size={16} class="icon" />
                         {rel.name}
                     </span>
                 ) else (

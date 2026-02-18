@@ -9,7 +9,7 @@
 //!     .id = "posts",
 //!     .title = "Posts",
 //!     .path = "/posts",        // becomes /admin/posts
-//!     .icon = icons.edit,
+//!     .icon = .edit,
 //!     .position = 20,
 //!     .setup = setup,
 //! });
@@ -24,12 +24,16 @@
 
 const std = @import("std");
 const mw = @import("middleware");
+const publr_ui = @import("publr_ui");
 
 /// Handler function type - matches the router's handler signature
 pub const Handler = mw.Handler;
 
 /// Context type - the middleware Context
 pub const Context = mw.Context;
+
+/// Icon name enum, re-exported from design system
+pub const IconName = publr_ui.icon.Name;
 
 /// Admin page definition - represents a navigation item and its routes
 pub const Page = struct {
@@ -43,8 +47,8 @@ pub const Page = struct {
     /// For child pages, relative to parent (e.g., "/new" with parent "users" becomes "/admin/users/new")
     path: []const u8,
 
-    /// SVG icon markup for navigation
-    icon: []const u8 = "",
+    /// Icon for navigation (from design system icon set)
+    icon: IconName = .home,
 
     /// Sort position in navigation (lower = higher)
     position: u16 = 100,

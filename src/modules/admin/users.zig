@@ -5,7 +5,6 @@
 
 const std = @import("std");
 const admin = @import("admin_api");
-const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const Auth = @import("auth").Auth;
@@ -19,7 +18,7 @@ pub const page = admin.registerPage(.{
     .id = "users",
     .title = "Users",
     .path = "/users",
-    .icon = icons.users,
+    .icon = .users,
     .position = 30,
     .setup = setup,
 });

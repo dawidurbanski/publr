@@ -27,7 +27,6 @@
 
 const std = @import("std");
 const admin = @import("admin_api");
-const icons = @import("icons");
 const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const csrf = @import("csrf");
@@ -182,7 +181,7 @@ pub const content_pages: [schemas.content_types.len]admin.Page = blk: {
             .id = "content." ++ CT.type_id,
             .title = CT.display_name,
             .path = "/content/" ++ CT.type_id,
-            .icon = icons.bookmark,
+            .icon = .bookmark,
             .position = 15 + @as(u16, @intCast(i)),
             .section = "content",
             .setup = ContentHandlers(CT).setup,

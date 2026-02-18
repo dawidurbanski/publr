@@ -29,7 +29,6 @@ const components = @import("plugin_components");
 const design_system = @import("plugin_design_system");
 const content_types = @import("plugin_content_types");
 const releases = @import("plugin_releases");
-const icons = @import("icons");
 const schemas = @import("schemas");
 
 /// All registered admin pages, sorted by position.
@@ -115,7 +114,7 @@ pub fn findByPath(path: []const u8) ?admin.Page {
 const NavItem = struct {
     label: []const u8,
     path: []const u8,
-    icon: []const u8,
+    icon: admin.IconName,
     is_active: bool,
 };
 
@@ -124,12 +123,12 @@ const topbar_entries = [_]struct {
     label: []const u8,
     path: []const u8,
     section: []const u8,
-    icon: []const u8,
+    icon: admin.IconName,
 }{
-    .{ .label = "Content", .path = "/admin/content/" ++ schemas.content_types[0].type_id, .section = "content", .icon = icons.bookmark },
-    .{ .label = "Releases", .path = "/admin/releases", .section = "releases", .icon = icons.copy },
-    .{ .label = "Content Types", .path = "/admin/content-types", .section = "content_types", .icon = icons.package },
-    .{ .label = "Media", .path = "/admin/media", .section = "media", .icon = icons.image },
+    .{ .label = "Content", .path = "/admin/content/" ++ schemas.content_types[0].type_id, .section = "content", .icon = .bookmark },
+    .{ .label = "Releases", .path = "/admin/releases", .section = "releases", .icon = .copy },
+    .{ .label = "Content Types", .path = "/admin/content-types", .section = "content_types", .icon = .package },
+    .{ .label = "Media", .path = "/admin/media", .section = "media", .icon = .image },
 };
 
 /// Compute topbar nav items with active state for the given page

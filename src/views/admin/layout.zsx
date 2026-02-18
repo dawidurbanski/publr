@@ -1,6 +1,7 @@
 // Admin layout template - topbar nav with conditional section sidebar
 
-const icons = @import("icons");
+const Icon = @import("publr_ui").icon.Icon;
+const IconName = @import("publr_ui").icon.Name;
 
 pub fn Layout(props: struct {
     title: []const u8,
@@ -38,7 +39,7 @@ pub fn Layout(props: struct {
                     <div class="top-bar-right">
                         <div class="bottom-bar-left">
                             <a href="/admin/settings" class="settings-link">
-                                <span class="nav-icon">{@raw icons.settings}</span>
+                                <span class="nav-icon"><Icon name={IconName.settings} size={20} class="icon" /></span>
                             </a>
                         </div>
                         <div data-publr-component="dropdown" class="avatar-dropdown">
@@ -68,7 +69,7 @@ pub fn Layout(props: struct {
                     <aside class="section-sidebar">
                         <div class="section-sidebar-group">
                             <h6 class="section-sidebar-group-title">
-                                {@raw icons.folder}
+                                <Icon name={IconName.folder} size={16} class="icon" />
                                 Content types
                             </h6>
                             <nav class="section-sidebar-nav">

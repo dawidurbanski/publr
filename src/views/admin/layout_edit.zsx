@@ -1,6 +1,7 @@
 // Edit layout — no left sidebar, topbar with logo, back nav bar, right sidebar shell
 
-const icons = @import("icons");
+const Icon = @import("publr_ui").icon.Icon;
+const IconName = @import("publr_ui").icon.Name;
 
 pub fn LayoutEdit(props: struct {
     title: []const u8,
@@ -32,7 +33,7 @@ pub fn LayoutEdit(props: struct {
                     <div class="top-bar-right">
                         <div class="bottom-bar-left">
                             <a href="/admin/settings" class="settings-link">
-                                <span class="nav-icon">{@raw icons.settings}</span>
+                                <span class="nav-icon"><Icon name={IconName.settings} size={20} class="icon" /></span>
                             </a>
                         </div>
                         <div data-publr-component="dropdown" class="avatar-dropdown">
@@ -62,7 +63,7 @@ pub fn LayoutEdit(props: struct {
                     <div class="edit-nav">
                         <div class="edit-nav-left">
                             <a href={props.back_url} class="back-btn" aria-label="Back">
-                                <span class="back-btn-icon">{@raw icons.arrow_left}</span>
+                                <span class="back-btn-icon"><Icon name={IconName.arrow_left} size={20} class="icon" /></span>
                             </a>
                             <span class="edit-nav-title">{props.title}</span>
                         </div>
