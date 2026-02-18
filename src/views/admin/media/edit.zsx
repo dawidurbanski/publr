@@ -62,7 +62,7 @@ pub fn Edit(props: struct {
                 </div>
             ) else (
                 <div class="media-preview-file">
-                    <Icon name={IconName.file} size={24} class="icon icon-lg" />
+                    <Icon name={IconName.file} class="icon icon-lg" />
                     <span class="media-preview-filename">{props.media.filename}</span>
                 </div>
             )}

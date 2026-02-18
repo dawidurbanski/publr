@@ -33,7 +33,7 @@ pub fn LayoutEdit(props: struct {
                     <div class="top-bar-right">
                         <div class="bottom-bar-left">
                             <a href="/admin/settings" class="settings-link">
-                                <span class="nav-icon"><Icon name={IconName.settings} size={20} class="icon" /></span>
+                                <span class="nav-icon"><Icon name={IconName.settings} size={20} /></span>
                             </a>
                         </div>
                         <div data-publr-component="dropdown" class="avatar-dropdown">
@@ -63,7 +63,7 @@ pub fn LayoutEdit(props: struct {
                     <div class="edit-nav">
                         <div class="edit-nav-left">
                             <a href={props.back_url} class="back-btn" aria-label="Back">
-                                <span class="back-btn-icon"><Icon name={IconName.arrow_left} size={20} class="icon" /></span>
+                                <span class="back-btn-icon"><Icon name={IconName.arrow_left} size={20} /></span>
                             </a>
                             <span class="edit-nav-title">{props.title}</span>
                         </div>

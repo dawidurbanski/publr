@@ -48,7 +48,7 @@ pub fn List(props: struct {
                             <td class="actions-col">
                                 <div data-publr-component="dropdown">
                                     <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        <Icon name={IconName.more} size={24} class="icon" />
+                                        <Icon name={IconName.more} />
                                     </button>
                                     <div class="dropdown-menu" data-publr-part="content">
                                         <a href={release.detail_url} class="dropdown-item">View Details</a>

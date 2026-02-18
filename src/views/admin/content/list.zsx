@@ -52,7 +52,7 @@ pub fn List(props: struct {
             </form>
             {if (props.active_author_filter.len > 0) (
                 <a href={props.base_path} class="btn btn-sm table-filter-clear" title="Clear filter">
-                    <Icon name={IconName.x_close} size={16} class="icon" /> Clear filter
+                    <Icon name={IconName.x_close} size={16} /> Clear filter
                 </a>
             )}
         </div>
@@ -68,7 +68,7 @@ pub fn List(props: struct {
                         <th class="table-col-thumb"></th>
                         <th class="table-sortable">
                             Title
-                            <span class="table-sort-icon"><Icon name={IconName.chevron_up} size={24} class="icon" /></span>
+                            <span class="table-sort-icon"><Icon name={IconName.chevron_up} /></span>
                         </th>
                         <th>Author</th>
                         <th>Status</th>
@@ -83,7 +83,7 @@ pub fn List(props: struct {
                                 <input type="checkbox" class="table-checkbox" aria-label="Select entry" />
                             </td>
                             <td class="table-col-thumb">
-                                <div class="table-thumb"><Icon name={IconName.file} size={24} class="icon" /></div>
+                                <div class="table-thumb"><Icon name={IconName.file} /></div>
                             </td>
                             <td class="table-col-strong">
                                 <a href={entry.edit_url}>{entry.title}</a>
@@ -96,11 +96,11 @@ pub fn List(props: struct {
                             <td>
                                 <span class="table-cell-icon">
                                     {if (@import("std").mem.eql(u8, entry.status, "published")) (
-                                        <span class="table-cell-icon-prefix" style="color: var(--color-success)"><Icon name={IconName.dot_filled} size={24} class="icon icon-dot" /></span>
+                                        <span class="table-cell-icon-prefix" style="color: var(--color-success)"><Icon name={IconName.dot_filled} class="icon icon-dot" /></span>
                                     ) else if (@import("std").mem.eql(u8, entry.status, "changed")) (
-                                        <span class="table-cell-icon-prefix" style="color: var(--color-warning)"><Icon name={IconName.dot_half} size={24} class="icon icon-dot" /></span>
+                                        <span class="table-cell-icon-prefix" style="color: var(--color-warning)"><Icon name={IconName.dot_half} class="icon icon-dot" /></span>
                                     ) else (
-                                        <span class="table-cell-icon-prefix"><Icon name={IconName.dot_outline} size={24} class="icon icon-dot" /></span>
+                                        <span class="table-cell-icon-prefix"><Icon name={IconName.dot_outline} class="icon icon-dot" /></span>
                                     )}
                                     <span class={if (@import("std").mem.eql(u8, entry.status, "published")) ("badge badge-published") else if (@import("std").mem.eql(u8, entry.status, "changed")) ("badge badge-changed") else ("badge badge-draft")}>{entry.status}</span>
                                 </span>
@@ -109,7 +109,7 @@ pub fn List(props: struct {
                             <td class="actions-col">
                                 <div data-publr-component="dropdown">
                                     <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        <Icon name={IconName.more} size={24} class="icon" />
+                                        <Icon name={IconName.more} />
                                     </button>
                                     <div class="dropdown-menu" data-publr-part="content">
                                         <a href={entry.edit_url} class="dropdown-item">Edit</a>
@@ -128,9 +128,9 @@ pub fn List(props: struct {
                     <nav class="pagination" aria-label="Content pagination">
                         <span class="pagination-label">Page:</span>
                         {if (props.prev_page_url.len > 0) (
-                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} class="icon" /></a>
+                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} /></a>
                         ) else (
-                            <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} class="icon" /></span>
+                            <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={16} /></span>
                         )}
                         {for (props.page_urls) |pg| (
                             {if (pg.is_ellipsis) (
@@ -142,9 +142,9 @@ pub fn List(props: struct {
                             )}
                         )}
                         {if (props.next_page_url.len > 0) (
-                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} class="icon" /></a>
+                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} /></a>
                         ) else (
-                            <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} class="icon" /></span>
+                            <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={16} /></span>
                         )}
                     </nav>
                 )}

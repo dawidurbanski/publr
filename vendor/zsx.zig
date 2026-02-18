@@ -64,6 +64,41 @@ pub fn render(writer: anytype, value: anytype) !void {
     }
 }
 
+/// Compute return type for withDefaults: if all Defaults fields exist in Raw,
+/// return Raw directly (preserving original types); otherwise return Defaults.
+fn WithDefaultsReturn(comptime Defaults: type, comptime Raw: type) type {
+    for (@typeInfo(Defaults).@"struct".fields) |field| {
+        if (!@hasField(Raw, field.name)) return Defaults;
+    }
+    return Raw;
+}
+
+/// Merge props with defaults: fields present in raw are used as-is,
+/// missing fields get their default values from the Defaults type.
+/// When all fields are present, returns raw directly (no type coercion).
+pub fn withDefaults(comptime Defaults: type, raw: anytype) WithDefaultsReturn(Defaults, @TypeOf(raw)) {
+    const needs_defaults = comptime needs: {
+        for (@typeInfo(Defaults).@"struct".fields) |field| {
+            if (!@hasField(@TypeOf(raw), field.name)) break :needs true;
+        }
+        break :needs false;
+    };
+
+    if (needs_defaults) {
+        var result: Defaults = undefined;
+        inline for (@typeInfo(Defaults).@"struct".fields) |field| {
+            if (@hasField(@TypeOf(raw), field.name)) {
+                @field(result, field.name) = @field(raw, field.name);
+            } else {
+                @field(result, field.name) = field.defaultValue().?;
+            }
+        }
+        return result;
+    } else {
+        return raw;
+    }
+}
+
 };
 
 pub const fmt_jsx = struct {
@@ -1543,6 +1578,7 @@ const Parser = struct {
 
         // Emit Props type for component functions with inline struct params
         // Find first colon at brace depth 0 (the param name:type separator)
+        var concrete_props_param: ?[]const u8 = null;
         emit_props: {
             const raw_params = mem.trim(u8, params, " \t\n\r");
             var p: usize = 0;
@@ -1569,6 +1605,23 @@ const Parser = struct {
             try self.write("Props = ");
             try self.write(type_text);
             try self.write(";\n");
+            // Only use withDefaults if the struct has fields with default values.
+            // Scan for '=' at brace depth 1 (inside the struct body).
+            has_defaults: {
+                var scan_d: usize = 0;
+                var brace_d: usize = 0;
+                while (scan_d < type_text.len) : (scan_d += 1) {
+                    switch (type_text[scan_d]) {
+                        '{' => brace_d += 1,
+                        '}' => brace_d -= 1,
+                        '=' => if (brace_d == 1 and scan_d + 1 < type_text.len and type_text[scan_d + 1] != '=') {
+                            concrete_props_param = mem.trim(u8, raw_params[0..p], " \t");
+                            break :has_defaults;
+                        },
+                        else => {},
+                    }
+                }
+            }
         }
 
         // Emit transformed function
@@ -1608,6 +1661,9 @@ const Parser = struct {
                     if (mem.indexOf(u8, param, ":")) |colon| {
                         const name = mem.trim(u8, param[0..colon], " \t");
                         try self.write(", ");
+                        if (concrete_props_param != null and mem.eql(u8, name, concrete_props_param.?)) {
+                            try self.write("_");
+                        }
                         try self.write(name);
                         try self.write(": anytype");
                     } else {
@@ -1621,6 +1677,17 @@ const Parser = struct {
             }
         }
         try self.write(") !void {\n");
+
+        // Emit defaults merging for concrete props
+        if (concrete_props_param) |cpp| {
+            try self.write("const ");
+            try self.write(cpp);
+            try self.write(" = zsx.withDefaults(");
+            try self.write(func_name);
+            try self.write("Props, _");
+            try self.write(cpp);
+            try self.write(");\n");
+        }
 
         // Parse and emit body
         try self.parseFunctionBody(body);

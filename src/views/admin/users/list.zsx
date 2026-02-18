@@ -27,7 +27,7 @@ pub fn List(props: struct {
                         <th class="table-col-thumb"></th>
                         <th class="table-sortable">
                             Name
-                            <span class="table-sort-icon"><Icon name={IconName.chevron_up} size={24} class="icon" /></span>
+                            <span class="table-sort-icon"><Icon name={IconName.chevron_up} /></span>
                         </th>
                         <th>Email</th>
                         <th class="actions-col"></th>
@@ -40,7 +40,7 @@ pub fn List(props: struct {
                                 <input type="checkbox" class="table-checkbox" aria-label="Select user" />
                             </td>
                             <td class="table-col-thumb">
-                                <div class="table-thumb"><Icon name={IconName.users} size={24} class="icon" /></div>
+                                <div class="table-thumb"><Icon name={IconName.users} /></div>
                             </td>
                             <td>
                                 <a href={user.edit_url}>
@@ -55,7 +55,7 @@ pub fn List(props: struct {
                             <td class="actions-col">
                                 <div data-publr-component="dropdown">
                                     <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        <Icon name={IconName.more} size={24} class="icon" />
+                                        <Icon name={IconName.more} />
                                     </button>
                                     <div class="dropdown-menu" data-publr-part="content">
                                         <a href={user.edit_url} class="dropdown-item">Edit</a>

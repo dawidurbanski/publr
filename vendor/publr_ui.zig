@@ -64,6 +64,41 @@ pub fn render(writer: anytype, value: anytype) !void {
     }
 }
 
+/// Compute return type for withDefaults: if all Defaults fields exist in Raw,
+/// return Raw directly (preserving original types); otherwise return Defaults.
+fn WithDefaultsReturn(comptime Defaults: type, comptime Raw: type) type {
+    for (@typeInfo(Defaults).@"struct".fields) |field| {
+        if (!@hasField(Raw, field.name)) return Defaults;
+    }
+    return Raw;
+}
+
+/// Merge props with defaults: fields present in raw are used as-is,
+/// missing fields get their default values from the Defaults type.
+/// When all fields are present, returns raw directly (no type coercion).
+pub fn withDefaults(comptime Defaults: type, raw: anytype) WithDefaultsReturn(Defaults, @TypeOf(raw)) {
+    const needs_defaults = comptime needs: {
+        for (@typeInfo(Defaults).@"struct".fields) |field| {
+            if (!@hasField(@TypeOf(raw), field.name)) break :needs true;
+        }
+        break :needs false;
+    };
+
+    if (needs_defaults) {
+        var result: Defaults = undefined;
+        inline for (@typeInfo(Defaults).@"struct".fields) |field| {
+            if (@hasField(@TypeOf(raw), field.name)) {
+                @field(result, field.name) = @field(raw, field.name);
+            } else {
+                @field(result, field.name) = field.defaultValue().?;
+            }
+        }
+        return result;
+    } else {
+        return raw;
+    }
+}
+
 };
 
 pub const icons_data = struct {
@@ -262,7 +297,8 @@ pub const ButtonProps = struct {
     disabled: bool = false,
     @"type": Type = .button,
 };
-pub fn Button(writer: anytype, props: anytype) !void {
+pub fn Button(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(ButtonProps, _props);
     const base = "inline-flex items-center justify-center font-semibold transition-colors";
 
     const is_link = props.hierarchy == .link or props.hierarchy == .link_gray;
@@ -352,7 +388,8 @@ pub const DialogProps = struct {
     confirm_label: []const u8 = "",
     dismissable: bool = true,
 };
-pub fn Dialog(writer: anytype, props: anytype) !void {
+pub fn Dialog(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogProps, _props);
     try writer.writeAll("<div data-publr-component=\"dialog\" data-publr-state=\"closed\"");
     try writer.writeAll(" data-publr-dismissable=\"");
     try runtime.render(writer, if (props.dismissable) "true" else "false");
@@ -434,7 +471,8 @@ pub const IconProps = struct {
     size: u16 = 24,
     class: []const u8 = "icon",
 };
-pub fn Icon(writer: anytype, props: anytype) !void {
+pub fn Icon(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(IconProps, _props);
     try writer.writeAll("<svg viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"");
     try writer.writeAll(" class=\"");
     try runtime.render(writer, props.class);

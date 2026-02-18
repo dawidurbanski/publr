@@ -8,7 +8,7 @@ pub fn SectionSidebar(props: struct { items: anytype }) {
             href={item.path}
             class={if (item.is_active) "section-nav-item active" else "section-nav-item"}
         >
-            <span class="nav-icon"><Icon name={item.icon} size={20} class="icon" /></span>
+            <span class="nav-icon"><Icon name={item.icon} size={20} /></span>
             {item.label}
         </a>
     )}
