@@ -181,6 +181,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addAnonymousImport("static_interact_index_js", .{
         .root_source_file = b.path("static/interact/index.js"),
     });
+    exe.root_module.addAnonymousImport("static_interact_repeater_js", .{
+        .root_source_file = b.path("static/interact/repeater.js"),
+    });
     exe.root_module.addAnonymousImport("static_media_selection_js", .{
         .root_source_file = b.path("static/media-selection.js"),
     });

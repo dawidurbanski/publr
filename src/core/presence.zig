@@ -477,10 +477,19 @@ pub fn fieldEdit(conn_id: u64, field_name: []const u8, raw_value: []const u8) vo
     const subs = entries.getPtr(entry_id) orelse return;
 
     // Verify lock ownership (defense-in-depth)
+    // Sub-fields (e.g. "faq.0.question") are covered by the parent container lock ("faq")
     const locks = field_locks.getPtr(entry_id) orelse return;
     if (locks.get(field_name)) |lock| {
         if (lock.conn_id != conn_id) return;
-    } else return;
+    } else {
+        // Check if this is a sub-field of a locked container
+        if (std.mem.indexOfScalar(u8, field_name, '.')) |dot| {
+            const parent = field_name[0..dot];
+            if (locks.get(parent)) |lock| {
+                if (lock.conn_id != conn_id) return;
+            } else return;
+        } else return;
+    }
 
     broadcastFieldEditValue(field_name, raw_value, subs.*, conn_id);
 }

@@ -28,6 +28,8 @@ const users = new Map();
 const fieldLocks = new Map();
 let focusedField = null;
 let focusDebounceTimer = null;
+let blurTimer = null;
+let pendingBlurField = null;
 const FOCUS_DEBOUNCE_MS = 75;
 
 // Field edit broadcasting (debounced per field)
@@ -65,6 +67,7 @@ export function initPresence() {
     on('lock_released', handleLockReleased);
     on('takeover_result', handleTakeoverResult);
     on('field_edit', handleFieldEdit);
+    on('published_state', handlePublishedState);
     on('release_updated', handleReleaseUpdated);
     on('open', handleWsOpen);
 
@@ -75,6 +78,9 @@ export function initPresence() {
     // Field edit broadcasting (debounced oninput + onchange for checkboxes)
     form.addEventListener('input', onFieldInput);
     form.addEventListener('change', onFieldChange);
+
+    // Repeater structural sync (add/remove/reorder)
+    form.addEventListener('publr:repeater-sync', onRepeaterSync);
 
     // Connect WS (idempotent if already connected)
     connect();
@@ -127,11 +133,13 @@ function handlePresenceSync(data) {
         send('focus', { field: focusedField });
     }
 
-    // Set up takeover hover on page-load hard lock badges
+    // Set up takeover hover on page-load hard lock badges (includes repeater/group containers)
     const form = document.getElementById('entry-form');
     if (form) {
         form.querySelectorAll('.field-editor-badge.field-editor-active').forEach(function(badge) {
-            const group = badge.closest('.form-group[data-field]');
+            var group = badge.closest('.form-group[data-field]');
+            // Skip nested sub-field badges
+            if (group && (group.closest('.field-repeater-item-content') || group.closest('.field-group-content'))) return;
             if (group) setupBadgeTakeoverHover(group, group.dataset.field);
         });
     }
@@ -245,8 +253,8 @@ function handleLockReleased(data) {
         if (badge) {
             badge.classList.remove('field-editor-active');
             badge.innerHTML = '';
-            // Re-enable inputs disabled by badge (not marked with data-soft-locked)
-            group.querySelectorAll('.form-control:disabled').forEach(function(el) {
+            // Re-enable inputs/buttons disabled by badge (not marked with data-soft-locked)
+            group.querySelectorAll('input:disabled, textarea:disabled, select:disabled, button:disabled').forEach(function(el) {
                 if (!el.dataset.softLocked) el.disabled = false;
             });
         }
@@ -261,7 +269,34 @@ function handleFieldEdit(data) {
     if (!data || !data.field || data.value === undefined) return;
 
     const group = document.querySelector('.form-group[data-field="' + data.field + '"]');
-    if (!group) return;
+    if (!group) {
+        // May be a sub-field inside a repeater (e.g. "faq.0.question")
+        const subGroup = document.querySelector('.form-group[data-field="' + data.field + '"]');
+        if (subGroup) {
+            const input = subGroup.querySelector('.form-control');
+            if (input) input.value = data.value;
+        }
+        const form = document.getElementById('entry-form');
+        if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
+        return;
+    }
+
+    // Check if this is a repeater container field
+    const repeater = group.querySelector('.field-repeater[data-field]');
+    if (repeater) {
+        // Parse JSON array and dispatch apply event to the repeater widget
+        try {
+            var items = JSON.parse(data.value);
+            if (Array.isArray(items)) {
+                repeater.dispatchEvent(new CustomEvent('publr:repeater-apply', {
+                    detail: { items: items }
+                }));
+            }
+        } catch(e) {}
+        const form = document.getElementById('entry-form');
+        if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
+        return;
+    }
 
     const input = group.querySelector('.form-control');
     if (input) {
@@ -277,6 +312,15 @@ function handleFieldEdit(data) {
     // Notify admin.js to re-run change detection (adds field-changed class)
     const form = document.getElementById('entry-form');
     if (form) form.dispatchEvent(new CustomEvent('publr:fields-updated'));
+}
+
+function handlePublishedState(data) {
+    if (!data) return;
+    const form = document.getElementById('entry-form');
+    if (!form) return;
+    form.dispatchEvent(new CustomEvent('publr:published-state', {
+        detail: { publishedState: data.published_state, status: data.status }
+    }));
 }
 
 function handleReleaseUpdated(data) {
@@ -309,8 +353,8 @@ function handleTakeoverResult(data) {
             badge.innerHTML = '';
         }
 
-        // Re-enable inputs
-        group.querySelectorAll('.form-control:disabled').forEach(function(el) {
+        // Re-enable inputs/buttons
+        group.querySelectorAll('input:disabled, textarea:disabled, select:disabled, button:disabled').forEach(function(el) {
             el.disabled = false;
             delete el.dataset.softLocked;
         });
@@ -389,14 +433,43 @@ function deriveActivityCheckInterval(inactiveMs, heartbeatMs) {
 // Field focus/blur — soft lock events
 // =========================================================================
 
+// Resolve field name for presence tracking.
+// Sub-fields inside repeaters/groups resolve to the top-level container field.
+function resolveFieldName(target) {
+    var formGroup = target.closest('.form-group[data-field]');
+    if (!formGroup) return null;
+    var nested = formGroup.closest('.field-repeater-item-content, .field-group-content');
+    while (nested) {
+        formGroup = nested.closest('.form-group[data-field]');
+        if (!formGroup) return null;
+        nested = formGroup.closest('.field-repeater-item-content, .field-group-content');
+    }
+    return formGroup.dataset.field;
+}
+
 function onFieldFocus(e) {
     // Ignore focus events caused by peek wrapper DOM mutations
     const form = document.getElementById('entry-form');
     if (form && form.dataset.peekMutating) return;
 
-    const group = e.target.closest('.form-group[data-field]');
-    if (!group) return;
-    const field = group.dataset.field;
+    // Ignore focus from peek buttons/values — they shouldn't trigger field locking
+    if (e.target.closest('.field-peek-btn, .field-peek-value')) return;
+
+    const field = resolveFieldName(e.target);
+    if (!field) return;
+
+    // Handle pending blur timer
+    if (blurTimer) {
+        clearTimeout(blurTimer);
+        if (pendingBlurField !== field) {
+            // Switching fields — flush blur for old field immediately
+            send('blur', { field: pendingBlurField });
+        }
+        // Same field — cancel blur (intra-container tab)
+        blurTimer = null;
+        pendingBlurField = null;
+    }
+
     if (field === focusedField) return;
 
     clearTimeout(focusDebounceTimer);
@@ -411,14 +484,22 @@ function onFieldBlur(e) {
     const form = document.getElementById('entry-form');
     if (form && form.dataset.peekMutating) return;
 
-    const group = e.target.closest('.form-group[data-field]');
-    if (!group) return;
-    const field = group.dataset.field;
+    const field = resolveFieldName(e.target);
+    if (!field) return;
     if (field !== focusedField) return;
 
     clearTimeout(focusDebounceTimer);
-    focusedField = null;
-    send('blur', { field });
+    // Debounce blur to absorb intra-container tabbing (repeaters/groups)
+    clearTimeout(blurTimer);
+    pendingBlurField = field;
+    blurTimer = setTimeout(() => {
+        if (focusedField === field) {
+            focusedField = null;
+            send('blur', { field });
+        }
+        blurTimer = null;
+        pendingBlurField = null;
+    }, FOCUS_DEBOUNCE_MS);
 }
 
 function onFieldInput(e) {
@@ -426,7 +507,10 @@ function onFieldInput(e) {
     const group = e.target.closest('.form-group[data-field]');
     if (!group) return;
     const field = group.dataset.field;
-    if (field !== focusedField) return;
+
+    // For sub-fields, check focus on the resolved container field
+    const resolved = resolveFieldName(e.target);
+    if (resolved !== focusedField) return;
 
     clearTimeout(editDebounceTimers[field]);
     editDebounceTimers[field] = setTimeout(() => {
@@ -439,12 +523,26 @@ function onFieldChange(e) {
     const group = e.target.closest('.form-group[data-field]');
     if (!group) return;
     const field = group.dataset.field;
-    if (field !== focusedField) return;
+
+    const resolved = resolveFieldName(e.target);
+    if (resolved !== focusedField) return;
 
     clearTimeout(editDebounceTimers[field]);
     editDebounceTimers[field] = setTimeout(() => {
         send('field_edit', { field, value: e.target.checked ? 'true' : 'false' });
     }, EDIT_DEBOUNCE_MS);
+}
+
+function onRepeaterSync(e) {
+    if (!e.detail || !e.detail.field || !e.detail.items) return;
+    // The repeater's container field must be our focused field
+    const repeaterEl = e.target.closest('.field-repeater[data-field]');
+    if (!repeaterEl) return;
+    const resolved = resolveFieldName(repeaterEl);
+    if (resolved !== focusedField) return;
+
+    // Broadcast the full repeater state — use container field name for lock check
+    send('field_edit', { field: resolved, value: JSON.stringify(e.detail.items) });
 }
 
 // =========================================================================
@@ -459,8 +557,10 @@ function applyFieldLock(field, lockData) {
     group.classList.remove('field-soft-locked', 'field-hard-locked');
     group.classList.add(isHard ? 'field-hard-locked' : 'field-soft-locked');
 
-    // Disable inputs — only mark as soft-locked if not already disabled (e.g. by hard lock)
-    group.querySelectorAll('input, textarea, select').forEach(el => {
+    // Disable inputs/buttons — only mark as soft-locked if not already disabled (e.g. by hard lock)
+    // Skip peek buttons — they're read-only and should stay clickable on locked fields
+    group.querySelectorAll('input, textarea, select, button').forEach(el => {
+        if (el.classList.contains('field-peek-btn')) return;
         if (!el.disabled) {
             el.disabled = true;
             el.dataset.softLocked = 'true';
@@ -671,6 +771,7 @@ function cleanup() {
     if (activityTimer) clearInterval(activityTimer);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     clearTimeout(focusDebounceTimer);
+    clearTimeout(blurTimer);
 
     off('presence_sync', handlePresenceSync);
     off('user_joined', handleUserJoined);
@@ -683,6 +784,7 @@ function cleanup() {
     off('lock_released', handleLockReleased);
     off('takeover_result', handleTakeoverResult);
     off('field_edit', handleFieldEdit);
+    off('published_state', handlePublishedState);
     off('release_updated', handleReleaseUpdated);
     off('open', handleWsOpen);
 
@@ -692,6 +794,7 @@ function cleanup() {
         form.removeEventListener('focusout', onFieldBlur);
         form.removeEventListener('input', onFieldInput);
         form.removeEventListener('change', onFieldChange);
+        form.removeEventListener('publr:repeater-sync', onRepeaterSync);
     }
 
     for (const key of Object.keys(editDebounceTimers)) {
