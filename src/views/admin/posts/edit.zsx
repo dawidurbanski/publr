@@ -38,7 +38,7 @@ pub fn Edit(props: struct {
                 <label for="title">Title</label>
                 <div class="field-check-row">
                     <span class="field-editor-badge" data-field="title"></span>
-                    <input type="checkbox" class="field-publish-check" data-field="title" checked="" />
+                    <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="title" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 </div>
             </div>
             <input
@@ -55,7 +55,7 @@ pub fn Edit(props: struct {
                 <label for="slug">Slug</label>
                 <div class="field-check-row">
                     <span class="field-editor-badge" data-field="slug"></span>
-                    <input type="checkbox" class="field-publish-check" data-field="slug" checked="" />
+                    <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="slug" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 </div>
             </div>
             <input
@@ -71,7 +71,7 @@ pub fn Edit(props: struct {
                 <label for="content">Content</label>
                 <div class="field-check-row">
                     <span class="field-editor-badge" data-field="body"></span>
-                    <input type="checkbox" class="field-publish-check" data-field="body" checked="" />
+                    <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="body" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 </div>
             </div>
             <textarea

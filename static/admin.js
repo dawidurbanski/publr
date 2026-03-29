@@ -442,28 +442,28 @@
     var publishFieldsInput = document.getElementById('publish-fields');
     var releaseTriggerText = document.getElementById('release-trigger-text');
 
-    // Parse fields-in-releases: build map of fieldName → {id, name}
+    // Parse fields-in-releases: build map of fieldName → [{id, name, scheduled_for}, ...]
     var fieldsInReleases = {};
-    var fieldsInReleasesRaw = form.dataset.fieldsInReleases || '[]';
-    try {
-        var releaseItems = JSON.parse(fieldsInReleasesRaw);
-        for (var ri = 0; ri < releaseItems.length; ri++) {
-            var item = releaseItems[ri];
-            if (item.fields === null) {
-                // Full publish — all fields are in this release
-                form.querySelectorAll('.form-group[data-field]').forEach(function(g) {
-                    if (!fieldsInReleases[g.dataset.field]) {
-                        fieldsInReleases[g.dataset.field] = { id: item.id, name: item.name };
-                    }
-                });
-            } else {
-                for (var fi = 0; fi < item.fields.length; fi++) {
-                    if (!fieldsInReleases[item.fields[fi]]) {
-                        fieldsInReleases[item.fields[fi]] = { id: item.id, name: item.name };
-                    }
+    function parseFieldsInReleases(items) {
+        var map = {};
+        for (var ri = 0; ri < items.length; ri++) {
+            var item = items[ri];
+            if (item.fields === null) continue;
+            var entry = { id: item.id, name: item.name, scheduled_for: item.scheduled_for || null };
+            for (var fi = 0; fi < item.fields.length; fi++) {
+                if (!map[item.fields[fi]]) map[item.fields[fi]] = [];
+                // Avoid duplicate release ids
+                var isDup = false;
+                for (var di = 0; di < map[item.fields[fi]].length; di++) {
+                    if (map[item.fields[fi]][di].id === item.id) { isDup = true; break; }
                 }
+                if (!isDup) map[item.fields[fi]].push(entry);
             }
         }
+        return map;
+    }
+    try {
+        fieldsInReleases = parseFieldsInReleases(JSON.parse(form.dataset.fieldsInReleases || '[]'));
     } catch(e) {}
 
     // Parse field editors: fields changed by other users
@@ -472,8 +472,14 @@
         fieldEditors = JSON.parse(form.dataset.fieldEditors || '{}');
     } catch(e) {}
 
+    // Sub-fields inside containers (repeaters, groups) are not independently tracked
+    function isNestedField(el) {
+        return el.closest('.field-repeater-item-content') !== null || el.closest('.field-group-content') !== null;
+    }
+
     // Populate editor badges and disable fields edited by other users
     form.querySelectorAll('.field-editor-badge[data-field]').forEach(function(badge) {
+        if (isNestedField(badge)) return;
         var editor = fieldEditors[badge.dataset.field];
         if (editor) {
             badge.innerHTML = '<img src="' + editor.avatar + '" alt="" class="field-editor-avatar" /><span>Edited by ' + editor.name + '</span>';
@@ -482,90 +488,114 @@
             var group = badge.closest('.form-group');
             if (group) {
                 group.classList.add('field-hard-locked');
-                var field = group.querySelector('.form-control');
-                if (field) field.disabled = true;
+                group.querySelectorAll('input, textarea, select, button').forEach(function(el) {
+                    if (el.classList.contains('field-peek-btn')) return;
+                    el.disabled = true;
+                });
             }
         }
     });
 
-    // Create "In release XXX" links for fields already in a release
-    form.querySelectorAll('.form-group[data-field]').forEach(function(group) {
-        var rel = fieldsInReleases[group.dataset.field];
-        if (rel) {
+    // Render release badge links for a form group
+    function renderReleaseLinks(group) {
+        group.querySelectorAll('.field-release-link').forEach(function(l) { l.remove(); });
+        var releases = fieldsInReleases[group.dataset.field];
+        if (!releases || releases.length === 0) return;
+        var container = group.querySelector('.field-check-row') || group.querySelector('.form-label-row');
+        if (!container) return;
+        for (var i = 0; i < releases.length; i++) {
+            var rel = releases[i];
             var link = document.createElement('a');
             link.href = '/admin/releases/' + rel.id;
             link.className = 'field-release-link';
-            link.textContent = 'In release ' + rel.name;
-            var checkRow = group.querySelector('.field-check-row');
-            if (checkRow) checkRow.appendChild(link);
-            else group.querySelector('.form-label-row').appendChild(link);
+            link.textContent = 'In release: ' + rel.name;
+            container.appendChild(link);
         }
+    }
+
+    // Create release links on init
+    form.querySelectorAll('.form-group[data-field]').forEach(function(group) {
+        if (isNestedField(group)) return;
+        renderReleaseLinks(group);
     });
 
     // Peek icons (inline SVG for showing published value)
     var peekIconShow = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.42 12.71C2.28 12.5 2.22 12.39 2.18 12.22A.68.68 0 0 1 2.18 11.78C2.22 11.61 2.28 11.5 2.42 11.29 3.55 9.5 6.9 5 12 5s8.45 4.5 9.58 6.29c.14.21.21.32.24.49a.68.68 0 0 1 0 .44c-.04.17-.1.28-.24.49C20.45 14.5 17.1 19 12 19S3.55 14.5 2.42 12.71Z"/><circle cx="12" cy="12" r="3"/></svg>';
     var peekIconHide = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.74 5.09C11.15 5.03 11.57 5 12 5c5.1 0 8.45 4.5 9.58 6.29.14.21.21.32.24.49a.68.68 0 0 1 0 .45c-.04.16-.1.28-.24.49-.3.47-.76 1.14-1.36 1.86M6.72 6.72A14.02 14.02 0 0 0 2.42 11.29c-.14.22-.21.33-.24.49a.68.68 0 0 0 0 .44c.04.17.1.28.24.49C3.55 14.5 6.9 19 12 19c2.06 0 3.83-.73 5.29-1.72M3 3l18 18M9.88 9.88A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.12-.88"/></svg>';
 
-    function ensurePeekWrapper(group) {
-        var existing = group.querySelector('.field-peek-wrapper');
-        if (existing) {
-            existing.classList.remove('field-peek-hidden');
-            return existing;
-        }
-        var control = group.querySelector('.form-control');
-        if (!control) return null;
-        var hadFocus = document.activeElement === control;
-        var selStart, selEnd;
-        if (hadFocus) {
-            try { selStart = control.selectionStart; selEnd = control.selectionEnd; } catch(e) {}
-            form.dataset.peekMutating = '1';
-        }
-        var wrapper = document.createElement('div');
-        wrapper.className = 'field-peek-wrapper';
-        control.parentNode.insertBefore(wrapper, control);
-        wrapper.appendChild(control);
-        if (hadFocus) {
-            control.focus();
-            try { control.setSelectionRange(selStart, selEnd); } catch(e) {}
-            delete form.dataset.peekMutating;
-        }
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'field-peek-btn';
-        btn.title = 'Show published value';
-        btn.innerHTML = peekIconShow;
-        wrapper.appendChild(btn);
-        var valueBox = document.createElement('div');
-        valueBox.className = 'field-peek-value';
-        valueBox.style.display = 'none';
-        wrapper.after(valueBox);
-        btn.addEventListener('click', function() {
-            var vb = group.querySelector('.field-peek-value');
-            if (vb.style.display === 'none') {
-                vb.style.display = '';
-                btn.innerHTML = peekIconHide;
-                btn.title = 'Hide published value';
-            } else {
-                vb.style.display = 'none';
-                btn.innerHTML = peekIconShow;
+    // Set up .field-wrapper + peek button + "Changed" pill on all form groups at init.
+    // The wrapper is always present; peek button visibility is driven by .field-changed CSS.
+    function initFieldWrappers() {
+        form.querySelectorAll('.form-group[data-field]').forEach(function(group) {
+            // Add "Changed" pill inside the label
+            var label = group.querySelector('.form-label-row .form-label') || group.querySelector('.form-label-row label');
+            if (label && !label.querySelector('.field-changed-pill')) {
+                var pill = document.createElement('span');
+                pill.className = 'field-changed-pill';
+                pill.textContent = 'Changed';
+                label.appendChild(pill);
+            }
+
+            // Wrap the field content in .field-wrapper
+            // For regular fields: wrap .form-control; for containers: wrap .field-repeater/.field-group
+            var control = group.querySelector('.form-control');
+            var container = !control ? group.querySelector('.field-repeater, .field-group') : null;
+            var target = control || container;
+            if (!target) return;
+            if (target.closest('.field-wrapper')) return;
+
+            var wrapper = document.createElement('div');
+            wrapper.className = 'field-wrapper';
+            target.parentNode.insertBefore(wrapper, target);
+            wrapper.appendChild(target);
+
+            // Add peek button only for regular fields (not containers)
+            if (control) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'field-peek-btn';
                 btn.title = 'Show published value';
+                btn.innerHTML = peekIconShow;
+                wrapper.appendChild(btn);
+
+                var valueBox = document.createElement('div');
+                valueBox.className = 'field-peek-value';
+                valueBox.style.display = 'none';
+                wrapper.after(valueBox);
+
+                btn.addEventListener('click', function() {
+                    var vb = group.querySelector('.field-peek-value');
+                    if (vb.style.display === 'none') {
+                        vb.style.display = '';
+                        btn.innerHTML = peekIconHide;
+                        btn.title = 'Hide published value';
+                    } else {
+                        vb.style.display = 'none';
+                        btn.innerHTML = peekIconShow;
+                        btn.title = 'Show published value';
+                    }
+                });
             }
         });
-        return wrapper;
     }
 
-    function removePeekWrapper(group) {
-        var wrapper = group.querySelector('.field-peek-wrapper');
-        if (!wrapper) return;
-        // Hide peek UI without moving the control — avoids focus loss
-        wrapper.classList.add('field-peek-hidden');
+    initFieldWrappers();
+
+    function getFieldWrapper(group) {
+        return group.querySelector('.field-wrapper');
+    }
+
+    function resetPeek(group) {
         var vb = group.querySelector('.field-peek-value');
         if (vb) vb.style.display = 'none';
+        var btn = group.querySelector('.field-peek-btn');
+        if (btn) {
+            btn.innerHTML = peekIconShow;
+            btn.title = 'Show published value';
+        }
     }
 
     function updatePeek(group, publishedValue) {
-        var wrapper = ensurePeekWrapper(group);
-        if (!wrapper) return;
         var vb = group.querySelector('.field-peek-value');
         if (!vb) return;
         var fieldKey = group.dataset.field;
@@ -693,12 +723,70 @@
         return el ? (el.value || '') : '';
     }
 
+    // Update peek wrappers on repeater sub-fields
+    function updateRepeaterPeeks(repeater, fieldKey, publishedArr, changed) {
+        var published = Array.isArray(publishedArr) ? publishedArr : [];
+        repeater.querySelectorAll('.field-repeater-item-content .form-group[data-field]').forEach(function(subGroup) {
+            if (!changed) { resetPeek(subGroup); return; }
+            var subFieldKey = subGroup.dataset.field;
+            if (subFieldKey.indexOf(fieldKey + '.') !== 0) return;
+            var rest = subFieldKey.substring(fieldKey.length + 1);
+            var dotPos = rest.indexOf('.');
+            if (dotPos === -1) { resetPeek(subGroup); return; }
+            var idx = parseInt(rest.substring(0, dotPos), 10);
+            var subField = rest.substring(dotPos + 1);
+            if (subField.indexOf('.') !== -1) { resetPeek(subGroup); return; }
+
+            var pubItem = (idx < published.length && typeof published[idx] === 'object' && published[idx] !== null) ? published[idx] : null;
+            var pubVal = pubItem ? ((pubItem[subField] != null) ? String(pubItem[subField]) : '') : '';
+            var input = subGroup.querySelector('.form-control');
+            var curVal = input ? (input.value || '') : '';
+
+            if (curVal !== pubVal || pubItem === null) {
+                updatePeek(subGroup, pubVal);
+            } else {
+                resetPeek(subGroup);
+            }
+        });
+    }
+
+    // Compare repeater form data against published JSON array
+    function isRepeaterChanged(repeater, fieldKey, publishedArr) {
+        var countInput = repeater.querySelector('[data-repeater-count]');
+        var count = countInput ? parseInt(countInput.value, 10) : 0;
+
+        if (!Array.isArray(publishedArr)) return count > 0;
+        if (count !== publishedArr.length) return true;
+
+        for (var i = 0; i < count; i++) {
+            var pubItem = publishedArr[i];
+            if (typeof pubItem !== 'object' || pubItem === null) pubItem = {};
+            var prefix = fieldKey + '.' + i + '.';
+            var inputs = repeater.querySelectorAll('[name]');
+            for (var j = 0; j < inputs.length; j++) {
+                if (inputs[j].hasAttribute('data-repeater-count')) continue;
+                var name = inputs[j].name;
+                if (name.indexOf(prefix) !== 0) continue;
+                var subField = name.substring(prefix.length);
+                // Only check direct sub-fields (skip nested container sub-fields)
+                if (subField.indexOf('.') !== -1) continue;
+                var pubVal = (pubItem[subField] != null) ? String(pubItem[subField]) : '';
+                var curVal = inputs[j].type === 'checkbox' ? (inputs[j].checked ? 'true' : 'false') : (inputs[j].value || '');
+                if (curVal !== pubVal) return true;
+            }
+        }
+        return false;
+    }
+
     function detectChangedFields() {
         if (!publishedFields || entryStatus === 'draft') {
             changedFieldCount = 0;
             selectedFieldCount = 0;
-            form.querySelectorAll('.field-peek-wrapper').forEach(function(w) {
-                removePeekWrapper(w.closest('.form-group'));
+            form.querySelectorAll('.field-wrapper').forEach(function(w) {
+                w.classList.remove('field-changed', 'field-deselected', 'field-in-release');
+                var g = w.closest('.form-group');
+                if (g) g.classList.remove('field-changed', 'field-deselected', 'field-in-release');
+                resetPeek(g);
             });
             return;
         }
@@ -708,41 +796,66 @@
         selectedFieldCount = 0;
 
         groups.forEach(function(group) {
+            if (isNestedField(group)) return;
             var fieldKey = group.dataset.field;
-            var currentValue = getFieldValue(fieldKey);
-            var publishedValue = (publishedFields[fieldKey] != null) ? String(publishedFields[fieldKey]) : '';
             var checkbox = group.querySelector('.field-publish-check');
+            var wrapper = getFieldWrapper(group);
 
-            // Field already in a pending release — show as locked
-            if (fieldsInReleases[fieldKey] && currentValue !== publishedValue) {
-                group.classList.add('field-in-release');
-                group.classList.remove('field-changed', 'field-deselected');
-                removePeekWrapper(group);
-                return;
+            // Determine if field has changed
+            var isChanged;
+            var isContainer = false;
+            var repeater = group.querySelector('.field-repeater[data-field]');
+            var currentValue, publishedValue;
+            if (repeater) {
+                isContainer = true;
+                isChanged = isRepeaterChanged(repeater, fieldKey, publishedFields[fieldKey]);
+            } else {
+                currentValue = getFieldValue(fieldKey);
+                publishedValue = (publishedFields[fieldKey] != null) ? String(publishedFields[fieldKey]) : '';
+                isChanged = currentValue !== publishedValue;
             }
-            group.classList.remove('field-in-release');
 
-            if (currentValue !== publishedValue) {
+            // Mark field-in-release class independently (for badge visibility)
+            if (fieldsInReleases[fieldKey]) {
+                if (wrapper) wrapper.classList.add('field-in-release');
+                group.classList.add('field-in-release');
+            } else {
+                if (wrapper) wrapper.classList.remove('field-in-release');
+                group.classList.remove('field-in-release');
+            }
+
+            if (isChanged) {
                 changedFieldCount++;
-                updatePeek(group, publishedValue);
-                if (checkbox.checked) {
+                if (!isContainer) updatePeek(group, publishedValue);
+                if (repeater) updateRepeaterPeeks(repeater, fieldKey, publishedFields[fieldKey], true);
+                if (checkbox && checkbox.checked) {
+                    if (wrapper) {
+                        wrapper.classList.add('field-changed');
+                        wrapper.classList.remove('field-deselected');
+                    }
                     group.classList.add('field-changed');
-                    group.classList.remove('field-deselected');
                     selectedFieldCount++;
-                } else {
+                } else if (checkbox) {
+                    if (wrapper) {
+                        wrapper.classList.remove('field-changed');
+                        wrapper.classList.add('field-deselected');
+                    }
                     group.classList.remove('field-changed');
                     group.classList.add('field-deselected');
                 }
             } else {
                 // Field unchanged — hide checkbox, reset state
-                checkbox.checked = true;
+                if (checkbox) checkbox.checked = true;
+                if (wrapper) wrapper.classList.remove('field-changed', 'field-deselected');
                 group.classList.remove('field-changed', 'field-deselected');
-                removePeekWrapper(group);
+                if (!isContainer) resetPeek(group);
+                if (repeater) updateRepeaterPeeks(repeater, fieldKey, publishedFields[fieldKey], false);
             }
         });
     }
 
     function updateButtons() {
+        initFieldWrappers(); // Ensure new dynamic sub-fields have wrappers
         detectChangedFields();
 
         if (publishBtn) {
@@ -817,43 +930,27 @@
     form.addEventListener('publr:fields-updated', function() {
         updateButtons();
     });
+    form.addEventListener('publr:published-state', function(e) {
+        if (!e.detail) return;
+        if (e.detail.publishedState) {
+            publishedFields = e.detail.publishedState;
+        }
+        if (e.detail.status) {
+            entryStatus = e.detail.status;
+            form.dataset.entryStatus = entryStatus;
+        }
+        // Reset saved state so autosave detects changes correctly against new baseline
+        lastSavedState = JSON.stringify(getFormState());
+        isDirty = false;
+        updateButtons();
+    });
     form.addEventListener('publr:release-updated', function(e) {
         if (!e.detail || !e.detail.fieldsInReleases) return;
-        // Re-parse fieldsInReleases from broadcast data
-        fieldsInReleases = {};
-        var items = e.detail.fieldsInReleases;
-        for (var ri = 0; ri < items.length; ri++) {
-            var item = items[ri];
-            if (item.fields === null) {
-                form.querySelectorAll('.form-group[data-field]').forEach(function(g) {
-                    if (!fieldsInReleases[g.dataset.field]) {
-                        fieldsInReleases[g.dataset.field] = { id: item.id, name: item.name };
-                    }
-                });
-            } else {
-                for (var fi = 0; fi < item.fields.length; fi++) {
-                    if (!fieldsInReleases[item.fields[fi]]) {
-                        fieldsInReleases[item.fields[fi]] = { id: item.id, name: item.name };
-                    }
-                }
-            }
-        }
-        // Update release link badges in the form
-        form.querySelectorAll('.field-release-link').forEach(function(link) { link.remove(); });
+        fieldsInReleases = parseFieldsInReleases(e.detail.fieldsInReleases);
+        // Re-render release link badges
         form.querySelectorAll('.form-group[data-field]').forEach(function(group) {
-            var rel = fieldsInReleases[group.dataset.field];
-            if (rel) {
-                var link = document.createElement('a');
-                link.href = '/admin/releases/' + rel.id;
-                link.className = 'field-release-link';
-                link.textContent = 'In release ' + rel.name;
-                var checkRow = group.querySelector('.field-check-row');
-                if (checkRow) checkRow.appendChild(link);
-                else {
-                    var labelRow = group.querySelector('.form-label-row');
-                    if (labelRow) labelRow.appendChild(link);
-                }
-            }
+            if (isNestedField(group)) return;
+            renderReleaseLinks(group);
         });
         updateButtons();
     });
@@ -883,8 +980,11 @@
             var selected = [];
             form.querySelectorAll('.field-publish-check:checked').forEach(function(cb) {
                 var group = cb.closest('.form-group[data-field]');
-                if (group && group.classList.contains('field-changed')) {
-                    selected.push(group.dataset.field);
+                if (group) {
+                    var w = getFieldWrapper(group);
+                    if (w && w.classList.contains('field-changed')) {
+                        selected.push(group.dataset.field);
+                    }
                 }
             });
             publishFieldsInput.value = selected.length > 0 ? JSON.stringify(selected) : '';
@@ -936,8 +1036,34 @@
     }
 
     // Populate fields hidden input on form submit (publish button)
-    form.addEventListener('submit', function() {
+    // Warn if publishing fields that are in pending releases
+    form.addEventListener('submit', function(e) {
         populateFields();
+        // Collect fields about to be published that are also in releases
+        var warnings = [];
+        var groups = form.querySelectorAll('.form-group[data-field]');
+        groups.forEach(function(group) {
+            if (isNestedField(group)) return;
+            var fieldKey = group.dataset.field;
+            var wrapper = getFieldWrapper(group);
+            if (!wrapper || !wrapper.classList.contains('field-changed')) return;
+            var releases = fieldsInReleases[fieldKey];
+            if (!releases || releases.length === 0) return;
+            for (var i = 0; i < releases.length; i++) {
+                var found = false;
+                for (var j = 0; j < warnings.length; j++) {
+                    if (warnings[j].id === releases[i].id) { found = true; break; }
+                }
+                if (!found) warnings.push(releases[i]);
+            }
+        });
+        if (warnings.length > 0) {
+            var names = warnings.map(function(w) { return '"' + w.name + '"'; }).join(', ');
+            if (!confirm('Some fields you are publishing are also in pending release(s): ' + names + '.\n\nThis may cause conflicts when those releases are published later.\n\nContinue?')) {
+                e.preventDefault();
+                return false;
+            }
+        }
     });
 })();
 

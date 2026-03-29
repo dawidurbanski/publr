@@ -1,4 +1,4 @@
 .{
     .name = "publr",
-    .configText = "hello from comptime",
+    .configText = "hello from comptime 222",
 }
