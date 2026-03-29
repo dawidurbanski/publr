@@ -35,4 +35,10 @@ pub const Page = content_type.ContentType("page", .{ .name = "Page" }, &.{
 
     // SEO meta description
     field.Text("meta_description", .{ .display = "Meta Description" }),
+
+    // FAQ section
+    field.Repeater("faq", .{ .label = "FAQ" }, &.{
+        field.String("question", .{ .required = true }),
+        field.Text("answer", .{ .required = true }),
+    }),
 });

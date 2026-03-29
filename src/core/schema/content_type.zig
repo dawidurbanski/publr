@@ -349,44 +349,10 @@ fn defaultPlural(comptime name: []const u8) []const u8 {
     return name ++ "s";
 }
 
-/// Generate a struct type from field definitions at comptime
+/// Generate a struct type from field definitions at comptime.
+/// Delegates to the shared implementation in field.zig.
 fn GenerateDataStruct(comptime fields: []const FieldDef) type {
-    var struct_fields: [fields.len]std.builtin.Type.StructField = undefined;
-
-    for (fields, 0..) |f, i| {
-        // Determine the Zig type for this field
-        // Required fields are non-optional, optional fields are wrapped in ?T
-        const FieldType = if (f.required)
-            f.zig_type
-        else
-            // If the type is already optional, use it as-is
-            if (@typeInfo(f.zig_type) == .optional)
-                f.zig_type
-            else
-                ?f.zig_type;
-
-        // Create the struct field
-        struct_fields[i] = .{
-            .name = f.name ++ "", // Ensure we have a proper string literal
-            .type = FieldType,
-            .default_value_ptr = if (f.required)
-                null
-            else
-                // Default to null for optional fields
-                @as(?*const anyopaque, @ptrCast(&@as(FieldType, null))),
-            .is_comptime = false,
-            .alignment = @alignOf(FieldType),
-        };
-    }
-
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &struct_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
+    return field_mod.GenerateSubStruct(fields);
 }
 
 // =============================================================================
@@ -541,4 +507,5 @@ test "getTaxonomyFields returns correct fields" {
 
 test "content_type: public API coverage" {
     _ = ContentType;
+    _ = @import("nested_type_validation.test.zig");
 }

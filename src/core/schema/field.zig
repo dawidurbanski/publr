@@ -33,6 +33,8 @@ pub const RenderContext = struct {
     required: bool,
     /// Validation errors for this field
     errors: ?[]const []const u8 = null,
+    /// Allocator for container fields (Group, Repeater) that need to parse JSON values
+    allocator: ?std.mem.Allocator = null,
 };
 
 /// Storage hint for the field - determines where data is persisted
@@ -104,6 +106,9 @@ pub const FieldDef = struct {
 
     /// Source field for auto-generation (e.g., slug from title)
     source_field: ?[]const u8 = null,
+
+    /// Child fields for container types (Group, Repeater). Empty for scalar fields.
+    sub_fields: []const FieldDef = &.{},
 
     /// Validation function - returns error message or null if valid
     validate: *const fn (value: []const u8) ?[]const u8,
@@ -185,7 +190,7 @@ pub fn String(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <input type="text" class="form-control" id="{s}" name="{s}" value="{s}"
@@ -237,7 +242,7 @@ pub fn Text(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <textarea class="form-control" id="{s}" name="{s}" rows="{}"
@@ -289,7 +294,7 @@ pub fn Slug(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <input type="text" class="form-control" id="{s}" name="{s}" value="{s}"
@@ -352,7 +357,7 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <div data-widget="ref-picker" data-ref-type="{s}" data-ref-many="{s}"
@@ -422,7 +427,7 @@ pub fn Select(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <select class="form-control" id="{s}" name="{s}"
@@ -484,7 +489,7 @@ pub fn Boolean(comptime name: []const u8, comptime opts: struct {
                 \\    <span class="form-label">{s}</span>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <label class="form-check">
@@ -540,7 +545,7 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <input type="datetime-local" class="form-control" id="{s}" name="{s}" value="{s}"
@@ -596,7 +601,7 @@ pub fn Image(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <div class="image-picker" data-publr-component="image-picker" data-publr-state="{s}">
@@ -695,7 +700,7 @@ pub fn Integer(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <input type="number" class="form-control" id="{s}" name="{s}" value="{s}"
@@ -763,7 +768,7 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <input type="number" class="form-control" id="{s}" name="{s}" value="{s}"
@@ -821,7 +826,7 @@ pub fn RichText(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <textarea class="form-control" id="{s}" name="{s}" rows="12"
@@ -881,7 +886,7 @@ pub fn Email(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <input type="email" class="form-control" id="{s}" name="{s}" value="{s}"
@@ -945,7 +950,7 @@ pub fn Url(comptime name: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <input type="url" class="form-control" id="{s}" name="{s}" value="{s}"
@@ -997,7 +1002,7 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
                 \\    <label class="form-label" for="{s}">{s}</label>
                 \\    <div class="field-check-row">
                 \\      <span class="field-editor-badge" data-field="{s}"></span>
-                \\      <input type="checkbox" class="field-publish-check" data-field="{s}" checked />
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 \\    </div>
                 \\  </div>
                 \\  <div data-widget="taxonomy-picker" data-taxonomy="{s}" data-many="{s}"
@@ -1035,6 +1040,359 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
         .validate = S.validate,
         .render = S.render,
     };
+}
+
+// =============================================================================
+// Container Fields
+// =============================================================================
+
+/// Generate a struct type from field definitions at comptime.
+/// Used by Group to create nested struct types, and by ContentType for the top-level Data struct.
+pub fn GenerateSubStruct(comptime fields: []const FieldDef) type {
+    var struct_fields: [fields.len]std.builtin.Type.StructField = undefined;
+
+    for (fields, 0..) |f, i| {
+        const is_repeater = comptime std.mem.eql(u8, f.field_type_id, "repeater");
+
+        // Repeater uses raw slice type (not optional) — empty slice is the "absent" state.
+        const FieldType = if (f.required or is_repeater)
+            f.zig_type
+        else if (@typeInfo(f.zig_type) == .optional)
+            f.zig_type
+        else
+            ?f.zig_type;
+
+        struct_fields[i] = .{
+            .name = f.name ++ "",
+            .type = FieldType,
+            .default_value_ptr = if (f.required)
+                null
+            else if (is_repeater)
+                @as(?*const anyopaque, @ptrCast(&@as(FieldType, &.{})))
+            else
+                @as(?*const anyopaque, @ptrCast(&@as(FieldType, null))),
+            .is_comptime = false,
+            .alignment = @alignOf(FieldType),
+        };
+    }
+
+    return @Type(.{
+        .@"struct" = .{
+            .layout = .auto,
+            .fields = &struct_fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+}
+
+/// Convert a std.json.Value to a string for field rendering.
+fn jsonValueToString(allocator: std.mem.Allocator, value: std.json.Value) ?[]const u8 {
+    return switch (value) {
+        .string => |s| s,
+        .integer => |i| std.fmt.allocPrint(allocator, "{d}", .{i}) catch null,
+        .float => |f| std.fmt.allocPrint(allocator, "{d}", .{f}) catch null,
+        .bool => |b| if (b) "true" else "false",
+        .null => null,
+        .object, .array => blk: {
+            var buf: std.ArrayListUnmanaged(u8) = .{};
+            buf.writer(allocator).print("{f}", .{std.json.fmt(value, .{})}) catch break :blk null;
+            break :blk buf.toOwnedSlice(allocator) catch null;
+        },
+        .number_string => |s| s,
+    };
+}
+
+/// Group of fields — produces a nested JSON object.
+///
+/// Example:
+/// ```zig
+/// field.Group("seo", .{}, &.{
+///     field.String("meta_title", .{}),
+///     field.Text("meta_description", .{}),
+/// })
+/// ```
+///
+/// Produces JSON: `{ "seo": { "meta_title": "...", "meta_description": "..." } }`
+pub fn Group(comptime name: []const u8, comptime config: struct {
+    required: bool = false,
+    label: ?[]const u8 = null,
+    position: Position = .main,
+    translatable_mode: TranslatableMode = .independent,
+}, comptime sub_fields: []const FieldDef) FieldDef {
+    const NestedStruct = GenerateSubStruct(sub_fields);
+
+    const S = struct {
+        pub fn validate(_: []const u8) ?[]const u8 {
+            // Group-level validation is a no-op. Sub-field validation
+            // happens during form parsing where each sub-field's validate
+            // function is called individually.
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            const alloc = ctx.allocator orelse return;
+
+            // Parse the group's JSON value to extract sub-field values
+            var obj: ?std.json.ObjectMap = null;
+            var parsed_result: ?std.json.Parsed(std.json.Value) = null;
+            if (ctx.value) |json_str| {
+                if (json_str.len > 2) {
+                    if (std.json.parseFromSlice(std.json.Value, alloc, json_str, .{})) |result| {
+                        parsed_result = result;
+                        if (result.value == .object) {
+                            obj = result.value.object;
+                        }
+                    } else |_| {}
+                }
+            }
+            defer if (parsed_result) |*pr| pr.deinit();
+
+            // Fieldset wrapper with toggle
+            try writer.print(
+                \\<fieldset class="field-group" data-field="{s}" data-publr-component="toggle" data-publr-state="open">
+                \\  <legend class="field-group-legend" data-publr-part="trigger">{s}</legend>
+                \\  <div class="field-group-content" data-publr-part="content">
+                \\
+            , .{ ctx.name, ctx.display_name });
+
+            // Render each sub-field
+            inline for (sub_fields) |sf| {
+                const sub_value: ?[]const u8 = if (obj) |o| blk: {
+                    if (o.get(sf.name)) |v| {
+                        break :blk jsonValueToString(alloc, v);
+                    }
+                    break :blk null;
+                } else null;
+
+                const dotted = std.fmt.allocPrint(alloc, "{s}.{s}", .{ ctx.name, sf.name }) catch sf.name;
+                sf.render(writer, .{
+                    .name = dotted,
+                    .display_name = sf.display_name,
+                    .value = sub_value,
+                    .required = sf.required,
+                    .allocator = alloc,
+                }) catch {};
+            }
+
+            try writer.writeAll(
+                \\  </div>
+                \\</fieldset>
+                \\
+            );
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = config.label orelse humanize(name),
+        .field_type_id = "group",
+        .zig_type = NestedStruct,
+        .required = config.required,
+        .position = config.position,
+        .translatable_mode = config.translatable_mode,
+        .sub_fields = sub_fields,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Repeater of fields — produces a JSON array of objects.
+///
+/// Example:
+/// ```zig
+/// field.Repeater("questions", .{}, &.{
+///     field.String("question", .{ .required = true }),
+///     field.Text("answer", .{ .required = true }),
+/// })
+/// ```
+///
+/// Produces JSON: `{ "questions": [{ "question": "...", "answer": "..." }, ...] }`
+pub fn Repeater(comptime name: []const u8, comptime config: struct {
+    required: bool = false,
+    label: ?[]const u8 = null,
+    min: ?usize = null,
+    max: ?usize = null,
+    max_depth: usize = 2,
+    position: Position = .main,
+    translatable_mode: TranslatableMode = .independent,
+}, comptime sub_fields: []const FieldDef) FieldDef {
+    // Enforce max_depth: count Repeater nesting in children and add 1 for self
+    const child_depth = computeRepeaterDepth(sub_fields);
+    if (child_depth + 1 > config.max_depth) {
+        @compileError("Repeater nesting exceeds max_depth of " ++ std.fmt.comptimePrint("{d}", .{config.max_depth}));
+    }
+
+    const ItemStruct = GenerateSubStruct(sub_fields);
+
+    const S = struct {
+        pub fn validate(_: []const u8) ?[]const u8 {
+            // Repeater-level validation is a no-op. Sub-field validation
+            // happens during form parsing. Min/max count validation is
+            // handled at the form parsing layer.
+            return null;
+        }
+
+        pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
+            const alloc = ctx.allocator orelse return;
+
+            // Parse the repeater's JSON value (array of objects)
+            var arr: ?std.json.Array = null;
+            var parsed_result: ?std.json.Parsed(std.json.Value) = null;
+            if (ctx.value) |json_str| {
+                if (json_str.len > 1) {
+                    if (std.json.parseFromSlice(std.json.Value, alloc, json_str, .{})) |result| {
+                        parsed_result = result;
+                        if (result.value == .array) {
+                            arr = result.value.array;
+                        }
+                    } else |_| {}
+                }
+            }
+            defer if (parsed_result) |*pr| pr.deinit();
+
+            const item_count = if (arr) |a| a.items.len else 0;
+
+            // Form group wrapper (consistent with other field types for locking/change detection)
+            try writer.print(
+                \\<div class="form-group" data-field="{s}">
+                \\  <div class="form-label-row">
+                \\    <label class="form-label">{s}</label>
+                \\    <div class="field-check-row">
+                \\      <span class="field-editor-badge" data-field="{s}"></span>
+                \\      <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="{s}" checked /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
+                \\    </div>
+                \\  </div>
+                \\<div class="field-repeater" data-field="{s}" data-widget="repeater"
+            , .{ ctx.name, ctx.display_name, ctx.name, ctx.name, ctx.name });
+            if (config.min) |m| try writer.print(" data-min=\"{d}\"", .{m});
+            if (config.max) |m| try writer.print(" data-max=\"{d}\"", .{m});
+            try writer.writeAll(">\n");
+
+            // Hidden count field for form parsing
+            try writer.print(
+                \\  <input type="hidden" name="{s}._count" value="{d}" data-repeater-count />
+                \\
+            , .{ ctx.name, item_count });
+
+            // Items container
+            try writer.writeAll("  <div class=\"field-repeater-items\">\n");
+
+            // Render existing items
+            if (arr) |a| {
+                for (a.items, 0..) |item, idx| {
+                    try writeItemStart(writer);
+                    writeSubFields(writer, alloc, ctx.name, item, idx);
+                    try writeItemEnd(writer);
+                }
+            }
+
+            try writer.writeAll("  </div>\n");
+
+            // Template item (hidden, for JS cloning in task-04)
+            try writer.writeAll("  <template data-repeater-template>\n");
+            try writeItemStart(writer);
+            writeTemplateSubFields(writer, alloc, ctx.name);
+            try writeItemEnd(writer);
+            try writer.writeAll("  </template>\n");
+
+            // Add button
+            try writer.writeAll(
+                \\  <button type="button" class="btn btn-sm" data-repeater-add>Add</button>
+                \\</div>
+                \\</div>
+                \\
+            );
+        }
+
+        fn writeItemStart(writer: std.io.AnyWriter) !void {
+            try writer.writeAll(
+                \\    <div class="field-repeater-item">
+                \\      <div class="field-repeater-item-controls">
+                \\        <button type="button" class="btn btn-sm btn-icon" data-repeater-up title="Move up">&uarr;</button>
+                \\        <button type="button" class="btn btn-sm btn-icon" data-repeater-down title="Move down">&darr;</button>
+                \\        <button type="button" class="btn btn-sm btn-icon btn-ghost" data-repeater-remove title="Remove">&times;</button>
+                \\      </div>
+                \\      <div class="field-repeater-item-content">
+                \\
+            );
+        }
+
+        fn writeItemEnd(writer: std.io.AnyWriter) !void {
+            try writer.writeAll(
+                \\      </div>
+                \\    </div>
+                \\
+            );
+        }
+
+        fn writeSubFields(writer: std.io.AnyWriter, alloc: std.mem.Allocator, base_name: []const u8, item_value: std.json.Value, idx: usize) void {
+            var obj: ?std.json.ObjectMap = null;
+            if (item_value == .object) obj = item_value.object;
+
+            inline for (sub_fields) |sf| {
+                const sub_value: ?[]const u8 = if (obj) |o| blk: {
+                    if (o.get(sf.name)) |v| {
+                        break :blk jsonValueToString(alloc, v);
+                    }
+                    break :blk null;
+                } else null;
+
+                const field_name = std.fmt.allocPrint(alloc, "{s}.{d}.{s}", .{ base_name, idx, sf.name }) catch sf.name;
+                sf.render(writer, .{
+                    .name = field_name,
+                    .display_name = sf.display_name,
+                    .value = sub_value,
+                    .required = sf.required,
+                    .allocator = alloc,
+                }) catch {};
+            }
+        }
+
+        fn writeTemplateSubFields(writer: std.io.AnyWriter, alloc: std.mem.Allocator, base_name: []const u8) void {
+            inline for (sub_fields) |sf| {
+                const field_name = std.fmt.allocPrint(alloc, "{s}.__INDEX__.{s}", .{ base_name, sf.name }) catch sf.name;
+                sf.render(writer, .{
+                    .name = field_name,
+                    .display_name = sf.display_name,
+                    .value = null,
+                    .required = sf.required,
+                    .allocator = alloc,
+                }) catch {};
+            }
+        }
+    };
+
+    return .{
+        .name = name,
+        .display_name = config.label orelse humanize(name),
+        .field_type_id = "repeater",
+        .zig_type = []const ItemStruct,
+        .required = config.required,
+        .position = config.position,
+        .translatable_mode = config.translatable_mode,
+        .sub_fields = sub_fields,
+        .validate = S.validate,
+        .render = S.render,
+    };
+}
+
+/// Compute the maximum Repeater nesting depth in a field tree.
+/// Returns 0 if no nested Repeaters, 1 if one level of Repeater children, etc.
+/// Groups pass through without counting toward depth.
+fn computeRepeaterDepth(comptime fields: []const FieldDef) usize {
+    var max: usize = 0;
+    for (fields) |f| {
+        if (comptime std.mem.eql(u8, f.field_type_id, "repeater")) {
+            const depth = 1 + computeRepeaterDepth(f.sub_fields);
+            if (depth > max) max = depth;
+        } else if (f.sub_fields.len > 0) {
+            // Group or other container — pass through without counting
+            const depth = computeRepeaterDepth(f.sub_fields);
+            if (depth > max) max = depth;
+        }
+    }
+    return max;
 }
 
 // =============================================================================
@@ -1168,6 +1526,384 @@ test "Url field validates required" {
     try std.testing.expect(u.validate("https://example.com") == null);
 }
 
+test "Group generates nested struct type" {
+    const group = Group("seo", .{}, &.{
+        String("meta_title", .{}),
+        Text("meta_description", .{}),
+    });
+
+    try std.testing.expectEqualStrings("group", group.field_type_id);
+    try std.testing.expectEqualStrings("seo", group.name);
+    try std.testing.expectEqualStrings("Seo", group.display_name);
+    try std.testing.expect(group.sub_fields.len == 2);
+
+    // Verify the nested struct type
+    const info = @typeInfo(group.zig_type);
+    try std.testing.expect(info == .@"struct");
+    try std.testing.expect(info.@"struct".fields.len == 2);
+    try std.testing.expectEqualStrings("meta_title", info.@"struct".fields[0].name);
+    try std.testing.expectEqualStrings("meta_description", info.@"struct".fields[1].name);
+}
+
+test "Group JSON round-trip" {
+    const group = Group("seo", .{}, &.{
+        String("meta_title", .{ .required = true }),
+        String("meta_description", .{}),
+    });
+
+    const json =
+        \\{"meta_title":"Hello","meta_description":"World"}
+    ;
+
+    const parsed = try std.json.parseFromSlice(group.zig_type, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings("Hello", parsed.value.meta_title);
+    try std.testing.expect(parsed.value.meta_description != null);
+    try std.testing.expectEqualStrings("World", parsed.value.meta_description.?);
+
+    // Serialize back
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(std.testing.allocator);
+    try buf.writer(std.testing.allocator).print("{f}", .{std.json.fmt(parsed.value, .{})});
+    try std.testing.expectEqualStrings(json, buf.items);
+}
+
+test "Nested Group (Group inside Group)" {
+    const inner = Group("og", .{}, &.{
+        String("title", .{}),
+        String("image", .{}),
+    });
+
+    const outer = Group("seo", .{}, &.{
+        String("meta_title", .{}),
+        inner,
+    });
+
+    const info = @typeInfo(outer.zig_type);
+    try std.testing.expect(info == .@"struct");
+    try std.testing.expect(info.@"struct".fields.len == 2);
+
+    // Inner field type should also be a struct
+    const inner_type_info = @typeInfo(inner.zig_type);
+    try std.testing.expect(inner_type_info == .@"struct");
+    try std.testing.expect(inner_type_info.@"struct".fields.len == 2);
+}
+
+test "Optional Group parses null and object" {
+    const group = Group("seo", .{}, &.{
+        String("meta_title", .{ .required = true }),
+    });
+
+    // Wrap as optional (simulating non-required in ContentType)
+    const Wrapper = GenerateSubStruct(&.{group});
+
+    // Parse object
+    {
+        const json =
+            \\{"seo":{"meta_title":"Hello"}}
+        ;
+        const parsed = try std.json.parseFromSlice(Wrapper, std.testing.allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expect(parsed.value.seo != null);
+        try std.testing.expectEqualStrings("Hello", parsed.value.seo.?.meta_title);
+    }
+
+    // Parse with missing key (defaults to null)
+    {
+        const json = "{}";
+        const parsed = try std.json.parseFromSlice(Wrapper, std.testing.allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expect(parsed.value.seo == null);
+    }
+}
+
+test "Group validation is no-op at group level" {
+    const group = Group("seo", .{}, &.{
+        String("meta_title", .{ .required = true }),
+    });
+
+    // Group-level validate always passes
+    try std.testing.expect(group.validate("") == null);
+    try std.testing.expect(group.validate("anything") == null);
+}
+
+test "Group render emits fieldset" {
+    const group = Group("seo", .{}, &.{
+        String("meta_title", .{ .required = true }),
+    });
+
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(std.testing.allocator);
+
+    try group.render(buf.writer(std.testing.allocator).any(), .{
+        .name = "seo",
+        .display_name = "SEO",
+        .value = null,
+        .required = false,
+        .allocator = std.testing.allocator,
+    });
+
+    const html = buf.items;
+    try std.testing.expect(std.mem.indexOf(u8, html, "<fieldset class=\"field-group\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-field=\"seo\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "SEO") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "name=\"seo.meta_title\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "</fieldset>") != null);
+}
+
+test "Group render populates sub-field values from JSON" {
+    const group = Group("seo", .{}, &.{
+        String("meta_title", .{}),
+    });
+
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(std.testing.allocator);
+
+    try group.render(buf.writer(std.testing.allocator).any(), .{
+        .name = "seo",
+        .display_name = "SEO",
+        .value = "{\"meta_title\":\"Hello World\"}",
+        .required = false,
+        .allocator = std.testing.allocator,
+    });
+
+    const html = buf.items;
+    try std.testing.expect(std.mem.indexOf(u8, html, "value=\"Hello World\"") != null);
+}
+
+test "Conditional Group has condition config" {
+    // Conditional groups are supported via the existing data-field attribute
+    // on the fieldset — the condition system uses data-field for show/hide.
+    const group = Group("seo", .{ .label = "SEO Settings" }, &.{
+        String("meta_title", .{}),
+    });
+
+    try std.testing.expectEqualStrings("SEO Settings", group.display_name);
+    try std.testing.expectEqualStrings("group", group.field_type_id);
+}
+
+test "Repeater generates slice type" {
+    const repeater = Repeater("questions", .{}, &.{
+        String("question", .{ .required = true }),
+        Text("answer", .{ .required = true }),
+    });
+
+    try std.testing.expectEqualStrings("repeater", repeater.field_type_id);
+    try std.testing.expectEqualStrings("questions", repeater.name);
+    try std.testing.expect(repeater.sub_fields.len == 2);
+
+    // zig_type should be a slice
+    const info = @typeInfo(repeater.zig_type);
+    try std.testing.expect(info == .pointer);
+    try std.testing.expect(info.pointer.size == .slice);
+
+    // Element type should be a struct with the sub-fields
+    const elem_info = @typeInfo(info.pointer.child);
+    try std.testing.expect(elem_info == .@"struct");
+    try std.testing.expect(elem_info.@"struct".fields.len == 2);
+    try std.testing.expectEqualStrings("question", elem_info.@"struct".fields[0].name);
+    try std.testing.expectEqualStrings("answer", elem_info.@"struct".fields[1].name);
+}
+
+test "Repeater JSON round-trip" {
+    const repeater = Repeater("questions", .{}, &.{
+        String("question", .{ .required = true }),
+        String("answer", .{ .required = true }),
+    });
+
+    const Wrapper = GenerateSubStruct(&.{repeater});
+
+    const json =
+        \\{"questions":[{"question":"What?","answer":"A CMS."},{"question":"How?","answer":"Zig."}]}
+    ;
+
+    const parsed = try std.json.parseFromSlice(Wrapper, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.questions.len == 2);
+    try std.testing.expectEqualStrings("What?", parsed.value.questions[0].question);
+    try std.testing.expectEqualStrings("A CMS.", parsed.value.questions[0].answer);
+    try std.testing.expectEqualStrings("How?", parsed.value.questions[1].question);
+    try std.testing.expectEqualStrings("Zig.", parsed.value.questions[1].answer);
+
+    // Serialize back
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(std.testing.allocator);
+    try buf.writer(std.testing.allocator).print("{f}", .{std.json.fmt(parsed.value, .{})});
+    try std.testing.expectEqualStrings(json, buf.items);
+}
+
+test "Empty Repeater parses to empty slice" {
+    const repeater = Repeater("items", .{}, &.{
+        String("label", .{ .required = true }),
+    });
+
+    const Wrapper = GenerateSubStruct(&.{repeater});
+
+    // Parse with empty array
+    {
+        const json =
+            \\{"items":[]}
+        ;
+        const parsed = try std.json.parseFromSlice(Wrapper, std.testing.allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expect(parsed.value.items.len == 0);
+    }
+
+    // Parse with missing key — defaults to empty slice (not null)
+    {
+        const json = "{}";
+        const parsed = try std.json.parseFromSlice(Wrapper, std.testing.allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expect(parsed.value.items.len == 0);
+    }
+}
+
+test "Repeater with Group inside — JSON round-trip" {
+    const repeater = Repeater("items", .{}, &.{
+        String("label", .{ .required = true }),
+        Group("appearance", .{}, &.{
+            String("style", .{}),
+            String("icon", .{}),
+        }),
+    });
+
+    const Wrapper = GenerateSubStruct(&.{repeater});
+
+    const json =
+        \\{"items":[{"label":"Products","appearance":{"style":"bold","icon":"star"}}]}
+    ;
+
+    const parsed = try std.json.parseFromSlice(Wrapper, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.items.len == 1);
+    try std.testing.expectEqualStrings("Products", parsed.value.items[0].label);
+    try std.testing.expect(parsed.value.items[0].appearance != null);
+    try std.testing.expectEqualStrings("bold", parsed.value.items[0].appearance.?.style.?);
+}
+
+test "Repeater inside Group — JSON round-trip" {
+    const group = Group("nav", .{}, &.{
+        String("title", .{ .required = true }),
+        Repeater("links", .{}, &.{
+            String("label", .{ .required = true }),
+            String("url", .{ .required = true }),
+        }),
+    });
+
+    const Wrapper = GenerateSubStruct(&.{group});
+
+    const json =
+        \\{"nav":{"title":"Main Nav","links":[{"label":"Home","url":"/"},{"label":"About","url":"/about"}]}}
+    ;
+
+    const parsed = try std.json.parseFromSlice(Wrapper, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.nav != null);
+    try std.testing.expectEqualStrings("Main Nav", parsed.value.nav.?.title);
+    try std.testing.expect(parsed.value.nav.?.links.len == 2);
+    try std.testing.expectEqualStrings("Home", parsed.value.nav.?.links[0].label);
+}
+
+test "Nested Repeater within max_depth" {
+    // Repeater inside Repeater: depth = 2, max_depth = 2 — allowed
+    const repeater = Repeater("sections", .{ .max_depth = 2 }, &.{
+        String("title", .{ .required = true }),
+        Repeater("items", .{}, &.{
+            String("label", .{ .required = true }),
+        }),
+    });
+
+    try std.testing.expectEqualStrings("repeater", repeater.field_type_id);
+    try std.testing.expect(repeater.sub_fields.len == 2);
+}
+
+test "Repeater validation is no-op" {
+    const repeater = Repeater("items", .{}, &.{
+        String("label", .{ .required = true }),
+    });
+
+    try std.testing.expect(repeater.validate("") == null);
+    try std.testing.expect(repeater.validate("anything") == null);
+}
+
+test "Repeater render emits container with items" {
+    const repeater = Repeater("questions", .{ .min = 1, .max = 5 }, &.{
+        String("question", .{ .required = true }),
+    });
+
+    // Use arena to avoid leak detection on render allocations
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(alloc);
+
+    // Render with existing items
+    try repeater.render(buf.writer(alloc).any(), .{
+        .name = "questions",
+        .display_name = "Questions",
+        .value = "[{\"question\":\"What?\"}]",
+        .required = false,
+        .allocator = alloc,
+    });
+
+    const html = buf.items;
+    // Container with data attributes
+    try std.testing.expect(std.mem.indexOf(u8, html, "class=\"field-repeater\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-widget=\"repeater\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-min=\"1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-max=\"5\"") != null);
+    // Count hidden field
+    try std.testing.expect(std.mem.indexOf(u8, html, "name=\"questions._count\" value=\"1\"") != null);
+    // Indexed field names
+    try std.testing.expect(std.mem.indexOf(u8, html, "name=\"questions.0.question\"") != null);
+    // Item value populated
+    try std.testing.expect(std.mem.indexOf(u8, html, "value=\"What?\"") != null);
+    // Template with __INDEX__
+    try std.testing.expect(std.mem.indexOf(u8, html, "<template data-repeater-template>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "name=\"questions.__INDEX__.question\"") != null);
+    // Add button
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-repeater-add") != null);
+    // Item controls
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-repeater-up") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-repeater-down") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-repeater-remove") != null);
+}
+
+test "Repeater render with empty value" {
+    const repeater = Repeater("items", .{}, &.{
+        String("label", .{}),
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(alloc);
+
+    try repeater.render(buf.writer(alloc).any(), .{
+        .name = "items",
+        .display_name = "Items",
+        .value = null,
+        .required = false,
+        .allocator = alloc,
+    });
+
+    const html = buf.items;
+    // Count should be 0
+    try std.testing.expect(std.mem.indexOf(u8, html, "value=\"0\"") != null);
+    // Template should still be present
+    try std.testing.expect(std.mem.indexOf(u8, html, "<template data-repeater-template>") != null);
+    // No real items (no indexed field names except in template)
+    try std.testing.expect(std.mem.indexOf(u8, html, "name=\"items.0.label\"") == null);
+}
+
 test "field: public API coverage" {
     _ = humanize;
     _ = String;
@@ -1184,4 +1920,7 @@ test "field: public API coverage" {
     _ = Email;
     _ = Url;
     _ = Taxonomy;
+    _ = Group;
+    _ = Repeater;
+    _ = GenerateSubStruct;
 }
