@@ -152,6 +152,54 @@ fn handleDetail(ctx: *Context) !void {
         return;
     };
 
+    renderDetailPage(ctx, db, release_id, &.{});
+}
+
+fn handlePublish(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, "/admin/releases");
+        return;
+    };
+
+    const release_id = ctx.param("id") orelse {
+        redirect(ctx, "/admin/releases");
+        return;
+    };
+
+    const force = ctx.formValue("force");
+    const is_force = if (force) |f| std.mem.eql(u8, f, "1") else false;
+
+    if (!is_force) {
+        // First pass: detect conflicts
+        const conflicts = cms.detectReleaseConflicts(ctx.allocator, db, release_id) catch &[_]cms.ReleaseFieldConflict{};
+        if (conflicts.len > 0) {
+            // Re-render detail page with conflict UI
+            renderDetailWithConflicts(ctx, db, release_id, conflicts);
+            return;
+        }
+    }
+
+    // Collect skip fields from checkboxes
+    const skip_json = ctx.formValue("skip_fields");
+    if (skip_json != null or is_force) {
+        cms.publishBatchReleaseWithSkips(ctx.allocator, db, release_id, skip_json) catch |err| {
+            std.log.err("releases: publishBatchReleaseWithSkips failed: {s}", .{@errorName(err)});
+        };
+    } else {
+        cms.publishBatchRelease(ctx.allocator, db, release_id) catch |err| {
+            std.log.err("releases: publishBatchRelease failed: {s}", .{@errorName(err)});
+        };
+    }
+
+    const url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}", .{release_id}) catch "/admin/releases";
+    redirect(ctx, url);
+}
+
+fn renderDetailWithConflicts(ctx: *Context, db: anytype, release_id: []const u8, conflicts: []const cms.ReleaseFieldConflict) void {
+    renderDetailPage(ctx, db, release_id, conflicts);
+}
+
+fn renderDetailPage(ctx: *Context, db: anytype, release_id: []const u8, conflicts: []const cms.ReleaseFieldConflict) void {
     const detail = cms.getRelease(ctx.allocator, db, release_id) catch {
         redirect(ctx, "/admin/releases");
         return;
@@ -162,15 +210,9 @@ fn handleDetail(ctx: *Context) !void {
 
     const csrf_token = csrf.ensureToken(ctx);
 
-    const ViewItem = struct {
-        entry_id: []const u8,
-        entry_title: []const u8,
-        entry_status: []const u8,
-        edit_url: []const u8,
-        remove_url: []const u8,
-    };
+    const DetailTpl = views.admin.releases.detail;
 
-    var view_items = ctx.allocator.alloc(ViewItem, detail.items.len) catch {
+    var view_items = ctx.allocator.alloc(DetailTpl.Item, detail.items.len) catch {
         redirect(ctx, "/admin/releases");
         return;
     };
@@ -185,12 +227,26 @@ fn handleDetail(ctx: *Context) !void {
         };
     }
 
+    var conflict_views = ctx.allocator.alloc(DetailTpl.Conflict, conflicts.len) catch {
+        redirect(ctx, "/admin/releases");
+        return;
+    };
+
+    for (conflicts, 0..) |c, i| {
+        conflict_views[i] = .{
+            .entry_title = c.entry_title,
+            .field_name = c.field_name,
+            .release_value = c.release_value,
+            .current_value = c.current_value,
+        };
+    }
+
     const is_pending = std.mem.eql(u8, detail.status, "pending");
     const is_released = std.mem.eql(u8, detail.status, "released");
     const is_reverted = std.mem.eql(u8, detail.status, "reverted");
     const can_archive = !is_pending;
 
-    const content = tpl.render(views.admin.releases.detail.Detail, .{.{
+    const content = tpl.render(DetailTpl.Detail, .{.{
         .name = detail.name,
         .status = detail.status,
         .author = detail.author_email orelse "System",
@@ -206,28 +262,10 @@ fn handleDetail(ctx: *Context) !void {
         .is_reverted = is_reverted,
         .can_archive = can_archive,
         .error_message = "",
+        .conflicts = conflict_views,
     }});
 
     ctx.html(registry.renderPageWith(page, ctx, content, detail.name));
-}
-
-fn handlePublish(ctx: *Context) !void {
-    const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/releases");
-        return;
-    };
-
-    const release_id = ctx.param("id") orelse {
-        redirect(ctx, "/admin/releases");
-        return;
-    };
-
-    cms.publishBatchRelease(ctx.allocator, db, release_id) catch |err| {
-        std.debug.print("Error publishing release: {}\n", .{err});
-    };
-
-    const url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}", .{release_id}) catch "/admin/releases";
-    redirect(ctx, url);
 }
 
 fn handleRevert(ctx: *Context) !void {

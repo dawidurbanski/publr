@@ -46,6 +46,9 @@ pub const addToRelease = release.addToRelease;
 pub const removeFromRelease = release.removeFromRelease;
 pub const archiveRelease = release.archiveRelease;
 pub const publishBatchRelease = release.publishBatchRelease;
+pub const publishBatchReleaseWithSkips = release.publishBatchReleaseWithSkips;
+pub const ReleaseFieldConflict = release.ReleaseFieldConflict;
+pub const detectReleaseConflicts = release.detectReleaseConflicts;
 
 // =========================================================================
 // Release Queries

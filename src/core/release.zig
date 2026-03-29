@@ -71,6 +71,7 @@ pub const EntryReleaseFieldInfo = struct {
     release_id: []const u8,
     release_name: []const u8,
     fields: ?[]const u8, // JSON array of field names, or null for full publish
+    scheduled_for: ?i64 = null,
 };
 
 fn appendFlowHistory(
@@ -1213,10 +1214,10 @@ pub fn getEntryPendingReleaseIds(allocator: Allocator, db: *Db, entry_id: []cons
 /// Get pending release items for an entry, with release name and field list.
 pub fn getEntryPendingReleaseFields(allocator: Allocator, db: *Db, entry_id: []const u8) ![]const EntryReleaseFieldInfo {
     var stmt = try db.prepare(
-        \\SELECT ri.release_id, r.name, ri.selected_fields
+        \\SELECT ri.release_id, r.name, ri.selected_fields, r.scheduled_for
         \\FROM release_entries ri
         \\JOIN releases r ON r.id = ri.release_id
-        \\WHERE ri.entry_id = ?1 AND r.status = 'pending' AND r.name IS NOT NULL
+        \\WHERE ri.entry_id = ?1 AND (r.status = 'pending' OR r.status = 'scheduled') AND r.name IS NOT NULL
     );
     defer stmt.deinit();
     try stmt.bindText(1, entry_id);
@@ -1228,9 +1229,390 @@ pub fn getEntryPendingReleaseFields(allocator: Allocator, db: *Db, entry_id: []c
             .release_id = try allocator.dupe(u8, stmt.columnText(0) orelse ""),
             .release_name = try allocator.dupe(u8, stmt.columnText(1) orelse ""),
             .fields = if (stmt.columnText(2)) |f| try allocator.dupe(u8, f) else null,
+            .scheduled_for = if (stmt.columnIsNull(3)) null else stmt.columnInt(3),
         });
     }
     return results.toOwnedSlice(allocator);
+}
+
+/// A single field conflict in a release
+pub const ReleaseFieldConflict = struct {
+    entry_id: []const u8,
+    entry_title: []const u8,
+    field_name: []const u8,
+    release_value: []const u8,
+    current_value: []const u8,
+};
+
+/// Detect conflicts for a release: fields where from_version_id != current published_version_id.
+/// Returns list of per-field conflicts showing release vs current published values.
+pub fn detectReleaseConflicts(allocator: Allocator, db: *Db, release_id: []const u8) ![]const ReleaseFieldConflict {
+    // For each release_entries row with selected_fields, compare from_version_id vs published_version_id
+    var items_stmt = try db.prepare(
+        \\SELECT ri.entry_id, COALESCE(e.title, '(untitled)'),
+        \\  ri.from_version_id, e.published_version_id,
+        \\  ri.selected_fields, ri.to_version_id
+        \\FROM release_entries ri
+        \\JOIN content_entries e ON e.id = ri.entry_id
+        \\WHERE ri.release_id = ?1
+    );
+    defer items_stmt.deinit();
+    try items_stmt.bindText(1, release_id);
+
+    var conflicts: std.ArrayList(ReleaseFieldConflict) = .{};
+    errdefer conflicts.deinit(allocator);
+
+    while (try items_stmt.step()) {
+        const entry_id = items_stmt.columnText(0) orelse continue;
+        const entry_title = items_stmt.columnText(1) orelse "(untitled)";
+        const from_vid = items_stmt.columnText(2);
+        const published_vid = items_stmt.columnText(3);
+
+        // No conflict if from_version matches current published version
+        if (from_vid) |fv| {
+            if (published_vid) |pv| {
+                if (std.mem.eql(u8, fv, pv)) continue;
+            } else continue; // from_vid set but no published — shouldn't happen, skip
+        } else {
+            if (published_vid == null) continue; // Both null — first publish, no conflict
+            // from_vid null but published exists — entry was published after staging
+        }
+
+        const fields_json = items_stmt.columnText(4);
+        const to_vid = items_stmt.columnText(5) orelse continue;
+
+        // Get the release's snapshot data (to_version)
+        var to_data: []const u8 = "{}";
+        var to_stmt: ?Statement = null;
+        defer if (to_stmt) |*s| s.deinit();
+        {
+            var stmt = try db.prepare("SELECT data_json FROM content_versions WHERE id = ?1");
+            try stmt.bindText(1, to_vid);
+            if (try stmt.step()) {
+                to_data = stmt.columnText(0) orelse "{}";
+            }
+            to_stmt = stmt;
+        }
+
+        // Get current published data
+        const pub_data = getPublishedData(allocator, db, entry_id) catch continue orelse continue;
+        defer allocator.free(pub_data);
+
+        if (fields_json) |fj| {
+            // Partial publish — compare per-field
+            const parsed = std.json.parseFromSlice(std.json.Value, allocator, fj, .{}) catch continue;
+            defer parsed.deinit();
+            if (parsed.value != .array) continue;
+
+            const to_parsed = std.json.parseFromSlice(std.json.Value, allocator, to_data, .{}) catch continue;
+            defer to_parsed.deinit();
+            const to_obj = if (to_parsed.value == .object) to_parsed.value.object else continue;
+
+            const pub_parsed = std.json.parseFromSlice(std.json.Value, allocator, pub_data, .{}) catch continue;
+            defer pub_parsed.deinit();
+            const pub_obj = if (pub_parsed.value == .object) pub_parsed.value.object else continue;
+
+            // Get from_version data for comparison
+            var from_data: []const u8 = "{}";
+            var from_alloc: ?[]const u8 = null;
+            defer if (from_alloc) |fa| allocator.free(fa);
+            if (from_vid) |fv| {
+                var fstmt = try db.prepare("SELECT data_json FROM content_versions WHERE id = ?1");
+                defer fstmt.deinit();
+                try fstmt.bindText(1, fv);
+                if (try fstmt.step()) {
+                    if (fstmt.columnText(0)) |fd| {
+                        from_alloc = try allocator.dupe(u8, fd);
+                        from_data = from_alloc.?;
+                    }
+                }
+            }
+            const from_parsed = std.json.parseFromSlice(std.json.Value, allocator, from_data, .{}) catch continue;
+            defer from_parsed.deinit();
+            const from_obj = if (from_parsed.value == .object) from_parsed.value.object else continue;
+
+            for (parsed.value.array.items) |field_item| {
+                if (field_item != .string) continue;
+                const fname = field_item.string;
+
+                // Get values: from_version[field], published[field], to_version[field]
+                const from_val = from_obj.get(fname);
+                const pub_val = pub_obj.get(fname);
+
+                // Conflict exists if the published value has changed since staging
+                // (from_version[field] != current_published[field])
+                const from_str = if (from_val) |v| stringifyJsonValue(allocator, v) catch null else null;
+                defer if (from_str) |s| allocator.free(s);
+                const pub_str = if (pub_val) |v| stringifyJsonValue(allocator, v) catch null else null;
+                defer if (pub_str) |s| allocator.free(s);
+
+                const from_s = from_str orelse "";
+                const pub_s = pub_str orelse "";
+                if (std.mem.eql(u8, from_s, pub_s)) continue;
+
+                // This field has a conflict
+                const release_val = if (to_obj.get(fname)) |v| stringifyJsonValue(allocator, v) catch try allocator.dupe(u8, "?") else try allocator.dupe(u8, "(not set)");
+                try conflicts.append(allocator, .{
+                    .entry_id = try allocator.dupe(u8, entry_id),
+                    .entry_title = try allocator.dupe(u8, entry_title),
+                    .field_name = try allocator.dupe(u8, fname),
+                    .release_value = release_val,
+                    .current_value = try allocator.dupe(u8, pub_s),
+                });
+            }
+        } else {
+            // Full publish — just note a generic conflict for the whole entry
+            try conflicts.append(allocator, .{
+                .entry_id = try allocator.dupe(u8, entry_id),
+                .entry_title = try allocator.dupe(u8, entry_title),
+                .field_name = try allocator.dupe(u8, "(full entry)"),
+                .release_value = try allocator.dupe(u8, "(full snapshot)"),
+                .current_value = try allocator.dupe(u8, "(modified since staging)"),
+            });
+        }
+    }
+
+    return conflicts.toOwnedSlice(allocator);
+}
+
+/// Stringify a JSON value for display (truncated for readability)
+fn stringifyJsonValue(allocator: Allocator, value: std.json.Value) ![]const u8 {
+    switch (value) {
+        .null => return try allocator.dupe(u8, "null"),
+        .bool => |b| return try allocator.dupe(u8, if (b) "true" else "false"),
+        .integer => |i| return try std.fmt.allocPrint(allocator, "{d}", .{i}),
+        .float => |f| return try std.fmt.allocPrint(allocator, "{d}", .{f}),
+        .string => |s| {
+            if (s.len > 80) {
+                const truncated = try allocator.alloc(u8, 83);
+                @memcpy(truncated[0..80], s[0..80]);
+                @memcpy(truncated[80..83], "...");
+                return truncated;
+            }
+            return try allocator.dupe(u8, s);
+        },
+        .array => |arr| return try std.fmt.allocPrint(allocator, "[{d} items]", .{arr.items.len}),
+        .object => |obj| return try std.fmt.allocPrint(allocator, "{{{d} fields}}", .{obj.count()}),
+        .number_string => |s| return try allocator.dupe(u8, s),
+    }
+}
+
+/// Publish a batch release with optional field skip list.
+/// skip_fields_json: JSON array of field names to exclude from merge, or null.
+pub fn publishBatchReleaseWithSkips(allocator: Allocator, db: *Db, release_id: []const u8, skip_fields_json: ?[]const u8) !void {
+    // Parse skip fields if provided
+    var skip_set: ?std.json.ArrayHashMap(void) = null;
+    defer if (skip_set) |*ss| ss.map.deinit(allocator);
+
+    if (skip_fields_json) |sfj| {
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, sfj, .{}) catch null;
+        defer if (parsed) |p| p.deinit();
+
+        if (parsed) |p| {
+            if (p.value == .array) {
+                var set: std.json.ArrayHashMap(void) = .{};
+                for (p.value.array.items) |item| {
+                    if (item == .string) {
+                        set.map.put(allocator, item.string, {}) catch continue;
+                    }
+                }
+                skip_set = set;
+            }
+        }
+    }
+
+    // Validate release is pending
+    {
+        var stmt = try db.prepare("SELECT status FROM releases WHERE id = ?1");
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        if (!try stmt.step()) return ReleaseError.ReleaseNotFound;
+        const status = stmt.columnText(0) orelse return ReleaseError.ReleaseNotFound;
+        if (!std.mem.eql(u8, status, "pending") and !std.mem.eql(u8, status, "scheduled")) return ReleaseError.InvalidReleaseStatus;
+    }
+
+    // Fetch release author
+    var release_author_id: ?[]const u8 = null;
+    {
+        var a_stmt = try db.prepare("SELECT author_id FROM releases WHERE id = ?1");
+        defer a_stmt.deinit();
+        try a_stmt.bindText(1, release_id);
+        if (try a_stmt.step()) {
+            if (a_stmt.columnText(0)) |aid| {
+                release_author_id = try allocator.dupe(u8, aid);
+            }
+        }
+    }
+    defer if (release_author_id) |a| allocator.free(a);
+
+    // For each item: apply to_version data and set status/published_version_id
+    {
+        var items_stmt = try db.prepare(
+            \\SELECT ri.entry_id, ri.to_version_id, ev.data_json, ri.selected_fields, ri.from_version_id
+            \\FROM release_entries ri
+            \\JOIN content_versions ev ON ev.id = ri.to_version_id
+            \\WHERE ri.release_id = ?1
+        );
+        defer items_stmt.deinit();
+        try items_stmt.bindText(1, release_id);
+
+        while (try items_stmt.step()) {
+            const eid = items_stmt.columnText(0) orelse continue;
+            const to_vid = items_stmt.columnText(1) orelse continue;
+            const to_data = items_stmt.columnText(2) orelse continue;
+            const fields = items_stmt.columnText(3);
+            const from_vid = items_stmt.columnText(4);
+
+            if (fields) |fields_json| {
+                // Partial publish: merge selected fields into published version
+                const parsed = std.json.parseFromSlice(std.json.Value, allocator, fields_json, .{}) catch continue;
+                defer parsed.deinit();
+
+                if (parsed.value != .array) continue;
+
+                const arr = parsed.value.array;
+                var names = allocator.alloc([]const u8, arr.items.len) catch continue;
+                defer allocator.free(names);
+                var count: usize = 0;
+
+                for (arr.items) |item| {
+                    if (item == .string) {
+                        // Skip fields in skip_set
+                        if (skip_set) |ss| {
+                            if (ss.map.contains(item.string)) continue;
+                        }
+                        names[count] = item.string;
+                        count += 1;
+                    }
+                }
+                if (count == 0) continue;
+                const field_names = names[0..count];
+
+                // Get current published data
+                const published_data = getPublishedData(allocator, db, eid) catch continue orelse continue;
+                defer allocator.free(published_data);
+
+                // Merge: published + selected fields from to_version data
+                const merged_data = mergeJsonFields(allocator, published_data, to_data, field_names) catch continue;
+                defer allocator.free(merged_data);
+
+                // Collect collaborators
+                const collab_json = collectCollaborators(allocator, db, eid, from_vid, to_vid, release_author_id) catch null;
+                defer if (collab_json) |c| allocator.free(c);
+
+                // Create new version with merged data
+                const new_vid = id_gen.generateVersionId();
+                {
+                    var v_stmt = try db.prepare(
+                        \\INSERT INTO content_versions (id, entry_id, parent_id, data_json, author_id, version_type, collaborators)
+                        \\VALUES (?1, ?2, ?3, ?4, ?5, 'published', ?6)
+                    );
+                    defer v_stmt.deinit();
+                    try v_stmt.bindText(1, &new_vid);
+                    try v_stmt.bindText(2, eid);
+                    try v_stmt.bindText(3, to_vid);
+                    try v_stmt.bindText(4, merged_data);
+                    try v_stmt.bindNull(5);
+                    if (collab_json) |cj| try v_stmt.bindText(6, cj) else try v_stmt.bindNull(6);
+                    _ = try v_stmt.step();
+                }
+
+                // Update release_entries.to_version
+                {
+                    var ri_stmt = try db.prepare(
+                        "UPDATE release_entries SET to_version_id = ?1 WHERE release_id = ?2 AND entry_id = ?3",
+                    );
+                    defer ri_stmt.deinit();
+                    try ri_stmt.bindText(1, &new_vid);
+                    try ri_stmt.bindText(2, release_id);
+                    try ri_stmt.bindText(3, eid);
+                    _ = try ri_stmt.step();
+                }
+
+                // Determine status
+                var cur_stmt2 = try db.prepare(
+                    \\SELECT ev.data_json FROM content_entries e
+                    \\JOIN content_versions ev ON ev.id = e.current_version_id
+                    \\WHERE e.id = ?1
+                );
+                defer cur_stmt2.deinit();
+                try cur_stmt2.bindText(1, eid);
+                const still_changed = if (try cur_stmt2.step())
+                    if (cur_stmt2.columnText(0)) |cur_data|
+                        !std.mem.eql(u8, cur_data, merged_data)
+                    else
+                        true
+                else
+                    true;
+
+                const new_status: []const u8 = if (still_changed) "changed" else "published";
+                var u_stmt = try db.prepare(
+                    \\UPDATE content_entries SET status = ?1, published_version_id = ?2,
+                    \\published_at = unixepoch(), updated_at = unixepoch()
+                    \\WHERE id = ?3
+                );
+                defer u_stmt.deinit();
+                try u_stmt.bindText(1, new_status);
+                try u_stmt.bindText(2, &new_vid);
+                try u_stmt.bindText(3, eid);
+                _ = try u_stmt.step();
+
+                try mirrorPublishedState(db, eid, &new_vid, new_status, release_author_id);
+            } else {
+                // Full publish path (same as original publishBatchRelease)
+                var cur_stmt2 = try db.prepare(
+                    \\SELECT ev.data_json FROM content_entries e
+                    \\JOIN content_versions ev ON ev.id = e.current_version_id
+                    \\WHERE e.id = ?1
+                );
+                defer cur_stmt2.deinit();
+                try cur_stmt2.bindText(1, eid);
+                const still_changed = if (try cur_stmt2.step())
+                    if (cur_stmt2.columnText(0)) |cur_data|
+                        !std.mem.eql(u8, cur_data, to_data)
+                    else
+                        false
+                else
+                    false;
+
+                const new_status: []const u8 = if (still_changed) "changed" else "published";
+                var u_stmt = try db.prepare(
+                    \\UPDATE content_entries SET status = ?1, published_version_id = ?2,
+                    \\published_at = unixepoch(), updated_at = unixepoch()
+                    \\WHERE id = ?3
+                );
+                defer u_stmt.deinit();
+                try u_stmt.bindText(1, new_status);
+                try u_stmt.bindText(2, to_vid);
+                try u_stmt.bindText(3, eid);
+                _ = try u_stmt.step();
+
+                try mirrorPublishedState(db, eid, to_vid, new_status, release_author_id);
+
+                {
+                    const collab_json = collectCollaborators(allocator, db, eid, from_vid, to_vid, release_author_id) catch null;
+                    defer if (collab_json) |c| allocator.free(c);
+                    var vt_stmt = try db.prepare(
+                        "UPDATE content_versions SET version_type = 'published', collaborators = ?1 WHERE id = ?2",
+                    );
+                    defer vt_stmt.deinit();
+                    if (collab_json) |cj| try vt_stmt.bindText(1, cj) else try vt_stmt.bindNull(1);
+                    try vt_stmt.bindText(2, to_vid);
+                    _ = try vt_stmt.step();
+                }
+            }
+        }
+    }
+
+    // Mark release as released
+    {
+        var stmt = try db.prepare(
+            "UPDATE releases SET status = 'released', released_at = unixepoch() WHERE id = ?1",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, release_id);
+        _ = try stmt.step();
+    }
 }
 
 test "mergeJsonFields overlays selected fields and keeps others" {
@@ -1277,6 +1659,8 @@ test "core release: public API coverage" {
     _ = removeFromRelease;
     _ = archiveRelease;
     _ = publishBatchRelease;
+    _ = publishBatchReleaseWithSkips;
+    _ = detectReleaseConflicts;
     _ = listReleases;
     _ = getRelease;
     _ = listPendingReleases;
