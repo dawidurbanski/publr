@@ -508,7 +508,12 @@ pub fn jsonValueToString(allocator: Allocator, value: std.json.Value) ![]const u
         .bool => |b| try allocator.dupe(u8, if (b) "true" else "false"),
         .integer => |i| try std.fmt.allocPrint(allocator, "{d}", .{i}),
         .float => |f| try std.fmt.allocPrint(allocator, "{d}", .{f}),
-        .array, .object => try std.fmt.allocPrint(allocator, "[complex value]", .{}),
+        .array, .object => blk: {
+            var buf: std.ArrayListUnmanaged(u8) = .{};
+            buf.writer(allocator).print("{f}", .{std.json.fmt(value, .{})}) catch
+                break :blk try allocator.dupe(u8, "[complex value]");
+            break :blk buf.toOwnedSlice(allocator) catch try allocator.dupe(u8, "[complex value]");
+        },
         else => try allocator.dupe(u8, ""),
     };
 }

@@ -561,6 +561,7 @@ fn updateFor(comptime CT: type, ctx: *Context) !void {
     if (std.mem.eql(u8, status, "published")) {
         cms.publishEntry(ctx.allocator, db, entry_id, author_id, fields_json) catch {};
         notifyPublishedFieldsReleased(ctx.allocator, db, entry_id, fields_json);
+        broadcastPublishedState(ctx.allocator, db, entry_id);
     }
 
     const edit_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry_id }) catch base_url;
@@ -605,6 +606,7 @@ fn publishFor(comptime CT: type, ctx: *Context) !void {
 
     cms.publishEntry(ctx.allocator, db, entry_id, author_id, fields_json) catch {};
     notifyPublishedFieldsReleased(ctx.allocator, db, entry_id, fields_json);
+    broadcastPublishedState(ctx.allocator, db, entry_id);
 
     redirect(ctx, base_url);
 }
@@ -1359,6 +1361,7 @@ fn renderFieldsHtml(
                 .display_name = fd.display_name,
                 .value = value,
                 .required = fd.required,
+                .allocator = allocator,
             }) catch {};
         }
     }
@@ -1458,6 +1461,7 @@ fn renderSidebarHtml(
                     .display_name = fd.display_name,
                     .value = value,
                     .required = fd.required,
+                    .allocator = allocator,
                 }) catch {};
                 const field_html = field_buf.toOwnedSlice(allocator) catch "";
                 const patched = injectFormAttr(allocator, field_html, "entry-form");
@@ -1496,7 +1500,13 @@ fn parseFormData(comptime CT: type, ctx: *Context) CT.Data {
     var data: CT.Data = undefined;
 
     inline for (CT.schema) |fd| {
-        if (fd.zig_type == []const []const u8) {
+        if (comptime std.mem.eql(u8, fd.field_type_id, "repeater")) {
+            // Repeater field: parse indexed form values (items.0.label, items.1.label, ...)
+            @field(data, fd.name) = parseRepeaterFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
+        } else if (fd.sub_fields.len > 0) {
+            // Group field: build nested struct from dot-notation form values
+            @field(data, fd.name) = parseGroupFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
+        } else if (fd.zig_type == []const []const u8) {
             // Array fields (taxonomy, ref-many) can't be submitted via HTML forms.
             // Default to empty for new entries.
             @field(data, fd.name) = &.{};
@@ -1507,6 +1517,119 @@ fn parseFormData(comptime CT: type, ctx: *Context) CT.Data {
     }
 
     return data;
+}
+
+/// Build a Group's nested struct from dot-notation form values.
+/// Handles nested Groups and Repeaters recursively via comptime sub_fields.
+fn parseGroupFormData(
+    comptime T: type,
+    comptime sub_fields: []const field_mod.FieldDef,
+    comptime prefix: []const u8,
+    ctx: *Context,
+) T {
+    var result: T = undefined;
+    inline for (sub_fields) |sf| {
+        const key = prefix ++ "." ++ sf.name;
+        const FieldType = @TypeOf(@field(result, sf.name));
+        if (comptime std.mem.eql(u8, sf.field_type_id, "repeater")) {
+            // Nested repeater: parse indexed form values
+            @field(result, sf.name) = parseRepeaterFormData(sf.zig_type, sf.sub_fields, key, ctx);
+        } else if (sf.sub_fields.len > 0) {
+            // Nested group: recurse
+            @field(result, sf.name) = parseGroupFormData(sf.zig_type, sf.sub_fields, key, ctx);
+        } else if (FieldType == []const []const u8 or FieldType == ?[]const []const u8) {
+            // Array types can't be submitted via forms
+            @field(result, sf.name) = if (FieldType == ?[]const []const u8) null else &.{};
+        } else {
+            const raw = ctx.formValue(key) orelse "";
+            @field(result, sf.name) = formToZig(FieldType, raw);
+        }
+    }
+    return result;
+}
+
+/// Parse a Repeater's items from indexed form values (comptime prefix).
+/// Reads prefix._count for item count, then iterates prefix.0.field, prefix.1.field, ...
+fn parseRepeaterFormData(
+    comptime SliceT: type,
+    comptime sub_fields: []const field_mod.FieldDef,
+    comptime prefix: []const u8,
+    ctx: *Context,
+) SliceT {
+    const ElemT = @typeInfo(SliceT).pointer.child;
+    const alloc = ctx.allocator;
+
+    // Read item count from hidden _count field
+    const count_str = ctx.formValue(prefix ++ "._count") orelse "0";
+    const count = std.fmt.parseInt(usize, count_str, 10) catch 0;
+    if (count == 0) return &.{};
+
+    var items = alloc.alloc(ElemT, count) catch return &.{};
+    for (0..count) |idx| {
+        // Build runtime prefix for this item: "items.0"
+        const item_prefix = std.fmt.allocPrint(alloc, "{s}.{d}", .{ prefix, idx }) catch continue;
+        items[idx] = parseItemFormData(ElemT, sub_fields, alloc, item_prefix, ctx);
+    }
+    return items;
+}
+
+/// Parse a single Repeater item's sub-fields using a runtime prefix.
+/// Used for items within Repeater where the index is runtime.
+/// Also handles nested Groups and Repeaters within items.
+fn parseItemFormData(
+    comptime T: type,
+    comptime sub_fields: []const field_mod.FieldDef,
+    allocator: Allocator,
+    prefix: []const u8,
+    ctx: *Context,
+) T {
+    var result: T = undefined;
+    inline for (sub_fields) |sf| {
+        const key = std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, sf.name }) catch sf.name;
+        const FieldType = @TypeOf(@field(result, sf.name));
+
+        if (comptime std.mem.eql(u8, sf.field_type_id, "repeater")) {
+            // Nested Repeater with runtime prefix
+            @field(result, sf.name) = parseRepeaterFormDataRuntime(
+                @typeInfo(sf.zig_type).pointer.child,
+                sf.sub_fields,
+                allocator,
+                key,
+                ctx,
+            );
+        } else if (sf.sub_fields.len > 0) {
+            // Nested Group with runtime prefix
+            @field(result, sf.name) = parseItemFormData(sf.zig_type, sf.sub_fields, allocator, key, ctx);
+        } else if (FieldType == []const []const u8 or FieldType == ?[]const []const u8) {
+            @field(result, sf.name) = if (FieldType == ?[]const []const u8) null else &.{};
+        } else {
+            const raw = ctx.formValue(key) orelse "";
+            @field(result, sf.name) = formToZig(FieldType, raw);
+        }
+    }
+    return result;
+}
+
+/// Parse a nested Repeater's items using a runtime prefix.
+/// Used when a Repeater is nested inside another Repeater (runtime parent index).
+fn parseRepeaterFormDataRuntime(
+    comptime ElemT: type,
+    comptime sub_fields: []const field_mod.FieldDef,
+    allocator: Allocator,
+    prefix: []const u8,
+    ctx: *Context,
+) []const ElemT {
+    const count_key = std.fmt.allocPrint(allocator, "{s}._count", .{prefix}) catch return &.{};
+    const count_str = ctx.formValue(count_key) orelse "0";
+    const count = std.fmt.parseInt(usize, count_str, 10) catch 0;
+    if (count == 0) return &.{};
+
+    var items = allocator.alloc(ElemT, count) catch return &.{};
+    for (0..count) |idx| {
+        const item_prefix = std.fmt.allocPrint(allocator, "{s}.{d}", .{ prefix, idx }) catch continue;
+        items[idx] = parseItemFormData(ElemT, sub_fields, allocator, item_prefix, ctx);
+    }
+    return items;
 }
 
 /// Parse form data with field ownership validation.
@@ -1524,7 +1647,72 @@ fn parseFormDataWithValidation(
     var data: CT.Data = undefined;
 
     inline for (CT.schema) |fd| {
-        if (fd.zig_type == []const []const u8) {
+        if (comptime std.mem.eql(u8, fd.field_type_id, "repeater")) {
+            // Repeater field: ownership tracked at the repeater level.
+            const rejected_repeater = blk: {
+                if (owners) |own| {
+                    if (own.get(fd.name)) |field_info| {
+                        if (author_id) |aid| {
+                            if (field_info.changed_by_id) |owner_id| {
+                                if (!std.mem.eql(u8, owner_id, aid)) {
+                                    rejected.append(ctx.allocator, .{
+                                        .field = fd.name,
+                                        .owner_name = field_info.changed_by orelse "another user",
+                                    }) catch {};
+                                    break :blk true;
+                                }
+                            }
+                        }
+                    }
+                }
+                break :blk false;
+            };
+            if (rejected_repeater) {
+                @field(data, fd.name) = @field(existing.*, fd.name);
+            } else {
+                @field(data, fd.name) = parseRepeaterFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
+                // Track as newly acquired if value changed and field is unowned
+                if (owners == null or !owners.?.contains(fd.name)) {
+                    const existing_str = fieldToString(@TypeOf(@field(existing.*, fd.name)), ctx.allocator, @field(existing.*, fd.name)) orelse "";
+                    const new_str = fieldToString(@TypeOf(@field(data, fd.name)), ctx.allocator, @field(data, fd.name)) orelse "";
+                    if (!std.mem.eql(u8, existing_str, new_str)) {
+                        newly_acquired.append(ctx.allocator, fd.name) catch {};
+                    }
+                }
+            }
+        } else if (fd.sub_fields.len > 0) {
+            // Group field: ownership tracked at the group level.
+            const rejected_group = blk: {
+                if (owners) |own| {
+                    if (own.get(fd.name)) |field_info| {
+                        if (author_id) |aid| {
+                            if (field_info.changed_by_id) |owner_id| {
+                                if (!std.mem.eql(u8, owner_id, aid)) {
+                                    rejected.append(ctx.allocator, .{
+                                        .field = fd.name,
+                                        .owner_name = field_info.changed_by orelse "another user",
+                                    }) catch {};
+                                    break :blk true;
+                                }
+                            }
+                        }
+                    }
+                }
+                break :blk false;
+            };
+            if (rejected_group) {
+                @field(data, fd.name) = @field(existing.*, fd.name);
+            } else {
+                @field(data, fd.name) = parseGroupFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
+                if (owners == null or !owners.?.contains(fd.name)) {
+                    const existing_str = fieldToString(@TypeOf(@field(existing.*, fd.name)), ctx.allocator, @field(existing.*, fd.name)) orelse "";
+                    const new_str = fieldToString(@TypeOf(@field(data, fd.name)), ctx.allocator, @field(data, fd.name)) orelse "";
+                    if (!std.mem.eql(u8, existing_str, new_str)) {
+                        newly_acquired.append(ctx.allocator, fd.name) catch {};
+                    }
+                }
+            }
+        } else if (fd.zig_type == []const []const u8) {
             // Array fields (taxonomy, ref-many) can't round-trip through HTML forms.
             // Preserve existing value.
             @field(data, fd.name) = @field(existing.*, fd.name);
@@ -1553,6 +1741,9 @@ fn formToZig(comptime T: type, raw: []const u8) T {
     } else if (T == []const []const u8) {
         // Array types can't be submitted via HTML forms — return empty
         return &.{};
+    } else if (@typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice) {
+        // Repeater (slice of structs) — return empty slice
+        return &.{};
     } else {
         return if (@typeInfo(T) == .optional) null else undefined;
     }
@@ -1575,6 +1766,22 @@ fn fieldToString(comptime T: type, allocator: Allocator, val: T) ?[]const u8 {
             std.fmt.allocPrint(allocator, "{d}", .{v}) catch null
         else
             null;
+    } else if (@typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice and T != []const u8 and T != []const []const u8) {
+        // Repeater: serialize slice of structs to JSON array
+        var buf: std.ArrayListUnmanaged(u8) = .{};
+        buf.writer(allocator).print("{f}", .{std.json.fmt(val, .{})}) catch return null;
+        return buf.toOwnedSlice(allocator) catch null;
+    } else if (@typeInfo(T) == .@"struct") {
+        // Group: serialize struct to JSON
+        var buf: std.ArrayListUnmanaged(u8) = .{};
+        buf.writer(allocator).print("{f}", .{std.json.fmt(val, .{})}) catch return null;
+        return buf.toOwnedSlice(allocator) catch null;
+    } else if (@typeInfo(T) == .optional) {
+        // Generic optional: unwrap and recurse (handles ?Struct, ?bool, etc.)
+        if (val) |v| {
+            return fieldToString(@typeInfo(T).optional.child, allocator, v);
+        }
+        return null;
     } else {
         return null;
     }
@@ -1980,6 +2187,12 @@ fn buildFieldsInReleasesJson(allocator: Allocator, items: []const cms.EntryRelea
         } else {
             try w.writeAll("null");
         }
+        try w.writeAll(",\"scheduled_for\":");
+        if (item.scheduled_for) |sf| {
+            try w.print("{d}", .{sf});
+        } else {
+            try w.writeAll("null");
+        }
         try w.writeByte('}');
     }
     try w.writeByte(']');
@@ -2157,6 +2370,32 @@ fn notifyPublishedFieldsReleased(allocator: Allocator, db: *Db, entry_id: []cons
             presence.clearOwnershipOverrides(entry_id, names.items);
         }
     }
+}
+
+/// Broadcast the new published state to all subscribers of an entry.
+/// Other users update their publishedFields to reflect what was just published.
+fn broadcastPublishedState(allocator: Allocator, db: *Db, entry_id: []const u8) void {
+    const published_data = cms.getPublishedData(allocator, db, entry_id) catch return orelse return;
+
+    // Get current entry status
+    var stmt = db.prepare("SELECT status FROM content_entries WHERE id = ?1") catch return;
+    defer stmt.deinit();
+    stmt.bindText(1, entry_id) catch return;
+    const status = if (stmt.step() catch return)
+        (stmt.columnText(0) orelse "published")
+    else
+        "published";
+
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+    w.writeAll("{\"published_state\":") catch return;
+    w.writeAll(published_data) catch return;
+    w.writeAll(",\"status\":\"") catch return;
+    w.writeAll(status) catch return;
+    w.writeAll("\"}") catch return;
+
+    presence.broadcastEntryMessage(entry_id, "published_state", buf.items);
 }
 
 /// Broadcast updated fieldsInReleases to all subscribers of an entry.
