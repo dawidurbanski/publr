@@ -985,8 +985,10 @@ fn transpileDirectory(allocator: Allocator, input_dir: []const u8, output_dir: [
     }
 
     for (zsx_files.items) |rel_path| {
-        // Check if this file is under components/ directory
-        if (mem.startsWith(u8, rel_path, "components/") or mem.startsWith(u8, rel_path, "components\\")) {
+        // Check if this file is under components/ or layouts/ directory
+        const is_component = mem.startsWith(u8, rel_path, "components/") or mem.startsWith(u8, rel_path, "components\\");
+        const is_layout = mem.startsWith(u8, rel_path, "layouts/") or mem.startsWith(u8, rel_path, "layouts\\");
+        if (is_component or is_layout) {
             const basename = fs.path.basename(rel_path);
             const name_no_ext = basename[0 .. basename.len - 4]; // strip .zsx
             // Convert to PascalCase component name
@@ -1052,10 +1054,18 @@ fn transpileFile(allocator: Allocator, input_dir: []const u8, output_dir: []cons
     try file.writeAll(zig_code);
 }
 
-const ComponentImport = struct {
+pub const ComponentImport = struct {
     name: []const u8, // PascalCase name, e.g. "Dialog"
     import_path: []const u8, // relative @import path, e.g. "../components/dialog.zig"
 };
+
+/// Transpile a ZSX source string to Zig code. Public API for use by .publr code generation.
+pub fn transpileSource(allocator: Allocator, source: []const u8, source_path: []const u8, component_imports: []const ComponentImport) ![]u8 {
+    var parser = Parser.init(allocator, source, source_path);
+    defer parser.deinit();
+    parser.component_imports = component_imports;
+    return try parser.generate();
+}
 
 /// Scan source for PascalCase tag usage and resolve to component @imports
 fn scanComponentUsage(
@@ -1410,6 +1420,7 @@ const Parser = struct {
     output: std.ArrayListUnmanaged(u8) = .{},
     indent: usize = 1,
     component_imports: []const ComponentImport = &.{},
+    children_depth: u8 = 0, // nesting depth for children anonymous functions
 
     const Error = error{
         UnexpectedChar,
@@ -1448,7 +1459,9 @@ const Parser = struct {
             try self.write(ci.name);
             try self.write(" = @import(\"");
             try self.write(ci.import_path);
-            try self.write("\");\n");
+            try self.write("\").");
+            try self.write(ci.name);
+            try self.write(";\n");
         }
 
         try self.write("\npub const source_path = \"");
@@ -1916,7 +1929,8 @@ const Parser = struct {
         if (self.pos < self.source.len) self.pos += 1; // skip >
 
         try self.writeIndent();
-        try self.write("try writer.writeAll(\"");
+        try self.writeTryWriter();
+        try self.write("writeAll(\"");
         try self.writeEscaped(self.source[start..self.pos]);
         try self.write("\");\n");
     }
@@ -1932,7 +1946,8 @@ const Parser = struct {
         }
 
         try self.writeIndent();
-        try self.write("try writer.writeAll(\"");
+        try self.writeTryWriter();
+        try self.write("writeAll(\"");
         try self.writeEscaped(self.source[start..self.pos]);
         try self.write("\");\n");
     }
@@ -1964,7 +1979,8 @@ const Parser = struct {
                 // Emit closing tag (only for HTML elements, not components)
                 if (emit_close) {
                     try self.writeIndent();
-                    try self.write("try writer.writeAll(\"</");
+                    try self.writeTryWriter();
+                    try self.write("writeAll(\"</");
                     try self.write(parent_tag);
                     try self.write(">\");\n");
                 }
@@ -2145,9 +2161,12 @@ const Parser = struct {
                 const rhs = mem.trim(u8, expr[qpos + 2 ..], " \t\n\r");
                 try self.writeIndent();
                 if (is_raw) {
-                    try self.write("try writer.writeAll(");
+                    try self.writeTryWriter();
+                    try self.write("writeAll(");
                 } else {
-                    try self.write("try zsx.render(writer, ");
+                    try self.write("try zsx.render(");
+                    try self.writeWriterVar();
+                    try self.write(", ");
                 }
                 try self.write(lhs);
                 try self.write(" orelse ");
@@ -2160,9 +2179,12 @@ const Parser = struct {
                 const else_val = mem.trim(u8, expr[cpos + 1 ..], " \t\n\r");
                 try self.writeIndent();
                 if (is_raw) {
-                    try self.write("try writer.writeAll(");
+                    try self.writeTryWriter();
+                    try self.write("writeAll(");
                 } else {
-                    try self.write("try zsx.render(writer, ");
+                    try self.write("try zsx.render(");
+                    try self.writeWriterVar();
+                    try self.write(", ");
                 }
                 try self.write("if (");
                 try self.write(cond);
@@ -2183,9 +2205,12 @@ const Parser = struct {
     fn emitPlainExpression(self: *Parser, expr: []const u8, is_raw: bool) Error!void {
         try self.writeIndent();
         if (is_raw) {
-            try self.write("try writer.writeAll(");
+            try self.writeTryWriter();
+                    try self.write("writeAll(");
         } else {
-            try self.write("try zsx.render(writer, ");
+            try self.write("try zsx.render(");
+                    try self.writeWriterVar();
+                    try self.write(", ");
         }
         try self.write(expr);
         try self.write(");\n");
@@ -2364,7 +2389,8 @@ const Parser = struct {
 
     fn emitHtmlTag(self: *Parser, tag: []const u8, attrs: []const Attr) Error!void {
         try self.writeIndent();
-        try self.write("try writer.writeAll(\"<");
+        try self.writeTryWriter();
+        try self.write("writeAll(\"<");
         try self.write(tag);
 
         // Emit static attributes
@@ -2395,29 +2421,36 @@ const Parser = struct {
                     if (attr.value.len >= 2 and attr.value[0] == '`' and attr.value[attr.value.len - 1] == '`') {
                         // Backtick attribute: emit sequential calls
                         try self.writeIndent();
-                        try self.write("try writer.writeAll(\" ");
+                        try self.writeTryWriter();
+                        try self.write("writeAll(\" ");
                         try self.write(attr.name);
                         try self.write("=\\\"\");\n");
                         const inner = attr.value[1 .. attr.value.len - 1];
                         try self.emitBacktickString(inner, true);
                         try self.writeIndent();
-                        try self.write("try writer.writeAll(\"\\\"\");\n");
+                        try self.writeTryWriter();
+                        try self.write("writeAll(\"\\\"\");\n");
                     } else {
                         try self.writeIndent();
-                        try self.write("try writer.writeAll(\" ");
+                        try self.writeTryWriter();
+                        try self.write("writeAll(\" ");
                         try self.write(attr.name);
                         try self.write("=\\\"\");\n");
                         try self.writeIndent();
-                        try self.write("try zsx.render(writer, ");
+                        try self.write("try zsx.render(");
+                        try self.writeWriterVar();
+                        try self.write(", ");
                         try self.write(attr.value);
                         try self.write(");\n");
                         try self.writeIndent();
-                        try self.write("try writer.writeAll(\"\\\"\");\n");
+                        try self.writeTryWriter();
+                        try self.write("writeAll(\"\\\"\");\n");
                     }
                 }
             }
             try self.writeIndent();
-            try self.write("try writer.writeAll(\">\");\n");
+            try self.writeTryWriter();
+            try self.write("writeAll(\">\");\n");
         } else {
             try self.write(">\");\n");
         }
@@ -2427,29 +2460,48 @@ const Parser = struct {
         try self.writeIndent();
         try self.write("try ");
         try self.write(name);
-        try self.write("(writer, .{");
+        try self.write("(");
+        try self.writeWriterVar();
+        try self.write(", .{");
         try self.emitComponentProps(attrs);
         try self.write(" });\n");
     }
 
     fn emitComponentCallWithChildren(self: *Parser, name: []const u8, attrs: []const Attr) Error!void {
+        // Pre-render children to a buffer so runtime variables are accessible
+        // (anonymous functions can't capture runtime locals in Zig).
+        // The component receives .children as a []u8 string and uses {@raw props.children}.
+        try self.writeIndent();
+        try self.write("{\n");
+        self.indent += 1;
+
+        // Create children buffer using page allocator (freed when scope exits)
+        try self.writeIndent();
+        try self.write("var _children_buf: @import(\"std\").ArrayListUnmanaged(u8) = .{};\n");
+        try self.writeIndent();
+        try self.write("const _children_alloc = @import(\"std\").heap.page_allocator;\n");
+        try self.writeIndent();
+        try self.write("defer _children_buf.deinit(_children_alloc);\n");
+
+        // Render children into the buffer using _children_w as the writer
+        self.children_depth += 1;
+        try self.parseChildren(name, false);
+        self.children_depth -= 1;
+
+        // Call the component with children as pre-rendered HTML
         try self.writeIndent();
         try self.write("try ");
         try self.write(name);
-        try self.write("(writer, .{");
+        try self.write("(");
+        try self.writeWriterVar();
+        try self.write(", .{");
         try self.emitComponentProps(attrs);
-        try self.write(", .children = struct {\n");
-        self.indent += 2;
-        try self.writeIndent();
-        try self.write("pub fn f(writer: anytype) !void {\n");
-        self.indent += 1;
-        try self.parseChildren(name, false);
+        if (attrs.len > 0) try self.write(",");
+        try self.write(" .children = _children_buf.items });\n");
+
         self.indent -= 1;
         try self.writeIndent();
         try self.write("}\n");
-        self.indent -= 2;
-        try self.writeIndent();
-        try self.write("}.f });\n");
     }
 
     fn emitComponentProps(self: *Parser, attrs: []const Attr) Error!void {
@@ -2527,13 +2579,15 @@ const Parser = struct {
             if (text.len > 0 and mem.indexOf(u8, text, "\n") != null) {
                 // Multi-line whitespace - emit newline
                 try self.writeIndent();
-                try self.write("try writer.writeAll(\"\\n\");\n");
+                try self.writeTryWriter();
+                try self.write("writeAll(\"\\n\");\n");
             }
             return;
         }
 
         try self.writeIndent();
-        try self.write("try writer.writeAll(\"");
+        try self.writeTryWriter();
+        try self.write("writeAll(\"");
         try self.writeEscaped(text);
         try self.write("\");\n");
     }
@@ -2547,7 +2601,8 @@ const Parser = struct {
                 // Emit preceding literal text
                 if (i > text_start) {
                     try self.writeIndent();
-                    try self.write("try writer.writeAll(\"");
+                    try self.writeTryWriter();
+        try self.write("writeAll(\"");
                     try self.writeEscaped(content[text_start..i]);
                     try self.write("\");\n");
                 }
@@ -2572,15 +2627,20 @@ const Parser = struct {
                 // Emit expression
                 try self.writeIndent();
                 if (is_raw) {
-                    try self.write("try writer.writeAll(");
+                    try self.writeTryWriter();
+                    try self.write("writeAll(");
                     try self.write(expr);
                     try self.write(");\n");
                 } else if (use_escape) {
-                    try self.write("try zsx.escape(writer, ");
+                    try self.write("try zsx.escape(");
+                    try self.writeWriterVar();
+                    try self.write(", ");
                     try self.write(expr);
                     try self.write(");\n");
                 } else {
-                    try self.write("try zsx.render(writer, ");
+                    try self.write("try zsx.render(");
+                    try self.writeWriterVar();
+                    try self.write(", ");
                     try self.write(expr);
                     try self.write(");\n");
                 }
@@ -2594,7 +2654,8 @@ const Parser = struct {
         // Emit trailing literal text
         if (text_start < content.len) {
             try self.writeIndent();
-            try self.write("try writer.writeAll(\"");
+            try self.writeTryWriter();
+        try self.write("writeAll(\"");
             try self.writeEscaped(content[text_start..content.len]);
             try self.write("\");\n");
         }
@@ -2615,6 +2676,23 @@ const Parser = struct {
 
     fn write(self: *Parser, data: []const u8) Error!void {
         try self.output.appendSlice(self.allocator, data);
+    }
+
+    /// Emit the current writer variable name (changes in children context)
+    fn writeWriterVar(self: *Parser) Error!void {
+        if (self.children_depth == 0) {
+            try self.write("writer");
+        } else {
+            // Children are pre-rendered to _children_buf via _children_w
+            try self.write("_children_buf.writer(_children_alloc)");
+        }
+    }
+
+    /// Emit "try <writer>." prefix for writer method calls
+    fn writeTryWriter(self: *Parser) Error!void {
+        try self.write("try ");
+        try self.writeWriterVar();
+        try self.write(".");
     }
 
     fn writeByte(self: *Parser, byte: u8) Error!void {
