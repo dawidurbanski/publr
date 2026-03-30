@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Publr</title>
+  <link rel="stylesheet" href="/theme/theme.css" />
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/"><img src="/theme/logo.svg" alt="Publr" width="28" height="28" style="vertical-align: middle;" /></a>
+      <a href="/posts">Posts</a>
+      <a href="/pages">Pages</a>
+    </nav>
+  </header>
+  <main>
+    {@raw props.children}
+  </main>
+  <footer>
+    <small>Powered by Publr</small>
+  </footer>
+</body>
+</html>

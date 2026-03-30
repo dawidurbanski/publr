@@ -1,0 +1,11 @@
+---
+const slug = ctx.param("slug") orelse "unknown";
+const post = try ctx.entry(.post, slug);
+---
+<Base>
+  <article>
+    <p><a href="/posts">← Back to posts</a></p>
+    <h1>{post.title}</h1>
+    <div class="body">{@raw post.data.body}</div>
+  </article>
+</Base>

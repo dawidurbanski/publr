@@ -1,0 +1,11 @@
+---
+const pages = try ctx.query(.page, .{ .limit = 100 });
+---
+<Base>
+  <h1>Pages</h1>
+  <ul>
+    {for (pages) |page| (
+      <li><a href={`/pages/${page.data.slug}`}>{page.title}</a></li>
+    )}
+  </ul>
+</Base>

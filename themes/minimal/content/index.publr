@@ -1,0 +1,5 @@
+<Base>
+  <h1>Welcome to Publr</h1>
+  <p>A fast, single-binary CMS with static site generation.</p>
+  <p><a href="/posts">View Posts</a> | <a href="/pages">View Pages</a></p>
+</Base>

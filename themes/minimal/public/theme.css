@@ -1,0 +1,13 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 48rem; margin: 0 auto; padding: 2rem 1.5rem; }
+a { color: #2563eb; text-decoration: none; }
+a:hover { text-decoration: underline; }
+header nav { display: flex; gap: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; margin-bottom: 2rem; }
+header nav a { font-weight: 500; color: #4b5563; }
+header nav a:hover { color: #1a1a1a; }
+h1 { font-size: 1.875rem; font-weight: 700; margin-bottom: 1rem; }
+p { margin-bottom: 1rem; }
+ul { list-style: none; }
+ul li { padding: 0.5rem 0; border-bottom: 1px solid #f3f4f6; }
+article .body { margin-top: 1.5rem; line-height: 1.8; }
+footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 0.875rem; }
