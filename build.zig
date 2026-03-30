@@ -12,6 +12,29 @@ pub fn build(b: *std.Build) void {
     const project_dir = b.option([]const u8, "project-dir", "Absolute path to project directory (external source tree builds — resolves themes, data)");
     _ = plugins_path; // Reserved for future plugin discovery
 
+    // Theme name: --theme option (external builds) > publr.zon .theme field > "default"
+    const theme_name: []const u8 = b.option([]const u8, "theme", "Theme directory name (overrides publr.zon .theme)") orelse blk: {
+        const publr_config = @import("publr.zon");
+        break :blk if (@hasField(@TypeOf(publr_config), "theme"))
+            publr_config.theme
+        else
+            "default";
+    };
+    const theme_path = b.pathJoin(&.{ "themes", theme_name });
+    const theme_static_rel = b.pathJoin(&.{ "themes", theme_name, "public" });
+
+    // Theme-level config (optional: themes/<name>/publr.zon)
+    const theme_config_path = b.pathJoin(&.{ "themes", theme_name, "publr.zon" });
+    const has_theme_config = blk: {
+        if (project_dir != null) break :blk false;
+        b.build_root.handle.access(theme_config_path, .{}) catch break :blk false;
+        break :blk true;
+    };
+    const theme_config_module: ?*std.Build.Module = if (has_theme_config)
+        b.createModule(.{ .root_source_file = b.path(theme_config_path) })
+    else
+        null;
+
     // ZSX amalgamation — single vendor/zsx.zig for all build tools + runtime
     const zsx = b.createModule(.{
         .root_source_file = b.path("vendor/zsx.zig"),
@@ -76,6 +99,58 @@ pub fn build(b: *std.Build) void {
     fmt_cmd.addArgs(&.{"src/views"});
     fmt_step.dependOn(&fmt_cmd.step);
 
+    // =========================================================================
+    // Theme Pipeline: .publr → .zsx → .zig
+    // =========================================================================
+
+    // publr_template module (shared between preprocess tool and tests)
+    const publr_template_module = b.createModule(.{
+        .root_source_file = b.path("src/tools/publr_template.zig"),
+        .imports = &.{.{ .name = "zsx", .module = zsx }},
+    });
+
+    // Build .publr preprocessor
+    const publr_preprocess = b.addExecutable(.{
+        .name = "publr_preprocess",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/publr_preprocess.zig"),
+            .target = b.graph.host,
+            .imports = &.{.{ .name = "publr_template", .module = publr_template_module }},
+        }),
+    });
+
+    // Resolve theme directory (--project-dir for external builds, local otherwise)
+    const theme_dir: std.Build.LazyPath = if (project_dir) |pd|
+        .{ .cwd_relative = b.pathJoin(&.{ pd, theme_path }) }
+    else
+        b.path(theme_path);
+
+    // Step 1: Preprocess .publr → synthetic .zsx
+    const preprocess_cmd = b.addRunArtifact(publr_preprocess);
+    preprocess_cmd.addDirectoryArg(theme_dir);
+    const theme_zsx = preprocess_cmd.addOutputDirectoryArg("theme_zsx");
+
+    // Register .publr files for cache invalidation
+    {
+        const local_theme_dir = if (project_dir) |_| null else b.build_root.handle.openDir(theme_path, .{ .iterate = true }) catch null;
+        if (local_theme_dir) |*dir| {
+            var d = dir.*;
+            defer d.close();
+            var walker = d.walk(b.allocator) catch @panic("cannot walk theme dir");
+            defer walker.deinit();
+            while (walker.next() catch @panic("walk error")) |entry| {
+                if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, ".publr")) {
+                    preprocess_cmd.addFileInput(b.path(b.pathJoin(&.{ theme_path, entry.path })));
+                }
+            }
+        }
+    }
+
+    // Step 2: ZSX transpile synthetic .zsx → .zig
+    const transpile_theme_cmd = b.addRunArtifact(zsx_transpiler);
+    transpile_theme_cmd.addDirectoryArg(theme_zsx);
+    const gen_theme = transpile_theme_cmd.addOutputDirectoryArg("theme");
+
     const exe = b.addExecutable(.{
         .name = "publr",
         .root_module = b.createModule(.{
@@ -85,23 +160,12 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // Main exe depends on transpile step (init_db dependency added later)
+    // Main exe depends on transpile steps (init_db dependency added later)
     exe.step.dependOn(&transpile_zsx_cmd.step);
+    exe.step.dependOn(&transpile_theme_cmd.step);
 
-    // Run preBuild hooks from publr.zon (theme tooling, asset pipelines, etc.)
-    // Skipped in watch mode (watchers handle independently) and external builds
-    // (recompile endpoint runs hooks separately before invoking zig build)
-    if (!watch_mode and config_path == null) {
-        const publr_config = @import("publr.zon");
-        if (@hasField(@TypeOf(publr_config), "build")) {
-            if (@hasField(@TypeOf(publr_config.build), "preBuild")) {
-                inline for (publr_config.build.preBuild) |cmd| {
-                    const hook = b.addSystemCommand(&cmd);
-                    exe.step.dependOn(&hook.step);
-                }
-            }
-        }
-    }
+    // Note: preBuild/postBuild hooks from publr.zon run during `publr build` CLI,
+    // not during `zig build`. This avoids hard failures when tools aren't installed.
 
     // Vendor static library — SQLite, stb_image, libwebp compiled once and cached.
     // Only recompiled when vendor sources change, not when Zig code changes.
@@ -152,6 +216,15 @@ pub fn build(b: *std.Build) void {
             b.path("publr.zon"),
     });
     exe.root_module.addImport("publr_config", publr_config_module);
+    // Theme config: theme's own publr.zon, or empty fallback
+    if (theme_config_module) |m| {
+        exe.root_module.addImport("theme_config", m);
+    } else {
+        const empty_config = b.addWriteFiles();
+        exe.root_module.addImport("theme_config", b.createModule(.{
+            .root_source_file = empty_config.add("theme_config_empty.zon", ".{}"),
+        }));
+    }
 
     // Embed static assets
     exe.root_module.addAnonymousImport("static_admin_css", .{
@@ -193,12 +266,80 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addAnonymousImport("static_interact_presence_js", .{
         .root_source_file = b.path("static/interact/presence.js"),
     });
-    exe.root_module.addAnonymousImport("static_theme_css", .{
-        .root_source_file = if (project_dir) |pd|
-            .{ .cwd_relative = b.pathJoin(&.{ pd, "themes/demo/static/theme.css" }) }
-        else
-            b.path("themes/demo/static/theme.css"),
-    });
+    // =========================================================================
+    // Theme Static Assets — scan, embed, and generate lookup module
+    // =========================================================================
+    const theme_static_module = blk: {
+        const theme_static_path = theme_static_rel;
+        var gen_src: std.ArrayListUnmanaged(u8) = .{};
+        const w = gen_src.writer(b.allocator);
+
+        w.writeAll(
+            \\pub const File = struct {
+            \\    path: []const u8,
+            \\    data: []const u8,
+            \\    content_type: []const u8,
+            \\    disk_path: []const u8,
+            \\};
+            \\
+            \\pub const files = [_]File{
+            \\
+        ) catch @panic("OOM");
+
+        // Collect theme static files
+        var file_count: usize = 0;
+        const local_static_dir = if (project_dir) |_| null else b.build_root.handle.openDir(theme_static_path, .{ .iterate = true }) catch null;
+        if (local_static_dir) |*sd| {
+            var d = sd.*;
+            defer d.close();
+            var walker = d.walk(b.allocator) catch @panic("cannot walk theme static");
+            defer walker.deinit();
+            while (walker.next() catch @panic("walk error")) |entry| {
+                if (entry.kind != .file) continue;
+                const rel = entry.path;
+                const import_name = sanitizeImportName(b.allocator, rel);
+                const mime = getMimeForBuild(rel);
+                const disk = b.pathJoin(&.{ theme_static_path, rel });
+
+                w.print(
+                    \\    .{{ .path = "{s}", .data = @embedFile("{s}"), .content_type = "{s}", .disk_path = "{s}" }},
+                    \\
+                , .{ rel, import_name, mime, disk }) catch @panic("OOM");
+
+                file_count += 1;
+            }
+        }
+
+        w.writeAll(
+            \\};
+            \\
+        ) catch @panic("OOM");
+
+        const gen_files = b.addWriteFiles();
+        const theme_static_src = gen_files.add("theme_static.zig", gen_src.items);
+
+        const mod = b.createModule(.{
+            .root_source_file = theme_static_src,
+        });
+
+        // Add anonymous imports for each embedded file (second pass)
+        if (project_dir == null) {
+            var sd2 = b.build_root.handle.openDir(theme_static_path, .{ .iterate = true }) catch @panic("cannot open theme static dir");
+            defer sd2.close();
+            var walker2 = sd2.walk(b.allocator) catch @panic("cannot walk theme static");
+            defer walker2.deinit();
+            while (walker2.next() catch @panic("walk error")) |entry2| {
+                if (entry2.kind != .file) continue;
+                const import_name2 = sanitizeImportName(b.allocator, entry2.path);
+                mod.addAnonymousImport(import_name2, .{
+                    .root_source_file = b.path(b.pathJoin(&.{ theme_static_path, entry2.path })),
+                });
+            }
+        }
+
+        break :blk mod;
+    };
+    exe.root_module.addImport("theme_static", theme_static_module);
 
     // Design system amalgamation — components, CSS, JS as string constants
     const publr_ui = b.createModule(.{
@@ -215,6 +356,55 @@ pub fn build(b: *std.Build) void {
         .root_source_file = gen_views.path(b, "views.zig"),
         .imports = &.{.{ .name = "zsx", .module = zsx_views }},
     });
+
+    // Theme module — generated from .publr templates
+    const theme = b.createModule(.{
+        .root_source_file = gen_theme.path(b, "views.zig"),
+        .imports = &.{.{ .name = "zsx", .module = zsx_views }},
+    });
+
+    // Route table generator — walks pages/, produces routes.zig
+    const publr_routes_module = b.createModule(.{
+        .root_source_file = b.path("src/tools/publr_routes.zig"),
+    });
+    const publr_gen_routes = b.addExecutable(.{
+        .name = "publr_gen_routes",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/publr_gen_routes.zig"),
+            .target = b.graph.host,
+            .imports = &.{.{ .name = "publr_routes", .module = publr_routes_module }},
+        }),
+    });
+
+    // Run route generator: pages/ dir → routes.zig
+    const gen_routes_cmd = b.addRunArtifact(publr_gen_routes);
+    // Input: the pages/ subdirectory within the preprocessed theme .zsx output
+    // (we use the .zsx directory because it has the same file structure as pages/)
+    gen_routes_cmd.addDirectoryArg(theme_dir);
+    const gen_routes_dir = gen_routes_cmd.addOutputDirectoryArg("theme_routes");
+
+    // Register .publr page files for cache invalidation
+    if (project_dir == null) {
+        const pages_path = b.pathJoin(&.{ theme_path, "content" });
+        var pages_dir_h = b.build_root.handle.openDir(pages_path, .{ .iterate = true }) catch null;
+        if (pages_dir_h) |*pd| {
+            defer pd.close();
+            var walker = pd.walk(b.allocator) catch @panic("cannot walk pages");
+            defer walker.deinit();
+            while (walker.next() catch @panic("walk error")) |entry| {
+                if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, ".publr")) {
+                    gen_routes_cmd.addFileInput(b.path(b.pathJoin(&.{ pages_path, entry.path })));
+                }
+            }
+        }
+    }
+
+    // Theme routes module
+    const theme_routes = b.createModule(.{
+        .root_source_file = gen_routes_dir.path(b, "routes.zig"),
+        .imports = &.{.{ .name = "theme", .module = theme }},
+    });
+    exe.root_module.addImport("theme_routes", theme_routes);
 
     // =========================================================================
     // Schema Modules
@@ -326,11 +516,19 @@ pub fn build(b: *std.Build) void {
     });
     db_module.addIncludePath(b.path("vendor"));
 
+    const publish_hooks_module = b.createModule(.{
+        .root_source_file = b.path("src/publish_hooks.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+        },
+    });
+
     const modules_api_module = b.createModule(.{
         .root_source_file = b.path("src/modules/mod.zig"),
         .imports = &.{
             .{ .name = "router", .module = router_module },
             .{ .name = "db", .module = db_module },
+            .{ .name = "publr_config", .module = publr_config_module },
         },
     });
 
@@ -456,6 +654,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "release", .module = release_module },
             .{ .name = "core_init", .module = core_init_module },
             .{ .name = "schemas", .module = schemas_module },
+            .{ .name = "publish_hooks", .module = publish_hooks_module },
         },
     });
     // Storage backend
@@ -477,6 +676,19 @@ pub fn build(b: *std.Build) void {
             .{ .name = "id_gen", .module = id_gen_module },
         },
     });
+    // Template context for .publr theme templates
+    const template_context_module = b.createModule(.{
+        .root_source_file = b.path("src/core/template_context.zig"),
+        .imports = &.{
+            .{ .name = "cms", .module = cms_module },
+            .{ .name = "schemas", .module = schemas_module },
+            .{ .name = "taxonomy", .module = taxonomy_module },
+            .{ .name = "db", .module = db_module },
+            .{ .name = "publr_config", .module = publr_config_module },
+            .{ .name = "middleware", .module = middleware_module },
+        },
+    });
+
     // Media CRUD API
     const media_module = b.createModule(.{
         .root_source_file = b.path("src/core/media.zig"),
@@ -746,6 +958,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "rest_json", .module = rest_json_module },
             .{ .name = "rest_auth", .module = rest_auth_module },
             .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
+            .{ .name = "publish_hooks", .module = publish_hooks_module },
         },
     });
     const rest_version_module = b.createModule(.{
@@ -1022,6 +1235,9 @@ pub fn build(b: *std.Build) void {
 
     // Add views namespace and core imports to main executable
     exe.root_module.addImport("views", views);
+    exe.root_module.addImport("theme", theme);
+    exe.root_module.addImport("template_context", template_context_module);
+    exe.root_module.addImport("publish_hooks", publish_hooks_module);
     exe.root_module.addImport("admin_api", admin_api_module);
     exe.root_module.addImport("publr_ui", publr_ui);
     exe.root_module.addImport("modules", modules_api_module);
@@ -1176,11 +1392,46 @@ pub fn build(b: *std.Build) void {
     const test_rest_step = b.step("test-rest", "Run REST integration tests");
     test_rest_step.dependOn(&run_rest_tests.step);
 
+    // Publr template tool tests (needs zsx module)
+    const publr_template_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/publr_template.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zsx", .module = zsx }},
+        }),
+    });
+    const run_publr_template_tests = b.addRunArtifact(publr_template_tests);
+
+    // Publr preprocessor tests
+    const publr_preprocess_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/publr_preprocess.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "publr_template", .module = publr_template_module }},
+        }),
+    });
+    const run_publr_preprocess_tests = b.addRunArtifact(publr_preprocess_tests);
+
+    // Publr route table tests
+    const publr_routes_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/publr_routes.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_publr_routes_tests = b.addRunArtifact(publr_routes_tests);
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_cli_tests.step);
     test_step.dependOn(&run_rest_tests.step);
+    test_step.dependOn(&run_publr_template_tests.step);
+    test_step.dependOn(&run_publr_preprocess_tests.step);
+    test_step.dependOn(&run_publr_routes_tests.step);
 
     // Verify step: runs all tests + WASM build.
     const verify_step = b.step("verify", "Run tests and verify WASM build");
@@ -1351,4 +1602,47 @@ pub fn build(b: *std.Build) void {
     run_bundle.step.dependOn(&transpile_zsx_cmd.step);
 
     browser_bundle_step.dependOn(&run_bundle.step);
+}
+
+// =============================================================================
+// Build helpers
+// =============================================================================
+
+/// Sanitize a file path into a valid Zig identifier for anonymous imports.
+/// e.g. "fonts/poppins-400.woff2" → "_fonts_poppins_400_woff2"
+fn sanitizeImportName(allocator: std.mem.Allocator, path: []const u8) []const u8 {
+    const buf = allocator.alloc(u8, path.len + 1) catch @panic("OOM");
+    buf[0] = '_';
+    for (path, 0..) |c, i| {
+        buf[i + 1] = if (std.ascii.isAlphanumeric(c)) c else '_';
+    }
+    return buf;
+}
+
+/// Get MIME type from file path for build-time code generation.
+fn getMimeForBuild(path: []const u8) []const u8 {
+    const ext = std.fs.path.extension(path);
+    const map = .{
+        .{ ".css", "text/css" },
+        .{ ".js", "application/javascript" },
+        .{ ".json", "application/json" },
+        .{ ".html", "text/html" },
+        .{ ".svg", "image/svg+xml" },
+        .{ ".png", "image/png" },
+        .{ ".jpg", "image/jpeg" },
+        .{ ".jpeg", "image/jpeg" },
+        .{ ".webp", "image/webp" },
+        .{ ".gif", "image/gif" },
+        .{ ".ico", "image/x-icon" },
+        .{ ".woff", "font/woff" },
+        .{ ".woff2", "font/woff2" },
+        .{ ".ttf", "font/ttf" },
+        .{ ".otf", "font/otf" },
+        .{ ".xml", "application/xml" },
+        .{ ".txt", "text/plain" },
+    };
+    inline for (map) |entry| {
+        if (std.mem.eql(u8, ext, entry[0])) return entry[1];
+    }
+    return "application/octet-stream";
 }
