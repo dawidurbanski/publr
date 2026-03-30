@@ -7,7 +7,7 @@ pub fn handleIndex(ctx: *Context) !void {
     if (ctx.isPartial()) {
         ctx.html(content);
     } else {
-        ctx.html(wrapWithBase(content, "Publr", &.{"/static/theme.css"}, &.{}));
+        ctx.html(wrapWithBase(content, "Publr", &.{"/theme/theme.css"}, &.{}));
     }
 }
 

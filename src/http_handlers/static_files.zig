@@ -10,7 +10,6 @@ pub fn setDevMode(dev_mode: bool) void {
 
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
 const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
-const ThemeCss = static.Asset("theme.css", @embedFile("static_theme_css"));
 
 const InteractCore = static.Asset("core.js", @embedFile("static_interact_core_js"));
 const InteractToggle = static.Asset("toggle.js", @embedFile("static_interact_toggle_js"));
@@ -38,7 +37,6 @@ const AssetEntry = struct {
 const asset_map = .{
     .{ "admin.css", AssetEntry{ .asset = AdminCss, .disk_path = "static/admin.css" } },
     .{ "admin.js", AssetEntry{ .asset = AdminJs, .disk_path = "static/admin.js" } },
-    .{ "theme.css", AssetEntry{ .asset = ThemeCss, .disk_path = "themes/demo/static/theme.css" } },
     .{ "interact/core.js", AssetEntry{ .asset = InteractCore, .disk_path = "static/interact/core.js" } },
     .{ "interact/toggle.js", AssetEntry{ .asset = InteractToggle, .disk_path = "static/interact/toggle.js" } },
     .{ "interact/portal.js", AssetEntry{ .asset = InteractPortal, .disk_path = "static/interact/portal.js" } },
@@ -80,6 +78,53 @@ pub fn handleStatic(ctx: *Context) !void {
                 }
             }
             entry[1].asset.serve(ctx, ctx.getRequestHeader("If-None-Match"));
+            return;
+        }
+    }
+
+    ctx.response.setStatus("404 Not Found");
+    ctx.response.setContentType("text/plain");
+    ctx.response.setBody("Not Found");
+}
+
+const theme_static = @import("theme_static");
+
+/// Serve theme static assets at /theme/*
+pub fn handleThemeStatic(ctx: *Context) !void {
+    const file = ctx.wildcard orelse {
+        ctx.response.setStatus("404 Not Found");
+        ctx.response.setContentType("text/plain");
+        ctx.response.setBody("Not Found");
+        return;
+    };
+
+    inline for (theme_static.files) |entry| {
+        if (std.mem.eql(u8, file, entry.path)) {
+            if (is_dev_mode) {
+                const content = std.fs.cwd().readFileAlloc(std.heap.page_allocator, entry.disk_path, 4 * 1024 * 1024) catch {
+                    ctx.response.setStatus("404 Not Found");
+                    ctx.response.setContentType("text/plain");
+                    ctx.response.setBody("File not found");
+                    return;
+                };
+                ctx.response.setContentType(entry.content_type);
+                ctx.response.setBody(content);
+                return;
+            }
+
+            // Production: serve embedded with caching
+            const etag = comptime static.compileTimeETag(entry.data);
+            if (ctx.getRequestHeader("If-None-Match")) |client_etag| {
+                if (std.mem.indexOf(u8, client_etag, &etag) != null) {
+                    ctx.response.setStatus("304 Not Modified");
+                    ctx.response.setHeader("ETag", &etag);
+                    return;
+                }
+            }
+            ctx.response.setContentType(entry.content_type);
+            ctx.response.setBody(entry.data);
+            ctx.response.setHeader("ETag", &etag);
+            ctx.response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
             return;
         }
     }
