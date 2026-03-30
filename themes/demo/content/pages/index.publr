@@ -1,0 +1,13 @@
+---
+const pages = try ctx.query(.page, .{ .limit = 100 });
+---
+<Base>
+  <h1 class="text-3xl font-bold mb-6">Pages</h1>
+  <ul class="divide-y divide-gray-100">
+    {for (pages) |page| (
+      <li class="py-3">
+        <a href={`/pages/${page.data.slug}`} class="text-blue-600 font-medium hover:underline">{page.title}</a>
+      </li>
+    )}
+  </ul>
+</Base>

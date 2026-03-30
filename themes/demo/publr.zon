@@ -1,0 +1,10 @@
+.{
+    .build = .{
+        .preBuild = .{
+            .{ "tailwindcss", "-i", "themes/demo/src/input.css", "-o", "themes/demo/public/theme.css", "--minify" },
+        },
+        .postBuild = .{
+            .{ "find", "{output}", "-name", "*.html", "-exec", "minhtml", "--output", "{}", "{}", ";" },
+        },
+    },
+}

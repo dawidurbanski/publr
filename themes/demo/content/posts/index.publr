@@ -1,0 +1,13 @@
+---
+const posts = try ctx.query(.post, .{ .limit = 100 });
+---
+<Base>
+  <h1 class="text-3xl font-bold mb-6">Blog Posts</h1>
+  <ul class="divide-y divide-gray-100">
+    {for (posts) |post| (
+      <li class="py-3">
+        <a href={`/posts/${post.data.slug}`} class="text-blue-600 font-medium hover:underline">{post.title}</a>
+      </li>
+    )}
+  </ul>
+</Base>
