@@ -175,7 +175,11 @@ fn getLatestSourceMtime() i128 {
 fn getLatestAssetMtime() i128 {
     var max_mtime: i128 = 0;
     max_mtime = @max(max_mtime, getFileMtime("static/admin.css"));
-    max_mtime = @max(max_mtime, getFileMtime("themes/demo/static/theme.css"));
+    const theme_css_path = if (@hasField(@TypeOf(publr_config), "theme"))
+        "themes/" ++ publr_config.theme ++ "/public/theme.css"
+    else
+        "themes/default/static/theme.css";
+    max_mtime = @max(max_mtime, getFileMtime(theme_css_path));
     return max_mtime;
 }
 

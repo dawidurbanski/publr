@@ -1,4 +1,8 @@
 .{
     .name = "publr",
+    .url = "http://localhost:8080",
+    .description = "Publr CMS",
+    .theme = "minimal",
+    .site = .{},
     .configText = "hello from comptime 222",
 }

@@ -86,6 +86,11 @@ pub fn handleRecompile(ctx: *Context) !void {
     const project_flag = std.fmt.allocPrint(allocator, "-Dproject-dir={s}", .{cwd_path}) catch {
         return jsonError(ctx, "Allocation failed");
     };
+    const theme_flag = std.fmt.allocPrint(allocator, "-Dtheme={s}", .{
+        if (@hasField(@TypeOf(publr_config), "theme")) publr_config.theme else "default",
+    }) catch {
+        return jsonError(ctx, "Allocation failed");
+    };
 
     // Separate output directory so we never overwrite zig-out/bin/publr (used by dev runner)
     const prefix_path = std.fs.path.join(allocator, &.{ source_path, ".publr" }) catch {
@@ -106,6 +111,7 @@ pub fn handleRecompile(ctx: *Context) !void {
             config_flag,
             plugins_flag,
             project_flag,
+            theme_flag,
             "-Doptimize=Debug",
         },
         allocator,
