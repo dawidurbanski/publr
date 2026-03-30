@@ -28,6 +28,23 @@ pub const reserved_ids = [_][]const u8{
     Page.type_id,
 };
 
+/// Look up content type ID from a URL handle.
+/// Returns null if no content type has this handle.
+pub fn typeIdFromHandle(handle: []const u8) ?[]const u8 {
+    inline for (content_types) |CT| {
+        if (std.mem.eql(u8, CT.handle, handle)) return CT.type_id;
+    }
+    return null;
+}
+
+/// Look up URL handle from a content type ID.
+pub fn handleFromTypeId(type_id: []const u8) ?[]const u8 {
+    inline for (content_types) |CT| {
+        if (std.mem.eql(u8, CT.type_id, type_id)) return CT.handle;
+    }
+    return null;
+}
+
 /// Check if a content type ID is reserved (core)
 pub fn isReserved(id: []const u8) bool {
     inline for (reserved_ids) |reserved| {

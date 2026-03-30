@@ -7,7 +7,7 @@ const content_type = @import("content_type");
 const field = @import("field");
 
 /// Static page content type
-pub const Page = content_type.ContentType("page", .{ .name = "Page" }, &.{
+pub const Page = content_type.ContentType("page", .{ .name = "Page", .handle = "pages" }, &.{
     // Title is promoted to entries.title column
     field.String("title", .{ .required = true, .max_length = 200 }),
 

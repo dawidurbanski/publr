@@ -64,6 +64,9 @@ pub const Hooks = struct {
 pub const Config = struct {
     /// Human-readable name (e.g., "Blog Post", "Author")
     name: []const u8,
+    /// URL handle for theme routing (e.g., "blog" for /blog/:slug).
+    /// Defaults to the content type ID if not set.
+    handle: ?[]const u8 = null,
     /// Optional plural display name used in admin list contexts
     name_plural: ?[]const u8 = null,
     /// Optional icon identifier for admin navigation
@@ -125,6 +128,9 @@ pub fn ContentType(
     return struct {
         /// Content type identifier (e.g., "post", "author")
         pub const type_id = id;
+
+        /// URL handle for theme routing. Falls back to type_id.
+        pub const handle = config.handle orelse id;
 
         /// Human-readable name (e.g., "Blog Post", "Author")
         pub const display_name = config.name;

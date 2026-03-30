@@ -7,7 +7,7 @@ const content_type = @import("content_type");
 const field = @import("field");
 
 /// Blog post content type
-pub const Post = content_type.ContentType("post", .{ .name = "Blog Post" }, &.{
+pub const Post = content_type.ContentType("post", .{ .name = "Blog Post", .handle = "posts" }, &.{
     // Title is promoted to entries.title column
     field.String("title", .{ .required = true, .max_length = 200 }),
 
