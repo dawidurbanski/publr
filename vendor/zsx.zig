@@ -1005,6 +1005,9 @@ fn transpileDirectory(allocator: Allocator, input_dir: []const u8, output_dir: [
 
     // Phase 3: Generate views.zig namespace module
     try generateViewsModule(allocator, output_dir, zsx_files.items);
+
+    // Phase 4: Generate gallery_defaults.zig (imports gallery.zon from each component dir)
+    try generateGalleryDefaults(allocator, input_dir, output_dir, zsx_files.items);
 }
 
 fn transpileFile(allocator: Allocator, input_dir: []const u8, output_dir: []const u8, rel_path: []const u8, component_registry: *const std.StringHashMapUnmanaged([]const u8)) !void {
@@ -1352,20 +1355,10 @@ fn emitNamespaceLevel(
         }
     }.lessThan);
 
-    // Emit subdirectory structs
+    // Emit subdirectory structs (or flat imports for colocated components)
     for (subdir_names.items) |subdir_name| {
         const ident = try makeZigIdentifier(allocator, subdir_name);
         defer allocator.free(ident);
-
-        // Add blank line between file imports and struct declarations
-        if (files_at_level.items.len > 0 or subdir_names.items.len > 1) {
-            try output.append(allocator, '\n');
-        }
-
-        try writeViewsIndent(output, allocator, indent);
-        try output.appendSlice(allocator, "pub const ");
-        try output.appendSlice(allocator, ident);
-        try output.appendSlice(allocator, " = struct {\n");
 
         const new_prefix = if (prefix.len > 0)
             try std.fmt.allocPrint(allocator, "{s}{s}/", .{ prefix, subdir_name })
@@ -1373,10 +1366,63 @@ fn emitNamespaceLevel(
             try std.fmt.allocPrint(allocator, "{s}/", .{subdir_name});
         defer allocator.free(new_prefix);
 
-        try emitNamespaceLevel(allocator, output, sorted_files, new_prefix, indent + 1);
+        // Colocated component detection: if a directory contains exactly one .zsx file
+        // whose name matches the directory (e.g., button/button.zsx), emit a flat import
+        // instead of a nested struct. This supports the convention:
+        //   src/components/button/button.zsx → pub const button = @import("button/button.zig");
+        const colocated_path = blk: {
+            const expected = std.fmt.allocPrint(allocator, "{s}{s}.zsx", .{ new_prefix, subdir_name }) catch break :blk null;
+            defer allocator.free(expected);
 
-        try writeViewsIndent(output, allocator, indent);
-        try output.appendSlice(allocator, "};\n");
+            var subdir_file_count: usize = 0;
+            var found_match = false;
+            for (sorted_files) |rel_path| {
+                if (!mem.startsWith(u8, rel_path, new_prefix)) continue;
+                const sub_suffix = rel_path[new_prefix.len..];
+                // Only count direct children (no further nesting)
+                if (mem.indexOfScalar(u8, sub_suffix, '/') != null) continue;
+                if (mem.indexOfScalar(u8, sub_suffix, '\\') != null) continue;
+                subdir_file_count += 1;
+                if (mem.eql(u8, rel_path, expected)) found_match = true;
+            }
+            if (found_match and subdir_file_count == 1) {
+                break :blk std.fmt.allocPrint(allocator, "{s}{s}", .{ new_prefix, subdir_name }) catch null;
+            }
+            break :blk null;
+        };
+
+        if (colocated_path) |col_path| {
+            defer allocator.free(col_path);
+            const zig_rel = try makeZigName(allocator, col_path);
+            defer allocator.free(zig_rel);
+
+            // Add blank line between file imports and struct declarations
+            if (files_at_level.items.len > 0 or subdir_names.items.len > 1) {
+                try output.append(allocator, '\n');
+            }
+
+            try writeViewsIndent(output, allocator, indent);
+            try output.appendSlice(allocator, "pub const ");
+            try output.appendSlice(allocator, ident);
+            try output.appendSlice(allocator, " = @import(\"");
+            try output.appendSlice(allocator, zig_rel);
+            try output.appendSlice(allocator, ".zig\");\n");
+        } else {
+            // Add blank line between file imports and struct declarations
+            if (files_at_level.items.len > 0 or subdir_names.items.len > 1) {
+                try output.append(allocator, '\n');
+            }
+
+            try writeViewsIndent(output, allocator, indent);
+            try output.appendSlice(allocator, "pub const ");
+            try output.appendSlice(allocator, ident);
+            try output.appendSlice(allocator, " = struct {\n");
+
+            try emitNamespaceLevel(allocator, output, sorted_files, new_prefix, indent + 1);
+
+            try writeViewsIndent(output, allocator, indent);
+            try output.appendSlice(allocator, "};\n");
+        }
     }
 }
 
@@ -1385,6 +1431,66 @@ fn writeViewsIndent(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, l
     while (i < level) : (i += 1) {
         try output.appendSlice(allocator, "    ");
     }
+}
+
+/// Generate gallery_defaults.zig — imports gallery.zon from each colocated component directory.
+/// This allows html_variants.zig and wasm_bridge.zig to access gallery-only defaults at comptime.
+fn generateGalleryDefaults(allocator: Allocator, input_dir: []const u8, output_dir: []const u8, zsx_files: []const []u8) !void {
+    var output = std.ArrayListUnmanaged(u8){};
+    defer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "// Generated from gallery.zon files - do not edit\n\n");
+
+    // Find colocated components (button/button.zsx pattern) that have a gallery.zon
+    var sorted = try allocator.alloc([]const u8, zsx_files.len);
+    defer allocator.free(sorted);
+    for (zsx_files, 0..) |f, i| sorted[i] = f;
+    mem.sort([]const u8, sorted, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return mem.order(u8, a, b) == .lt;
+        }
+    }.lessThan);
+
+    for (sorted) |rel_path| {
+        const basename = fs.path.basename(rel_path);
+        const name_no_ext = basename[0 .. basename.len - 4]; // strip .zsx
+
+        // Check if this is a colocated component (e.g., button/button.zsx)
+        const dir_path = fs.path.dirname(rel_path) orelse continue;
+        const parent_name = fs.path.basename(dir_path);
+        if (!mem.eql(u8, name_no_ext, parent_name)) continue;
+
+        // Check if gallery.zon exists in the source component directory
+        const gallery_path = try std.fmt.allocPrint(allocator, "{s}/{s}/gallery.zon", .{ input_dir, dir_path });
+        defer allocator.free(gallery_path);
+
+        const gallery_exists = blk: {
+            const f = fs.cwd().openFile(gallery_path, .{}) catch break :blk false;
+            f.close();
+            break :blk true;
+        };
+
+        if (gallery_exists) {
+            const ident = try makeZigIdentifier(allocator, name_no_ext);
+            defer allocator.free(ident);
+
+            // Import path relative to output dir (src/gen/components/).
+            // gallery.zon is at src/components/<name>/gallery.zon.
+            // From src/gen/components/ → ../../components/<name>/gallery.zon
+            try output.appendSlice(allocator, "pub const ");
+            try output.appendSlice(allocator, ident);
+            try output.appendSlice(allocator, " = @import(\"../../components/");
+            try output.appendSlice(allocator, name_no_ext);
+            try output.appendSlice(allocator, "/gallery.zon\");\n");
+        }
+    }
+
+    const gallery_path = try std.fmt.allocPrint(allocator, "{s}/gallery_defaults.zig", .{output_dir});
+    defer allocator.free(gallery_path);
+
+    var file = try fs.cwd().createFile(gallery_path, .{});
+    defer file.close();
+    try file.writeAll(output.items);
 }
 
 fn makeZigName(allocator: Allocator, base: []const u8) ![]u8 {
@@ -1872,6 +1978,15 @@ const Parser = struct {
                     const val = self.source[val_start..self.pos];
                     if (self.pos < self.source.len) self.pos += 1; // skip }
                     try attrs.append(self.allocator, .{ .name = attr_name, .value = val, .is_expr = true, .is_spread = false });
+                } else if (self.pos < self.source.len and self.source[self.pos] == '.') {
+                    // Enum value: =.identifier
+                    const val_start = self.pos;
+                    self.pos += 1; // skip .
+                    while (self.pos < self.source.len and (std.ascii.isAlphanumeric(self.source[self.pos]) or self.source[self.pos] == '_')) {
+                        self.pos += 1;
+                    }
+                    const val = self.source[val_start..self.pos];
+                    try attrs.append(self.allocator, .{ .name = attr_name, .value = val, .is_expr = true, .is_spread = false });
                 }
             } else {
                 // Boolean attribute
@@ -2206,11 +2321,11 @@ const Parser = struct {
         try self.writeIndent();
         if (is_raw) {
             try self.writeTryWriter();
-                    try self.write("writeAll(");
+            try self.write("writeAll(");
         } else {
             try self.write("try zsx.render(");
-                    try self.writeWriterVar();
-                    try self.write(", ");
+            try self.writeWriterVar();
+            try self.write(", ");
         }
         try self.write(expr);
         try self.write(");\n");
@@ -2602,7 +2717,7 @@ const Parser = struct {
                 if (i > text_start) {
                     try self.writeIndent();
                     try self.writeTryWriter();
-        try self.write("writeAll(\"");
+                    try self.write("writeAll(\"");
                     try self.writeEscaped(content[text_start..i]);
                     try self.write("\");\n");
                 }
@@ -2655,7 +2770,7 @@ const Parser = struct {
         if (text_start < content.len) {
             try self.writeIndent();
             try self.writeTryWriter();
-        try self.write("writeAll(\"");
+            try self.write("writeAll(\"");
             try self.writeEscaped(content[text_start..content.len]);
             try self.write("\");\n");
         }
@@ -2678,6 +2793,17 @@ const Parser = struct {
         try self.output.appendSlice(self.allocator, data);
     }
 
+    fn writeByte(self: *Parser, byte: u8) Error!void {
+        try self.output.append(self.allocator, byte);
+    }
+
+    fn writeIndent(self: *Parser) Error!void {
+        var i: usize = 0;
+        while (i < self.indent) : (i += 1) {
+            try self.write("    ");
+        }
+    }
+
     /// Emit the current writer variable name (changes in children context)
     fn writeWriterVar(self: *Parser) Error!void {
         if (self.children_depth == 0) {
@@ -2693,17 +2819,6 @@ const Parser = struct {
         try self.write("try ");
         try self.writeWriterVar();
         try self.write(".");
-    }
-
-    fn writeByte(self: *Parser, byte: u8) Error!void {
-        try self.output.append(self.allocator, byte);
-    }
-
-    fn writeIndent(self: *Parser) Error!void {
-        var i: usize = 0;
-        while (i < self.indent) : (i += 1) {
-            try self.write("    ");
-        }
     }
 
     fn skipWhitespace(self: *Parser) void {
@@ -2732,5 +2847,7 @@ const Parser = struct {
         is_spread: bool,
     };
 };
+
+// views.zig namespace generation tests
 
 };
