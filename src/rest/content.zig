@@ -208,6 +208,7 @@ fn handleWorkflowStub(ctx: *Context) !void {
     try json.errorEnvelope(ctx, "501 Not Implemented", "not_implemented", "Workflow API is not implemented yet");
 }
 
+/// Look up an entry's slug by trying each content type.
 fn getFieldsObject(value: std.json.Value) ?std.json.Value {
     if (value == .object) {
         if (value.object.get("fields")) |fields| {

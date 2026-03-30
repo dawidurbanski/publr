@@ -24,6 +24,7 @@ const Db = db_mod.Db;
 const id_gen = @import("id_gen");
 const core_init = @import("core_init");
 const schemas = @import("schemas");
+const publish_hooks = @import("publish_hooks");
 
 const Allocator = std.mem.Allocator;
 
@@ -69,7 +70,10 @@ pub const getEntryVersionId = release.getEntryVersionId;
 pub const getPublishedData = release.getPublishedData;
 pub const discardToPublished = release.discardToPublished;
 pub const mergeJsonFields = release.mergeJsonFields;
-pub const publishEntry = release.publishEntry;
+pub fn publishEntry(allocator: Allocator, db: *Db, entry_id: []const u8, author_id: ?[]const u8, fields_json: ?[]const u8) !void {
+    try release.publishEntry(allocator, db, entry_id, author_id, fields_json);
+    publish_hooks.afterPublish(db, allocator, entry_id);
+}
 pub const revertRelease = release.revertRelease;
 pub const reReleaseReverted = release.reReleaseReverted;
 pub const scheduleRelease = release.scheduleRelease;
@@ -865,6 +869,8 @@ pub fn unpublishEntry(db: *Db, entry_id: []const u8) (Db.Error || EntryLifecycle
     defer stmt.deinit();
     try stmt.bindText(1, entry_id);
     _ = try stmt.step();
+
+    publish_hooks.afterPublish(db, std.heap.page_allocator, entry_id);
 }
 
 // =============================================================================
