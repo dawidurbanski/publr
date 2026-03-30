@@ -6,6 +6,8 @@ const Context = router_mod.Context;
 const Method = router_mod.Method;
 const logger = @import("logger.zig");
 const error_pages = @import("error.zig");
+const publish_hooks = @import("publish_hooks");
+const ssg = @import("ssg.zig");
 const tpl = @import("tpl");
 const dev = @import("dev.zig");
 const recompile = @import("recompile.zig");
@@ -32,6 +34,7 @@ const rest_info = @import("rest_info");
 const site_handlers = @import("http_handlers/site.zig");
 const setup_auth_handlers = @import("http_handlers/setup_auth.zig");
 const static_handlers = @import("http_handlers/static_files.zig");
+const theme_handlers = @import("http_handlers/theme.zig");
 const ws_handlers = @import("http_handlers/websocket.zig");
 const connection_handlers = @import("http_server/connection.zig");
 
@@ -53,6 +56,7 @@ pub fn serve(
 ) !void {
     is_dev_mode = dev_mode;
     static_handlers.setDevMode(dev_mode);
+    theme_handlers.setDevMode(dev_mode);
     ws_handlers.configure(&shutdown_requested, dev_mode);
     collaboration_config.setTiming(lock_timeout_ms, heartbeat_interval_ms);
     presence.setTiming(
@@ -120,13 +124,16 @@ pub fn serve(
     }
 
     // Register core routes
-    try router.get("/", site_handlers.handleIndex);
     try router.get("/admin/setup", setup_auth_handlers.handleSetupGet);
     try router.post("/admin/setup", setup_auth_handlers.handleSetupPost);
     try router.get("/admin/login", setup_auth_handlers.handleLoginGet);
     try router.post("/admin/login", setup_auth_handlers.handleLoginPost);
     try router.post("/admin/logout", setup_auth_handlers.handleLogout);
     try router.get("/static/*", static_handlers.handleStatic);
+    if (comptime modules_api.hasModule(.theme)) {
+        try router.get("/theme/*", static_handlers.handleThemeStatic);
+        try router.get("/sitemap.xml", handleSitemap);
+    }
     try router.get("/media/*", media_handler.handleMedia);
     try router.post("/admin/system/recompile", recompile.handleRecompile);
     try router.post("/admin/system/config", recompile.handleConfigUpdate);
@@ -161,12 +168,23 @@ pub fn serve(
         try router.get("/error-test", site_handlers.handleErrorTest);
     }
 
-    // Custom 404 handler
-    router.setNotFound(error_pages.notFoundHandler);
+    // Theme routes (lowest priority — registered after admin, API, and plugin routes)
+    if (comptime modules_api.hasModule(.theme)) {
+        try theme_handlers.registerRoutes(&router);
+
+        // Custom 404 handler (theme 404 page if available, otherwise default)
+        if (!theme_handlers.setNotFoundHandler(&router)) {
+            router.setNotFound(error_pages.notFoundHandler);
+        }
+
+        // Register SSG regeneration hook for publish/unpublish
+        publish_hooks.register(&ssgRegenHook);
+    } else {
+        router.setNotFound(error_pages.notFoundHandler);
+    }
 
     connection_handlers.configure(&router, &active_connections);
 
-    // Set up signal handlers for graceful shutdown
     setupSignalHandlers();
 
     const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
@@ -226,6 +244,68 @@ pub fn serve(
     // (OS reclaims memory, closes sockets/files). Without this, the process
     // lingers after zig-build's parent exits, leaving the terminal without a prompt.
     std.process.exit(0);
+}
+
+fn handleSitemap(ctx: *router_mod.Context) !void {
+    // Try pre-generated file first
+    const output_dir = ssg.getOutputDir();
+    var path_buf: [512]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/sitemap.xml", .{output_dir}) catch "";
+    if (path.len > 0) {
+        if (std.fs.cwd().readFileAlloc(ctx.allocator, path, 1024 * 1024)) |content| {
+            ctx.response.setContentType("application/xml");
+            ctx.response.setBody(content);
+            return;
+        } else |_| {}
+    }
+
+    // Generate on the fly (includes dynamic routes from DB)
+    const db = if (auth_middleware.auth) |a| a.db else return error_pages.notFoundHandler(ctx);
+    const content = ssg.generateSitemapContent(ctx.allocator, db) catch return error_pages.notFoundHandler(ctx);
+    ctx.response.setContentType("application/xml");
+    ctx.response.setBody(content);
+}
+
+fn ssgRegenHook(db: *@import("db").Db, alloc: std.mem.Allocator, entry_id: []const u8) void {
+    const output_dir = ssg.getOutputDir();
+
+    // Look up slug and content type from entry_id (using arena so strings stay valid)
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const slug = blk: {
+        var stmt = db.prepare("SELECT slug FROM content_entries WHERE id = ?1") catch break :blk null;
+        defer stmt.deinit();
+        stmt.bindText(1, entry_id) catch break :blk null;
+        if ((stmt.step() catch null) orelse false) {
+            if (stmt.columnText(0)) |s| break :blk a.dupe(u8, s) catch null;
+        }
+        break :blk null;
+    };
+
+    const content_type_id = blk: {
+        var stmt = db.prepare("SELECT a.content_type FROM content_anchors a JOIN content_entries e ON e.anchor_id = a.id WHERE e.id = ?1") catch break :blk null;
+        defer stmt.deinit();
+        stmt.bindText(1, entry_id) catch break :blk null;
+        if ((stmt.step() catch null) orelse false) {
+            if (stmt.columnText(0)) |s| break :blk a.dupe(u8, s) catch null;
+        }
+        break :blk null;
+    };
+
+    if (slug) |s| {
+        // Convert DB type_id to handle for manifest matching
+        const handle = if (content_type_id) |ct| @import("schemas").handleFromTypeId(ct) else null;
+        if (ssg.regenerateEntry(a, db, output_dir, s, handle)) |n| {
+            std.debug.print("[ssg] Regenerated {d} pages for '{s}'\n", .{ n, s });
+        }
+    } else {
+        if (ssg.regeneratePages(a, db, output_dir)) |n| {
+            std.debug.print("[ssg] Regenerated {d} pages\n", .{n});
+        }
+    }
+    ssg.regenerateSitemap(a, db, output_dir) catch {};
 }
 
 fn setupSignalHandlers() void {
