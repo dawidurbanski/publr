@@ -2647,6 +2647,12 @@ const Parser = struct {
             } else {
                 if (!first) try self.write(", ");
                 try self.write(" .");
+                if (isZigKeyword(attr.name)) {
+                    try self.write("@compileError(\"ZSX: prop name '");
+                    try self.write(attr.name);
+                    try self.write("' is a Zig keyword. Use a non-colliding name (e.g., snake_case convention).\")");
+                    return;
+                }
                 try self.write(attr.name);
                 try self.write(" = ");
                 if (attr.is_expr) {
