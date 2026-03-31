@@ -2590,15 +2590,30 @@ const Parser = struct {
         try self.write("{\n");
         self.indent += 1;
 
+        // Use depth-unique variable names to avoid shadowing in nested children
+        const depth_suffix: []const u8 = switch (self.children_depth) {
+            0 => "0", 1 => "1", 2 => "2", 3 => "3", 4 => "4",
+            5 => "5", 6 => "6", 7 => "7", 8 => "8", 9 => "9",
+            else => "x",
+        };
+
         // Create children buffer using page allocator (freed when scope exits)
         try self.writeIndent();
-        try self.write("var _children_buf: @import(\"std\").ArrayListUnmanaged(u8) = .{};\n");
+        try self.write("var _children_buf_");
+        try self.write(depth_suffix);
+        try self.write(": @import(\"std\").ArrayListUnmanaged(u8) = .{};\n");
         try self.writeIndent();
-        try self.write("const _children_alloc = @import(\"std\").heap.page_allocator;\n");
+        try self.write("const _children_alloc_");
+        try self.write(depth_suffix);
+        try self.write(" = @import(\"std\").heap.page_allocator;\n");
         try self.writeIndent();
-        try self.write("defer _children_buf.deinit(_children_alloc);\n");
+        try self.write("defer _children_buf_");
+        try self.write(depth_suffix);
+        try self.write(".deinit(_children_alloc_");
+        try self.write(depth_suffix);
+        try self.write(");\n");
 
-        // Render children into the buffer using _children_w as the writer
+        // Render children into the buffer
         self.children_depth += 1;
         try self.parseChildren(name, false);
         self.children_depth -= 1;
@@ -2612,7 +2627,9 @@ const Parser = struct {
         try self.write(", .{");
         try self.emitComponentProps(attrs);
         if (attrs.len > 0) try self.write(",");
-        try self.write(" .children = _children_buf.items });\n");
+        try self.write(" .children = _children_buf_");
+        try self.write(depth_suffix);
+        try self.write(".items });\n");
 
         self.indent -= 1;
         try self.writeIndent();
@@ -2809,8 +2826,17 @@ const Parser = struct {
         if (self.children_depth == 0) {
             try self.write("writer");
         } else {
-            // Children are pre-rendered to _children_buf via _children_w
-            try self.write("_children_buf.writer(_children_alloc)");
+            // Children are pre-rendered to depth-specific buffer
+            const depth_suffix: []const u8 = switch (self.children_depth - 1) {
+                0 => "0", 1 => "1", 2 => "2", 3 => "3", 4 => "4",
+                5 => "5", 6 => "6", 7 => "7", 8 => "8", 9 => "9",
+                else => "x",
+            };
+            try self.write("_children_buf_");
+            try self.write(depth_suffix);
+            try self.write(".writer(_children_alloc_");
+            try self.write(depth_suffix);
+            try self.write(")");
         }
     }
 
