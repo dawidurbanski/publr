@@ -1,6 +1,9 @@
 // Publr UI Amalgamation — generated from design-system/src/gen/components/*.zig
 // Do not edit directly. Regenerate: ./scripts/amalgamate-design-system.sh
 
+// Self-reference for cross-component imports within the amalgamation.
+const root = @This();
+
 pub const runtime = struct {
 const std = @import("std");
 
@@ -103,7 +106,15 @@ pub fn withDefaults(comptime Defaults: type, raw: anytype) WithDefaultsReturn(De
 
 pub const icons_data = struct {
 
-pub const Name = enum { arrow_left, bookmark, chart, check, chevron_down, chevron_left, chevron_right, chevron_up, components, copy, dot_filled, dot_half, dot_outline, edit, file, folder_plus, folder, grid, home, image, list, lock, logout, more, package, plus_circle, plus, search, settings, sync, tag, trash, upload, user, users, x_close };
+pub const Name = enum { alert_hexagon, alert_triangle, arrow_left, bookmark, chart, check, chevron_down, chevron_left, chevron_right, chevron_up, components, copy, dot_filled, dot_half, dot_outline, edit, file, folder_plus, folder, grid, home, image, list, lock, logout, more, package, plus_circle, plus, search, settings, sync, tag, trash, upload, user, users, x_close };
+
+pub const alert_hexagon: []const u8 =
+    \\<path d="M12 8.00008V12.0001M12 16.0001H12.01M3 7.94153V16.0586C3 16.4013 3 16.5726 3.05048 16.7254C3.09515 16.8606 3.16816 16.9847 3.26463 17.0893C3.37369 17.2077 3.52345 17.2909 3.82297 17.4573L11.223 21.5684C11.5066 21.726 11.6484 21.8047 11.7985 21.8356C11.9315 21.863 12.0685 21.863 12.2015 21.8356C12.3516 21.8047 12.4934 21.726 12.777 21.5684L20.177 17.4573C20.4766 17.2909 20.6263 17.2077 20.7354 17.0893C20.8318 16.9847 20.9049 16.8606 20.9495 16.7254C21 16.5726 21 16.4013 21 16.0586V7.94153C21 7.59889 21 7.42756 20.9495 7.27477C20.9049 7.13959 20.8318 7.01551 20.7354 6.91082C20.6263 6.79248 20.4766 6.70928 20.177 6.54288L12.777 2.43177C12.4934 2.27421 12.3516 2.19543 12.2015 2.16454C12.0685 2.13721 11.9315 2.13721 11.7985 2.16454C11.6484 2.19543 11.5066 2.27421 11.223 2.43177L3.82297 6.54288C3.52345 6.70928 3.37369 6.79248 3.26463 6.91082C3.16816 7.01551 3.09515 7.13959 3.05048 7.27477C3 7.42756 3 7.59889 3 7.94153Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+;
+
+pub const alert_triangle: []const u8 =
+    \\<path d="M11.9998 8.99999V13M11.9998 17H12.0098M10.6151 3.89171L2.39019 18.0983C1.93398 18.8863 1.70588 19.2803 1.73959 19.6037C1.769 19.8857 1.91677 20.142 2.14613 20.3088C2.40908 20.5 2.86435 20.5 3.77487 20.5H20.2246C21.1352 20.5 21.5904 20.5 21.8534 20.3088C22.0827 20.142 22.2305 19.8857 22.2599 19.6037C22.2936 19.2803 22.0655 18.8863 21.6093 18.0983L13.3844 3.89171C12.9299 3.10654 12.7026 2.71396 12.4061 2.58211C12.1474 2.4671 11.8521 2.4671 11.5935 2.58211C11.2969 2.71396 11.0696 3.10655 10.6151 3.89171Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+;
 
 pub const arrow_left: []const u8 =
     \\<path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -267,86 +278,1417 @@ pub fn get(name: Name) []const u8 {
 }
 };
 
-pub const button = struct {
+pub const avatar = struct {
 
-/// Button — primary action element.
+/// Avatar — user identity with image, initials fallback, badge, and grouping.
 ///
-/// Renders a `<button>` with Tailwind utility classes based on hierarchy, size,
-/// and disabled state. Uses `data-publr-component="button"` for JS binding.
+/// Sub-components matching shadcn API:
+///   - Avatar: outer container (size)
+///   - AvatarImage: `<img>` element (absolute, covers fallback)
+///   - AvatarFallback: initials shown when no image
+///   - AvatarBadge: small status indicator positioned on the avatar
+///   - AvatarGroup: container that overlaps children with ring dividers (via CSS)
+///   - AvatarGroupCount: "+N" overflow count
 ///
-/// Hierarchy variants:
-///   - primary: solid brand background, white text
-///   - secondary: white background, gray text, border
-///   - tertiary: transparent, gray text, hover background
-///   - link: text-only brand color, no padding
-///   - link_gray: text-only gray, no padding
+/// Usage:
+///   <Avatar size=.md>
+///       <AvatarImage src="/img/olivia.jpg" alt="Olivia" />
+///       <AvatarFallback>OM</AvatarFallback>
+///   </Avatar>
 ///
-/// Keyboard: standard `<button>` behavior (Enter/Space to activate).
-/// No custom JS handler — purely CSS-driven.
+///   <Avatar size=.md>
+///       <AvatarFallback>OM</AvatarFallback>
+///       <AvatarBadge />
+///   </Avatar>
+///
+///   <AvatarGroup>
+///       <Avatar size=.sm><AvatarFallback>OM</AvatarFallback></Avatar>
+///       <Avatar size=.sm><AvatarFallback>JL</AvatarFallback></Avatar>
+///       <AvatarGroupCount size=.sm count="3" />
+///   </AvatarGroup>
+pub const Size = enum { sm, default, lg };
+// ── Components (shadcn API) ─────────────────────────
+pub const AvatarProps = struct {
+    size: Size = .default,
+    children: []const u8 = "",
+};
+pub fn Avatar(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AvatarProps, _props);
+    const dimensions = if (props.size == .sm) "h-8 w-8 text-xs"
+        else if (props.size == .lg) "h-14 w-14 text-lg"
+        else "h-10 w-10 text-sm";
+    try writer.writeAll("<span data-publr-component=\"avatar\"");
+    try writer.writeAll(" data-publr-size=\"");
+    try runtime.render(writer, props.size);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("relative inline-flex items-center justify-center rounded-full shrink-0 ");
+    try writer.writeAll(dimensions);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const AvatarImageProps = struct {
+    src: []const u8 = "",
+    alt: []const u8 = "",
+};
+pub fn AvatarImage(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AvatarImageProps, _props);
+    try writer.writeAll("<img data-publr-part=\"image\" class=\"absolute inset-0 h-full w-full rounded-full object-cover\"");
+    try writer.writeAll(" src=\"");
+    try runtime.render(writer, props.src);
+    try writer.writeAll("\"");
+    try writer.writeAll(" alt=\"");
+    try runtime.render(writer, props.alt);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+}
+
+pub const AvatarFallbackProps = struct {
+    children: []const u8 = "",
+};
+pub fn AvatarFallback(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AvatarFallbackProps, _props);
+    try writer.writeAll("<span data-publr-part=\"fallback\" class=\"flex h-full w-full items-center justify-center rounded-full bg-muted text-muted-foreground font-medium uppercase\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const AvatarBadgeProps = struct {};
+pub fn AvatarBadge(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<span data-publr-part=\"badge\" class=\"absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background bg-success\">");
+    try writer.writeAll("</span>");
+}
+
+pub const AvatarGroupProps = struct {
+    children: []const u8 = "",
+};
+pub fn AvatarGroup(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AvatarGroupProps, _props);
+    try writer.writeAll("<div data-publr-component=\"avatar-group\" class=\"flex -space-x-2\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const AvatarGroupCountProps = struct {
+    count: []const u8 = "0",
+    size: Size = .default,
+};
+pub fn AvatarGroupCount(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AvatarGroupCountProps, _props);
+    const dimensions = if (props.size == .sm) "h-8 w-8 text-[10px]"
+        else if (props.size == .lg) "h-14 w-14 text-sm"
+        else "h-10 w-10 text-xs";
+    try writer.writeAll("<span data-publr-part=\"count\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("relative inline-flex items-center justify-center rounded-full border-2 border-background bg-muted font-medium text-muted-foreground ");
+    try writer.writeAll(dimensions);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n        +");
+    try runtime.render(writer, props.count);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+// ── Gallery Demo (separate from component API) ──────
+// Props are forwarded to sub-components. The gallery groups them
+// by sub-component in the tree panel via manifest.sub_components.
+pub const AvatarDemoProps = struct {
+    // Demo selector
+    demo: enum { fallback, with_image, with_badge, group } = .fallback,
+    // Avatar props
+    size: Size = .default,
+    // AvatarImage props
+    src: []const u8 = "",
+    alt: []const u8 = "",
+    // AvatarFallback props
+    fallback: []const u8 = "",
+    // Group: per-item props
+    src_1: []const u8 = "",
+    alt_1: []const u8 = "",
+    fallback_1: []const u8 = "",
+    src_2: []const u8 = "",
+    alt_2: []const u8 = "",
+    fallback_2: []const u8 = "",
+    src_3: []const u8 = "",
+    alt_3: []const u8 = "",
+    fallback_3: []const u8 = "",
+    // AvatarGroupCount props
+    count: []const u8 = "",
+};
+pub fn AvatarDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AvatarDemoProps, _props);
+    if (props.demo == .fallback) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.fallback);
+                try AvatarFallback(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Avatar(writer, .{ .size = props.size, .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_image) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try AvatarImage(_children_buf_0.writer(_children_alloc_0), .{ .src = props.src,  .alt = props.alt });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.fallback);
+                try AvatarFallback(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Avatar(writer, .{ .size = props.size, .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_badge) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.fallback);
+                try AvatarFallback(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try AvatarBadge(_children_buf_0.writer(_children_alloc_0), .{ });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Avatar(writer, .{ .size = props.size, .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.fallback_1);
+                    try AvatarFallback(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Avatar(_children_buf_0.writer(_children_alloc_0), .{ .size = props.size, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.fallback_2);
+                    try AvatarFallback(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Avatar(_children_buf_0.writer(_children_alloc_0), .{ .size = props.size, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.fallback_3);
+                    try AvatarFallback(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Avatar(_children_buf_0.writer(_children_alloc_0), .{ .size = props.size, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try AvatarGroupCount(_children_buf_0.writer(_children_alloc_0), .{ .size = props.size,  .count = props.count });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try AvatarGroup(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const badge = struct {
+
+/// Badge — status indicator label.
+///
+/// Renders a `<span>` with variant-driven colors. Used for status tags
+/// (Published, Draft, Active), counts, and labels.
+///
+/// No JS — purely CSS-driven.
 ///
 /// Example:
-///   <Button hierarchy=.primary size=.md label="Save changes" />
-///   <Button hierarchy=.link disabled={true} label="Disabled" />
-pub const Hierarchy = enum { primary, secondary, tertiary, link, link_gray };
-pub const Size = enum { sm, md, lg, xl };
-pub const Type = enum { button, submit, reset };
-pub const ButtonProps = struct {
-    label: []const u8 = "Button CTA",
-    hierarchy: Hierarchy = .primary,
+///   <Badge label="Published" variant=.success />
+///   <Badge label="Draft" variant=.secondary />
+///   <Badge label="Error" variant=.error size=.sm />
+pub const Variant = enum { default, secondary, outline, success, warning, @"error", destructive };
+pub const Size = enum { sm, md };
+pub const BadgeProps = struct {
+    label: []const u8 = "Badge",
+    variant: Variant = .default,
     size: Size = .md,
-    disabled: bool = false,
-    @"type": Type = .button,
 };
-pub fn Button(writer: anytype, _props: anytype) !void {
-const props = runtime.withDefaults(ButtonProps, _props);
-    const base = "inline-flex items-center justify-center font-semibold transition-colors";
+pub fn Badge(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BadgeProps, _props);
+    const base = "inline-flex items-center font-medium rounded-full border";
 
-    const is_link = props.hierarchy == .link or props.hierarchy == .link_gray;
-
-    const size_classes = if (is_link) switch (props.size) {
-        .sm, .md => "text-sm gap-xs",
-        .lg, .xl => "text-md gap-sm",
-    } else switch (props.size) {
-        .sm => "px-3 py-2 text-sm gap-xs rounded-md",
-        .md => "px-3.5 py-2.5 text-sm gap-xs rounded-md",
-        .lg => "px-4 py-2.5 text-md gap-xs rounded-md",
-        .xl => "px-[30px] py-3 text-lg gap-sm rounded-md",
+    const size_classes = switch (props.size) {
+        .sm => "px-2 py-0.5 text-[10px]",
+        .md => "px-2.5 py-0.5 text-xs",
     };
 
-    const hierarchy_classes = if (props.disabled) switch (props.hierarchy) {
-        .primary => "bg-gray-100 text-gray-400 shadow-xs cursor-not-allowed",
-        .secondary => "bg-white text-gray-400 shadow-xs cursor-not-allowed",
-        .tertiary, .link, .link_gray => "text-gray-300 cursor-not-allowed",
-    } else switch (props.hierarchy) {
-        .primary => "bg-brand-600 text-white shadow-btn-primary hover:bg-brand-700",
-        .secondary => "bg-white text-gray-700 shadow-btn-secondary hover:bg-gray-50",
-        .tertiary => "text-gray-600 hover:bg-gray-50 hover:text-gray-700",
-        .link => "text-brand-700 hover:text-brand-800",
-        .link_gray => "text-gray-600 hover:text-gray-700",
+    const variant_classes = switch (props.variant) {
+        .default => "bg-primary text-primary-foreground border-transparent",
+        .secondary => "bg-secondary text-secondary-foreground border-transparent",
+        .outline => "bg-transparent text-foreground border-border",
+        .success => "bg-success/10 text-success border-success/20",
+        .warning => "bg-warning/10 text-warning border-warning/20",
+        .@"error" => "bg-error/10 text-error border-error/20",
+        .destructive => "bg-destructive text-primary-foreground border-transparent",
     };
-
-    const focus = if (props.disabled) "" else "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200 focus-visible:ring-offset-2";
-    try writer.writeAll("<button data-publr-component=\"button\"");
-    try writer.writeAll(" type=\"");
-    try runtime.render(writer, props.@"type");
+    try writer.writeAll("<span data-publr-component=\"badge\"");
+    try writer.writeAll(" data-publr-variant=\"");
+    try runtime.render(writer, props.variant);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-size=\"");
+    try runtime.render(writer, props.size);
     try writer.writeAll("\"");
     try writer.writeAll(" class=\"");
     try writer.writeAll(base);
     try writer.writeAll(" ");
     try writer.writeAll(size_classes);
     try writer.writeAll(" ");
-    try writer.writeAll(hierarchy_classes);
-    try writer.writeAll(" ");
-    try writer.writeAll(focus);
-    try writer.writeAll("\"");
-    try writer.writeAll(" disabled=\"");
-    try runtime.render(writer, props.disabled);
+    try writer.writeAll(variant_classes);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
     try runtime.render(writer, props.label);
     try writer.writeAll("\n");
-    try writer.writeAll("</button>");
+    try writer.writeAll("</span>");
+}
+
+};
+
+pub const breadcrumbs = struct {
+
+/// Breadcrumbs — navigation trail.
+///
+/// Composable sub-components:
+///   - Breadcrumb: outer `<nav>` with aria-label
+///   - BreadcrumbList: `<ol>` container
+///   - BreadcrumbItem: `<li>` wrapper
+///   - BreadcrumbLink: clickable link
+///   - BreadcrumbPage: current page (not a link)
+///   - BreadcrumbSeparator: separator between items (default: chevron icon)
+///   - BreadcrumbEllipsis: "..." for collapsed middle items
+///
+/// Usage:
+///   <Breadcrumb>
+///       <BreadcrumbList>
+///           <BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem>
+///           <BreadcrumbSeparator />
+///           <BreadcrumbItem><BreadcrumbPage>Profile</BreadcrumbPage></BreadcrumbItem>
+///       </BreadcrumbList>
+///   </Breadcrumb>
+pub const Icon = root.icon.Icon;
+// ── Sub-components ──────────────────────────────────
+pub const BreadcrumbProps = struct {
+    children: []const u8 = "",
+};
+pub fn Breadcrumb(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbProps, _props);
+    try writer.writeAll("<nav data-publr-component=\"breadcrumbs\" aria-label=\"Breadcrumb\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</nav>");
+}
+
+pub const BreadcrumbListProps = struct {
+    children: []const u8 = "",
+};
+pub fn BreadcrumbList(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbListProps, _props);
+    try writer.writeAll("<ol class=\"flex items-center gap-1.5 flex-wrap\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</ol>");
+}
+
+pub const BreadcrumbItemProps = struct {
+    children: []const u8 = "",
+};
+pub fn BreadcrumbItem(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbItemProps, _props);
+    try writer.writeAll("<li class=\"inline-flex items-center gap-1.5\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</li>");
+}
+
+pub const BreadcrumbLinkProps = struct {
+    href: []const u8 = "#",
+    children: []const u8 = "",
+};
+pub fn BreadcrumbLink(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbLinkProps, _props);
+    try writer.writeAll("<a class=\"text-sm text-muted-foreground hover:text-foreground transition-colors\"");
+    try writer.writeAll(" href=\"");
+    try runtime.render(writer, props.href);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</a>");
+}
+
+pub const BreadcrumbPageProps = struct {
+    children: []const u8 = "",
+};
+pub fn BreadcrumbPage(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbPageProps, _props);
+    try writer.writeAll("<span aria-current=\"page\" class=\"text-sm font-medium text-foreground\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const BreadcrumbSeparatorProps = struct {};
+pub fn BreadcrumbSeparator(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<li role=\"presentation\" class=\"text-muted-foreground\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .chevron_right,  .size = 14,  .class = "text-muted-foreground" });
+    try writer.writeAll("\n");
+    try writer.writeAll("</li>");
+}
+
+pub const BreadcrumbEllipsisProps = struct {};
+pub fn BreadcrumbEllipsis(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<li class=\"text-sm text-muted-foreground\">");
+    try writer.writeAll("...");
+    try writer.writeAll("</li>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const BreadcrumbsDemoProps = struct {
+    demo: enum { two_level, three_level, four_level, with_ellipsis } = .three_level,
+    // BreadcrumbLink props per item
+    link_1: []const u8 = "",
+    href_1: []const u8 = "",
+    link_2: []const u8 = "",
+    href_2: []const u8 = "",
+    link_3: []const u8 = "",
+    href_3: []const u8 = "",
+    // BreadcrumbPage
+    page: []const u8 = "",
+};
+pub fn BreadcrumbsDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbsDemoProps, _props);
+    if (props.demo == .two_level) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_1);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_1, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.page);
+                        try BreadcrumbPage(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbList(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Breadcrumb(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .three_level) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_1);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_1, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_2);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_2, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.page);
+                        try BreadcrumbPage(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbList(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Breadcrumb(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .four_level) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_1);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_1, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_2);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_2, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_3);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_3, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.page);
+                        try BreadcrumbPage(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbList(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Breadcrumb(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_1);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_1, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try BreadcrumbEllipsis(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.link_2);
+                        try BreadcrumbLink(_children_buf_2.writer(_children_alloc_2), .{ .href = props.href_2, .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.page);
+                        try BreadcrumbPage(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try BreadcrumbItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try BreadcrumbList(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Breadcrumb(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const button = struct {
+
+/// Button — primary action element.
+///
+/// Renders a `<button>` with semantic token classes based on hierarchy, size,
+/// and disabled state. Uses `data-publr-component="button"` for JS binding.
+///
+/// Hierarchy variants:
+///   - primary: solid primary background, primary-foreground text
+///   - secondary: secondary background, secondary-foreground text, border
+///   - tertiary: transparent, muted text, hover accent background
+///   - link: text-only primary color, no padding
+///   - link_gray: text-only muted color, no padding
+///   - destructive: solid destructive background for dangerous actions
+///
+/// Keyboard: standard `<button>` behavior (Enter/Space to activate).
+/// No custom JS handler — purely CSS-driven.
+///
+/// Example:
+///   <Button hierarchy=.primary size=.md label="Save changes" />
+///   <Button hierarchy=.destructive label="Delete" icon=.trash />
+///   <Button hierarchy=.secondary label="Settings" icon=.settings />
+pub const Icon = root.icon.Icon;
+pub const IconName = root.icon.Name;
+pub const Hierarchy = enum { primary, secondary, tertiary, link, link_gray, destructive };
+pub const Size = enum { sm, md, lg, xl };
+pub const Type = enum { button, submit, reset };
+pub const ButtonProps = struct {
+    label: []const u8,
+    hierarchy: Hierarchy = .primary,
+    size: Size = .md,
+    disabled: bool = false,
+    loading: bool = false,
+    @"type": Type = .button,
+    icon: ?IconName = null,
+};
+pub fn Button(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(ButtonProps, _props);
+    const base = "inline-flex items-center justify-center font-semibold transition-colors";
+    const is_disabled = props.disabled or props.loading;
+
+    const is_link = props.hierarchy == .link or props.hierarchy == .link_gray;
+
+    const size_classes = if (is_link) switch (props.size) {
+        .sm, .md => "text-sm gap-2",
+        .lg, .xl => "text-md gap-2.5",
+    } else switch (props.size) {
+        .sm => "px-3 py-2 text-sm gap-2 rounded-md",
+        .md => "px-3.5 py-2.5 text-sm gap-2 rounded-md",
+        .lg => "px-4 py-2.5 text-md gap-2 rounded-md",
+        .xl => "px-5 py-3 text-lg gap-2.5 rounded-md",
+    };
+
+    const icon_size: u16 = switch (props.size) {
+        .sm => 14,
+        .md => 16,
+        .lg => 18,
+        .xl => 20,
+    };
+
+    const hierarchy_classes = if (is_disabled) switch (props.hierarchy) {
+        .primary, .destructive => "bg-muted text-muted-foreground shadow-xs cursor-not-allowed",
+        .secondary => "bg-background text-muted-foreground shadow-xs border border-input cursor-not-allowed",
+        .tertiary, .link, .link_gray => "text-muted-foreground cursor-not-allowed",
+    } else switch (props.hierarchy) {
+        .primary => "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90",
+        .secondary => "bg-secondary text-secondary-foreground shadow-xs border border-input hover:bg-accent hover:text-accent-foreground",
+        .tertiary => "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+        .link => "text-primary hover:text-primary/80",
+        .link_gray => "text-muted-foreground hover:text-foreground",
+        .destructive => "bg-destructive text-primary-foreground shadow-xs hover:bg-destructive/90",
+    };
+
+    const focus = if (is_disabled) "" else "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
+
+    const has_icon = props.icon != null and !props.loading;
+    const state = if (props.loading) "loading" else "idle";
+    if (is_disabled) {
+        try writer.writeAll("<button data-publr-component=\"button\" aria-disabled=\"true\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" type=\"");
+        try runtime.render(writer, props.@"type");
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(size_classes);
+        try writer.writeAll(" ");
+        try writer.writeAll(hierarchy_classes);
+        try writer.writeAll(" ");
+        try writer.writeAll(focus);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (props.loading) {
+            try Icon(writer, .{ .name = .sync,  .size = icon_size,  .class = "shrink-0 animate-spin" });
+        }
+        try writer.writeAll("\n");
+        if (has_icon) {
+            try Icon(writer, .{ .name = props.icon.?,  .size = icon_size,  .class = "" });
+        }
+        try writer.writeAll("\n");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    } else {
+        try writer.writeAll("<button data-publr-component=\"button\" aria-disabled=\"false\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" type=\"");
+        try runtime.render(writer, props.@"type");
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(size_classes);
+        try writer.writeAll(" ");
+        try writer.writeAll(hierarchy_classes);
+        try writer.writeAll(" ");
+        try writer.writeAll(focus);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_icon) {
+            try Icon(writer, .{ .name = props.icon.?,  .size = icon_size,  .class = "" });
+        }
+        try writer.writeAll("\n");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    }
+}
+
+};
+
+pub const card = struct {
+
+/// Card — elevated surface container.
+///
+/// Composable sub-components:
+///   - Card: outer container with border, bg, shadow
+///   - CardHeader: top section (contains title, description, action)
+///   - CardTitle: heading text
+///   - CardDescription: subtitle/helper text
+///   - CardAction: top-right action slot (e.g., button, dropdown)
+///   - CardContent: main body
+///   - CardFooter: bottom section
+///
+/// Usage:
+///   <Card size=.default>
+///       <CardHeader>
+///           <CardTitle>Account</CardTitle>
+///           <CardDescription>Manage your settings.</CardDescription>
+///       </CardHeader>
+///       <CardContent>
+///           <p>Your content here.</p>
+///       </CardContent>
+///       <CardFooter>
+///           <Button label="Save" />
+///       </CardFooter>
+///   </Card>
+// ── Sub-components ──────────────────────────────────
+pub const CardProps = struct {
+    children: []const u8 = "",
+};
+pub fn Card(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardProps, _props);
+    try writer.writeAll("<div data-publr-component=\"card\" class=\"rounded-lg border border-border bg-card text-card-foreground shadow-sm\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const CardHeaderProps = struct {
+    children: []const u8 = "",
+};
+pub fn CardHeader(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardHeaderProps, _props);
+    try writer.writeAll("<div data-publr-part=\"header\" class=\"flex flex-col space-y-1.5 p-6 pb-0\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const CardTitleProps = struct {
+    children: []const u8 = "",
+};
+pub fn CardTitle(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardTitleProps, _props);
+    try writer.writeAll("<h3 data-publr-part=\"title\" class=\"text-lg font-semibold text-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</h3>");
+}
+
+pub const CardDescriptionProps = struct {
+    children: []const u8 = "",
+};
+pub fn CardDescription(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardDescriptionProps, _props);
+    try writer.writeAll("<p data-publr-part=\"description\" class=\"text-sm text-muted-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</p>");
+}
+
+pub const CardActionProps = struct {
+    children: []const u8 = "",
+};
+pub fn CardAction(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardActionProps, _props);
+    try writer.writeAll("<div data-publr-part=\"action\" class=\"ml-auto\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const CardContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn CardContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" class=\"p-6\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const CardFooterProps = struct {
+    children: []const u8 = "",
+};
+pub fn CardFooter(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardFooterProps, _props);
+    try writer.writeAll("<div data-publr-part=\"footer\" class=\"flex items-center p-6 pt-0\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const CardDemoProps = struct {
+    demo: enum { basic, with_description, with_footer } = .basic,
+    // CardTitle
+    title: []const u8 = "",
+    // CardDescription
+    description: []const u8 = "",
+    // CardContent
+    content: []const u8 = "",
+    // CardFooter
+    footer: []const u8 = "",
+};
+pub fn CardDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CardDemoProps, _props);
+    if (props.demo == .basic) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.title);
+                    try CardTitle(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try CardHeader(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p class=\"text-sm text-foreground\">");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try CardContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Card(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_description) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.title);
+                    try CardTitle(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.description);
+                    try CardDescription(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try CardHeader(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p class=\"text-sm text-foreground\">");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try CardContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Card(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.title);
+                    try CardTitle(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.description);
+                    try CardDescription(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try CardHeader(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p class=\"text-sm text-foreground\">");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try CardContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.footer);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</span>");
+                try CardFooter(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Card(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const checkbox = struct {
+
+/// Checkbox — toggle control for checked/unchecked state.
+///
+/// Renders a native `<input type="checkbox">` with styled indicator.
+/// Compose with Field/FieldLabel for labeling, or use the built-in label prop.
+///
+/// No custom JS — native checkbox handles state.
+///
+/// Usage:
+///   <Checkbox label="Accept terms" />
+///   <Checkbox label="Subscribe" description="Get weekly updates" />
+///   <Checkbox label="Disabled" disabled={true} />
+///   <Checkbox label="Invalid" invalid={true} />
+///   <Checkbox label="Checked" checked=.checked />
+pub const CheckedState = enum { unchecked, checked, indeterminate };
+pub const CheckboxProps = struct {
+    label: []const u8 = "",
+    description: []const u8 = "",
+    name: []const u8 = "",
+    value: []const u8 = "",
+    checked: CheckedState = .unchecked,
+    disabled: bool = false,
+    invalid: bool = false,
+};
+pub fn Checkbox(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(CheckboxProps, _props);
+    const has_label = props.label.len > 0;
+    const has_description = props.description.len > 0;
+    const invalid_ring = if (props.invalid) "ring-1 ring-error" else "";
+    const checkbox_class_base = "h-4 w-4 shrink-0 rounded border border-input bg-background text-primary accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+    const state = switch (props.checked) {
+        .checked => "checked",
+        .unchecked => "unchecked",
+        .indeterminate => "indeterminate",
+    };
+    const is_checked = props.checked == .checked;
+    const is_indeterminate = props.checked == .indeterminate;
+    if (props.disabled and is_checked) {
+        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(checkbox_class_base);
+        try writer.writeAll(" ");
+        try writer.writeAll(invalid_ring);
+        try writer.writeAll(" mt-0.5");
+        try writer.writeAll("\"");
+        try writer.writeAll(" checked=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_label) {
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (props.disabled and is_indeterminate) {
+        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\" data-publr-indeterminate=\"true\" aria-checked=\"mixed\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(checkbox_class_base);
+        try writer.writeAll(" ");
+        try writer.writeAll(invalid_ring);
+        try writer.writeAll(" mt-0.5");
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_label) {
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (props.disabled) {
+        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(checkbox_class_base);
+        try writer.writeAll(" ");
+        try writer.writeAll(invalid_ring);
+        try writer.writeAll(" mt-0.5");
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_label) {
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (is_checked) {
+        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-pointer\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(checkbox_class_base);
+        try writer.writeAll(" ");
+        try writer.writeAll(invalid_ring);
+        try writer.writeAll(" mt-0.5");
+        try writer.writeAll("\"");
+        try writer.writeAll(" checked=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_label) {
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (is_indeterminate) {
+        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-pointer\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\" data-publr-indeterminate=\"true\" aria-checked=\"mixed\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(checkbox_class_base);
+        try writer.writeAll(" ");
+        try writer.writeAll(invalid_ring);
+        try writer.writeAll(" mt-0.5");
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_label) {
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else {
+        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-pointer\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(checkbox_class_base);
+        try writer.writeAll(" ");
+        try writer.writeAll(invalid_ring);
+        try writer.writeAll(" mt-0.5");
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_label) {
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    }
 }
 
 };
@@ -355,88 +1697,1187 @@ pub const dialog = struct {
 
 /// Dialog — modal overlay with focus trap.
 ///
-/// Renders a trigger button + overlay container. Clicking the trigger opens the
-/// dialog. Uses `data-publr-component="dialog"` for JS initialization.
+/// Sub-components matching Radix Dialog API:
+///   - Dialog: root container with state
+///   - DialogTrigger: button that opens the dialog
+///   - DialogOverlay: backdrop layer
+///   - DialogContent: centered content panel
+///   - DialogClose: button that closes the dialog
+///   - DialogTitle: accessible heading
+///   - DialogDescription: accessible body text
 ///
-/// Data attributes:
-///   - `data-publr-component="dialog"` — component identifier
-///   - `data-publr-state="open|closed"` — current visibility state
-///   - `data-publr-dismissable="true|false"` — whether overlay click/Escape closes
-///   - `data-publr-part="trigger"` — the open button
-///   - `data-publr-part="content"` — the overlay container
-///   - `data-publr-part="close"` — the dismiss/cancel button
-///
-/// Keyboard:
-///   - Enter/Space on trigger: opens dialog
-///   - Tab: cycles through focusable elements (focus trap)
-///   - Shift+Tab: reverse focus cycle
-///   - Escape: closes dialog (if dismissable)
-///
-/// JS handler (publr-dialog.js):
-///   - Focus trap: Tab wraps between first/last focusable elements
-///   - Focus restore: returns focus to trigger on close
-///   - Overlay dismiss: click outside content to close
-///
-/// Example:
-///   <Dialog trigger_label="Delete" title="Confirm" body="Are you sure?" confirm_label="Delete" />
-///   <Dialog trigger_label="Info" title="Notice" body="Read this." dismissable={false} />
+/// Usage:
+///   <Dialog>
+///       <DialogTrigger><Button label="Open" /></DialogTrigger>
+///       <DialogOverlay>
+///           <DialogContent>
+///               <DialogTitle>Are you sure?</DialogTitle>
+///               <DialogDescription>This action cannot be undone.</DialogDescription>
+///               <div class="flex justify-end gap-3 mt-6">
+///                   <DialogClose><Button hierarchy=.secondary label="Cancel" /></DialogClose>
+///                   <Button hierarchy=.destructive label="Delete" />
+///               </div>
+///           </DialogContent>
+///       </DialogOverlay>
+///   </Dialog>
+pub const Button = root.button.Button;
+// ── Sub-components ──────────────────────────────────
 pub const DialogProps = struct {
-    trigger_label: []const u8,
-    title: []const u8,
-    body: []const u8,
-    dismiss_label: []const u8 = "Cancel",
-    confirm_label: []const u8 = "",
+    id: []const u8 = "",
     dismissable: bool = true,
+    children: []const u8 = "",
 };
 pub fn Dialog(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogProps, _props);
-    try writer.writeAll("<div data-publr-component=\"dialog\" data-publr-state=\"closed\"");
+    try writer.writeAll("<div data-publr-component=\"dialog\" data-publr-state=\"closed\" class=\"group inline-block\"");
+    try writer.writeAll(" data-publr-id=\"");
+    try runtime.render(writer, props.id);
+    try writer.writeAll("\"");
     try writer.writeAll(" data-publr-dismissable=\"");
     try runtime.render(writer, if (props.dismissable) "true" else "false");
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
-    try writer.writeAll("<button data-publr-part=\"trigger\" aria-expanded=\"false\" class=\"inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500\">");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
-    try runtime.render(writer, props.trigger_label);
+    try writer.writeAll("</div>");
+}
+
+pub const DialogTriggerProps = struct {
+    children: []const u8 = "",
+};
+pub fn DialogTrigger(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogTriggerProps, _props);
+    try writer.writeAll("<span data-publr-part=\"trigger\" aria-expanded=\"false\">");
     try writer.writeAll("\n");
-    try writer.writeAll("</button>");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
-    try writer.writeAll("<div data-publr-part=\"content\" class=\"fixed inset-0 z-50 flex items-center justify-center bg-black/50 opacity-0 pointer-events-none transition-opacity data-[publr-state=open]:opacity-100 data-[publr-state=open]:pointer-events-auto\" role=\"dialog\" aria-modal=\"true\">");
+    try writer.writeAll("</span>");
+}
+
+pub const DialogOverlayProps = struct {
+    children: []const u8 = "",
+};
+pub fn DialogOverlay(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogOverlayProps, _props);
+    try writer.writeAll("<div data-publr-part=\"overlay\" class=\"fixed inset-0 z-50 flex items-center justify-center bg-black/50 opacity-0 pointer-events-none transition-opacity group-data-[publr-state=open]:opacity-100 group-data-[publr-state=open]:pointer-events-auto\">");
     try writer.writeAll("\n");
-    try writer.writeAll("<div class=\"bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl\">");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
-    try writer.writeAll("<h3 class=\"text-lg font-semibold text-gray-900\">");
-    try runtime.render(writer, props.title);
+    try writer.writeAll("</div>");
+}
+
+pub const DialogContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn DialogContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"publr-dialog-title\" aria-describedby=\"publr-dialog-description\" class=\"bg-popover text-popover-foreground rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border border-border\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const DialogCloseProps = struct {
+    children: []const u8 = "",
+};
+pub fn DialogClose(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogCloseProps, _props);
+    try writer.writeAll("<span data-publr-part=\"close\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const DialogTitleProps = struct {
+    children: []const u8 = "",
+};
+pub fn DialogTitle(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogTitleProps, _props);
+    try writer.writeAll("<h3 id=\"publr-dialog-title\" data-publr-part=\"title\" class=\"text-lg font-semibold text-foreground\">");
+    try writer.writeAll(props.children);
     try writer.writeAll("</h3>");
-    try writer.writeAll("\n");
-    try writer.writeAll("<p class=\"mt-2 text-sm text-gray-600\">");
-    try runtime.render(writer, props.body);
+}
+
+pub const DialogDescriptionProps = struct {
+    children: []const u8 = "",
+};
+pub fn DialogDescription(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogDescriptionProps, _props);
+    try writer.writeAll("<p id=\"publr-dialog-description\" data-publr-part=\"description\" class=\"mt-2 text-sm text-muted-foreground\">");
+    try writer.writeAll(props.children);
     try writer.writeAll("</p>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const DialogDemoProps = struct {
+    demo: enum { confirm, destructive, info } = .confirm,
+};
+pub fn DialogDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DialogDemoProps, _props);
+    if (props.demo == .confirm) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .secondary,  .label = "Open dialog" });
+                try DialogTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Save changes?");
+                        try DialogTitle(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Your unsaved changes will be lost if you don't save them.");
+                        try DialogDescription(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("<div class=\"flex justify-end gap-3 mt-6\">");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try Button(_children_buf_3.writer(_children_alloc_3), .{ .hierarchy = .secondary,  .label = "Cancel" });
+                        try DialogClose(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("<span data-publr-part=\"confirm\">");
+                    try Button(_children_buf_2.writer(_children_alloc_2), .{ .hierarchy = .primary,  .label = "Save" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("</span>");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("</div>");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try DialogContent(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DialogOverlay(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Dialog(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .destructive) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .destructive,  .label = "Delete" });
+                try DialogTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Delete item?");
+                        try DialogTitle(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("This action cannot be undone. This will permanently delete the item.");
+                        try DialogDescription(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("<div class=\"flex justify-end gap-3 mt-6\">");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try Button(_children_buf_3.writer(_children_alloc_3), .{ .hierarchy = .secondary,  .label = "Cancel" });
+                        try DialogClose(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("<span data-publr-part=\"confirm\">");
+                    try Button(_children_buf_2.writer(_children_alloc_2), .{ .hierarchy = .destructive,  .label = "Delete" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("</span>");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("</div>");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try DialogContent(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DialogOverlay(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Dialog(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .secondary,  .label = "Info" });
+                try DialogTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Notice");
+                        try DialogTitle(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Please read the terms and conditions before continuing.");
+                        try DialogDescription(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("<div class=\"flex justify-end gap-3 mt-6\">");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("<span data-publr-part=\"confirm\">");
+                    try Button(_children_buf_2.writer(_children_alloc_2), .{ .hierarchy = .primary,  .label = "I understand" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("</span>");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("</div>");
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try DialogContent(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DialogOverlay(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Dialog(writer, .{ .dismissable = false, .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const dropdown = struct {
+
+/// DropdownMenu — action menu triggered by a button.
+///
+/// Sub-components matching shadcn API:
+///   - DropdownMenu: root container with state
+///   - DropdownMenuTrigger: element that opens the menu
+///   - DropdownMenuContent: floating panel
+///   - DropdownMenuGroup: logical grouping
+///   - DropdownMenuLabel: non-interactive heading
+///   - DropdownMenuItem: clickable action (variant: destructive)
+///   - DropdownMenuSeparator: visual divider
+///
+/// Usage:
+///   <DropdownMenu>
+///       <DropdownMenuTrigger>
+///           <Button label="Actions" icon=.chevron_down />
+///       </DropdownMenuTrigger>
+///       <DropdownMenuContent>
+///           <DropdownMenuLabel>Actions</DropdownMenuLabel>
+///           <DropdownMenuItem>Edit</DropdownMenuItem>
+///           <DropdownMenuItem>Duplicate</DropdownMenuItem>
+///           <DropdownMenuSeparator />
+///           <DropdownMenuItem variant=.destructive>Delete</DropdownMenuItem>
+///       </DropdownMenuContent>
+///   </DropdownMenu>
+pub const Button = root.button.Button;
+pub const Icon = root.icon.Icon;
+// ── Sub-components ──────────────────────────────────
+pub const DropdownMenuProps = struct {
+    children: []const u8 = "",
+};
+pub fn DropdownMenu(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownMenuProps, _props);
+    try writer.writeAll("<div data-publr-component=\"dropdown\" data-publr-state=\"closed\" class=\"group relative inline-block\">");
     try writer.writeAll("\n");
-    try writer.writeAll("<div class=\"flex justify-end gap-3 mt-6\">");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
-    try writer.writeAll("<button data-publr-part=\"close\" class=\"px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50\">");
+    try writer.writeAll("</div>");
+}
+
+pub const DropdownMenuTriggerProps = struct {
+    children: []const u8 = "",
+};
+pub fn DropdownMenuTrigger(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownMenuTriggerProps, _props);
+    try writer.writeAll("<span data-publr-part=\"trigger\" aria-expanded=\"false\" aria-haspopup=\"menu\">");
     try writer.writeAll("\n");
-    try runtime.render(writer, props.dismiss_label);
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
-    try writer.writeAll("</button>");
+    try writer.writeAll("</span>");
+}
+
+pub const DropdownMenuContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn DropdownMenuContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownMenuContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"menu\" class=\"hidden group-data-[publr-state=open]:block min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg\">");
     try writer.writeAll("\n");
-    if (props.confirm_label.len > 0) {
-        try writer.writeAll("<button class=\"px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const DropdownMenuGroupProps = struct {
+    children: []const u8 = "",
+};
+pub fn DropdownMenuGroup(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownMenuGroupProps, _props);
+    try writer.writeAll("<div role=\"group\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</div>");
+}
+
+pub const DropdownMenuLabelProps = struct {
+    children: []const u8 = "",
+};
+pub fn DropdownMenuLabel(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownMenuLabelProps, _props);
+    try writer.writeAll("<span data-publr-part=\"label\" class=\"block px-2 py-1.5 text-xs font-semibold text-muted-foreground\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const ItemVariant = enum { default, destructive };
+pub const DropdownMenuItemProps = struct {
+    variant: ItemVariant = .default,
+    disabled: bool = false,
+    children: []const u8 = "",
+};
+pub fn DropdownMenuItem(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownMenuItemProps, _props);
+    const item_class = if (props.variant == .destructive)
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-destructive outline-none hover:bg-destructive/10 focus-visible:bg-destructive/10 disabled:pointer-events-none disabled:text-muted-foreground disabled:opacity-50"
+    else
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:text-muted-foreground disabled:opacity-50";
+
+    const variant_attr = if (props.variant == .destructive) "destructive" else "default";
+    const state = if (props.disabled) "disabled" else "default";
+    if (props.disabled) {
+        try writer.writeAll("<button data-publr-part=\"item\" role=\"menuitem\" tabindex=\"-1\" aria-disabled=\"true\"");
+        try writer.writeAll(" data-publr-variant=\"");
+        try runtime.render(writer, variant_attr);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, item_class);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
         try writer.writeAll("\n");
-        try runtime.render(writer, props.confirm_label);
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    } else {
+        try writer.writeAll("<button data-publr-part=\"item\" role=\"menuitem\" tabindex=\"-1\"");
+        try writer.writeAll(" data-publr-variant=\"");
+        try runtime.render(writer, variant_attr);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, item_class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
         try writer.writeAll("\n");
         try writer.writeAll("</button>");
     }
+}
+
+pub const DropdownMenuSeparatorProps = struct {};
+pub fn DropdownMenuSeparator(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<div data-publr-part=\"separator\" role=\"separator\" class=\"my-1 h-px bg-border\">");
+    try writer.writeAll("</div>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const DropdownDemoProps = struct {
+    demo: enum { basic, with_icons, destructive } = .basic,
+};
+pub fn DropdownDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownDemoProps, _props);
+    if (props.demo == .basic) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .secondary,  .label = "Actions",  .icon = .chevron_down,  .size = .sm });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DropdownMenuTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Actions");
+                    try DropdownMenuLabel(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Edit");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Duplicate");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Archive");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .disabled = true, .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DropdownMenuContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try DropdownMenu(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_icons) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .secondary,  .label = "Actions",  .icon = .chevron_down,  .size = .sm });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DropdownMenuTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Actions");
+                    try DropdownMenuLabel(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .edit,  .size = 16,  .class = "" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll(" Edit");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .copy,  .size = 16,  .class = "" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll(" Duplicate");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .disabled = true, .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .bookmark,  .size = 16,  .class = "" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll(" Archive");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DropdownMenuContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try DropdownMenu(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .secondary,  .label = "Actions",  .icon = .chevron_down,  .size = .sm });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DropdownMenuTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Actions");
+                    try DropdownMenuLabel(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .edit,  .size = 16,  .class = "" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll(" Edit");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .copy,  .size = 16,  .class = "" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll(" Duplicate");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DropdownMenuSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .trash,  .size = 16,  .class = "" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll(" Delete");
+                    try DropdownMenuItem(_children_buf_1.writer(_children_alloc_1), .{ .variant = .destructive, .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try DropdownMenuContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try DropdownMenu(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const empty = struct {
+
+/// Empty — zero-data placeholder.
+///
+/// Sub-components matching shadcn API:
+///   - Empty: outer container
+///   - EmptyMedia: icon/illustration area (variant: default or icon)
+///   - EmptyTitle: heading
+///   - EmptyDescription: body text
+///   - EmptyContent: action area (buttons, links)
+///
+/// Usage:
+///   <Empty>
+///       <EmptyMedia variant=.icon>
+///           <Icon name=.folder size={24} class="text-muted-foreground" />
+///       </EmptyMedia>
+///       <EmptyTitle>No posts yet</EmptyTitle>
+///       <EmptyDescription>Create your first post to get started.</EmptyDescription>
+///       <EmptyContent><Button label="Create Post" /></EmptyContent>
+///   </Empty>
+pub const Icon = root.icon.Icon;
+pub const Button = root.button.Button;
+// ── Sub-components ──────────────────────────────────
+pub const EmptyProps = struct {
+    children: []const u8 = "",
+};
+pub fn Empty(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(EmptyProps, _props);
+    try writer.writeAll("<div data-publr-component=\"empty\" class=\"flex flex-col items-center justify-center py-12 px-4 text-center\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
     try writer.writeAll("</div>");
+}
+
+pub const EmptyMediaProps = struct {
+    variant: enum { default, icon } = .default,
+    children: []const u8 = "",
+};
+pub fn EmptyMedia(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(EmptyMediaProps, _props);
+    const wrapper_class = if (props.variant == .icon) "rounded-full bg-muted p-3 mb-4" else "mb-4";
+    try writer.writeAll("<div data-publr-part=\"media\"");
+    try writer.writeAll(" class=\"");
+    try runtime.render(writer, wrapper_class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
     try writer.writeAll("</div>");
+}
+
+pub const EmptyTitleProps = struct {
+    children: []const u8 = "",
+};
+pub fn EmptyTitle(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(EmptyTitleProps, _props);
+    try writer.writeAll("<h3 data-publr-part=\"title\" class=\"text-lg font-semibold text-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</h3>");
+}
+
+pub const EmptyDescriptionProps = struct {
+    children: []const u8 = "",
+};
+pub fn EmptyDescription(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(EmptyDescriptionProps, _props);
+    try writer.writeAll("<p data-publr-part=\"description\" class=\"mt-1 text-sm text-muted-foreground max-w-sm\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</p>");
+}
+
+pub const EmptyContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn EmptyContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(EmptyContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" class=\"mt-4\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
     try writer.writeAll("</div>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const EmptyDemoProps = struct {
+    demo: enum { with_action, without_action } = .with_action,
+    // EmptyTitle
+    title: []const u8 = "",
+    // EmptyDescription
+    description: []const u8 = "",
+    // Button label in EmptyContent
+    action_label: []const u8 = "",
+};
+pub fn EmptyDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(EmptyDemoProps, _props);
+    if (props.demo == .with_action) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Icon(_children_buf_1.writer(_children_alloc_1), .{ .name = .folder,  .size = 24,  .class = "text-muted-foreground" });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try EmptyMedia(_children_buf_0.writer(_children_alloc_0), .{ .variant = .icon, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.title);
+                try EmptyTitle(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.description);
+                try EmptyDescription(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .primary,  .label = props.action_label });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try EmptyContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Empty(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Icon(_children_buf_1.writer(_children_alloc_1), .{ .name = .search,  .size = 24,  .class = "text-muted-foreground" });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try EmptyMedia(_children_buf_0.writer(_children_alloc_0), .{ .variant = .icon, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.title);
+                try EmptyTitle(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.description);
+                try EmptyDescription(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Empty(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const form_field = struct {
+
+/// Field — accessible form field layout system.
+///
+/// Sub-components matching shadcn API:
+///   - FieldSet: semantic fieldset wrapper
+///   - FieldLegend: legend for fieldset (variant: legend/label)
+///   - FieldGroup: stacks Field components
+///   - Field: core wrapper for a single field (orientation: vertical/horizontal)
+///   - FieldContent: flex column for label + description beside control
+///   - FieldLabel: styled label element
+///   - FieldDescription: helper text
+///   - FieldSeparator: visual divider
+///   - FieldError: error message container
+///
+/// Usage:
+///   <Field>
+///       <FieldLabel>Email</FieldLabel>
+///       <Input type=.email placeholder="you@example.com" />
+///       <FieldDescription>We'll never share your email.</FieldDescription>
+///   </Field>
+// ── Sub-components ──────────────────────────────────
+pub const FieldSetProps = struct {
+    children: []const u8 = "",
+};
+pub fn FieldSet(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldSetProps, _props);
+    try writer.writeAll("<fieldset data-publr-component=\"field-set\" class=\"space-y-6\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</fieldset>");
+}
+
+pub const LegendVariant = enum { legend, label };
+pub const FieldLegendProps = struct {
+    variant: LegendVariant = .legend,
+    children: []const u8 = "",
+};
+pub fn FieldLegend(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldLegendProps, _props);
+    const cls = if (props.variant == .label)
+        "text-sm font-medium text-foreground"
+    else
+        "text-lg font-semibold text-foreground";
+    try writer.writeAll("<legend");
+    try writer.writeAll(" class=\"");
+    try runtime.render(writer, cls);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</legend>");
+}
+
+pub const FieldGroupProps = struct {
+    children: []const u8 = "",
+};
+pub fn FieldGroup(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldGroupProps, _props);
+    try writer.writeAll("<div data-publr-component=\"field-group\" class=\"flex flex-col gap-4\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
     try writer.writeAll("\n");
     try writer.writeAll("</div>");
+}
+
+pub const Orientation = enum { vertical, horizontal };
+pub const FieldProps = struct {
+    orientation: Orientation = .vertical,
+    invalid: bool = false,
+    children: []const u8 = "",
+};
+pub fn Field(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldProps, _props);
+    const layout = if (props.orientation == .horizontal)
+        "flex items-start gap-3"
+    else
+        "grid gap-1.5";
+
+    const invalid_attr = if (props.invalid) "true" else "false";
+    try writer.writeAll("<div data-publr-component=\"field\"");
+    try writer.writeAll(" data-invalid=\"");
+    try runtime.render(writer, invalid_attr);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try runtime.render(writer, layout);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const FieldContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn FieldContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldContentProps, _props);
+    try writer.writeAll("<div class=\"flex flex-col gap-0.5\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const FieldLabelProps = struct {
+    html_for: []const u8 = "",
+    required: bool = false,
+    children: []const u8 = "",
+};
+pub fn FieldLabel(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldLabelProps, _props);
+    const has_for = props.html_for.len > 0;
+    if (has_for and props.required) {
+        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\"");
+        try writer.writeAll(" for=\"");
+        try runtime.render(writer, props.html_for);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("<span class=\"text-error ml-0.5\">");
+        try writer.writeAll("*");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (has_for) {
+        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\"");
+        try writer.writeAll(" for=\"");
+        try runtime.render(writer, props.html_for);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (props.required) {
+        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("<span class=\"text-error ml-0.5\">");
+        try writer.writeAll("*");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else {
+        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    }
+}
+
+pub const FieldDescriptionProps = struct {
+    children: []const u8 = "",
+};
+pub fn FieldDescription(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldDescriptionProps, _props);
+    try writer.writeAll("<p class=\"text-xs text-muted-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</p>");
+}
+
+pub const FieldSeparatorProps = struct {
+    children: []const u8 = "",
+};
+pub fn FieldSeparator(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldSeparatorProps, _props);
+    const has_children = props.children.len > 0;
+    if (has_children) {
+        try writer.writeAll("<div class=\"relative my-4\">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<div class=\"absolute inset-0 flex items-center\">");
+        try writer.writeAll("<span class=\"w-full border-t border-border\">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("</div>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<div class=\"relative flex justify-center text-xs uppercase\">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span class=\"bg-background px-2 text-muted-foreground\">");
+        try writer.writeAll(props.children);
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</div>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</div>");
+    } else {
+        try writer.writeAll("<div class=\"my-4 h-px bg-border\">");
+        try writer.writeAll("</div>");
+    }
+}
+
+pub const FieldErrorProps = struct {
+    children: []const u8 = "",
+};
+pub fn FieldError(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldErrorProps, _props);
+    try writer.writeAll("<p class=\"text-xs text-error\" role=\"alert\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</p>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const Input = root.text_input.Input;
+pub const FieldDemoProps = struct {
+    demo: enum { basic, with_error, horizontal, fieldset } = .basic,
+};
+pub fn FieldDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldDemoProps, _props);
+    if (props.demo == .basic) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("Email");
+                try FieldLabel(_children_buf_0.writer(_children_alloc_0), .{ .html_for = "email", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Input(_children_buf_0.writer(_children_alloc_0), .{ .name = "email",  .placeholder = "you@example.com" });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("We'll never share your email.");
+                try FieldDescription(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Field(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_error) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("Email");
+                try FieldLabel(_children_buf_0.writer(_children_alloc_0), .{ .html_for = "email", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Input(_children_buf_0.writer(_children_alloc_0), .{ .name = "email",  .placeholder = "you@example.com",  .invalid = true });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("Please enter a valid email address.");
+                try FieldError(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Field(writer, .{ .invalid = true, .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .horizontal) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("Remember me");
+                try FieldLabel(_children_buf_0.writer(_children_alloc_0), .{ .html_for = "remember", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Input(_children_buf_0.writer(_children_alloc_0), .{ .input_type = .checkbox,  .name = "remember" });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Field(writer, .{ .orientation = .horizontal, .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("Profile");
+                try FieldLegend(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Full name");
+                        try FieldLabel(_children_buf_2.writer(_children_alloc_2), .{ .html_for = "name", .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try Input(_children_buf_2.writer(_children_alloc_2), .{ .name = "name",  .placeholder = "John Doe" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try Field(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Email");
+                        try FieldLabel(_children_buf_2.writer(_children_alloc_2), .{ .html_for = "email",  .required = true, .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try Input(_children_buf_2.writer(_children_alloc_2), .{ .name = "email",  .placeholder = "you@example.com" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("We'll never share your email.");
+                        try FieldDescription(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try Field(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try FieldGroup(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try FieldSet(writer, .{ .children = _children_buf_0.items });
+        }
+    }
 }
 
 };
@@ -458,7 +2899,7 @@ pub const icon = struct {
 ///   <Icon name=.home />
 ///   <Icon name=.settings size={Size.sm} />
 ///   <Icon name=.edit size={Size.xl} class="text-brand-600" />
-pub const icons = icons_data;
+pub const icons = root.icons_data;
 pub const Name = icons.Name;
 pub const Size = struct {
     pub const sm: u16 = 16;
@@ -492,252 +2933,4094 @@ const props = runtime.withDefaults(IconProps, _props);
 
 };
 
+pub const input_group = struct {
+
+/// InputGroup — input with addons (icons, buttons, text).
+///
+/// Sub-components matching shadcn API:
+///   - InputGroup: wrapper that combines input + addons
+///   - InputGroupInput: styled input for use inside group
+///   - InputGroupTextarea: styled textarea for use inside group
+///   - InputGroupAddon: container for icons/buttons/text (align: inline_start/inline_end)
+///   - InputGroupButton: button inside addon
+///   - InputGroupText: static text inside addon
+///
+/// Usage:
+///   <InputGroup>
+///       <InputGroupInput placeholder="Search..." />
+///       <InputGroupAddon align_to=.inline_end>
+///           <Icon name=.search size={16} class="text-muted-foreground" />
+///       </InputGroupAddon>
+///   </InputGroup>
+pub const Icon = root.icon.Icon;
+// ── Sub-components ──────────────────────────────────
+pub const InputGroupProps = struct {
+    children: []const u8 = "",
+};
+pub fn InputGroup(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputGroupProps, _props);
+    try writer.writeAll("<div data-publr-component=\"input-group\" class=\"relative flex items-center\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const AddonAlign = enum { inline_start, inline_end };
+pub const InputGroupAddonProps = struct {
+    align_to: AddonAlign = .inline_start,
+    children: []const u8 = "",
+};
+pub fn InputGroupAddon(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputGroupAddonProps, _props);
+    const cls = if (props.align_to == .inline_end)
+        "absolute right-0 inset-y-0 flex items-center pr-3 pointer-events-none"
+    else
+        "absolute left-0 inset-y-0 flex items-center pl-3 pointer-events-none";
+    try writer.writeAll("<div data-publr-part=\"addon\"");
+    try writer.writeAll(" class=\"");
+    try runtime.render(writer, cls);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const InputGroupInputProps = struct {
+    placeholder: []const u8 = "",
+    name: []const u8 = "",
+    has_start_addon: bool = false,
+    has_end_addon: bool = false,
+    disabled: bool = false,
+};
+pub fn InputGroupInput(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputGroupInputProps, _props);
+    const padding = if (props.has_start_addon and props.has_end_addon) "pl-10 pr-10"
+        else if (props.has_start_addon) "pl-10"
+        else if (props.has_end_addon) "pr-10"
+        else "";
+    if (props.disabled) {
+        try writer.writeAll("<input data-publr-part=\"input\" type=\"text\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ");
+        try writer.writeAll(padding);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+    } else {
+        try writer.writeAll("<input data-publr-part=\"input\" type=\"text\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ");
+        try writer.writeAll(padding);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+    }
+}
+
+pub const InputGroupTextareaProps = struct {
+    placeholder: []const u8 = "",
+    name: []const u8 = "",
+    disabled: bool = false,
+};
+pub fn InputGroupTextarea(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputGroupTextareaProps, _props);
+    if (props.disabled) {
+        try writer.writeAll("<textarea data-publr-part=\"textarea\" class=\"flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</textarea>");
+    } else {
+        try writer.writeAll("<textarea data-publr-part=\"textarea\" class=\"flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</textarea>");
+    }
+}
+
+pub const InputGroupButtonProps = struct {
+    children: []const u8 = "",
+};
+pub fn InputGroupButton(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputGroupButtonProps, _props);
+    try writer.writeAll("<button data-publr-part=\"button\" class=\"inline-flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors pointer-events-auto\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</button>");
+}
+
+pub const InputGroupTextProps = struct {
+    children: []const u8 = "",
+};
+pub fn InputGroupText(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputGroupTextProps, _props);
+    try writer.writeAll("<span class=\"text-sm text-muted-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</span>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const InputGroupDemoProps = struct {
+    demo: enum { with_icon, with_text, with_button } = .with_icon,
+};
+pub fn InputGroupDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputGroupDemoProps, _props);
+    if (props.demo == .with_icon) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try InputGroupInput(_children_buf_0.writer(_children_alloc_0), .{ .placeholder = "Search...",  .has_start_addon = true });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Icon(_children_buf_1.writer(_children_alloc_1), .{ .name = .search,  .size = 16,  .class = "text-muted-foreground" });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try InputGroupAddon(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try InputGroup(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_text) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try InputGroupInput(_children_buf_0.writer(_children_alloc_0), .{ .placeholder = "0.00",  .has_start_addon = true });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("$");
+                    try InputGroupText(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try InputGroupAddon(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try InputGroup(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try InputGroupInput(_children_buf_0.writer(_children_alloc_0), .{ .placeholder = "Enter URL...",  .has_end_addon = true });
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .copy,  .size = 16,  .class = "" });
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try InputGroupButton(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try InputGroupAddon(_children_buf_0.writer(_children_alloc_0), .{ .align_to = .inline_end, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try InputGroup(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const text_input = struct {
+
+/// Input — text input and textarea for forms.
+///
+/// Sub-components:
+///   - Input: styled `<input>` element
+///   - Textarea: styled `<textarea>` element
+///
+/// Usage:
+///   <Input name="email" placeholder="you@example.com" />
+///   <Input input_type=.password name="password" />
+///   <Textarea name="bio" placeholder="Tell us about yourself" />
+pub const InputType = enum { text, email, password, search, tel, url, number, file, checkbox };
+pub const InputProps = struct {
+    input_type: InputType = .text,
+    name: []const u8 = "",
+    placeholder: []const u8 = "",
+    value: []const u8 = "",
+    disabled: bool = false,
+    invalid: bool = false,
+    required: bool = false,
+};
+pub fn Input(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(InputProps, _props);
+    const is_checkbox = props.input_type == .checkbox;
+    const base = if (is_checkbox)
+        "h-4 w-4 rounded border border-input bg-background accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+    else
+        "flex w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring file:border-0 file:bg-transparent file:text-foreground file:text-sm disabled:cursor-not-allowed disabled:opacity-50";
+
+    const border = if (props.invalid) "border-error" else "border-input";
+    if (props.disabled and props.required) {
+        try writer.writeAll("<input data-publr-component=\"input\"");
+        try writer.writeAll(" type=\"");
+        try runtime.render(writer, props.input_type);
+        try writer.writeAll("\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(border);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(" required=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+    } else if (props.disabled) {
+        try writer.writeAll("<input data-publr-component=\"input\"");
+        try writer.writeAll(" type=\"");
+        try runtime.render(writer, props.input_type);
+        try writer.writeAll("\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(border);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+    } else if (props.required) {
+        try writer.writeAll("<input data-publr-component=\"input\"");
+        try writer.writeAll(" type=\"");
+        try runtime.render(writer, props.input_type);
+        try writer.writeAll("\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(border);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(" required=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+    } else {
+        try writer.writeAll("<input data-publr-component=\"input\"");
+        try writer.writeAll(" type=\"");
+        try runtime.render(writer, props.input_type);
+        try writer.writeAll("\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(border);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+    }
+}
+
+pub const TextareaProps = struct {
+    name: []const u8 = "",
+    placeholder: []const u8 = "",
+    value: []const u8 = "",
+    disabled: bool = false,
+    invalid: bool = false,
+    required: bool = false,
+};
+pub fn Textarea(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TextareaProps, _props);
+    const border = if (props.invalid) "border-error" else "border-input";
+    if (props.disabled) {
+        try writer.writeAll("<textarea data-publr-component=\"textarea\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll(border);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("</textarea>");
+    } else {
+        try writer.writeAll("<textarea data-publr-component=\"textarea\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" placeholder=\"");
+        try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll(border);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-invalid=\"");
+        try runtime.render(writer, if (props.invalid) "true" else "false");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("</textarea>");
+    }
+}
+
+};
+
+pub const pagination = struct {
+
+/// Pagination — page navigation.
+///
+/// Sub-components matching shadcn API:
+///   - Pagination: outer `<nav>` container
+///   - PaginationContent: `<ul>` list
+///   - PaginationItem: `<li>` wrapper
+///   - PaginationLink: page number (is_active for current page)
+///   - PaginationPrevious: previous button with chevron
+///   - PaginationNext: next button with chevron
+///   - PaginationEllipsis: "..." truncation
+///
+/// Usage:
+///   <Pagination>
+///       <PaginationContent>
+///           <PaginationItem><PaginationPrevious /></PaginationItem>
+///           <PaginationItem><PaginationLink is_active={true}>1</PaginationLink></PaginationItem>
+///           <PaginationItem><PaginationLink>2</PaginationLink></PaginationItem>
+///           <PaginationItem><PaginationEllipsis /></PaginationItem>
+///           <PaginationItem><PaginationLink>10</PaginationLink></PaginationItem>
+///           <PaginationItem><PaginationNext /></PaginationItem>
+///       </PaginationContent>
+///   </Pagination>
+pub const Icon = root.icon.Icon;
+// ── Sub-components ──────────────────────────────────
+pub const PaginationProps = struct {
+    children: []const u8 = "",
+};
+pub fn Pagination(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationProps, _props);
+    try writer.writeAll("<nav data-publr-component=\"pagination\" aria-label=\"Pagination\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</nav>");
+}
+
+pub const PaginationContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn PaginationContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationContentProps, _props);
+    try writer.writeAll("<ul class=\"flex items-center gap-1\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</ul>");
+}
+
+pub const PaginationItemProps = struct {
+    children: []const u8 = "",
+};
+pub fn PaginationItem(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationItemProps, _props);
+    try writer.writeAll("<li>");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</li>");
+}
+
+pub const PaginationLinkProps = struct {
+    href: []const u8 = "#",
+    is_active: bool = false,
+    children: []const u8 = "",
+};
+pub fn PaginationLink(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationLinkProps, _props);
+    const base = "inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors";
+    if (props.is_active) {
+        try writer.writeAll("<span aria-current=\"page\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" bg-accent text-accent-foreground");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+    } else {
+        try writer.writeAll("<a");
+        try writer.writeAll(" href=\"");
+        try runtime.render(writer, props.href);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</a>");
+    }
+}
+
+pub const PaginationPreviousProps = struct {
+    href: []const u8 = "#",
+    disabled: bool = false,
+};
+pub fn PaginationPrevious(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationPreviousProps, _props);
+    const base = "inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors";
+    if (props.disabled) {
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" text-muted-foreground opacity-50 cursor-not-allowed");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .chevron_left,  .size = 16,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+    } else {
+        try writer.writeAll("<a");
+        try writer.writeAll(" href=\"");
+        try runtime.render(writer, props.href);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .chevron_left,  .size = 16,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</a>");
+    }
+}
+
+pub const PaginationNextProps = struct {
+    href: []const u8 = "#",
+    disabled: bool = false,
+};
+pub fn PaginationNext(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationNextProps, _props);
+    const base = "inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors";
+    if (props.disabled) {
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" text-muted-foreground opacity-50 cursor-not-allowed");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .chevron_right,  .size = 16,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+    } else {
+        try writer.writeAll("<a");
+        try writer.writeAll(" href=\"");
+        try runtime.render(writer, props.href);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .chevron_right,  .size = 16,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</a>");
+    }
+}
+
+pub const PaginationEllipsisProps = struct {};
+pub fn PaginationEllipsis(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<span class=\"inline-flex items-center justify-center h-8 w-8 text-sm text-muted-foreground\">");
+    try writer.writeAll("...");
+    try writer.writeAll("</span>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const PaginationDemoProps = struct {
+    demo: enum { few_pages, many_pages, last_page } = .few_pages,
+};
+pub fn PaginationDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationDemoProps, _props);
+    if (props.demo == .few_pages) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationPrevious(_children_buf_2.writer(_children_alloc_2), .{ .disabled = true });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("1");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .is_active = true, .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("2");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("3");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationNext(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try PaginationContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Pagination(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .many_pages) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationPrevious(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("1");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationEllipsis(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("4");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("5");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .is_active = true, .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("6");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationEllipsis(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("20");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationNext(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try PaginationContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Pagination(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationPrevious(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("1");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationEllipsis(_children_buf_2.writer(_children_alloc_2), .{ });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("8");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("9");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("10");
+                        try PaginationLink(_children_buf_2.writer(_children_alloc_2), .{ .is_active = true, .children = _children_buf_3.items });
+                    }
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try PaginationNext(_children_buf_2.writer(_children_alloc_2), .{ .disabled = true });
+                    try PaginationItem(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try PaginationContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Pagination(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const popover = struct {
+
+/// Popover — floating content panel.
+///
+/// Sub-components matching Radix Popover API:
+///   - Popover: outer container with state
+///   - PopoverTrigger: element that opens the popover
+///   - PopoverContent: floating panel (side, align_to, side_offset, align_offset)
+///   - PopoverHeader: header section
+///   - PopoverTitle: title text
+///   - PopoverDescription: body text
+///   - PopoverClose: close button (optional)
+///   - PopoverArrow: pointing arrow (optional)
+///
+/// Usage:
+///   <Popover>
+///       <PopoverTrigger><Button label="Settings" /></PopoverTrigger>
+///       <PopoverContent side=.bottom align_to=.center side_offset={8}>
+///           <PopoverTitle>Settings</PopoverTitle>
+///           <PopoverDescription>Customize your preferences.</PopoverDescription>
+///       </PopoverContent>
+///   </Popover>
+pub const Button = root.button.Button;
+// ── Sub-components ──────────────────────────────────
+pub const PopoverProps = struct {
+    modal: bool = false,
+    children: []const u8 = "",
+};
+pub fn Popover(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverProps, _props);
+    try writer.writeAll("<div data-publr-component=\"popover\" data-publr-state=\"closed\" class=\"group relative inline-block\"");
+    try writer.writeAll(" data-publr-modal=\"");
+    try runtime.render(writer, props.modal);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const PopoverTriggerProps = struct {
+    children: []const u8 = "",
+};
+pub fn PopoverTrigger(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverTriggerProps, _props);
+    try writer.writeAll("<span data-publr-part=\"trigger\" aria-expanded=\"false\" aria-haspopup=\"dialog\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const Side = enum { top, right, bottom, left };
+pub const Alignment = enum { start, center, end };
+pub const PopoverContentProps = struct {
+    side: Side = .bottom,
+    align_to: Alignment = .center,
+    side_offset: u16 = 0,
+    align_offset: u16 = 0,
+    avoid_collisions: bool = true,
+    children: []const u8 = "",
+};
+pub fn PopoverContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"dialog\" class=\"hidden group-data-[publr-state=open]:block w-72 rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md\"");
+    try writer.writeAll(" data-publr-side=\"");
+    try runtime.render(writer, props.side);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-align=\"");
+    try runtime.render(writer, props.align_to);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-side-offset=\"");
+    try runtime.render(writer, props.side_offset);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-align-offset=\"");
+    try runtime.render(writer, props.align_offset);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-avoid-collisions=\"");
+    try runtime.render(writer, props.avoid_collisions);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const PopoverHeaderProps = struct {
+    children: []const u8 = "",
+};
+pub fn PopoverHeader(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverHeaderProps, _props);
+    try writer.writeAll("<div data-publr-part=\"header\" class=\"mb-3\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const PopoverTitleProps = struct {
+    children: []const u8 = "",
+};
+pub fn PopoverTitle(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverTitleProps, _props);
+    try writer.writeAll("<h4 data-publr-part=\"title\" class=\"text-sm font-semibold text-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</h4>");
+}
+
+pub const PopoverDescriptionProps = struct {
+    children: []const u8 = "",
+};
+pub fn PopoverDescription(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverDescriptionProps, _props);
+    try writer.writeAll("<p data-publr-part=\"description\" class=\"text-sm text-muted-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</p>");
+}
+
+pub const PopoverCloseProps = struct {
+    children: []const u8 = "",
+};
+pub fn PopoverClose(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverCloseProps, _props);
+    try writer.writeAll("<button data-publr-part=\"close\" class=\"text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</button>");
+}
+
+pub const PopoverArrowProps = struct {};
+pub fn PopoverArrow(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<div data-publr-part=\"arrow\" class=\"absolute w-2.5 h-2.5 bg-popover border border-border rotate-45\">");
+    try writer.writeAll("</div>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const PopoverDemoProps = struct {
+    demo: enum { basic, with_form } = .basic,
+    // Popover
+    modal: bool = false,
+    // PopoverContent
+    side: Side = .bottom,
+    align_to: Alignment = .center,
+    side_offset: u16 = 0,
+    align_offset: u16 = 0,
+    avoid_collisions: bool = true,
+    // PopoverTitle
+    title: []const u8 = "",
+    // PopoverDescription
+    description: []const u8 = "",
+    // Trigger label
+    trigger_label: []const u8 = "",
+};
+pub fn PopoverDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverDemoProps, _props);
+    if (props.demo == .basic) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .secondary,  .label = props.trigger_label,  .size = .sm });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try PopoverTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.title);
+                        try PopoverTitle(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try PopoverHeader(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.description);
+                    try PopoverDescription(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try PopoverContent(_children_buf_0.writer(_children_alloc_0), .{ .side = props.side,  .align_to = props.align_to,  .side_offset = props.side_offset,  .align_offset = props.align_offset,  .avoid_collisions = props.avoid_collisions, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Popover(writer, .{ .modal = props.modal, .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try Button(_children_buf_1.writer(_children_alloc_1), .{ .hierarchy = .secondary,  .label = props.trigger_label,  .size = .sm });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try PopoverTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try runtime.render(_children_buf_3.writer(_children_alloc_3), props.title);
+                        try PopoverTitle(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try PopoverHeader(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.description);
+                    try PopoverDescription(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<div class=\"mt-3 grid gap-2\">");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<label class=\"grid gap-1\">");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<span class=\"text-xs font-medium text-foreground\">");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("Width");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</span>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<input type=\"text\" value=\"100%\" class=\"rounded-md border border-input bg-background px-2.5 py-1.5 text-sm\">");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</label>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<label class=\"grid gap-1\">");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<span class=\"text-xs font-medium text-foreground\">");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("Height");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</span>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<input type=\"text\" value=\"auto\" class=\"rounded-md border border-input bg-background px-2.5 py-1.5 text-sm\">");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</label>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</div>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try PopoverContent(_children_buf_0.writer(_children_alloc_0), .{ .side = props.side,  .align_to = props.align_to,  .side_offset = props.side_offset,  .align_offset = props.align_offset,  .avoid_collisions = props.avoid_collisions, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Popover(writer, .{ .modal = props.modal, .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const radio_group = struct {
+
+/// RadioGroup — set of radio buttons where only one can be selected.
+///
+/// Sub-components matching shadcn API:
+///   - RadioGroup: outer container (fieldset + legend)
+///   - RadioGroupItem: individual radio option with label + description
+///
+/// Usage:
+///   <RadioGroup name="plan" legend="Choose a plan">
+///       <RadioGroupItem value="free" label="Free" description="Up to 5 pages" />
+///       <RadioGroupItem value="pro" label="Pro" description="Unlimited pages" />
+///       <RadioGroupItem value="enterprise" label="Enterprise" description="Custom SLA" />
+///   </RadioGroup>
+pub const Orientation = enum { vertical, horizontal };
+// ── Sub-components ──────────────────────────────────
+pub const RadioGroupProps = struct {
+    name: []const u8 = "",
+    legend: []const u8 = "",
+    orientation: Orientation = .vertical,
+    disabled: bool = false,
+    children: []const u8 = "",
+};
+pub fn RadioGroup(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(RadioGroupProps, _props);
+    const layout = if (props.orientation == .horizontal)
+        "flex flex-row flex-wrap gap-4"
+    else
+        "flex flex-col gap-3";
+
+    const has_legend = props.legend.len > 0;
+    if (props.disabled) {
+        try writer.writeAll("<fieldset data-publr-component=\"radio-group\" class=\"space-y-3\"");
+        try writer.writeAll(" data-publr-name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_legend) {
+            try writer.writeAll("<legend class=\"text-sm font-medium text-foreground\">");
+            try runtime.render(writer, props.legend);
+            try writer.writeAll("</legend>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("<div role=\"radiogroup\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, layout);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</div>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</fieldset>");
+    } else {
+        try writer.writeAll("<fieldset data-publr-component=\"radio-group\" class=\"space-y-3\"");
+        try writer.writeAll(" data-publr-name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        if (has_legend) {
+            try writer.writeAll("<legend class=\"text-sm font-medium text-foreground\">");
+            try runtime.render(writer, props.legend);
+            try writer.writeAll("</legend>");
+        }
+        try writer.writeAll("\n");
+        try writer.writeAll("<div role=\"radiogroup\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, layout);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</div>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</fieldset>");
+    }
+}
+
+pub const RadioGroupItemProps = struct {
+    value: []const u8 = "",
+    label: []const u8 = "",
+    description: []const u8 = "",
+    name: []const u8 = "",
+    disabled: bool = false,
+};
+pub fn RadioGroupItem(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(RadioGroupItemProps, _props);
+    const has_description = props.description.len > 0;
+    const radio_class = "mt-0.5 h-4 w-4 shrink-0 rounded-full border border-input bg-background text-primary accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+    if (props.disabled) {
+        if (props.name.len > 0) {
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<input type=\"radio\"");
+            try writer.writeAll(" name=\"");
+            try runtime.render(writer, props.name);
+            try writer.writeAll("\"");
+            try writer.writeAll(" value=\"");
+            try runtime.render(writer, props.value);
+            try writer.writeAll("\"");
+            try writer.writeAll(" class=\"");
+            try runtime.render(writer, radio_class);
+            try writer.writeAll("\"");
+            try writer.writeAll(" disabled=\"");
+            try runtime.render(writer, true);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+            try writer.writeAll("\n");
+            try writer.writeAll("</label>");
+        } else {
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<input type=\"radio\"");
+            try writer.writeAll(" value=\"");
+            try runtime.render(writer, props.value);
+            try writer.writeAll("\"");
+            try writer.writeAll(" class=\"");
+            try runtime.render(writer, radio_class);
+            try writer.writeAll("\"");
+            try writer.writeAll(" disabled=\"");
+            try runtime.render(writer, true);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+            try writer.writeAll("\n");
+            try writer.writeAll("</label>");
+        }
+    } else {
+        if (props.name.len > 0) {
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-pointer\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<input type=\"radio\"");
+            try writer.writeAll(" name=\"");
+            try runtime.render(writer, props.name);
+            try writer.writeAll("\"");
+            try writer.writeAll(" value=\"");
+            try runtime.render(writer, props.value);
+            try writer.writeAll("\"");
+            try writer.writeAll(" class=\"");
+            try runtime.render(writer, radio_class);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+            try writer.writeAll("\n");
+            try writer.writeAll("</label>");
+        } else {
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-pointer\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<input type=\"radio\"");
+            try writer.writeAll(" value=\"");
+            try runtime.render(writer, props.value);
+            try writer.writeAll("\"");
+            try writer.writeAll(" class=\"");
+            try runtime.render(writer, radio_class);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<div class=\"grid gap-0.5\">");
+            try writer.writeAll("\n");
+            try writer.writeAll("<span class=\"text-sm text-foreground\">");
+            try runtime.render(writer, props.label);
+            try writer.writeAll("</span>");
+            try writer.writeAll("\n");
+            if (has_description) {
+                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try runtime.render(writer, props.description);
+                try writer.writeAll("</span>");
+            }
+            try writer.writeAll("\n");
+            try writer.writeAll("</div>");
+            try writer.writeAll("\n");
+            try writer.writeAll("</label>");
+        }
+    }
+}
+
+// ── Gallery preview ─────────────────────────────────
+pub const Demo = enum { default };
+pub const RadioGroupPreviewProps = struct {
+    demo: Demo = .default,
+    // RadioGroup
+    name: []const u8 = "",
+    legend: []const u8 = "",
+    orientation: Orientation = .vertical,
+    disabled: bool = false,
+    // RadioGroupItem @1
+    value_1: []const u8 = "",
+    label_1: []const u8 = "",
+    description_1: []const u8 = "",
+    // RadioGroupItem @2
+    value_2: []const u8 = "",
+    label_2: []const u8 = "",
+    description_2: []const u8 = "",
+    // RadioGroupItem @3
+    value_3: []const u8 = "",
+    label_3: []const u8 = "",
+    description_3: []const u8 = "",
+};
+pub fn RadioGroupPreview(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(RadioGroupPreviewProps, _props);
+    {
+        var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+        const _children_alloc_0 = @import("std").heap.page_allocator;
+        defer _children_buf_0.deinit(_children_alloc_0);
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        try RadioGroupItem(_children_buf_0.writer(_children_alloc_0), .{ .value = props.value_1,  .label = props.label_1,  .description = props.description_1 });
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        try RadioGroupItem(_children_buf_0.writer(_children_alloc_0), .{ .value = props.value_2,  .label = props.label_2,  .description = props.description_2 });
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        try RadioGroupItem(_children_buf_0.writer(_children_alloc_0), .{ .value = props.value_3,  .label = props.label_3,  .description = props.description_3 });
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        try RadioGroup(writer, .{ .name = props.name,  .legend = props.legend,  .orientation = props.orientation,  .disabled = props.disabled, .children = _children_buf_0.items });
+    }
+}
+
+};
+
+pub const select = struct {
+
+/// Select — custom select with composable parts.
+///
+/// Sub-components matching shadcn API:
+///   - Select: outer container with state + hidden input
+///   - SelectTrigger: the button that opens the listbox
+///   - SelectValue: displayed value/placeholder inside trigger
+///   - SelectContent: floating listbox panel
+///   - SelectGroup: group of options
+///   - SelectLabel: non-interactive group heading
+///   - SelectItem: individual option
+///   - SelectSeparator: divider between groups
+///
+/// Usage:
+///   <Select name="fruit">
+///       <SelectTrigger>
+///           <SelectValue>Select a fruit</SelectValue>
+///       </SelectTrigger>
+///       <SelectContent>
+///           <SelectGroup>
+///               <SelectLabel>Fruits</SelectLabel>
+///               <SelectItem value="apple">Apple</SelectItem>
+///               <SelectItem value="banana">Banana</SelectItem>
+///           </SelectGroup>
+///       </SelectContent>
+///   </Select>
+pub const Icon = root.icon.Icon;
+// ── Sub-components ──────────────────────────────────
+pub const SelectProps = struct {
+    name: []const u8 = "",
+    default_value: []const u8 = "",
+    children: []const u8 = "",
+};
+pub fn Select(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectProps, _props);
+    try writer.writeAll("<div data-publr-component=\"select\" data-publr-state=\"closed\" class=\"inline-block\"");
+    try writer.writeAll(" data-publr-default-value=\"");
+    try runtime.render(writer, props.default_value);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<input type=\"hidden\" data-publr-part=\"value\"");
+    try writer.writeAll(" name=\"");
+    try runtime.render(writer, props.name);
+    try writer.writeAll("\"");
+    try writer.writeAll(" value=\"");
+    try runtime.render(writer, props.default_value);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SelectTriggerProps = struct {
+    children: []const u8 = "",
+    disabled: bool = false,
+};
+pub fn SelectTrigger(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectTriggerProps, _props);
+    const base = "inline-flex items-center justify-between w-48 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+    if (props.disabled) {
+        try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" aria-expanded=\"false\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, base);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .chevron_down,  .size = 14,  .class = "text-muted-foreground shrink-0" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    } else {
+        try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" aria-expanded=\"false\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, base);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .chevron_down,  .size = 14,  .class = "text-muted-foreground shrink-0" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    }
+}
+
+pub const SelectValueProps = struct {
+    children: []const u8 = "",
+};
+pub fn SelectValue(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectValueProps, _props);
+    try writer.writeAll("<span class=\"text-muted-foreground truncate\" data-publr-part=\"label\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const SelectContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn SelectContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"listbox\" class=\"hidden min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SelectGroupProps = struct {
+    children: []const u8 = "",
+};
+pub fn SelectGroup(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectGroupProps, _props);
+    try writer.writeAll("<div role=\"group\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</div>");
+}
+
+pub const SelectLabelProps = struct {
+    children: []const u8 = "",
+};
+pub fn SelectLabel(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectLabelProps, _props);
+    try writer.writeAll("<div class=\"px-2 py-1.5 text-xs font-semibold text-muted-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</div>");
+}
+
+pub const SelectItemProps = struct {
+    value: []const u8 = "",
+    disabled: bool = false,
+    children: []const u8 = "",
+};
+pub fn SelectItem(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectItemProps, _props);
+    const state = if (props.disabled) "disabled" else "unselected";
+    const class = if (props.disabled)
+        "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground opacity-50 outline-none pointer-events-none cursor-default"
+    else
+        "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent cursor-pointer";
+    if (props.disabled) {
+        try writer.writeAll("<div data-publr-part=\"option\" role=\"option\" tabindex=\"-1\" aria-disabled=\"true\" aria-selected=\"false\"");
+        try writer.writeAll(" data-value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span data-publr-part=\"option-label\">");
+        try writer.writeAll(props.children);
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span data-publr-part=\"indicator\" class=\"ml-2 shrink-0 opacity-0 transition-opacity\">");
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .check,  .size = 16,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</div>");
+    } else {
+        try writer.writeAll("<div data-publr-part=\"option\" role=\"option\" tabindex=\"-1\" aria-selected=\"false\"");
+        try writer.writeAll(" data-value=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span data-publr-part=\"option-label\">");
+        try writer.writeAll(props.children);
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span data-publr-part=\"indicator\" class=\"ml-2 shrink-0 opacity-0 transition-opacity group-data-[publr-state=selected]:opacity-100\">");
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .check,  .size = 16,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</div>");
+    }
+}
+
+pub const SelectSeparatorProps = struct {};
+pub fn SelectSeparator(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<div role=\"separator\" class=\"my-1 h-px bg-border\">");
+    try writer.writeAll("</div>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const SelectDemoProps = struct {
+    demo: enum { basic, with_groups, disabled } = .basic,
+    // Select
+    name: []const u8 = "",
+    default_value: []const u8 = "banana",
+    // SelectValue
+    placeholder: []const u8 = "",
+};
+pub fn SelectDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectDemoProps, _props);
+    if (props.demo == .basic) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.placeholder);
+                    try SelectValue(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try SelectTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Apple");
+                    try SelectItem(_children_buf_1.writer(_children_alloc_1), .{ .value = "apple", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Banana");
+                    try SelectItem(_children_buf_1.writer(_children_alloc_1), .{ .value = "banana", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Cherry");
+                    try SelectItem(_children_buf_1.writer(_children_alloc_1), .{ .value = "cherry",  .disabled = true, .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Grape");
+                    try SelectItem(_children_buf_1.writer(_children_alloc_1), .{ .value = "grape", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Orange");
+                    try SelectItem(_children_buf_1.writer(_children_alloc_1), .{ .value = "orange", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try SelectContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Select(writer, .{ .name = props.name,  .default_value = props.default_value, .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_groups) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.placeholder);
+                    try SelectValue(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try SelectTrigger(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Fruits");
+                        try SelectLabel(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Apple");
+                        try SelectItem(_children_buf_2.writer(_children_alloc_2), .{ .value = "apple", .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Banana");
+                        try SelectItem(_children_buf_2.writer(_children_alloc_2), .{ .value = "banana", .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Cherry");
+                        try SelectItem(_children_buf_2.writer(_children_alloc_2), .{ .value = "cherry", .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try SelectGroup(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try SelectSeparator(_children_buf_1.writer(_children_alloc_1), .{ });
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Vegetables");
+                        try SelectLabel(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Carrot");
+                        try SelectItem(_children_buf_2.writer(_children_alloc_2), .{ .value = "carrot", .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Potato");
+                        try SelectItem(_children_buf_2.writer(_children_alloc_2), .{ .value = "potato",  .disabled = true, .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try SelectGroup(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try SelectContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Select(writer, .{ .name = props.name,  .default_value = props.default_value, .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.placeholder);
+                    try SelectValue(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try SelectTrigger(_children_buf_0.writer(_children_alloc_0), .{ .disabled = true, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Apple");
+                    try SelectItem(_children_buf_1.writer(_children_alloc_1), .{ .value = "apple", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("Banana");
+                    try SelectItem(_children_buf_1.writer(_children_alloc_1), .{ .value = "banana", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try SelectContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Select(writer, .{ .name = props.name,  .default_value = props.default_value, .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const sidebar = struct {
+
+/// Sidebar — navigation sidebar with composable parts.
+///
+/// Sub-components matching shadcn API:
+///   - Sidebar: outer container
+///   - SidebarHeader: sticky top section
+///   - SidebarContent: scrollable middle section
+///   - SidebarFooter: sticky bottom section
+///   - SidebarGroup: section within content
+///   - SidebarGroupLabel: section heading (collapsible option)
+///   - SidebarGroupContent: section body
+///   - SidebarMenu: list container
+///   - SidebarMenuItem: list item wrapper
+///   - SidebarMenuButton: clickable nav item (is_active)
+///   - SidebarMenuBadge: count badge on an item
+///
+/// Usage:
+///   <Sidebar>
+///       <SidebarHeader>
+///           <span>Publr CMS</span>
+///       </SidebarHeader>
+///       <SidebarContent>
+///           <SidebarGroup>
+///               <SidebarGroupLabel>Content</SidebarGroupLabel>
+///               <SidebarGroupContent>
+///                   <SidebarMenu>
+///                       <SidebarMenuItem>
+///                           <SidebarMenuButton is_active={true}>
+///                               <Icon name=.file size={16} class="" /> Pages
+///                           </SidebarMenuButton>
+///                       </SidebarMenuItem>
+///                   </SidebarMenu>
+///               </SidebarGroupContent>
+///           </SidebarGroup>
+///       </SidebarContent>
+///   </Sidebar>
+pub const Icon = root.icon.Icon;
+// ── Sub-components ──────────────────────────────────
+pub const SidebarContainerProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarContainer(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarContainerProps, _props);
+    try writer.writeAll("<nav data-publr-component=\"sidebar\" class=\"flex h-full w-56 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</nav>");
+}
+
+pub const SidebarHeaderProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarHeader(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarHeaderProps, _props);
+    try writer.writeAll("<div data-publr-part=\"header\" class=\"flex items-center gap-2 px-3 py-4 border-b border-sidebar-border\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SidebarContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" class=\"flex-1 overflow-y-auto px-2 py-2\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SidebarFooterProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarFooter(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarFooterProps, _props);
+    try writer.writeAll("<div data-publr-part=\"footer\" class=\"border-t border-sidebar-border px-2 py-2\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SidebarGroupProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarGroup(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarGroupProps, _props);
+    try writer.writeAll("<div data-publr-part=\"section\" data-publr-state=\"open\" class=\"mb-2\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SidebarGroupLabelProps = struct {
+    children: []const u8 = "",
+    collapsible: bool = false,
+};
+pub fn SidebarGroupLabel(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarGroupLabelProps, _props);
+    if (props.collapsible) {
+        try writer.writeAll("<button data-publr-part=\"section-trigger\" class=\"flex w-full items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-sidebar-foreground\">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .chevron_down,  .size = 14,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    } else {
+        try writer.writeAll("<span class=\"block px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider\">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+    }
+}
+
+pub const SidebarGroupContentProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarGroupContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarGroupContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"section-content\" class=\"mt-0.5 space-y-0.5\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SidebarMenuProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarMenu(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarMenuProps, _props);
+    try writer.writeAll("<div class=\"space-y-0.5\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const SidebarMenuItemProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarMenuItem(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarMenuItemProps, _props);
+    try writer.writeAll("<div>");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</div>");
+}
+
+pub const SidebarMenuButtonProps = struct {
+    href: []const u8 = "#",
+    is_active: bool = false,
+    children: []const u8 = "",
+};
+pub fn SidebarMenuButton(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarMenuButtonProps, _props);
+    const base = "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors";
+    if (props.is_active) {
+        try writer.writeAll("<a data-publr-part=\"item\" aria-current=\"page\"");
+        try writer.writeAll(" href=\"");
+        try runtime.render(writer, props.href);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" bg-sidebar-primary text-sidebar-primary-foreground");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</a>");
+    } else {
+        try writer.writeAll("<a data-publr-part=\"item\"");
+        try writer.writeAll(" href=\"");
+        try runtime.render(writer, props.href);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</a>");
+    }
+}
+
+pub const SidebarMenuBadgeProps = struct {
+    children: []const u8 = "",
+};
+pub fn SidebarMenuBadge(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarMenuBadgeProps, _props);
+    try writer.writeAll("<span class=\"ml-auto inline-flex items-center rounded-full bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-sidebar-accent-foreground\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+// ── Gallery preview (matches filename, no gallery_entry) ──
+pub const SidebarProps = struct {
+    collapsible: bool = false,
+};
+pub fn Sidebar(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarProps, _props);
+    {
+        var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+        const _children_alloc_0 = @import("std").heap.page_allocator;
+        defer _children_buf_0.deinit(_children_alloc_0);
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        {
+            var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_1 = @import("std").heap.page_allocator;
+            defer _children_buf_1.deinit(_children_alloc_1);
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            try _children_buf_1.writer(_children_alloc_1).writeAll("<span class=\"text-sm font-semibold text-sidebar-foreground\">");
+            try _children_buf_1.writer(_children_alloc_1).writeAll("Publr CMS");
+            try _children_buf_1.writer(_children_alloc_1).writeAll("</span>");
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            try SidebarHeader(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+        }
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        {
+            var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_1 = @import("std").heap.page_allocator;
+            defer _children_buf_1.deinit(_children_alloc_1);
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            {
+                var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_2 = @import("std").heap.page_allocator;
+                defer _children_buf_2.deinit(_children_alloc_2);
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                {
+                    var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_3 = @import("std").heap.page_allocator;
+                    defer _children_buf_3.deinit(_children_alloc_3);
+                    try _children_buf_3.writer(_children_alloc_3).writeAll("Content");
+                    try SidebarGroupLabel(_children_buf_2.writer(_children_alloc_2), .{ .collapsible = props.collapsible, .children = _children_buf_3.items });
+                }
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                {
+                    var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_3 = @import("std").heap.page_allocator;
+                    defer _children_buf_3.deinit(_children_alloc_3);
+                    try _children_buf_3.writer(_children_alloc_3).writeAll("\n");
+                    {
+                        var _children_buf_4: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_4 = @import("std").heap.page_allocator;
+                        defer _children_buf_4.deinit(_children_alloc_4);
+                        try _children_buf_4.writer(_children_alloc_4).writeAll("\n");
+                        {
+                            var _children_buf_5: @import("std").ArrayListUnmanaged(u8) = .{};
+                            const _children_alloc_5 = @import("std").heap.page_allocator;
+                            defer _children_buf_5.deinit(_children_alloc_5);
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            {
+                                var _children_buf_6: @import("std").ArrayListUnmanaged(u8) = .{};
+                                const _children_alloc_6 = @import("std").heap.page_allocator;
+                                defer _children_buf_6.deinit(_children_alloc_6);
+                                try _children_buf_6.writer(_children_alloc_6).writeAll("\n");
+                                try Icon(_children_buf_6.writer(_children_alloc_6), .{ .name = .file,  .size = 16,  .class = "" });
+                                try _children_buf_6.writer(_children_alloc_6).writeAll(" Pages\n                            ");
+                                try SidebarMenuButton(_children_buf_5.writer(_children_alloc_5), .{ .is_active = true, .children = _children_buf_6.items });
+                            }
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            try SidebarMenuItem(_children_buf_4.writer(_children_alloc_4), .{ .children = _children_buf_5.items });
+                        }
+                        try _children_buf_4.writer(_children_alloc_4).writeAll("\n");
+                        {
+                            var _children_buf_5: @import("std").ArrayListUnmanaged(u8) = .{};
+                            const _children_alloc_5 = @import("std").heap.page_allocator;
+                            defer _children_buf_5.deinit(_children_alloc_5);
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            {
+                                var _children_buf_6: @import("std").ArrayListUnmanaged(u8) = .{};
+                                const _children_alloc_6 = @import("std").heap.page_allocator;
+                                defer _children_buf_6.deinit(_children_alloc_6);
+                                try _children_buf_6.writer(_children_alloc_6).writeAll("\n");
+                                try Icon(_children_buf_6.writer(_children_alloc_6), .{ .name = .edit,  .size = 16,  .class = "" });
+                                try _children_buf_6.writer(_children_alloc_6).writeAll(" Posts\n                                ");
+                                {
+                                    var _children_buf_7: @import("std").ArrayListUnmanaged(u8) = .{};
+                                    const _children_alloc_7 = @import("std").heap.page_allocator;
+                                    defer _children_buf_7.deinit(_children_alloc_7);
+                                    try _children_buf_7.writer(_children_alloc_7).writeAll("12");
+                                    try SidebarMenuBadge(_children_buf_6.writer(_children_alloc_6), .{ .children = _children_buf_7.items });
+                                }
+                                try _children_buf_6.writer(_children_alloc_6).writeAll("\n");
+                                try SidebarMenuButton(_children_buf_5.writer(_children_alloc_5), .{ .children = _children_buf_6.items });
+                            }
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            try SidebarMenuItem(_children_buf_4.writer(_children_alloc_4), .{ .children = _children_buf_5.items });
+                        }
+                        try _children_buf_4.writer(_children_alloc_4).writeAll("\n");
+                        {
+                            var _children_buf_5: @import("std").ArrayListUnmanaged(u8) = .{};
+                            const _children_alloc_5 = @import("std").heap.page_allocator;
+                            defer _children_buf_5.deinit(_children_alloc_5);
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            {
+                                var _children_buf_6: @import("std").ArrayListUnmanaged(u8) = .{};
+                                const _children_alloc_6 = @import("std").heap.page_allocator;
+                                defer _children_buf_6.deinit(_children_alloc_6);
+                                try _children_buf_6.writer(_children_alloc_6).writeAll("\n");
+                                try Icon(_children_buf_6.writer(_children_alloc_6), .{ .name = .image,  .size = 16,  .class = "" });
+                                try _children_buf_6.writer(_children_alloc_6).writeAll(" Media\n                            ");
+                                try SidebarMenuButton(_children_buf_5.writer(_children_alloc_5), .{ .children = _children_buf_6.items });
+                            }
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            try SidebarMenuItem(_children_buf_4.writer(_children_alloc_4), .{ .children = _children_buf_5.items });
+                        }
+                        try _children_buf_4.writer(_children_alloc_4).writeAll("\n");
+                        try SidebarMenu(_children_buf_3.writer(_children_alloc_3), .{ .children = _children_buf_4.items });
+                    }
+                    try _children_buf_3.writer(_children_alloc_3).writeAll("\n");
+                    try SidebarGroupContent(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                }
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                try SidebarGroup(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+            }
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            {
+                var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_2 = @import("std").heap.page_allocator;
+                defer _children_buf_2.deinit(_children_alloc_2);
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                {
+                    var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_3 = @import("std").heap.page_allocator;
+                    defer _children_buf_3.deinit(_children_alloc_3);
+                    try _children_buf_3.writer(_children_alloc_3).writeAll("System");
+                    try SidebarGroupLabel(_children_buf_2.writer(_children_alloc_2), .{ .collapsible = props.collapsible, .children = _children_buf_3.items });
+                }
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                {
+                    var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_3 = @import("std").heap.page_allocator;
+                    defer _children_buf_3.deinit(_children_alloc_3);
+                    try _children_buf_3.writer(_children_alloc_3).writeAll("\n");
+                    {
+                        var _children_buf_4: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_4 = @import("std").heap.page_allocator;
+                        defer _children_buf_4.deinit(_children_alloc_4);
+                        try _children_buf_4.writer(_children_alloc_4).writeAll("\n");
+                        {
+                            var _children_buf_5: @import("std").ArrayListUnmanaged(u8) = .{};
+                            const _children_alloc_5 = @import("std").heap.page_allocator;
+                            defer _children_buf_5.deinit(_children_alloc_5);
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            {
+                                var _children_buf_6: @import("std").ArrayListUnmanaged(u8) = .{};
+                                const _children_alloc_6 = @import("std").heap.page_allocator;
+                                defer _children_buf_6.deinit(_children_alloc_6);
+                                try _children_buf_6.writer(_children_alloc_6).writeAll("\n");
+                                try Icon(_children_buf_6.writer(_children_alloc_6), .{ .name = .settings,  .size = 16,  .class = "" });
+                                try _children_buf_6.writer(_children_alloc_6).writeAll(" Settings\n                            ");
+                                try SidebarMenuButton(_children_buf_5.writer(_children_alloc_5), .{ .children = _children_buf_6.items });
+                            }
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            try SidebarMenuItem(_children_buf_4.writer(_children_alloc_4), .{ .children = _children_buf_5.items });
+                        }
+                        try _children_buf_4.writer(_children_alloc_4).writeAll("\n");
+                        {
+                            var _children_buf_5: @import("std").ArrayListUnmanaged(u8) = .{};
+                            const _children_alloc_5 = @import("std").heap.page_allocator;
+                            defer _children_buf_5.deinit(_children_alloc_5);
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            {
+                                var _children_buf_6: @import("std").ArrayListUnmanaged(u8) = .{};
+                                const _children_alloc_6 = @import("std").heap.page_allocator;
+                                defer _children_buf_6.deinit(_children_alloc_6);
+                                try _children_buf_6.writer(_children_alloc_6).writeAll("\n");
+                                try Icon(_children_buf_6.writer(_children_alloc_6), .{ .name = .users,  .size = 16,  .class = "" });
+                                try _children_buf_6.writer(_children_alloc_6).writeAll(" Users\n                            ");
+                                try SidebarMenuButton(_children_buf_5.writer(_children_alloc_5), .{ .children = _children_buf_6.items });
+                            }
+                            try _children_buf_5.writer(_children_alloc_5).writeAll("\n");
+                            try SidebarMenuItem(_children_buf_4.writer(_children_alloc_4), .{ .children = _children_buf_5.items });
+                        }
+                        try _children_buf_4.writer(_children_alloc_4).writeAll("\n");
+                        try SidebarMenu(_children_buf_3.writer(_children_alloc_3), .{ .children = _children_buf_4.items });
+                    }
+                    try _children_buf_3.writer(_children_alloc_3).writeAll("\n");
+                    try SidebarGroupContent(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                }
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                try SidebarGroup(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+            }
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            try SidebarContent(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+        }
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        {
+            var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_1 = @import("std").heap.page_allocator;
+            defer _children_buf_1.deinit(_children_alloc_1);
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            {
+                var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_2 = @import("std").heap.page_allocator;
+                defer _children_buf_2.deinit(_children_alloc_2);
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                try Icon(_children_buf_2.writer(_children_alloc_2), .{ .name = .user,  .size = 16,  .class = "" });
+                try _children_buf_2.writer(_children_alloc_2).writeAll(" Account\n            ");
+                try SidebarMenuButton(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+            }
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            try SidebarFooter(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+        }
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        try SidebarContainer(writer, .{ .children = _children_buf_0.items });
+    }
+}
+
+};
+
+pub const @"switch" = struct {
+
+/// Switch — toggle control with label.
+///
+/// Renders a `<label>` wrapping a hidden native checkbox and a styled track/thumb.
+/// The thumb position and track color are driven by `:checked` CSS state.
+///
+/// No custom JS needed — native checkbox handles state. Minimal JS syncs `aria-checked`.
+///
+/// Example:
+///   <Switch label="Enable notifications" />
+///   <Switch label="Dark mode" checked={true} />
+///   <Switch label="Maintenance" disabled={true} />
+pub const Size = enum { sm, md, lg };
+pub const SwitchProps = struct {
+    label: []const u8 = "Toggle",
+    name: []const u8 = "",
+    size: Size = .md,
+    checked: bool = false,
+    disabled: bool = false,
+};
+pub fn Switch(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SwitchProps, _props);
+    const track_size = switch (props.size) {
+        .sm => "w-8 h-4",
+        .md => "w-10 h-5",
+        .lg => "w-12 h-6",
+    };
+
+    const thumb_size = switch (props.size) {
+        .sm => "h-3 w-3",
+        .md => "h-4 w-4",
+        .lg => "h-5 w-5",
+    };
+
+    const thumb_translate = switch (props.size) {
+        .sm => "peer-checked:translate-x-4",
+        .md => "peer-checked:translate-x-5",
+        .lg => "peer-checked:translate-x-6",
+    };
+
+    const label_size = switch (props.size) {
+        .sm => "text-xs",
+        .md => "text-sm",
+        .lg => "text-md",
+    };
+    const state = if (props.checked) "checked" else "unchecked";
+    const container_class = if (props.disabled)
+        "inline-flex items-center gap-2 cursor-not-allowed opacity-50"
+    else
+        "inline-flex items-center gap-2 cursor-pointer";
+    if (props.disabled and props.checked) {
+        try writer.writeAll("<label data-publr-component=\"switch\"");
+        try writer.writeAll(" data-publr-size=\"");
+        try runtime.render(writer, props.size);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, container_class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span class=\"relative inline-flex items-center shrink-0\">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\" class=\"peer sr-only\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" checked=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(track_size);
+        try writer.writeAll(" rounded-full bg-input transition-colors peer-checked:bg-primary");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("absolute left-0.5 ");
+        try writer.writeAll(thumb_size);
+        try writer.writeAll(" rounded-full bg-background shadow-xs transition-transform ");
+        try writer.writeAll(thumb_translate);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-foreground ");
+        try writer.writeAll(label_size);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (props.disabled) {
+        try writer.writeAll("<label data-publr-component=\"switch\"");
+        try writer.writeAll(" data-publr-size=\"");
+        try runtime.render(writer, props.size);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, container_class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span class=\"relative inline-flex items-center shrink-0\">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\" class=\"peer sr-only\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(track_size);
+        try writer.writeAll(" rounded-full bg-input transition-colors peer-checked:bg-primary");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("absolute left-0.5 ");
+        try writer.writeAll(thumb_size);
+        try writer.writeAll(" rounded-full bg-background shadow-xs transition-transform ");
+        try writer.writeAll(thumb_translate);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-foreground ");
+        try writer.writeAll(label_size);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else if (props.checked) {
+        try writer.writeAll("<label data-publr-component=\"switch\"");
+        try writer.writeAll(" data-publr-size=\"");
+        try runtime.render(writer, props.size);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, container_class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span class=\"relative inline-flex items-center shrink-0\">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\" class=\"peer sr-only\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" checked=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(track_size);
+        try writer.writeAll(" rounded-full bg-input transition-colors peer-checked:bg-primary");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("absolute left-0.5 ");
+        try writer.writeAll(thumb_size);
+        try writer.writeAll(" rounded-full bg-background shadow-xs transition-transform ");
+        try writer.writeAll(thumb_translate);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-foreground ");
+        try writer.writeAll(label_size);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    } else {
+        try writer.writeAll("<label data-publr-component=\"switch\"");
+        try writer.writeAll(" data-publr-size=\"");
+        try runtime.render(writer, props.size);
+        try writer.writeAll("\"");
+        try writer.writeAll(" data-publr-state=\"");
+        try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, container_class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span class=\"relative inline-flex items-center shrink-0\">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<input type=\"checkbox\" class=\"peer sr-only\"");
+        try writer.writeAll(" name=\"");
+        try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll(track_size);
+        try writer.writeAll(" rounded-full bg-input transition-colors peer-checked:bg-primary");
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("absolute left-0.5 ");
+        try writer.writeAll(thumb_size);
+        try writer.writeAll(" rounded-full bg-background shadow-xs transition-transform ");
+        try writer.writeAll(thumb_translate);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-foreground ");
+        try writer.writeAll(label_size);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("</span>");
+        try writer.writeAll("\n");
+        try writer.writeAll("</label>");
+    }
+}
+
+};
+
+pub const table = struct {
+
+/// Table — data table with composable parts.
+///
+/// Sub-components matching shadcn API:
+///   - Table: `<table>` element (wrapped in overflow container)
+///   - TableCaption: caption text
+///   - TableHeader: `<thead>` element
+///   - TableBody: `<tbody>` element
+///   - TableFooter: `<tfoot>` element
+///   - TableRow: `<tr>` element
+///   - TableHead: `<th>` element (column header)
+///   - TableCell: `<td>` element
+///
+/// Usage:
+///   <Table>
+///       <TableHeader>
+///           <TableRow>
+///               <TableHead>Name</TableHead>
+///               <TableHead>Email</TableHead>
+///           </TableRow>
+///       </TableHeader>
+///       <TableBody>
+///           <TableRow>
+///               <TableCell>Olivia</TableCell>
+///               <TableCell>olivia@example.com</TableCell>
+///           </TableRow>
+///       </TableBody>
+///   </Table>
+pub const Icon = root.icon.Icon;
+// ── Sub-components ──────────────────────────────────
+pub const TableProps = struct {
+    children: []const u8 = "",
+};
+pub fn Table(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableProps, _props);
+    try writer.writeAll("<div data-publr-component=\"table\" class=\"w-full overflow-auto rounded-lg border border-border\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<table class=\"w-full caption-bottom\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</table>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const TableCaptionProps = struct {
+    children: []const u8 = "",
+};
+pub fn TableCaption(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableCaptionProps, _props);
+    try writer.writeAll("<caption class=\"mt-4 text-sm text-muted-foreground\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</caption>");
+}
+
+pub const TableHeaderProps = struct {
+    children: []const u8 = "",
+};
+pub fn TableHeader(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableHeaderProps, _props);
+    try writer.writeAll("<thead data-publr-part=\"header\" class=\"bg-muted/40\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</thead>");
+}
+
+pub const TableBodyProps = struct {
+    children: []const u8 = "",
+};
+pub fn TableBody(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableBodyProps, _props);
+    try writer.writeAll("<tbody data-publr-part=\"body\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</tbody>");
+}
+
+pub const TableFooterProps = struct {
+    children: []const u8 = "",
+};
+pub fn TableFooter(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableFooterProps, _props);
+    try writer.writeAll("<tfoot data-publr-part=\"footer\" class=\"border-t border-border bg-muted/40\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</tfoot>");
+}
+
+pub const TableRowProps = struct {
+    children: []const u8 = "",
+};
+pub fn TableRow(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableRowProps, _props);
+    try writer.writeAll("<tr class=\"border-b border-border hover:bg-accent/50 transition-colors\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</tr>");
+}
+
+pub const TableHeadProps = struct {
+    children: []const u8 = "",
+};
+pub fn TableHead(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableHeadProps, _props);
+    try writer.writeAll("<th class=\"text-left text-xs font-medium text-muted-foreground px-3 py-2.5\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</th>");
+}
+
+pub const TableCellProps = struct {
+    children: []const u8 = "",
+};
+pub fn TableCell(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableCellProps, _props);
+    try writer.writeAll("<td class=\"px-3 py-2.5 text-sm text-foreground\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</td>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const TableDemoProps = struct {
+    demo: enum { basic, with_footer, with_actions } = .basic,
+};
+pub fn TableDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TableDemoProps, _props);
+    if (props.demo == .basic) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Name");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Status");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Email");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Amount");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TableHeader(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Olivia Martin");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Active");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("olivia@example.com");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$1,250.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Jackson Lee");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Pending");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("jackson@example.com");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$340.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Isabella Nguyen");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Inactive");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("isabella@example.com");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$720.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TableBody(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Table(writer, .{ .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .with_footer) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Name");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Email");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Amount");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TableHeader(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Olivia Martin");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("olivia@example.com");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$1,250.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Jackson Lee");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("jackson@example.com");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$340.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TableBody(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Total");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$1,590.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TableFooter(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Table(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("A list of recent invoices.");
+                try TableCaption(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Invoice");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Status");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Method");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Amount");
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try TableHead(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TableHeader(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("INV001");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Paid");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Credit Card");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$250.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("<button class=\"text-xs text-muted-foreground hover:text-foreground\">");
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("...");
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("</button>");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("INV002");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Pending");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("Bank Transfer");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("$150.00");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("<button class=\"text-xs text-muted-foreground hover:text-foreground\">");
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("...");
+                        try _children_buf_3.writer(_children_alloc_3).writeAll("</button>");
+                        try TableCell(_children_buf_2.writer(_children_alloc_2), .{ .children = _children_buf_3.items });
+                    }
+                    try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                    try TableRow(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TableBody(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Table(writer, .{ .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const tabs = struct {
+
+/// Tabs — tabbed content panels.
+///
+/// Sub-components matching shadcn API:
+///   - Tabs: root container (default_value)
+///   - TabsList: tab trigger container (variant: default/line)
+///   - TabsTrigger: individual tab button (value, disabled)
+///   - TabsContent: individual tab panel (value)
+///
+/// Link triggers to panels via matching `value` prop.
+///
+/// Usage:
+///   <Tabs default_value="account">
+///       <TabsList>
+///           <TabsTrigger value="account">Account</TabsTrigger>
+///           <TabsTrigger value="password">Password</TabsTrigger>
+///       </TabsList>
+///       <TabsContent value="account">Account settings.</TabsContent>
+///       <TabsContent value="password">Password settings.</TabsContent>
+///   </Tabs>
+// ── Sub-components ──────────────────────────────────
+pub const TabsProps = struct {
+    default_value: []const u8 = "",
+    children: []const u8 = "",
+};
+pub fn Tabs(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TabsProps, _props);
+    try writer.writeAll("<div data-publr-component=\"tabs\"");
+    try writer.writeAll(" data-publr-default-value=\"");
+    try runtime.render(writer, props.default_value);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const Variant = enum { default, line };
+pub const TabsListProps = struct {
+    variant: Variant = .default,
+    children: []const u8 = "",
+};
+pub fn TabsList(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TabsListProps, _props);
+    const list_class = if (props.variant == .line)
+        "inline-flex items-center gap-0 border-b border-border"
+    else
+        "inline-flex items-center gap-1 rounded-lg bg-muted p-1";
+    try writer.writeAll("<div data-publr-part=\"list\" role=\"tablist\"");
+    try writer.writeAll(" data-publr-variant=\"");
+    try runtime.render(writer, props.variant);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try runtime.render(writer, list_class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const TabsTriggerProps = struct {
+    value: []const u8 = "",
+    disabled: bool = false,
+    children: []const u8 = "",
+};
+pub fn TabsTrigger(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TabsTriggerProps, _props);
+    const class = "px-3 py-1.5 text-sm font-medium rounded-md transition-colors data-[publr-state=active]:bg-background data-[publr-state=active]:text-foreground data-[publr-state=active]:shadow-xs data-[publr-state=inactive]:text-muted-foreground data-[publr-state=inactive]:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground";
+    if (props.disabled) {
+        try writer.writeAll("<button data-publr-part=\"trigger\" data-publr-state=\"inactive\" role=\"tab\" aria-selected=\"false\" aria-disabled=\"true\" tabindex=\"-1\"");
+        try writer.writeAll(" data-publr-tab=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" id=\"");
+        try writer.writeAll("publr-tab-trigger-");
+        try runtime.escape(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-controls=\"");
+        try writer.writeAll("publr-tab-content-");
+        try runtime.escape(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, class);
+        try writer.writeAll("\"");
+        try writer.writeAll(" disabled=\"");
+        try runtime.render(writer, true);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    } else {
+        try writer.writeAll("<button data-publr-part=\"trigger\" data-publr-state=\"inactive\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\"");
+        try writer.writeAll(" data-publr-tab=\"");
+        try runtime.render(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" id=\"");
+        try writer.writeAll("publr-tab-trigger-");
+        try runtime.escape(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" aria-controls=\"");
+        try writer.writeAll("publr-tab-content-");
+        try runtime.escape(writer, props.value);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try runtime.render(writer, class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
+        try writer.writeAll("\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    }
+}
+
+pub const TabsContentProps = struct {
+    value: []const u8 = "",
+    children: []const u8 = "",
+};
+pub fn TabsContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TabsContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" data-publr-state=\"inactive\" role=\"tabpanel\" class=\"mt-4 text-sm text-foreground\"");
+    try writer.writeAll(" data-publr-tab=\"");
+    try runtime.render(writer, props.value);
+    try writer.writeAll("\"");
+    try writer.writeAll(" id=\"");
+    try writer.writeAll("publr-tab-content-");
+    try runtime.escape(writer, props.value);
+    try writer.writeAll("\"");
+    try writer.writeAll(" aria-labelledby=\"");
+    try writer.writeAll("publr-tab-trigger-");
+    try runtime.escape(writer, props.value);
+    try writer.writeAll("\"");
+    try writer.writeAll(" hidden=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const TabsDemoProps = struct {
+    demo: enum { default, line } = .default,
+    default_value: []const u8 = "tab1",
+    // TabsTrigger labels (suffix _N for instance matching)
+    label_1: []const u8 = "",
+    label_2: []const u8 = "",
+    label_3: []const u8 = "",
+    // TabsContent text
+    content_1: []const u8 = "",
+    content_2: []const u8 = "",
+    content_3: []const u8 = "",
+};
+pub fn TabsDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TabsDemoProps, _props);
+    if (props.demo == .line) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.label_1);
+                    try TabsTrigger(_children_buf_1.writer(_children_alloc_1), .{ .value = "tab1", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.label_2);
+                    try TabsTrigger(_children_buf_1.writer(_children_alloc_1), .{ .value = "tab2", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.label_3);
+                    try TabsTrigger(_children_buf_1.writer(_children_alloc_1), .{ .value = "tab3",  .disabled = true, .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsList(_children_buf_0.writer(_children_alloc_0), .{ .variant = .line, .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p>");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsContent(_children_buf_0.writer(_children_alloc_0), .{ .value = "tab1", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p>");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content_2);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsContent(_children_buf_0.writer(_children_alloc_0), .{ .value = "tab2", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p>");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content_3);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsContent(_children_buf_0.writer(_children_alloc_0), .{ .value = "tab3", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Tabs(writer, .{ .default_value = props.default_value, .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.label_1);
+                    try TabsTrigger(_children_buf_1.writer(_children_alloc_1), .{ .value = "tab1", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.label_2);
+                    try TabsTrigger(_children_buf_1.writer(_children_alloc_1), .{ .value = "tab2", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    try runtime.render(_children_buf_2.writer(_children_alloc_2), props.label_3);
+                    try TabsTrigger(_children_buf_1.writer(_children_alloc_1), .{ .value = "tab3", .children = _children_buf_2.items });
+                }
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsList(_children_buf_0.writer(_children_alloc_0), .{ .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p>");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsContent(_children_buf_0.writer(_children_alloc_0), .{ .value = "tab1", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p>");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content_2);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsContent(_children_buf_0.writer(_children_alloc_0), .{ .value = "tab2", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("<p>");
+                try runtime.render(_children_buf_1.writer(_children_alloc_1), props.content_3);
+                try _children_buf_1.writer(_children_alloc_1).writeAll("</p>");
+                try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+                try TabsContent(_children_buf_0.writer(_children_alloc_0), .{ .value = "tab3", .children = _children_buf_1.items });
+            }
+            try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+            try Tabs(writer, .{ .default_value = props.default_value, .children = _children_buf_0.items });
+        }
+    }
+}
+
+};
+
+pub const toast = struct {
+
+/// Toast — notification feedback.
+///
+/// Renders a toast element with variant icon (from Icon component) and close button.
+/// For the gallery, renders a single visible toast preview.
+///
+/// In production, a ToastRegion renders hidden templates (one per variant).
+/// JS `publr.toast()` clones a template, sets the message, and shows it.
+///
+/// Data attributes:
+///   - `data-publr-component="toast"` — individual toast element
+///   - `data-publr-variant="<variant>"` — variant type
+///   - `data-publr-part="message"` — text content (JS sets this on clone)
+///   - `data-publr-part="close"` — dismiss button
+///
+/// Example (JS):
+///   publr.toast('Changes saved')
+///   publr.toast('File uploaded', { variant: 'success' })
+///   publr.toast('Something went wrong', { variant: 'error' })
+pub const Icon = root.icon.Icon;
+pub const Variant = enum { default, success, @"error", warning };
+pub const ToastProps = struct {
+    message: []const u8 = "Changes saved successfully",
+    variant: Variant = .default,
+    show_close: bool = true,
+};
+pub fn Toast(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(ToastProps, _props);
+    const border_class = switch (props.variant) {
+        .default => "border-border",
+        .success => "border-success/30",
+        .@"error" => "border-error/30",
+        .warning => "border-warning/30",
+    };
+    try writer.writeAll("<div data-publr-component=\"toast\" class=\"pointer-events-auto\"");
+    try writer.writeAll(" data-publr-variant=\"");
+    try runtime.render(writer, props.variant);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex items-center gap-3 rounded-lg border bg-background px-4 py-3 shadow-lg ");
+    try writer.writeAll(border_class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    if (props.variant == .success) {
+        try Icon(writer, .{ .name = .check,  .size = 16,  .class = "text-success shrink-0" });
+    } else if (props.variant == .@"error") {
+        try Icon(writer, .{ .name = .alert_hexagon,  .size = 16,  .class = "text-error shrink-0" });
+    } else if (props.variant == .warning) {
+        try Icon(writer, .{ .name = .alert_triangle,  .size = 16,  .class = "text-warning shrink-0" });
+    }
+    try writer.writeAll("\n");
+    try writer.writeAll("<p data-publr-part=\"message\" class=\"text-sm text-foreground\">");
+    try runtime.render(writer, props.message);
+    try writer.writeAll("</p>");
+    try writer.writeAll("\n");
+    if (props.show_close) {
+        try writer.writeAll("<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">");
+        try writer.writeAll("\n");
+        try Icon(writer, .{ .name = .x_close,  .size = 14,  .class = "" });
+        try writer.writeAll("\n");
+        try writer.writeAll("</button>");
+    }
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+/// ToastRegion — hidden container holding toast templates per variant.
+///
+/// Render once in your layout. JS reads templates from here to create toasts.
+/// Each template is a complete toast with proper icons, ready to be cloned.
+///
+/// Example:
+///   <!-- In your layout, once -->
+///   <ToastRegion />
+pub const ToastRegionProps = struct {};
+pub fn ToastRegion(writer: anytype, props: anytype) !void {
+    _ = props;
+    try writer.writeAll("<div id=\"publr-toast-region\" aria-live=\"polite\" role=\"status\" style=\"position:fixed;bottom:16px;right:16px;z-index:9999;display:flex;flex-direction:column-reverse;gap:8px;pointer-events:none;max-width:420px;\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<template data-publr-toast-template=\"default\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div data-publr-component=\"toast\" data-publr-variant=\"default\" class=\"pointer-events-auto\" style=\"opacity:0;transform:translateY(8px);transition:opacity 0.2s,transform 0.2s;\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div class=\"flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 shadow-lg\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<p data-publr-part=\"message\" class=\"text-sm text-foreground\">");
+    try writer.writeAll("</p>");
+    try writer.writeAll("\n");
+    try writer.writeAll("<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .x_close,  .size = 14,  .class = "" });
+    try writer.writeAll("\n");
+    try writer.writeAll("</button>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</template>");
+    try writer.writeAll("\n");
+    try writer.writeAll("<template data-publr-toast-template=\"success\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div data-publr-component=\"toast\" data-publr-variant=\"success\" class=\"pointer-events-auto\" style=\"opacity:0;transform:translateY(8px);transition:opacity 0.2s,transform 0.2s;\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div class=\"flex items-center gap-3 rounded-lg border border-success/30 bg-background px-4 py-3 shadow-lg\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .check,  .size = 16,  .class = "text-success shrink-0" });
+    try writer.writeAll("\n");
+    try writer.writeAll("<p data-publr-part=\"message\" class=\"text-sm text-foreground\">");
+    try writer.writeAll("</p>");
+    try writer.writeAll("\n");
+    try writer.writeAll("<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .x_close,  .size = 14,  .class = "" });
+    try writer.writeAll("\n");
+    try writer.writeAll("</button>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</template>");
+    try writer.writeAll("\n");
+    try writer.writeAll("<template data-publr-toast-template=\"error\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div data-publr-component=\"toast\" data-publr-variant=\"error\" class=\"pointer-events-auto\" style=\"opacity:0;transform:translateY(8px);transition:opacity 0.2s,transform 0.2s;\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div class=\"flex items-center gap-3 rounded-lg border border-error/30 bg-background px-4 py-3 shadow-lg\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .alert_hexagon,  .size = 16,  .class = "text-error shrink-0" });
+    try writer.writeAll("\n");
+    try writer.writeAll("<p data-publr-part=\"message\" class=\"text-sm text-foreground\">");
+    try writer.writeAll("</p>");
+    try writer.writeAll("\n");
+    try writer.writeAll("<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .x_close,  .size = 14,  .class = "" });
+    try writer.writeAll("\n");
+    try writer.writeAll("</button>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</template>");
+    try writer.writeAll("\n");
+    try writer.writeAll("<template data-publr-toast-template=\"warning\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div data-publr-component=\"toast\" data-publr-variant=\"warning\" class=\"pointer-events-auto\" style=\"opacity:0;transform:translateY(8px);transition:opacity 0.2s,transform 0.2s;\">");
+    try writer.writeAll("\n");
+    try writer.writeAll("<div class=\"flex items-center gap-3 rounded-lg border border-warning/30 bg-background px-4 py-3 shadow-lg\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .alert_triangle,  .size = 16,  .class = "text-warning shrink-0" });
+    try writer.writeAll("\n");
+    try writer.writeAll("<p data-publr-part=\"message\" class=\"text-sm text-foreground\">");
+    try writer.writeAll("</p>");
+    try writer.writeAll("\n");
+    try writer.writeAll("<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">");
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .x_close,  .size = 14,  .class = "" });
+    try writer.writeAll("\n");
+    try writer.writeAll("</button>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</template>");
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+};
+
+pub const tooltip = struct {
+
+/// Tooltip — hover/focus-triggered floating label.
+///
+/// Sub-components matching Radix Tooltip API:
+///   - TooltipProvider: global config (delay_duration, skip_delay_duration)
+///   - Tooltip: root container (default_open, delay_duration, disable_hoverable_content)
+///   - TooltipTrigger: element that triggers the tooltip
+///   - TooltipPortal: portals content into document.body
+///   - TooltipContent: floating label (side, alignment, side_offset, avoid_collisions, ...)
+///   - TooltipArrow: optional pointing arrow (width, height)
+///
+/// Usage:
+///   <TooltipProvider>
+///       <Tooltip>
+///           <TooltipTrigger><Button label="Hover me" /></TooltipTrigger>
+///           <TooltipPortal>
+///               <TooltipContent side=.top>
+///                   Edit this item
+///                   <TooltipArrow />
+///               </TooltipContent>
+///           </TooltipPortal>
+///       </Tooltip>
+///   </TooltipProvider>
+pub const Button = root.button.Button;
+// ── Sub-components ──────────────────────────────────
+pub const DelayDuration = enum { instant, fast, default, slow };
+pub const Side = enum { top, right, bottom, left };
+pub const Alignment = enum { start, center, end };
+pub const TooltipProviderProps = struct {
+    delay_duration: DelayDuration = .default,
+    skip_delay_duration: u16 = 300,
+    disable_hoverable_content: bool = false,
+    children: []const u8 = "",
+};
+pub fn TooltipProvider(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TooltipProviderProps, _props);
+    try writer.writeAll("<div data-publr-component=\"tooltip-provider\"");
+    try writer.writeAll(" data-publr-delay=\"");
+    try runtime.render(writer, props.delay_duration);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-skip-delay=\"");
+    try runtime.render(writer, props.skip_delay_duration);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-disable-hoverable-content=\"");
+    try runtime.render(writer, props.disable_hoverable_content);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const TooltipProps = struct {
+    default_open: bool = false,
+    delay_duration: DelayDuration = .default,
+    disable_hoverable_content: bool = false,
+    children: []const u8 = "",
+};
+pub fn Tooltip(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TooltipProps, _props);
+    try writer.writeAll("<div data-publr-component=\"tooltip\" class=\"inline-block\"");
+    try writer.writeAll(" data-publr-state=\"");
+    try runtime.render(writer, if (props.default_open) "open" else "closed");
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-delay=\"");
+    try runtime.render(writer, props.delay_duration);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-disable-hoverable-content=\"");
+    try runtime.render(writer, props.disable_hoverable_content);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const TooltipTriggerProps = struct {
+    children: []const u8 = "",
+};
+pub fn TooltipTrigger(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TooltipTriggerProps, _props);
+    try writer.writeAll("<span data-publr-part=\"trigger\" data-state=\"closed\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</span>");
+}
+
+pub const TooltipPortalProps = struct {
+    children: []const u8 = "",
+};
+pub fn TooltipPortal(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TooltipPortalProps, _props);
+    try writer.writeAll("<div data-publr-part=\"portal\">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const TooltipContentProps = struct {
+    side: Side = .top,
+    alignment: Alignment = .center,
+    side_offset: u16 = 0,
+    align_offset: u16 = 0,
+    avoid_collisions: bool = true,
+    collision_padding: u16 = 0,
+    arrow_padding: u16 = 0,
+    sticky: enum { partial, always } = .partial,
+    hide_when_detached: bool = false,
+    aria_label: []const u8 = "",
+    children: []const u8 = "",
+};
+pub fn TooltipContent(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TooltipContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" data-state=\"closed\" role=\"tooltip\" class=\"hidden px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium shadow-md whitespace-nowrap\"");
+    try writer.writeAll(" data-publr-side=\"");
+    try runtime.render(writer, props.side);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-align=\"");
+    try runtime.render(writer, props.alignment);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-side-offset=\"");
+    try runtime.render(writer, props.side_offset);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-align-offset=\"");
+    try runtime.render(writer, props.align_offset);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-avoid-collisions=\"");
+    try runtime.render(writer, props.avoid_collisions);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-collision-padding=\"");
+    try runtime.render(writer, props.collision_padding);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-arrow-padding=\"");
+    try runtime.render(writer, props.arrow_padding);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-sticky=\"");
+    try runtime.render(writer, props.sticky);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-hide-when-detached=\"");
+    try runtime.render(writer, props.hide_when_detached);
+    try writer.writeAll("\"");
+    try writer.writeAll(" aria-label=\"");
+    try runtime.render(writer, props.aria_label);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+pub const TooltipArrowProps = struct {
+    width: u16 = 10,
+    height: u16 = 5,
+};
+pub fn TooltipArrow(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TooltipArrowProps, _props);
+    try writer.writeAll("<div data-publr-part=\"arrow\" class=\"absolute w-2.5 h-1.5 bg-primary rotate-45\"");
+    try writer.writeAll(" data-publr-arrow-width=\"");
+    try runtime.render(writer, props.width);
+    try writer.writeAll("\"");
+    try writer.writeAll(" data-publr-arrow-height=\"");
+    try runtime.render(writer, props.height);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("</div>");
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const Demo = enum { default };
+pub const TooltipDemoProps = struct {
+    demo: Demo = .default,
+    // TooltipContent
+    side: Side = .top,
+    alignment: Alignment = .center,
+    // Tooltip
+    delay_duration: DelayDuration = .default,
+    // Content text
+    text: []const u8 = "",
+    // Trigger label
+    trigger_label: []const u8 = "",
+};
+pub fn TooltipDemo(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(TooltipDemoProps, _props);
+    {
+        var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+        const _children_alloc_0 = @import("std").heap.page_allocator;
+        defer _children_buf_0.deinit(_children_alloc_0);
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        {
+            var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_1 = @import("std").heap.page_allocator;
+            defer _children_buf_1.deinit(_children_alloc_1);
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            {
+                var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_2 = @import("std").heap.page_allocator;
+                defer _children_buf_2.deinit(_children_alloc_2);
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                try Button(_children_buf_2.writer(_children_alloc_2), .{ .hierarchy = .secondary,  .label = props.trigger_label,  .size = .sm });
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                try TooltipTrigger(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+            }
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            {
+                var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_2 = @import("std").heap.page_allocator;
+                defer _children_buf_2.deinit(_children_alloc_2);
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                {
+                    var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_3 = @import("std").heap.page_allocator;
+                    defer _children_buf_3.deinit(_children_alloc_3);
+                    try runtime.render(_children_buf_3.writer(_children_alloc_3), props.text);
+                    try TooltipContent(_children_buf_2.writer(_children_alloc_2), .{ .side = props.side,  .alignment = props.alignment, .children = _children_buf_3.items });
+                }
+                try _children_buf_2.writer(_children_alloc_2).writeAll("\n");
+                try TooltipPortal(_children_buf_1.writer(_children_alloc_1), .{ .children = _children_buf_2.items });
+            }
+            try _children_buf_1.writer(_children_alloc_1).writeAll("\n");
+            try Tooltip(_children_buf_0.writer(_children_alloc_0), .{ .delay_duration = props.delay_duration, .children = _children_buf_1.items });
+        }
+        try _children_buf_0.writer(_children_alloc_0).writeAll("\n");
+        try TooltipProvider(writer, .{ .children = _children_buf_0.items });
+    }
+}
+
+};
+
 pub const css =
-    \\*,:after,:before{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgba(59,130,246,.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgba(59,130,246,.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }/*! tailwindcss v3.4.19 | MIT License | https://tailwindcss.com*/*,:after,:before{border:0 solid #e9eaeb}:after,:before{--tw-content:""}:host,html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;-o-tab-size:4;tab-size:4;font-family:Geist,-apple-system,BlinkMacSystemFont,sans-serif;font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}body{line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,pre,samp{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,Liberation Mono,Courier New,monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:baseline}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}fieldset{margin:0}fieldset,legend{padding:0}menu,ol,ul{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::-moz-placeholder,textarea::-moz-placeholder{opacity:1;color:#a4a7ae}input::placeholder,textarea::placeholder{opacity:1;color:#a4a7ae}[role=button],button{cursor:pointer}:disabled{cursor:default}audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]:where(:not([hidden=until-found])){display:none}*,:after,:before{box-sizing:border-box}body{margin:0;font-family:Geist,-apple-system,BlinkMacSystemFont,sans-serif;color:#181d27;background:#fafafa}.container{width:100%}@media (min-width:640px){.container{max-width:640px}}@media (min-width:768px){.container{max-width:768px}}@media (min-width:1024px){.container{max-width:1024px}}@media (min-width:1280px){.container{max-width:1280px}}@media (min-width:1536px){.container{max-width:1536px}}.pointer-events-none{pointer-events:none}.fixed{position:fixed}.absolute{position:absolute}.relative{position:relative}.inset-0{inset:0}.left-2\.5{left:.625rem}.top-1\/2{top:50%}.z-50{z-index:50}.m-0{margin:0}.mx-1{margin-left:.25rem;margin-right:.25rem}.mx-4{margin-left:1rem;margin-right:1rem}.ml-2{margin-left:.5rem}.ml-3{margin-left:.75rem}.ml-auto{margin-left:auto}.mt-0\.5{margin-top:.125rem}.mt-2{margin-top:.5rem}.mt-6{margin-top:1.5rem}.block{display:block}.flex{display:flex}.inline-flex{display:inline-flex}.grid{display:grid}.hidden{display:none}.h-10{height:2.5rem}.h-3{height:.75rem}.h-3\.5{height:.875rem}.h-4{height:1rem}.h-5{height:1.25rem}.h-6{height:1.5rem}.h-7{height:1.75rem}.h-8{height:2rem}.h-\[25vh\]{height:25vh}.h-full{height:100%}.h-screen{height:100vh}.min-h-0{min-height:0}.w-2\/5{width:40%}.w-3{width:.75rem}.w-3\.5{width:.875rem}.w-4{width:1rem}.w-5{width:1.25rem}.w-6{width:1.5rem}.w-7{width:1.75rem}.w-8{width:2rem}.w-full{width:100%}.min-w-0{min-width:0}.max-w-md{max-width:28rem}.flex-1{flex:1 1 0%}.shrink-0{flex-shrink:0}.-translate-y-1\/2{--tw-translate-y:-50%;transform:translate(var(--tw-translate-x),var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))}.cursor-not-allowed{cursor:not-allowed}.grid-cols-\[repeat\(auto-fill\2c minmax\(200px\2c 1fr\)\)\]{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.flex-col{flex-direction:column}.items-center{align-items:center}.justify-end{justify-content:flex-end}.justify-center{justify-content:center}.justify-between{justify-content:space-between}.gap-0\.5{gap:.125rem}.gap-2{gap:.5rem}.gap-3{gap:.75rem}.gap-5{gap:1.25rem}.gap-sm{gap:6px}.gap-xs{gap:4px}.divide-y>:not([hidden])~:not([hidden]){--tw-divide-y-reverse:0;border-top-width:calc(1px*(1 - var(--tw-divide-y-reverse)));border-bottom-width:calc(1px*var(--tw-divide-y-reverse))}.divide-gray-100>:not([hidden])~:not([hidden]){--tw-divide-opacity:1;border-color:rgb(245 245 245/var(--tw-divide-opacity,1))}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rounded{border-radius:.25rem}.rounded-md{border-radius:8px}.rounded-xl{border-radius:12px}.border{border-width:1px}.border-b{border-bottom-width:1px}.border-r{border-right-width:1px}.border-t{border-top-width:1px}.border-gray-200{--tw-border-opacity:1;border-color:rgb(233 234 235/var(--tw-border-opacity,1))}.border-gray-300{--tw-border-opacity:1;border-color:rgb(213 215 218/var(--tw-border-opacity,1))}.border-gray-700{--tw-border-opacity:1;border-color:rgb(65 70 81/var(--tw-border-opacity,1))}.border-gray-800{--tw-border-opacity:1;border-color:rgb(37 43 55/var(--tw-border-opacity,1))}.bg-black\/50{background-color:rgba(0,0,0,.5)}.bg-brand-500{--tw-bg-opacity:1;background-color:rgb(18 173 255/var(--tw-bg-opacity,1))}.bg-brand-600{--tw-bg-opacity:1;background-color:rgb(2 162 255/var(--tw-bg-opacity,1))}.bg-gray-100{--tw-bg-opacity:1;background-color:rgb(245 245 245/var(--tw-bg-opacity,1))}.bg-gray-50{--tw-bg-opacity:1;background-color:rgb(250 250 250/var(--tw-bg-opacity,1))}.bg-gray-700{--tw-bg-opacity:1;background-color:rgb(65 70 81/var(--tw-bg-opacity,1))}.bg-gray-800{--tw-bg-opacity:1;background-color:rgb(37 43 55/var(--tw-bg-opacity,1))}.bg-gray-900{--tw-bg-opacity:1;background-color:rgb(24 29 39/var(--tw-bg-opacity,1))}.bg-gray-950{--tw-bg-opacity:1;background-color:rgb(10 13 18/var(--tw-bg-opacity,1))}.bg-white{--tw-bg-opacity:1;background-color:rgb(255 255 255/var(--tw-bg-opacity,1))}.p-3{padding:.75rem}.p-4{padding:1rem}.p-6{padding:1.5rem}.px-2{padding-left:.5rem;padding-right:.5rem}.px-2\.5{padding-left:.625rem;padding-right:.625rem}.px-3{padding-left:.75rem;padding-right:.75rem}.px-3\.5{padding-left:.875rem;padding-right:.875rem}.px-4{padding-left:1rem;padding-right:1rem}.px-\[30px\]{padding-left:30px;padding-right:30px}.py-1{padding-top:.25rem;padding-bottom:.25rem}.py-1\.5{padding-top:.375rem;padding-bottom:.375rem}.py-2{padding-top:.5rem;padding-bottom:.5rem}.py-2\.5{padding-top:.625rem;padding-bottom:.625rem}.py-3{padding-top:.75rem;padding-bottom:.75rem}.pb-4{padding-bottom:1rem}.pl-8{padding-left:2rem}.pr-3{padding-right:.75rem}.text-\[10px\]{font-size:10px}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-md{font-size:1rem;line-height:1.5rem}.text-sm{font-size:.875rem;line-height:1.25rem}.text-xs{font-size:.75rem;line-height:1.125rem}.font-medium{font-weight:500}.font-semibold{font-weight:600}.uppercase{text-transform:uppercase}.leading-relaxed{line-height:1.625}.tracking-tight{letter-spacing:-.025em}.tracking-wider{letter-spacing:.05em}.text-brand-700{--tw-text-opacity:1;color:rgb(0 136 214/var(--tw-text-opacity,1))}.text-gray-300{--tw-text-opacity:1;color:rgb(213 215 218/var(--tw-text-opacity,1))}.text-gray-400{--tw-text-opacity:1;color:rgb(164 167 174/var(--tw-text-opacity,1))}.text-gray-500{--tw-text-opacity:1;color:rgb(113 118 128/var(--tw-text-opacity,1))}.text-gray-600{--tw-text-opacity:1;color:rgb(83 88 98/var(--tw-text-opacity,1))}.text-gray-700{--tw-text-opacity:1;color:rgb(65 70 81/var(--tw-text-opacity,1))}.text-gray-900{--tw-text-opacity:1;color:rgb(24 29 39/var(--tw-text-opacity,1))}.text-white{--tw-text-opacity:1;color:rgb(255 255 255/var(--tw-text-opacity,1))}.placeholder-gray-500::-moz-placeholder{--tw-placeholder-opacity:1;color:rgb(113 118 128/var(--tw-placeholder-opacity,1))}.placeholder-gray-500::placeholder{--tw-placeholder-opacity:1;color:rgb(113 118 128/var(--tw-placeholder-opacity,1))}.opacity-0{opacity:0}.shadow-btn-primary{--tw-shadow:0 1px 2px 0 rgba(10,13,18,.05),inset 0 0 0 1px rgba(10,13,18,.18),inset 0 -2px 0 0 rgba(10,13,18,.05),inset 0 0 0 2px hsla(0,0%,100%,.12);--tw-shadow-colored:0 1px 2px 0 var(--tw-shadow-color),inset 0 0 0 1px var(--tw-shadow-color),inset 0 -2px 0 0 var(--tw-shadow-color),inset 0 0 0 2px var(--tw-shadow-color)}.shadow-btn-primary,.shadow-btn-secondary{box-shadow:var(--tw-ring-offset-shadow,0 0 #0000),var(--tw-ring-shadow,0 0 #0000),var(--tw-shadow)}.shadow-btn-secondary{--tw-shadow:0 1px 2px 0 rgba(10,13,18,.05),inset 0 0 0 1px #d5d7da,inset 0 -2px 0 0 rgba(10,13,18,.05);--tw-shadow-colored:0 1px 2px 0 var(--tw-shadow-color),inset 0 0 0 1px var(--tw-shadow-color),inset 0 -2px 0 0 var(--tw-shadow-color)}.shadow-xl{--tw-shadow:0 20px 25px -5px rgba(0,0,0,.1),0 8px 10px -6px rgba(0,0,0,.1);--tw-shadow-colored:0 20px 25px -5px var(--tw-shadow-color),0 8px 10px -6px var(--tw-shadow-color)}.shadow-xl,.shadow-xs{box-shadow:var(--tw-ring-offset-shadow,0 0 #0000),var(--tw-ring-shadow,0 0 #0000),var(--tw-shadow)}.shadow-xs{--tw-shadow:0 1px 2px 0 rgba(10,13,18,.05);--tw-shadow-colored:0 1px 2px 0 var(--tw-shadow-color)}.filter{filter:var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow)}.transition-colors{transition-property:color,background-color,border-color,text-decoration-color,fill,stroke;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.transition-opacity{transition-property:opacity;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.hover\:bg-brand-700:hover{--tw-bg-opacity:1;background-color:rgb(0 136 214/var(--tw-bg-opacity,1))}.hover\:bg-gray-50:hover{--tw-bg-opacity:1;background-color:rgb(250 250 250/var(--tw-bg-opacity,1))}.hover\:bg-gray-700:hover{--tw-bg-opacity:1;background-color:rgb(65 70 81/var(--tw-bg-opacity,1))}.hover\:text-brand-800:hover{--tw-text-opacity:1;color:rgb(0 105 166/var(--tw-text-opacity,1))}.hover\:text-gray-600:hover{--tw-text-opacity:1;color:rgb(83 88 98/var(--tw-text-opacity,1))}.hover\:text-gray-700:hover{--tw-text-opacity:1;color:rgb(65 70 81/var(--tw-text-opacity,1))}.hover\:text-white:hover{--tw-text-opacity:1;color:rgb(255 255 255/var(--tw-text-opacity,1))}.focus\:border-brand-500:focus{--tw-border-opacity:1;border-color:rgb(18 173 255/var(--tw-border-opacity,1))}.focus\:outline-none:focus{outline:2px solid transparent;outline-offset:2px}.focus\:ring-1:focus{--tw-ring-offset-shadow:var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);--tw-ring-shadow:var(--tw-ring-inset) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color)}.focus\:ring-1:focus,.focus\:ring-2:focus{box-shadow:var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow,0 0 #0000)}.focus\:ring-2:focus{--tw-ring-offset-shadow:var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);--tw-ring-shadow:var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color)}.focus\:ring-brand-500:focus{--tw-ring-opacity:1;--tw-ring-color:rgb(18 173 255/var(--tw-ring-opacity,1))}.focus\:ring-offset-2:focus{--tw-ring-offset-width:2px}.focus-visible\:outline-none:focus-visible{outline:2px solid transparent;outline-offset:2px}.focus-visible\:ring-4:focus-visible{--tw-ring-offset-shadow:var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);--tw-ring-shadow:var(--tw-ring-inset) 0 0 0 calc(4px + var(--tw-ring-offset-width)) var(--tw-ring-color);box-shadow:var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow,0 0 #0000)}.focus-visible\:ring-brand-200:focus-visible{--tw-ring-opacity:1;--tw-ring-color:rgb(153 221 255/var(--tw-ring-opacity,1))}.focus-visible\:ring-offset-2:focus-visible{--tw-ring-offset-width:2px}.data-\[publr-state\=open\]\:pointer-events-auto[data-publr-state=open]{pointer-events:auto}.data-\[publr-state\=open\]\:opacity-100[data-publr-state=open]{opacity:1}
+    \\/*! tailwindcss v4.2.2 | MIT License | https://tailwindcss.com */
+    \\@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:inline))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-space-y-reverse:0;--tw-space-x-reverse:0;--tw-divide-y-reverse:0;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial}}}@layer theme{:root,:host{--font-sans:"Geist", -apple-system, BlinkMacSystemFont, sans-serif;--font-mono:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;--color-gray-50:oklch(98.5% .002 247.839);--color-gray-100:oklch(96.7% .003 264.542);--color-gray-200:oklch(92.8% .006 264.531);--color-gray-300:oklch(87.2% .01 258.338);--color-gray-400:oklch(70.7% .022 261.325);--color-gray-500:oklch(55.1% .027 264.364);--color-gray-600:oklch(44.6% .03 256.802);--color-gray-700:oklch(37.3% .034 259.733);--color-gray-800:oklch(27.8% .033 256.848);--color-gray-900:oklch(21% .034 264.665);--color-gray-950:oklch(13% .028 261.692);--color-black:#000;--color-white:#fff;--spacing:.25rem;--container-sm:24rem;--container-md:28rem;--font-weight-medium:500;--font-weight-semibold:600;--tracking-tight:-.025em;--tracking-wider:.05em;--leading-relaxed:1.625;--animate-spin:spin 1s linear infinite;--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4, 0, .2, 1);--default-font-family:"Geist", -apple-system, BlinkMacSystemFont, sans-serif;--default-mono-font-family:var(--font-mono)}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring{outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab, red, red)){::placeholder{color:color-mix(in oklab, currentcolor 50%, transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}*{border-color:var(--border)}body{background-color:var(--background);color:var(--foreground);font-family:var(--font-sans);margin:0}}@layer components{[data-publr-component=avatar-group]>[data-publr-component=avatar]{box-shadow:0 0 0 2px var(--background)}}@layer utilities{.pointer-events-auto{pointer-events:auto}.pointer-events-none{pointer-events:none}.collapse{visibility:collapse}.visible{visibility:visible}.sr-only{clip-path:inset(50%);white-space:nowrap;border-width:0;width:1px;height:1px;margin:-1px;padding:0;position:absolute;overflow:hidden}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.sticky{position:sticky}.inset-0{inset:calc(var(--spacing) * 0)}.inset-y-0{inset-block:calc(var(--spacing) * 0)}.start{inset-inline-start:var(--spacing)}.end{inset-inline-end:var(--spacing)}.top-1{top:calc(var(--spacing) * 1)}.top-1\/2{top:50%}.right-0{right:calc(var(--spacing) * 0)}.bottom-0{bottom:calc(var(--spacing) * 0)}.left-0{left:calc(var(--spacing) * 0)}.left-0\.5{left:calc(var(--spacing) * .5)}.left-2{left:calc(var(--spacing) * 2)}.left-2\.5{left:calc(var(--spacing) * 2.5)}.z-50{z-index:50}.container{width:100%}@media (min-width:40rem){.container{max-width:40rem}}@media (min-width:48rem){.container{max-width:48rem}}@media (min-width:64rem){.container{max-width:64rem}}@media (min-width:80rem){.container{max-width:80rem}}@media (min-width:96rem){.container{max-width:96rem}}.m-0{margin:calc(var(--spacing) * 0)}.mx-1{margin-inline:calc(var(--spacing) * 1)}.mx-4{margin-inline:calc(var(--spacing) * 4)}.my-1{margin-block:calc(var(--spacing) * 1)}.my-4{margin-block:calc(var(--spacing) * 4)}.mt-0{margin-top:calc(var(--spacing) * 0)}.mt-0\.5{margin-top:calc(var(--spacing) * .5)}.mt-1{margin-top:calc(var(--spacing) * 1)}.mt-2{margin-top:calc(var(--spacing) * 2)}.mt-3{margin-top:calc(var(--spacing) * 3)}.mt-4{margin-top:calc(var(--spacing) * 4)}.mt-6{margin-top:calc(var(--spacing) * 6)}.-mr-1{margin-right:calc(var(--spacing) * -1)}.mr-0\.5{margin-right:calc(var(--spacing) * .5)}.mb-2{margin-bottom:calc(var(--spacing) * 2)}.mb-3{margin-bottom:calc(var(--spacing) * 3)}.mb-4{margin-bottom:calc(var(--spacing) * 4)}.ml-0\.5{margin-left:calc(var(--spacing) * .5)}.ml-1\.5{margin-left:calc(var(--spacing) * 1.5)}.ml-2{margin-left:calc(var(--spacing) * 2)}.ml-3{margin-left:calc(var(--spacing) * 3)}.ml-auto{margin-left:auto}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.inline-block{display:inline-block}.inline-flex{display:inline-flex}.table{display:table}.h-1\.5{height:calc(var(--spacing) * 1.5)}.h-2\.5{height:calc(var(--spacing) * 2.5)}.h-3{height:calc(var(--spacing) * 3)}.h-3\.5{height:calc(var(--spacing) * 3.5)}.h-4{height:calc(var(--spacing) * 4)}.h-5{height:calc(var(--spacing) * 5)}.h-6{height:calc(var(--spacing) * 6)}.h-7{height:calc(var(--spacing) * 7)}.h-8{height:calc(var(--spacing) * 8)}.h-10{height:calc(var(--spacing) * 10)}.h-14{height:calc(var(--spacing) * 14)}.h-\[25vh\]{height:25vh}.h-full{height:100%}.h-px{height:1px}.h-screen{height:100vh}.min-h-0{min-height:calc(var(--spacing) * 0)}.min-h-20{min-height:calc(var(--spacing) * 20)}.w-2{width:calc(var(--spacing) * 2)}.w-2\.5{width:calc(var(--spacing) * 2.5)}.w-2\/5{width:40%}.w-3{width:calc(var(--spacing) * 3)}.w-3\.5{width:calc(var(--spacing) * 3.5)}.w-4{width:calc(var(--spacing) * 4)}.w-5{width:calc(var(--spacing) * 5)}.w-6{width:calc(var(--spacing) * 6)}.w-7{width:calc(var(--spacing) * 7)}.w-8{width:calc(var(--spacing) * 8)}.w-10{width:calc(var(--spacing) * 10)}.w-12{width:calc(var(--spacing) * 12)}.w-14{width:calc(var(--spacing) * 14)}.w-48{width:calc(var(--spacing) * 48)}.w-56{width:calc(var(--spacing) * 56)}.w-72{width:calc(var(--spacing) * 72)}.w-full{width:100%}.max-w-md{max-width:var(--container-md)}.max-w-sm{max-width:var(--container-sm)}.min-w-0{min-width:calc(var(--spacing) * 0)}.min-w-48{min-width:calc(var(--spacing) * 48)}.flex-1{flex:1}.shrink-0{flex-shrink:0}.caption-bottom{caption-side:bottom}.-translate-y-1{--tw-translate-y:calc(var(--spacing) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.rotate-45{rotate:45deg}.transform{transform:var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,)}.animate-spin{animation:var(--animate-spin)}.cursor-default{cursor:default}.cursor-not-allowed{cursor:not-allowed}.cursor-pointer{cursor:pointer}.resize-y{resize:vertical}.grid-cols-\[repeat\(auto-fill\,minmax\(200px\,1fr\)\)\]{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.flex-col{flex-direction:column}.flex-row{flex-direction:row}.flex-wrap{flex-wrap:wrap}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.gap-0{gap:calc(var(--spacing) * 0)}.gap-0\.5{gap:calc(var(--spacing) * .5)}.gap-1{gap:calc(var(--spacing) * 1)}.gap-1\.5{gap:calc(var(--spacing) * 1.5)}.gap-2{gap:calc(var(--spacing) * 2)}.gap-2\.5{gap:calc(var(--spacing) * 2.5)}.gap-3{gap:calc(var(--spacing) * 3)}.gap-4{gap:calc(var(--spacing) * 4)}.gap-5{gap:calc(var(--spacing) * 5)}:where(.space-y-0\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-1\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 1.5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 1.5) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-3>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 3) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-6>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 6) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 6) * calc(1 - var(--tw-space-y-reverse)))}:where(.-space-x-2>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing) * -2) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing) * -2) * calc(1 - var(--tw-space-x-reverse)))}:where(.divide-y>:not(:last-child)){--tw-divide-y-reverse:0;border-bottom-style:var(--tw-border-style);border-top-style:var(--tw-border-style);border-top-width:calc(1px * var(--tw-divide-y-reverse));border-bottom-width:calc(1px * calc(1 - var(--tw-divide-y-reverse)))}:where(.divide-gray-100>:not(:last-child)){border-color:var(--color-gray-100)}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded{border-radius:.25rem}.rounded-full{border-radius:3.40282e38px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) * .8)}.rounded-xl{border-radius:calc(var(--radius) * 1.4)}.border{border-style:var(--tw-border-style);border-width:1px}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-l-2{border-left-style:var(--tw-border-style);border-left-width:2px}.border-background{border-color:var(--background)}.border-border{border-color:var(--border)}.border-error,.border-error\/20{border-color:var(--error)}@supports (color:color-mix(in lab, red, red)){.border-error\/20{border-color:color-mix(in oklab, var(--error) 20%, transparent)}}.border-error\/30{border-color:var(--error)}@supports (color:color-mix(in lab, red, red)){.border-error\/30{border-color:color-mix(in oklab, var(--error) 30%, transparent)}}.border-gray-200{border-color:var(--color-gray-200)}.border-gray-300{border-color:var(--color-gray-300)}.border-gray-700{border-color:var(--color-gray-700)}.border-gray-800{border-color:var(--color-gray-800)}.border-input{border-color:var(--input)}.border-sidebar-border{border-color:var(--sidebar-border)}.border-success\/20{border-color:var(--success)}@supports (color:color-mix(in lab, red, red)){.border-success\/20{border-color:color-mix(in oklab, var(--success) 20%, transparent)}}.border-success\/30{border-color:var(--success)}@supports (color:color-mix(in lab, red, red)){.border-success\/30{border-color:color-mix(in oklab, var(--success) 30%, transparent)}}.border-transparent{border-color:#0000}.border-warning\/20{border-color:var(--warning)}@supports (color:color-mix(in lab, red, red)){.border-warning\/20{border-color:color-mix(in oklab, var(--warning) 20%, transparent)}}.border-warning\/30{border-color:var(--warning)}@supports (color:color-mix(in lab, red, red)){.border-warning\/30{border-color:color-mix(in oklab, var(--warning) 30%, transparent)}}.bg-accent,.bg-accent\/50{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.bg-accent\/50{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.bg-background{background-color:var(--background)}.bg-black{background-color:var(--color-black)}.bg-black\/50{background-color:#00000080}@supports (color:color-mix(in lab, red, red)){.bg-black\/50{background-color:color-mix(in oklab, var(--color-black) 50%, transparent)}}.bg-border{background-color:var(--border)}.bg-card{background-color:var(--card)}.bg-destructive,.bg-destructive\/10{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.bg-destructive\/10{background-color:color-mix(in oklab, var(--destructive) 10%, transparent)}}.bg-error,.bg-error\/10{background-color:var(--error)}@supports (color:color-mix(in lab, red, red)){.bg-error\/10{background-color:color-mix(in oklab, var(--error) 10%, transparent)}}.bg-gray-50{background-color:var(--color-gray-50)}.bg-gray-100{background-color:var(--color-gray-100)}.bg-gray-200{background-color:var(--color-gray-200)}.bg-gray-700{background-color:var(--color-gray-700)}.bg-gray-800{background-color:var(--color-gray-800)}.bg-gray-900{background-color:var(--color-gray-900)}.bg-gray-950{background-color:var(--color-gray-950)}.bg-input{background-color:var(--input)}.bg-muted,.bg-muted\/40{background-color:var(--muted)}@supports (color:color-mix(in lab, red, red)){.bg-muted\/40{background-color:color-mix(in oklab, var(--muted) 40%, transparent)}}.bg-popover{background-color:var(--popover)}.bg-primary{background-color:var(--primary)}.bg-secondary{background-color:var(--secondary)}.bg-sidebar{background-color:var(--sidebar)}.bg-sidebar-accent{background-color:var(--sidebar-accent)}.bg-sidebar-primary{background-color:var(--sidebar-primary)}.bg-success,.bg-success\/10{background-color:var(--success)}@supports (color:color-mix(in lab, red, red)){.bg-success\/10{background-color:color-mix(in oklab, var(--success) 10%, transparent)}}.bg-transparent{background-color:#0000}.bg-warning,.bg-warning\/10{background-color:var(--warning)}@supports (color:color-mix(in lab, red, red)){.bg-warning\/10{background-color:color-mix(in oklab, var(--warning) 10%, transparent)}}.bg-white{background-color:var(--color-white)}.object-cover{object-fit:cover}.p-1{padding:calc(var(--spacing) * 1)}.p-3{padding:calc(var(--spacing) * 3)}.p-4{padding:calc(var(--spacing) * 4)}.p-6{padding:calc(var(--spacing) * 6)}.px-1\.5{padding-inline:calc(var(--spacing) * 1.5)}.px-2{padding-inline:calc(var(--spacing) * 2)}.px-2\.5{padding-inline:calc(var(--spacing) * 2.5)}.px-3{padding-inline:calc(var(--spacing) * 3)}.px-3\.5{padding-inline:calc(var(--spacing) * 3.5)}.px-4{padding-inline:calc(var(--spacing) * 4)}.px-5{padding-inline:calc(var(--spacing) * 5)}.px-\[30px\]{padding-inline:30px}.py-0\.5{padding-block:calc(var(--spacing) * .5)}.py-1{padding-block:calc(var(--spacing) * 1)}.py-1\.5{padding-block:calc(var(--spacing) * 1.5)}.py-2{padding-block:calc(var(--spacing) * 2)}.py-2\.5{padding-block:calc(var(--spacing) * 2.5)}.py-3{padding-block:calc(var(--spacing) * 3)}.py-4{padding-block:calc(var(--spacing) * 4)}.py-12{padding-block:calc(var(--spacing) * 12)}.pt-0{padding-top:calc(var(--spacing) * 0)}.pt-2{padding-top:calc(var(--spacing) * 2)}.pr-3{padding-right:calc(var(--spacing) * 3)}.pr-10{padding-right:calc(var(--spacing) * 10)}.pb-0{padding-bottom:calc(var(--spacing) * 0)}.pb-4{padding-bottom:calc(var(--spacing) * 4)}.pl-3{padding-left:calc(var(--spacing) * 3)}.pl-8{padding-left:calc(var(--spacing) * 8)}.pl-10{padding-left:calc(var(--spacing) * 10)}.text-center{text-align:center}.text-left{text-align:left}.text-lg{font-size:1.125rem;line-height:var(--tw-leading,1.75rem)}.text-md{font-size:1rem;line-height:var(--tw-leading,1.5rem)}.text-sm{font-size:.875rem;line-height:var(--tw-leading,1.25rem)}.text-xs{font-size:.75rem;line-height:var(--tw-leading,1.125rem)}.text-\[10px\]{font-size:10px}.leading-relaxed{--tw-leading:var(--leading-relaxed);line-height:var(--leading-relaxed)}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.tracking-tight{--tw-tracking:var(--tracking-tight);letter-spacing:var(--tracking-tight)}.tracking-wider{--tw-tracking:var(--tracking-wider);letter-spacing:var(--tracking-wider)}.whitespace-nowrap{white-space:nowrap}.text-accent-foreground{color:var(--accent-foreground)}.text-card-foreground{color:var(--card-foreground)}.text-destructive{color:var(--destructive)}.text-error{color:var(--error)}.text-error-foreground{color:var(--error-foreground)}.text-foreground{color:var(--foreground)}.text-gray-300{color:var(--color-gray-300)}.text-gray-400{color:var(--color-gray-400)}.text-gray-500{color:var(--color-gray-500)}.text-gray-600{color:var(--color-gray-600)}.text-gray-700{color:var(--color-gray-700)}.text-gray-900{color:var(--color-gray-900)}.text-muted-foreground{color:var(--muted-foreground)}.text-popover-foreground{color:var(--popover-foreground)}.text-primary{color:var(--primary)}.text-primary-foreground{color:var(--primary-foreground)}.text-secondary-foreground{color:var(--secondary-foreground)}.text-sidebar-accent-foreground{color:var(--sidebar-accent-foreground)}.text-sidebar-foreground{color:var(--sidebar-foreground)}.text-sidebar-primary-foreground{color:var(--sidebar-primary-foreground)}.text-success{color:var(--success)}.text-success-foreground{color:var(--success-foreground)}.text-warning{color:var(--warning)}.text-warning-foreground{color:var(--warning-foreground)}.text-white{color:var(--color-white)}.uppercase{text-transform:uppercase}.placeholder-muted-foreground::placeholder{color:var(--muted-foreground)}.accent-foreground{accent-color:var(--foreground)}.accent-primary{accent-color:var(--primary)}.opacity-0{opacity:0}.opacity-50{opacity:.5}.shadow{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 8px 24px var(--tw-shadow-color,oklch(0% 0 0/.12));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-md{--tw-shadow:0 2px 8px var(--tw-shadow-color,oklch(0% 0 0/.08));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-sm{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,oklch(0% 0 0/.06));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-xl{--tw-shadow:0 20px 25px -5px var(--tw-shadow-color,#0000001a), 0 8px 10px -6px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-xs{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,oklch(0% 0 0/.05));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring,.ring-1{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-error{--tw-ring-color:var(--error)}.ring-ring{--tw-ring-color:var(--ring)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.blur{--tw-blur:blur(8px);filter:var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)}.filter{filter:var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-colors{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-transform{transition-property:transform,translate,scale,rotate;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.outline-none{--tw-outline-style:none;outline-style:none}.select-all{-webkit-user-select:all;user-select:all}.group-data-\[publr-state\=open\]\:pointer-events-auto:is(:where(.group)[data-publr-state=open] *){pointer-events:auto}.group-data-\[publr-state\=open\]\:block:is(:where(.group)[data-publr-state=open] *){display:block}.group-data-\[publr-state\=open\]\:opacity-100:is(:where(.group)[data-publr-state=open] *),.group-data-\[publr-state\=selected\]\:opacity-100:is(:where(.group)[data-publr-state=selected] *){opacity:1}.peer-checked\:translate-x-4:is(:where(.peer):checked~*){--tw-translate-x:calc(var(--spacing) * 4);translate:var(--tw-translate-x) var(--tw-translate-y)}.peer-checked\:translate-x-5:is(:where(.peer):checked~*){--tw-translate-x:calc(var(--spacing) * 5);translate:var(--tw-translate-x) var(--tw-translate-y)}.peer-checked\:translate-x-6:is(:where(.peer):checked~*){--tw-translate-x:calc(var(--spacing) * 6);translate:var(--tw-translate-x) var(--tw-translate-y)}.peer-checked\:bg-primary:is(:where(.peer):checked~*){background-color:var(--primary)}.file\:border-0::file-selector-button{border-style:var(--tw-border-style);border-width:0}.file\:bg-transparent::file-selector-button{background-color:#0000}.file\:text-sm::file-selector-button{font-size:.875rem;line-height:var(--tw-leading,1.25rem)}.file\:text-foreground::file-selector-button{color:var(--foreground)}.placeholder\:text-muted-foreground::placeholder{color:var(--muted-foreground)}@media (hover:hover){.hover\:bg-accent:hover,.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.hover\:bg-destructive\/10:hover{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-destructive\/10:hover{background-color:color-mix(in oklab, var(--destructive) 10%, transparent)}}.hover\:bg-destructive\/90:hover{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-destructive\/90:hover{background-color:color-mix(in oklab, var(--destructive) 90%, transparent)}}.hover\:bg-gray-50:hover{background-color:var(--color-gray-50)}.hover\:bg-gray-700:hover{background-color:var(--color-gray-700)}.hover\:bg-primary\/90:hover{background-color:var(--primary)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-primary\/90:hover{background-color:color-mix(in oklab, var(--primary) 90%, transparent)}}.hover\:bg-sidebar-accent:hover{background-color:var(--sidebar-accent)}.hover\:text-accent-foreground:hover{color:var(--accent-foreground)}.hover\:text-foreground:hover{color:var(--foreground)}.hover\:text-gray-600:hover{color:var(--color-gray-600)}.hover\:text-gray-700:hover{color:var(--color-gray-700)}.hover\:text-primary\/80:hover{color:var(--primary)}@supports (color:color-mix(in lab, red, red)){.hover\:text-primary\/80:hover{color:color-mix(in oklab, var(--primary) 80%, transparent)}}.hover\:text-sidebar-accent-foreground:hover{color:var(--sidebar-accent-foreground)}.hover\:text-sidebar-foreground:hover{color:var(--sidebar-foreground)}.hover\:text-white:hover{color:var(--color-white)}}.focus\:border-sidebar-ring:focus{border-color:var(--sidebar-ring)}.focus\:ring-1:focus{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus\:ring-2:focus{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus\:ring-sidebar-ring:focus{--tw-ring-color:var(--sidebar-ring)}.focus\:ring-offset-2:focus{--tw-ring-offset-width:2px;--tw-ring-offset-shadow:var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)}.focus\:outline-hidden:focus{--tw-outline-style:none;outline-style:none}@media (forced-colors:active){.focus\:outline-hidden:focus{outline-offset:2px;outline:2px solid #0000}}.focus-visible\:bg-accent:focus-visible{background-color:var(--accent)}.focus-visible\:bg-destructive\/10:focus-visible{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-destructive\/10:focus-visible{background-color:color-mix(in oklab, var(--destructive) 10%, transparent)}}.focus-visible\:text-accent-foreground:focus-visible{color:var(--accent-foreground)}.focus-visible\:ring-2:focus-visible{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-4:focus-visible{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(4px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-ring:focus-visible{--tw-ring-color:var(--ring)}.focus-visible\:ring-offset-2:focus-visible{--tw-ring-offset-width:2px;--tw-ring-offset-shadow:var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)}.focus-visible\:outline-hidden:focus-visible{--tw-outline-style:none;outline-style:none}@media (forced-colors:active){.focus-visible\:outline-hidden:focus-visible{outline-offset:2px;outline:2px solid #0000}}.focus-visible\:outline-none:focus-visible{--tw-outline-style:none;outline-style:none}.disabled\:pointer-events-none:disabled{pointer-events:none}.disabled\:cursor-not-allowed:disabled{cursor:not-allowed}.disabled\:text-muted-foreground:disabled{color:var(--muted-foreground)}.disabled\:opacity-50:disabled{opacity:.5}@media (hover:hover){.disabled\:hover\:text-muted-foreground:disabled:hover{color:var(--muted-foreground)}}.data-\[publr-state\=active\]\:bg-background[data-publr-state=active]{background-color:var(--background)}.data-\[publr-state\=active\]\:text-foreground[data-publr-state=active]{color:var(--foreground)}.data-\[publr-state\=active\]\:shadow-xs[data-publr-state=active]{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,oklch(0% 0 0/.05));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.data-\[publr-state\=inactive\]\:text-muted-foreground[data-publr-state=inactive]{color:var(--muted-foreground)}@media (hover:hover){.data-\[publr-state\=inactive\]\:hover\:text-foreground[data-publr-state=inactive]:hover{color:var(--foreground)}}.data-\[publr-state\=open\]\:pointer-events-auto[data-publr-state=open]{pointer-events:auto}.data-\[publr-state\=open\]\:opacity-100[data-publr-state=open]{opacity:1}}:root{--radius:.5rem;--background:oklch(100% 0 0);--foreground:oklch(14.5% 0 0);--card:oklch(100% 0 0);--card-foreground:oklch(14.5% 0 0);--popover:oklch(100% 0 0);--popover-foreground:oklch(14.5% 0 0);--primary:oklch(55% .17 250);--primary-foreground:oklch(98.5% 0 0);--secondary:oklch(97% 0 0);--secondary-foreground:oklch(20.5% 0 0);--muted:oklch(97% 0 0);--muted-foreground:oklch(55.6% 0 0);--accent:oklch(97% 0 0);--accent-foreground:oklch(20.5% 0 0);--destructive:oklch(57.7% .245 27.325);--error:oklch(57.7% .245 27.325);--error-foreground:oklch(98.5% 0 0);--success:oklch(56% .16 145);--success-foreground:oklch(98.5% 0 0);--warning:oklch(68% .16 75);--warning-foreground:oklch(21% .034 46);--border:oklch(92.2% 0 0);--input:oklch(88.2% 0 0);--ring:oklch(55% .17 250);--sidebar:oklch(98.5% 0 0);--sidebar-foreground:oklch(14.5% 0 0);--sidebar-primary:oklch(55% .17 250);--sidebar-primary-foreground:oklch(98.5% 0 0);--sidebar-accent:oklch(97% 0 0);--sidebar-accent-foreground:oklch(20.5% 0 0);--sidebar-border:oklch(92.2% 0 0);--sidebar-ring:oklch(55% .17 250)}.dark{--background:oklch(14.5% 0 0);--foreground:oklch(98.5% 0 0);--card:oklch(20.5% 0 0);--card-foreground:oklch(98.5% 0 0);--popover:oklch(20.5% 0 0);--popover-foreground:oklch(98.5% 0 0);--primary:oklch(65% .17 250);--primary-foreground:oklch(14.5% 0 0);--secondary:oklch(26.9% 0 0);--secondary-foreground:oklch(98.5% 0 0);--muted:oklch(26.9% 0 0);--muted-foreground:oklch(70.8% 0 0);--accent:oklch(26.9% 0 0);--accent-foreground:oklch(98.5% 0 0);--destructive:oklch(70.4% .191 22.216);--error:oklch(70.4% .191 22.216);--error-foreground:oklch(98.5% 0 0);--success:oklch(65% .16 145);--success-foreground:oklch(14.5% 0 0);--warning:oklch(75% .16 75);--warning-foreground:oklch(14.5% 0 0);--border:oklch(100% 0 0/.1);--input:oklch(100% 0 0/.15);--ring:oklch(65% .17 250);--sidebar:oklch(20.5% 0 0);--sidebar-foreground:oklch(98.5% 0 0);--sidebar-primary:oklch(65% .17 250);--sidebar-primary-foreground:oklch(98.5% 0 0);--sidebar-accent:oklch(26.9% 0 0);--sidebar-accent-foreground:oklch(98.5% 0 0);--sidebar-border:oklch(100% 0 0/.1);--sidebar-ring:oklch(65% .17 250)}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}@keyframes spin{to{transform:rotate(360deg)}}
+    \\
+;
+
+pub const checkbox_js =
+    \\import{r as n,i as a}from"./publr-core.js";n("checkbox",i=>{const e=i.querySelector('input[type="checkbox"]');if(!e)return;e.dataset.publrIndeterminate==="true"&&(e.indeterminate=!0);function r(){const t=e.indeterminate?"indeterminate":e.checked?"checked":"unchecked";i.dataset.publrState=t,e.dataset.publrIndeterminate=t==="indeterminate"?"true":"false",t==="indeterminate"?e.setAttribute("aria-checked","mixed"):e.setAttribute("aria-checked",e.checked?"true":"false")}r(),e.addEventListener("change",r)});a();
     \\
 ;
 
 pub const core_js =
-    \\// Publr Interactivity — Core
-    \\// Registry, init, toggle state, toggle handler, autodetection
-    \\
-    \\const handlers = new Map();
-    \\
-    \\// ── Registry ────────────────────────────────────────
-    \\
-    \\export function register(name, handler) {
-    \\  handlers.set(name, handler);
-    \\}
-    \\
-    \\export function init(root = document) {
-    \\  root.querySelectorAll('[data-publr-component]').forEach((el) => {
-    \\    const name = el.dataset.publrComponent;
-    \\    const handler = handlers.get(name);
-    \\    if (handler && !el._publrInit) {
-    \\      el._publrInit = true;
-    \\      handler(el);
-    \\    }
-    \\  });
-    \\}
-    \\
-    \\// Re-init on dynamic content (for HTMX, etc.)
-    \\document.addEventListener('publr:init', (e) => init(e.target));
-    \\
-    \\// ── Toggle State ────────────────────────────────────
-    \\
-    \\export function isOpen(el) {
-    \\  return el.dataset.publrState === 'open';
-    \\}
-    \\
-    \\export function open(el) {
-    \\  el.dataset.publrState = 'open';
-    \\  const trigger = el.querySelector('[data-publr-part="trigger"]');
-    \\  if (trigger) trigger.setAttribute('aria-expanded', 'true');
-    \\}
-    \\
-    \\export function close(el) {
-    \\  el.dataset.publrState = 'closed';
-    \\  const trigger = el.querySelector('[data-publr-part="trigger"]');
-    \\  if (trigger) trigger.setAttribute('aria-expanded', 'false');
-    \\  if (el._publrOnClose) {
-    \\    el._publrOnClose();
-    \\    delete el._publrOnClose;
-    \\  }
-    \\}
-    \\
-    \\export function toggle(el) {
-    \\  if (isOpen(el)) {
-    \\    close(el);
-    \\  } else {
-    \\    open(el);
-    \\  }
-    \\}
-    \\
-    \\// ── Toggle Handler ──────────────────────────────────
-    \\
-    \\register('toggle', (el) => {
-    \\  const trigger = el.querySelector('[data-publr-part="trigger"]');
-    \\  if (!trigger) return;
-    \\  trigger.addEventListener('click', () => toggle(el));
-    \\});
-    \\
-    \\// ── Autodetection ───────────────────────────────────
-    \\
-    \\function autodetect() {
-    \\  document.querySelectorAll('[data-publr-component]').forEach((el) => {
-    \\    const name = el.dataset.publrComponent;
-    \\    if (!handlers.has(name)) {
-    \\      import(`./publr-${name}.js`).catch(() => {});
-    \\    }
-    \\  });
-    \\  init();
-    \\}
-    \\
-    \\if (document.readyState === 'loading') {
-    \\  document.addEventListener('DOMContentLoaded', autodetect);
-    \\} else {
-    \\  autodetect();
-    \\}
+    \\const a=new Map;function i(t,e){a.set(t,e)}function r(t=document){t.querySelectorAll("[data-publr-component]").forEach(e=>{const o=e.dataset.publrComponent,n=a.get(o);n&&!e._publrInit&&(e._publrInit=!0,n(e))})}document.addEventListener("publr:init",t=>r(t.target));function u(t){return t.dataset.publrState==="open"}function s(t){t.dataset.publrState="open";const e=t.querySelector('[data-publr-part="trigger"]');e&&e.setAttribute("aria-expanded","true")}function d(t){t.dataset.publrState="closed";const e=t.querySelector('[data-publr-part="trigger"]');e&&e.setAttribute("aria-expanded","false"),t._publrOnClose&&(t._publrOnClose(),delete t._publrOnClose)}function c(t){u(t)?d(t):s(t)}i("toggle",t=>{const e=t.querySelector('[data-publr-part="trigger"]');e&&e.addEventListener("click",()=>c(t))});document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>r()):r();export{u as a,d as c,r as i,s as o,i as r};
     \\
 ;
 
 pub const dialog_js =
-    \\// Publr Interactivity — Dialog
-    \\// Focus trap + dialog handler
+    \\import{r as g,o as m,c as q,i as S}from"./publr-core.js";import{t as v}from"./publr-focus.js";import{o as E}from"./publr-dismiss.js";let k=0;g("dialog",t=>{const s=t.querySelector('[data-publr-part="trigger"]'),c=t.querySelector('[data-publr-part="overlay"]'),a=t.querySelector('[data-publr-part="content"]'),i=t.querySelector('[data-publr-part="close"]'),o=t.querySelector('[data-publr-part="confirm"]'),n=t.querySelector('[data-publr-part="title"]'),u=t.querySelector('[data-publr-part="description"]');if(!s||!c||!a)return;const d=s.querySelector("button")||s,p=(i==null?void 0:i.querySelector("button"))||i,f=(o==null?void 0:o.querySelector("button"))||o,b=t.dataset.publrId||`publr-dialog-${++k}`;t.dataset.publrId=b,n?(n.id=`${b}-title`,a.setAttribute("aria-labelledby",n.id)):a.removeAttribute("aria-labelledby"),u?(u.id=`${b}-description`,a.setAttribute("aria-describedby",u.id)):a.removeAttribute("aria-describedby");let e=null,r=null;function l(){e&&(e(),e=null),r&&(r(),r=null),q(t),d.focus()}d.addEventListener("click",()=>{m(t),e=v(a),r=E(t,l),t._publrOnClose=()=>{e&&(e(),e=null),r&&(r(),r=null),d.focus()}}),p&&p.addEventListener("click",l),f&&f.addEventListener("click",()=>{l()}),c.addEventListener("click",y=>{y.target===c&&t.dataset.publrDismissable!=="false"&&l()})});S();
     \\
-    \\import { register, init, open, close } from './publr-core.js';
-    \\
-    \\// ── Focus Trap ──────────────────────────────────────
-    \\
-    \\const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    \\
-    \\function trapFocus(container) {
-    \\  const focusable = container.querySelectorAll(FOCUSABLE);
-    \\  if (!focusable.length) return;
-    \\
-    \\  const first = focusable[0];
-    \\  const last = focusable[focusable.length - 1];
-    \\
-    \\  container._publrPrevFocus = document.activeElement;
-    \\  first.focus();
-    \\
-    \\  container._publrTrapHandler = (e) => {
-    \\    if (e.key !== 'Tab') return;
-    \\
-    \\    if (e.shiftKey && document.activeElement === first) {
-    \\      e.preventDefault();
-    \\      last.focus();
-    \\    } else if (!e.shiftKey && document.activeElement === last) {
-    \\      e.preventDefault();
-    \\      first.focus();
-    \\    }
-    \\  };
-    \\
-    \\  container.addEventListener('keydown', container._publrTrapHandler);
-    \\}
-    \\
-    \\function releaseFocus(container) {
-    \\  if (container._publrTrapHandler) {
-    \\    container.removeEventListener('keydown', container._publrTrapHandler);
-    \\    delete container._publrTrapHandler;
-    \\  }
-    \\  if (container._publrPrevFocus) {
-    \\    container._publrPrevFocus.focus();
-    \\    delete container._publrPrevFocus;
-    \\  }
-    \\}
-    \\
-    \\// ── Dialog Handler ──────────────────────────────────
-    \\
-    \\register('dialog', (el) => {
-    \\  const trigger = el.querySelector('[data-publr-part="trigger"]');
-    \\  const content = el.querySelector('[data-publr-part="content"]');
-    \\  const closeBtn = el.querySelector('[data-publr-part="close"]');
-    \\  if (!trigger || !content) return;
-    \\
-    \\  trigger.addEventListener('click', () => {
-    \\    open(el);
-    \\    trapFocus(content);
-    \\    el._publrOnClose = () => {
-    \\      releaseFocus(content);
-    \\      trigger.focus();
-    \\    };
-    \\  });
-    \\
-    \\  if (closeBtn) {
-    \\    closeBtn.addEventListener('click', () => close(el));
-    \\  }
-    \\
-    \\  // Overlay click (only if dismissable)
-    \\  content.addEventListener('click', (e) => {
-    \\    if (e.target === content && el.dataset.publrDismissable !== 'false') {
-    \\      close(el);
-    \\    }
-    \\  });
-    \\
-    \\  // Escape key
-    \\  content.addEventListener('keydown', (e) => {
-    \\    if (e.key === 'Escape' && el.dataset.publrDismissable !== 'false') {
-    \\      close(el);
-    \\    }
-    \\  });
-    \\});
-    \\
-    \\init();
+;
+
+pub const dismiss_js =
+    \\function c(t,r,n=[]){function e(i){if(!t.contains(i.target)){for(const o of n)if(o&&o.contains(i.target))return;r()}}return requestAnimationFrame(()=>{document.addEventListener("click",e,!0)}),function(){document.removeEventListener("click",e,!0)}}function a(t,r){function n(e){e.key==="Escape"&&t.dataset.publrDismissable!=="false"&&r()}return document.addEventListener("keydown",n),function(){document.removeEventListener("keydown",n)}}export{c as a,a as o};
     \\
 ;
 
 pub const dropdown_js =
-    \\// Publr Interactivity — Dropdown
-    \\// Portal + dropdown handler
+    \\import{r as k,a as y,c as v,o as g,i as w}from"./publr-core.js";import{p as h}from"./publr-portal.js";import{p as D}from"./publr-position.js";import{a as E,o as A}from"./publr-dismiss.js";k("dropdown",n=>{const c=n.querySelector('[data-publr-part="trigger"]'),r=n.querySelector('[data-publr-part="content"]');if(!c||!r)return;let o=null,s=null,i=null;function b(){return[...r.querySelectorAll('[data-publr-part="item"]')].filter(t=>!t.disabled&&!t.hasAttribute("aria-disabled"))}function u(t,e){var a;t.forEach((l,d)=>{l.tabIndex=d===e?0:-1}),(a=t[e])==null||a.focus()}function f(){s&&(s(),s=null),i&&(i(),i=null),r.style.display="",o&&(o(),o=null),v(n),(c.querySelector("button")||c).focus()}function m(){g(n),o=h(r),r.style.display="block",D(r,c,{placement:"bottom-start",offset:12}),s=E(n,f,[r]),i=A(n,f);const t=b();t.length&&u(t,0),n._publrOnClose=()=>{s&&(s(),s=null),i&&(i(),i=null),r.style.display="",o&&(o(),o=null)}}c.addEventListener("click",()=>{y(n)?f():m()}),c.addEventListener("keydown",t=>{(t.key==="ArrowDown"||t.key==="Enter"||t.key===" ")&&!y(n)&&(t.preventDefault(),m())}),r.addEventListener("keydown",t=>{const e=b();if(!e.length)return;const a=e.indexOf(document.activeElement);switch(t.key){case"ArrowDown":{t.preventDefault();const l=a<e.length-1?a+1:0;u(e,l);break}case"ArrowUp":{t.preventDefault();const l=a>0?a-1:e.length-1;u(e,l);break}case"Home":{t.preventDefault(),u(e,0);break}case"End":{t.preventDefault(),u(e,e.length-1);break}case"Enter":case" ":{t.preventDefault(),a>=0&&(e[a].click(),f());break}case"Tab":{t.preventDefault(),f();break}default:if(t.key.length===1&&!t.ctrlKey&&!t.metaKey&&!t.altKey){const l=t.key.toLowerCase(),d=e.find(p=>p.textContent.trim().toLowerCase().startsWith(l));if(d){const p=e.indexOf(d);u(e,p)}}}}),r.addEventListener("click",t=>{const e=t.target.closest('[data-publr-part="item"]');e&&!e.disabled&&e.getAttribute("aria-disabled")!=="true"&&f()})});w();
     \\
-    \\import { register, init, open, close, isOpen } from './publr-core.js';
+;
+
+pub const focus_js =
+    \\const a='a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';function r(n,o={}){const i=()=>n.querySelectorAll(a),c=i();if(!c.length)return()=>{};const s=document.activeElement;o.initialFocus?o.initialFocus.focus():c[0].focus();function u(e){if(e.key!=="Tab")return;const t=i();if(!t.length)return;const l=t[0],f=t[t.length-1];e.shiftKey&&document.activeElement===l?(e.preventDefault(),f.focus()):!e.shiftKey&&document.activeElement===f&&(e.preventDefault(),l.focus())}return n.addEventListener("keydown",u),function(){n.removeEventListener("keydown",u),s&&s.focus&&s.focus()}}export{r as t};
     \\
-    \\// ── Portal ──────────────────────────────────────────
+;
+
+pub const keyboard_js =
     \\
-    \\let portalRoot = null;
     \\
-    \\function getPortalRoot() {
-    \\  if (!portalRoot) {
-    \\    portalRoot = document.createElement('div');
-    \\    portalRoot.id = 'publr-portal';
-    \\    portalRoot.style.cssText = 'position:fixed;top:0;left:0;z-index:9999;pointer-events:none;';
-    \\    document.body.appendChild(portalRoot);
-    \\  }
-    \\  return portalRoot;
-    \\}
+;
+
+pub const popover_js =
+    \\import{r as y,a as v,c as g,o as O,i as S}from"./publr-core.js";import{p as C}from"./publr-portal.js";import{p as k}from"./publr-position.js";import{t as q}from"./publr-focus.js";import{a as x,o as E}from"./publr-dismiss.js";y("popover",e=>{const i=e.querySelector('[data-publr-part="trigger"]'),t=e.querySelector('[data-publr-part="content"]');if(!i||!t)return;let o=null,s=null,l=null,n=null;function r(){n&&(n(),n=null),s&&(s(),s=null),l&&(l(),l=null),t.style.display="",o&&(o(),o=null),g(e),(i.querySelector("button")||i).focus()}function p(){O(e),o=C(t),t.style.display="block";const a=t.dataset.publrSide||"bottom",c=t.dataset.publrAlign||"center",d=parseInt(t.dataset.publrSideOffset||"0",10),f=t.dataset.publrAvoidCollisions!=="false",b=e.dataset.publrModal==="true",m=c==="center"?a:`${a}-${c}`;if(k(t,i,{placement:m,offset:d||12,flip:f}),s=x(e,r,[t]),l=E(e,r),b)n=q(t);else{const u=t.querySelector('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');u&&u.focus()}e._publrOnClose=()=>{n&&(n(),n=null),s&&(s(),s=null),l&&(l(),l=null),t.style.display="",o&&(o(),o=null)}}i.addEventListener("click",()=>{v(e)?r():p()})});S();
     \\
-    \\function portal(el) {
-    \\  el._publrOriginalParent = el.parentNode;
-    \\  el._publrOriginalNext = el.nextSibling;
-    \\  el.style.pointerEvents = 'auto';
-    \\  getPortalRoot().appendChild(el);
-    \\}
+;
+
+pub const portal_js =
+    \\let n=null;function r(){return n||(n=document.createElement("div"),n.id="publr-portal",n.style.cssText="position:fixed;top:0;left:0;z-index:9999;pointer-events:none;",document.body.appendChild(n)),n}function i(t){return t._publrOriginalParent=t.parentNode,t._publrOriginalNext=t.nextSibling,t.style.pointerEvents="auto",r().appendChild(t),()=>e(t)}function e(t){t._publrOriginalParent&&(t._publrOriginalParent.insertBefore(t,t._publrOriginalNext),delete t._publrOriginalParent,delete t._publrOriginalNext,t.style.pointerEvents="")}export{i as p,e as u};
     \\
-    \\function unportal(el) {
-    \\  if (el._publrOriginalParent) {
-    \\    el._publrOriginalParent.insertBefore(el, el._publrOriginalNext);
-    \\    delete el._publrOriginalParent;
-    \\    delete el._publrOriginalNext;
-    \\    el.style.pointerEvents = '';
-    \\  }
-    \\}
+;
+
+pub const position_js =
+    \\const h={"top-start":{primary:"top",align:"start"},top:{primary:"top",align:"center"},"top-end":{primary:"top",align:"end"},"bottom-start":{primary:"bottom",align:"start"},bottom:{primary:"bottom",align:"center"},"bottom-end":{primary:"bottom",align:"end"},"left-start":{primary:"left",align:"start"},left:{primary:"left",align:"center"},"left-end":{primary:"left",align:"end"},"right-start":{primary:"right",align:"start"},right:{primary:"right",align:"center"},"right-end":{primary:"right",align:"end"}},u={top:"bottom",bottom:"top",left:"right",right:"left"};function y(t,e,i,s,r){let l,o;return i==="bottom"?l=t.bottom+r:i==="top"?l=t.top-e.height-r:i==="left"?o=t.left-e.width-r:o=t.right+r,i==="top"||i==="bottom"?s==="start"?o=t.left:s==="end"?o=t.right-e.width:o=t.left+(t.width-e.width)/2:s==="start"?l=t.top:s==="end"?l=t.bottom-e.height:l=t.top+(t.height-e.height)/2,{top:l,left:o}}function b(t,e){return t.top<0||t.left<0||t.top+e.height>window.innerHeight||t.left+e.width>window.innerWidth}function C(t,e,i={}){const s=i.placement||"bottom-start",r=i.offset??4,l=i.flip!==!1,o=h[s]||h["bottom-start"],f=e.getBoundingClientRect();t.style.position="fixed",t.style.visibility="hidden",t.style.top="0",t.style.left="0";const p=t.getBoundingClientRect();t.style.visibility="";let{primary:n,align:m}=o,d=y(f,p,n,m,r);if(l&&b(d,p)){const a=u[n],g=y(f,p,a,m,r);b(g,p)||(n=a,d=g)}return t.style.top=`${d.top}px`,t.style.left=`${d.left}px`,m==="center"?n:`${n}-${m}`}export{C as p};
     \\
-    \\function position(el, anchor, opts = {}) {
-    \\  const rect = anchor.getBoundingClientRect();
-    \\  const placement = opts.placement || 'bottom-start';
+;
+
+pub const radio_group_js =
+    \\import{r as i,i as s}from"./publr-core.js";i("radio-group",t=>{const r=t.dataset.publrName||"",a=[...t.querySelectorAll('[data-publr-part="item"]')],o=a.map(e=>e.querySelector('input[type="radio"]')).filter(Boolean);r&&o.forEach(e=>{e.name||(e.name=r)});function c(){a.forEach(e=>{const n=e.querySelector('input[type="radio"]');n&&(e.dataset.publrState=n.checked?"checked":"unchecked")})}c(),o.forEach(e=>e.addEventListener("change",c))});s();
     \\
-    \\  el.style.position = 'fixed';
+;
+
+pub const select_js =
+    \\import{r as S,a as x,c as w,o as C,i as A}from"./publr-core.js";import{p as q}from"./publr-portal.js";import{p as I}from"./publr-position.js";import{a as K,o as V}from"./publr-dismiss.js";S("select",n=>{var h;const i=n.querySelector('[data-publr-part="trigger"]'),l=n.querySelector('[data-publr-part="content"]'),d=n.querySelector('[data-publr-part="value"]'),s=n.querySelector('[data-publr-part="label"]');if(!i||!l)return;const L=((h=s==null?void 0:s.textContent)==null?void 0:h.trim())||"";let f=null,p=null,b=null;function g(t){return t.hasAttribute("aria-disabled")||t.dataset.publrState==="disabled"}function m(){return[...l.querySelectorAll('[data-publr-part="option"]')].filter(t=>!g(t))}function D(t){var e,a;return((a=(e=t.querySelector('[data-publr-part="option-label"]'))==null?void 0:e.textContent)==null?void 0:a.trim())||t.textContent.trim()}function c(t,e){var a;t.forEach((o,r)=>{o.tabIndex=r===e?0:-1,o.classList.toggle("bg-accent",r===e),o.classList.toggle("text-accent-foreground",r===e)}),(a=t[e])==null||a.focus()}function v(t,{closeAfter:e=!0}={}){if(!t||g(t))return;const a=t.dataset.value,o=D(t);d&&(d.value=a),s&&(s.textContent=o,s.classList.remove("text-muted-foreground"),s.classList.add("text-foreground")),l.querySelectorAll('[data-publr-part="option"]').forEach(r=>{r.setAttribute("aria-selected",r===t?"true":"false"),r.dataset.publrState=r===t?"selected":g(r)?"disabled":"unselected"}),e&&u()}function u(){p&&(p(),p=null),b&&(b(),b=null),l.style.display="",f&&(f(),f=null),w(n),i.focus()}function y(){C(n),f=q(l),l.style.display="block",I(l,i,{placement:"bottom-start",offset:4}),p=K(n,u,[l]),b=V(n,u);const t=m(),e=t.findIndex(a=>a.getAttribute("aria-selected")==="true");t.length&&c(t,e>=0?e:0)}i.addEventListener("click",()=>{x(n)?u():y()}),i.addEventListener("keydown",t=>{(t.key==="ArrowDown"||t.key==="Enter"||t.key===" ")&&!x(n)&&(t.preventDefault(),y())}),l.addEventListener("keydown",t=>{const e=m();if(!e.length)return;const a=e.indexOf(document.activeElement);switch(t.key){case"ArrowDown":{t.preventDefault(),c(e,a<e.length-1?a+1:0);break}case"ArrowUp":{t.preventDefault(),c(e,a>0?a-1:e.length-1);break}case"Home":{t.preventDefault(),c(e,0);break}case"End":{t.preventDefault(),c(e,e.length-1);break}case"Enter":case" ":{t.preventDefault(),a>=0&&v(e[a]);break}case"Tab":{t.preventDefault(),u();break}default:if(t.key.length===1&&!t.ctrlKey&&!t.metaKey&&!t.altKey){const o=t.key.toLowerCase(),r=e.find(O=>O.textContent.trim().toLowerCase().startsWith(o));r&&c(e,e.indexOf(r))}}}),l.addEventListener("click",t=>{const e=t.target.closest('[data-publr-part="option"]');e&&!g(e)&&v(e)});const E=n.dataset.publrDefaultValue,k=m().find(t=>t.dataset.value===E);k?v(k,{closeAfter:!1}):s&&(d&&(d.value=""),s.textContent=L,s.classList.add("text-muted-foreground"),s.classList.remove("text-foreground"))});A();
     \\
-    \\  if (placement.startsWith('bottom')) {
-    \\    el.style.top = `${rect.bottom + 4}px`;
-    \\    el.style.left = `${rect.left}px`;
-    \\  } else if (placement.startsWith('top')) {
-    \\    el.style.bottom = `${window.innerHeight - rect.top + 4}px`;
-    \\    el.style.left = `${rect.left}px`;
-    \\  }
-    \\}
+;
+
+pub const sidebar_js =
+    \\import{r as n,i as c}from"./publr-core.js";n("sidebar",s=>{s.querySelectorAll('[data-publr-part="section-trigger"]').forEach(e=>{e.addEventListener("click",()=>{const t=e.closest('[data-publr-part="section"]');if(!t)return;const r=t.dataset.publrState==="open";t.dataset.publrState=r?"closed":"open";const a=t.querySelector('[data-publr-part="section-content"]');a&&(a.hidden=!!r);const o=e.querySelector("svg");o&&(o.style.transform=r?"rotate(-90deg)":"")})})});c();
     \\
-    \\// ── Dropdown Handler ────────────────────────────────
+;
+
+pub const switch_js =
+    \\import{r as n,i}from"./publr-core.js";n("switch",t=>{const e=t.querySelector('input[type="checkbox"]');if(!e)return;function c(){t.dataset.publrState=e.checked?"checked":"unchecked"}c(),e.addEventListener("change",c)});i();
     \\
-    \\register('dropdown', (el) => {
-    \\  const trigger = el.querySelector('[data-publr-part="trigger"]');
-    \\  const content = el.querySelector('[data-publr-part="content"]');
-    \\  if (!trigger || !content) return;
+;
+
+pub const tabs_js =
+    \\import{r as b,i as o}from"./publr-core.js";b("tabs",n=>{const l=n.querySelector('[data-publr-part="list"]');if(!l)return;function s(){return[...l.querySelectorAll('[data-publr-part="trigger"]')].filter(t=>!t.disabled)}function i(t){if(!t||t.disabled)return;const a=t.dataset.publrTab;n.querySelectorAll('[data-publr-part="trigger"]').forEach(e=>{e.dataset.publrState="inactive",e.setAttribute("aria-selected","false"),e.tabIndex=-1}),n.querySelectorAll('[data-publr-part="content"]').forEach(e=>{e.dataset.publrState="inactive",e.hidden=!0}),t.dataset.publrState="active",t.setAttribute("aria-selected","true"),t.tabIndex=0;const r=n.querySelector(`[data-publr-part="content"][data-publr-tab="${a}"]`);r&&(r.dataset.publrState="active",r.hidden=!1)}l.addEventListener("click",t=>{const a=t.target.closest('[data-publr-part="trigger"]');a&&!a.disabled&&i(a)}),l.addEventListener("keydown",t=>{const a=s(),r=a.indexOf(document.activeElement);if(r===-1)return;let e=r;switch(t.key){case"ArrowRight":t.preventDefault(),e=r<a.length-1?r+1:0;break;case"ArrowLeft":t.preventDefault(),e=r>0?r-1:a.length-1;break;case"Home":t.preventDefault(),e=0;break;case"End":t.preventDefault(),e=a.length-1;break;default:return}a[e].focus(),i(a[e])});const u=s(),c=n.dataset.publrDefaultValue,d=u.find(t=>t.dataset.publrTab===c)||u[0];d&&i(d)});o();
     \\
-    \\  trigger.addEventListener('click', () => {
-    \\    if (isOpen(el)) {
-    \\      close(el);
-    \\    } else {
-    \\      open(el);
-    \\      portal(content);
-    \\      position(content, trigger);
-    \\      el._publrOnClose = () => unportal(content);
-    \\    }
-    \\  });
-    \\});
+;
+
+pub const toast_js =
+    \\import{r as d,i as p}from"./publr-core.js";let f=0;function m(){return document.getElementById("publr-toast-region")}function y(t,o={}){const a=o.variant||"default",n=o.duration??4e3,s=++f,r=m();if(!r)return console.warn("publr.toast: no #publr-toast-region found. Add <ToastRegion /> to your layout."),null;const i=r.querySelector(`template[data-publr-toast-template="${a}"]`);if(!i)return console.warn(`publr.toast: no template for variant "${a}"`),null;const e=i.content.firstElementChild.cloneNode(!0);e.dataset.toastId=s;const l=e.querySelector('[data-publr-part="message"]');l&&(l.textContent=t);const u=e.querySelector('[data-publr-part="close"]');return u&&u.addEventListener("click",()=>c(e)),r.appendChild(e),requestAnimationFrame(()=>{e.style.opacity="1",e.style.transform="translateY(0)"}),n>0&&n!==1/0&&setTimeout(()=>c(e),n),s}function c(t){t.style.opacity="0",t.style.transform="translateY(8px)",setTimeout(()=>t.remove(),200)}typeof window<"u"&&(window.publr=window.publr||{},window.publr.toast=y);d("toast",t=>{const o=t.querySelector('[data-publr-part="close"]');o&&o.addEventListener("click",()=>{t.style.opacity="0",t.style.transform="translateY(8px)",t.style.transition="opacity 0.2s, transform 0.2s",setTimeout(()=>{t.style.display="none"},200)})});p();
     \\
-    \\init();
+;
+
+pub const tooltip_js =
+    \\import{r as T,o as q,c as v,i as A}from"./publr-core.js";import{p as D,u as d}from"./publr-portal.js";import{p as H}from"./publr-position.js";const I={instant:0,fast:200,default:700,slow:1e3};let u=0;T("tooltip-provider",()=>{});T("tooltip",t=>{const s=t.querySelector('[data-publr-part="trigger"]'),a=t.querySelector('[data-publr-part="portal"]'),e=t.querySelector('[data-publr-part="content"]');if(!s||!e)return;const o=t.closest('[data-publr-component="tooltip-provider"]'),E=t.dataset.publrDelay||o&&o.dataset.publrDelay||"default",S=I[E]??700,L=o?parseInt(o.dataset.publrSkipDelay||"300",10):300,g=(t.dataset.publrDisableHoverableContent||o&&o.dataset.publrDisableHoverableContent)==="true";let p=null,l=null,i=!1;function r(n){t.dataset.publrState=n,s.dataset.state=n,e.dataset.state=n}function f(n){clearTimeout(l);const m=Date.now()-u<L?0:S;r(m>0?"delayed-open":"instant-open"),p=setTimeout(()=>{q(t),r("instant-open"),a?D(a):D(e),i=!0,e.style.display="block";const b=e.dataset.publrSide||"top",y=e.dataset.publrAlign||"center",k=parseInt(e.dataset.publrSideOffset||"0",10),C=e.dataset.publrAvoidCollisions!=="false",h=y==="center"?b:`${b}-${y}`;H(e,s,{placement:h,offset:k||6,flip:C})},m)}function c(){clearTimeout(p),l=setTimeout(()=>{e.style.display="",i&&(a?d(a):d(e),i=!1),v(t),r("closed"),u=Date.now()},100)}function w(){clearTimeout(p),clearTimeout(l),e.style.display="",i&&(a?d(a):d(e),i=!1),v(t),r("closed"),u=Date.now()}s.addEventListener("mouseenter",()=>f()),s.addEventListener("mouseleave",c),s.addEventListener("focusin",()=>f()),s.addEventListener("focusout",c),g||(e.addEventListener("mouseenter",()=>clearTimeout(l)),e.addEventListener("mouseleave",c)),s.addEventListener("keydown",n=>{n.key==="Escape"&&w()})});A();
     \\
 ;
 
