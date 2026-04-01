@@ -1,3 +1,7 @@
+---
+const std = @import("std");
+const ts = std.time.timestamp();
+---
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -18,7 +22,7 @@
     {@raw props.children}
   </main>
   <footer>
-    <small>Powered by Publr</small>
+    <small>Powered by Publr · Generated at: <strong>{ts}</strong></small>
   </footer>
 </body>
 </html>
