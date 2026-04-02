@@ -1,4 +1,21 @@
 // Admin dashboard template
+const std = @import("std");
+const ui = @import("publr_ui");
+
+const Badge = ui.badge.Badge;
+const BadgeSize = ui.badge.Size;
+const BadgeVariant = ui.badge.Variant;
+const Card = ui.card.Card;
+const CardContent = ui.card.CardContent;
+const CardHeader = ui.card.CardHeader;
+const CardTitle = ui.card.CardTitle;
+const Table = ui.table.Table;
+const TableBody = ui.table.TableBody;
+const TableCell = ui.table.TableCell;
+const TableHead = ui.table.TableHead;
+const TableHeader = ui.table.TableHeader;
+const TableRow = ui.table.TableRow;
+
 const Post = struct {
     id: []const u8,
     title: []const u8,
@@ -14,51 +31,85 @@ pub fn Dashboard(props: struct {
     has_posts: bool,
     recent_posts: []const Post,
 }) {
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-value">{props.posts_count}</div>
-            <div class="stat-label">Posts</div>
+    <div class="dashboard-stats-grid">
+        <div class="dashboard-stat-card">
+            <Card>
+                <CardHeader>
+                    <CardTitle>Posts</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p class="dashboard-stat-value">{props.posts_count}</p>
+                </CardContent>
+            </Card>
         </div>
-        <div class="stat-card">
-            <div class="stat-value">{props.pages_count}</div>
-            <div class="stat-label">Pages</div>
+        <div class="dashboard-stat-card">
+            <Card>
+                <CardHeader>
+                    <CardTitle>Pages</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p class="dashboard-stat-value">{props.pages_count}</p>
+                </CardContent>
+            </Card>
         </div>
-        <div class="stat-card">
-            <div class="stat-value">{props.media_count}</div>
-            <div class="stat-label">Media</div>
+        <div class="dashboard-stat-card">
+            <Card>
+                <CardHeader>
+                    <CardTitle>Media</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p class="dashboard-stat-value">{props.media_count}</p>
+                </CardContent>
+            </Card>
         </div>
-        <div class="stat-card">
-            <div class="stat-value">{props.users_count}</div>
-            <div class="stat-label">Users</div>
+        <div class="dashboard-stat-card">
+            <Card>
+                <CardHeader>
+                    <CardTitle>Users</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p class="dashboard-stat-value">{props.users_count}</p>
+                </CardContent>
+            </Card>
         </div>
     </div>
-    <div class="panel">
-        <div class="panel-header">
-            <h2>Recent Posts</h2>
-        </div>
-        <div class="panel-body">
+    <div class="dashboard-recent-posts">
+        <Card>
+            <CardHeader>
+                <CardTitle>Recent Posts</CardTitle>
+            </CardHeader>
             {if (props.has_posts) (
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>Status</th>
-                            <th>Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Title</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Date</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
                         {for (props.recent_posts) |post| (
-                            <tr>
-                                <td><a href={post.id}>{post.title}</a></td>
-                                <td><span class={post.status}>{post.status}</span></td>
-                                <td>{post.date}</td>
-                            </tr>
+                            <TableRow>
+                                <TableCell><a href={post.id} class="dashboard-post-link">{post.title}</a></TableCell>
+                                <TableCell>
+                                    <Badge
+                                        label={if (std.mem.eql(u8, post.status, "published")) ("Published") else if (std.mem.eql(u8, post.status, "draft")) ("Draft") else if (std.mem.eql(u8, post.status, "scheduled")) ("Scheduled") else if (std.mem.eql(u8, post.status, "changed")) ("Changed") else (post.status)}
+                                        variant={if (std.mem.eql(u8, post.status, "published")) (BadgeVariant.success) else if (std.mem.eql(u8, post.status, "scheduled") or std.mem.eql(u8, post.status, "changed")) (BadgeVariant.warning) else if (std.mem.eql(u8, post.status, "draft")) (BadgeVariant.secondary) else (BadgeVariant.outline)}
+                                        size={BadgeSize.sm}
+                                    />
+                                </TableCell>
+                                <TableCell>{post.date}</TableCell>
+                            </TableRow>
                         )}
-                    </tbody>
-                </table>
+                    </TableBody>
+                </Table>
             ) else (
-                <p class="empty-state">No posts yet. <a href="/admin/content/post/new">Create your first post</a></p>
+                <CardContent>
+                    <p class="dashboard-empty-state">
+                        No posts yet. <a href="/admin/content/post/new">Create your first post</a>
+                    </p>
+                </CardContent>
             )}
-        </div>
+        </Card>
     </div>
 }

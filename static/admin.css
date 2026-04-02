@@ -2,8 +2,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
 
 * {
-    margin: 0;
-    padding: 0;
     box-sizing: border-box;
 }
 
@@ -123,10 +121,10 @@
     --text-light: #ffffff;
     --text-on-accent: #ffffff;
 
-    /* Accent — Brand */
-    --accent: var(--brand-800);
-    --accent-hover: var(--brand-700);
-    --accent-subtle: var(--brand-50);
+    /* Accent — Brand (renamed to avoid conflict with design-system --accent token) */
+    --brand-accent: var(--brand-800);
+    --brand-accent-hover: var(--brand-700);
+    --brand-accent-subtle: var(--brand-50);
 
     /* Semantic */
     --color-danger: var(--error-600);
@@ -219,7 +217,7 @@ body {
 }
 
 a {
-    color: var(--accent);
+    color: var(--brand-accent);
     text-decoration: none;
 }
 
@@ -374,13 +372,13 @@ body.admin {
 
 .topbar-nav-item:hover {
     color: var(--text-primary);
-    border-bottom: 2px solid var(--accent-hover);
+    border-bottom: 2px solid var(--brand-accent-hover);
     text-decoration: none;
 }
 
 .topbar-nav-item.active {
     color: var(--text-primary);
-    border-bottom: 2px solid var(--accent-hover);
+    border-bottom: 2px solid var(--brand-accent-hover);
 }
 
 .topbar-nav-item .nav-icon {
@@ -964,7 +962,7 @@ body.admin {
 }
 
 .version-release {
-    color: var(--accent);
+    color: var(--brand-accent);
     font-size: var(--text-xs);
 }
 
@@ -1055,7 +1053,7 @@ body.admin {
 
 .version-badge {
     font-size: var(--text-xs);
-    color: var(--accent);
+    color: var(--brand-accent);
     font-weight: 600;
 }
 
@@ -1101,7 +1099,7 @@ body.admin {
 
 .badge-current {
     font-size: var(--text-sm);
-    color: var(--accent);
+    color: var(--brand-accent);
     font-weight: 600;
 }
 
@@ -1209,7 +1207,7 @@ body.admin {
     display: inline-block;
     margin-top: var(--space-xs);
     font-size: var(--text-xs);
-    color: var(--accent);
+    color: var(--brand-accent);
     text-decoration: none;
 }
 
@@ -1231,7 +1229,7 @@ body.admin {
 }
 
 .version-compare-toggle input[type="checkbox"] {
-    accent-color: var(--accent);
+    accent-color: var(--brand-accent);
 }
 
 .version-compare-fields {
@@ -1303,7 +1301,7 @@ body.admin {
 .version-compare-radio input[type="radio"] {
     margin-top: 2px;
     flex-shrink: 0;
-    accent-color: var(--accent);
+    accent-color: var(--brand-accent);
 }
 
 .version-compare-radio input[type="radio"]:disabled {
@@ -1387,26 +1385,20 @@ body.admin {
     animation: none;
 }
 
-/* ── Stats ──────────────────────────────────────────── */
+/* ── Dashboard ──────────────────────────────────────── */
 
-.stats-grid {
+.dashboard-stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: var(--space-6);
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-4);
     margin-bottom: var(--space-6);
-    padding-bottom: var(--space-4);
-    border-bottom: 1px solid var(--border-default);
 }
 
-.stat-card {
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    padding: 0;
-    box-shadow: none;
+.dashboard-stat-card [data-publr-component="card"] {
+    height: 100%;
 }
 
-.stat-value {
+.dashboard-stat-value {
     font-size: var(--text-2xl);
     font-weight: 600;
     color: var(--text-primary);
@@ -1414,12 +1406,42 @@ body.admin {
     letter-spacing: -0.01em;
 }
 
-.stat-label {
+.dashboard-recent-posts {
+    margin-bottom: var(--space-5);
+}
+
+.dashboard-recent-posts [data-publr-component="card"] {
+    overflow: hidden;
+}
+
+.dashboard-recent-posts [data-publr-component="table"] {
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 0;
+}
+
+.dashboard-post-link {
+    color: var(--brand-accent);
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.dashboard-post-link:hover {
+    text-decoration: underline;
+}
+
+.dashboard-empty-state {
     color: var(--text-secondary);
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-top: 1px;
+}
+
+.dashboard-empty-state a {
+    color: var(--brand-accent);
+    text-decoration: none;
+}
+
+.dashboard-empty-state a:hover {
+    text-decoration: underline;
 }
 
 /* ── Panels ─────────────────────────────────────────── */
@@ -1483,7 +1505,7 @@ body.admin {
 }
 
 .table a {
-    color: var(--accent);
+    color: var(--brand-accent);
     text-decoration: none;
 }
 
@@ -1505,7 +1527,7 @@ body.admin {
     border-radius: var(--radius-sm);
     background: var(--bg-secondary);
     cursor: pointer;
-    accent-color: var(--accent);
+    accent-color: var(--brand-accent);
 }
 
 /* Thumbnail column */
@@ -1691,7 +1713,7 @@ body.admin {
 
 .badge-scheduled {
     background: var(--brand-50);
-    color: var(--accent);
+    color: var(--brand-accent);
 }
 
 .badge-archived {
@@ -1828,12 +1850,12 @@ body.admin {
 
 .dropdown-create-input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
 }
 
 .dropdown-create-btn {
     padding: var(--space-xs) var(--space-md);
-    background: var(--accent);
+    background: var(--brand-accent);
     color: var(--text-on-accent);
     border: none;
     border-radius: var(--radius-sm);
@@ -1844,7 +1866,7 @@ body.admin {
 }
 
 .dropdown-create-btn:hover {
-    background: var(--accent-hover);
+    background: var(--brand-accent-hover);
 }
 
 /* ── Buttons ────────────────────────────────────────── */
@@ -2731,7 +2753,7 @@ select.form-control {
 
 .media-upload-zone:hover,
 .media-upload-zone.dragover {
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
     background: var(--brand-25);
 }
 
@@ -2751,13 +2773,13 @@ select.form-control {
 }
 
 .upload-zone-link {
-    color: var(--accent);
+    color: var(--brand-accent);
     font-weight: 600;
     cursor: pointer;
 }
 
 .upload-zone-link:hover {
-    color: var(--accent-hover);
+    color: var(--brand-accent-hover);
 }
 
 .upload-zone-hint {
@@ -2789,7 +2811,7 @@ select.form-control {
     left: 0;
     height: 100%;
     width: var(--progress, 0%);
-    background: var(--accent);
+    background: var(--brand-accent);
     border-radius: var(--radius-full);
     transition: width 0.2s ease;
 }
@@ -3169,7 +3191,7 @@ select.form-control {
 }
 
 .media-url-link {
-    color: var(--accent);
+    color: var(--brand-accent);
     word-break: break-all;
     font-size: var(--text-xs);
 }
@@ -3375,7 +3397,7 @@ select.form-control {
 }
 
 .media-tag-chip.active {
-    background: var(--accent);
+    background: var(--brand-accent);
     color: var(--text-on-accent);
 }
 
@@ -3550,7 +3572,7 @@ select.form-control {
 
 .tag-picker-option input[type="checkbox"] {
     margin: 0;
-    accent-color: var(--accent);
+    accent-color: var(--brand-accent);
 }
 
 .tag-picker-create {
@@ -3561,7 +3583,7 @@ select.form-control {
     border: none;
     border-top: 1px solid var(--border-default);
     font-size: var(--text-sm);
-    color: var(--accent);
+    color: var(--brand-accent);
     font-weight: 500;
     cursor: pointer;
     text-align: left;
@@ -3675,7 +3697,7 @@ select.form-control {
 }
 
 .media-date-select:focus {
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
     box-shadow: var(--shadow-focus);
 }
 
@@ -3741,7 +3763,7 @@ select.form-control {
 }
 
 .media-unreviewed-link.active {
-    color: var(--accent);
+    color: var(--brand-accent);
     font-weight: 500;
 }
 
@@ -3776,7 +3798,7 @@ select.form-control {
 }
 
 .media-filter-count {
-    background: var(--accent);
+    background: var(--brand-accent);
     color: var(--text-on-accent);
     font-size: 10px;
     padding: 0 5px;
@@ -3813,7 +3835,7 @@ select.form-control {
     cursor: pointer;
     width: 16px;
     height: 16px;
-    accent-color: var(--accent);
+    accent-color: var(--brand-accent);
 }
 
 .media-toolbar-left {
@@ -3865,7 +3887,7 @@ select.form-control {
     width: 18px;
     height: 18px;
     cursor: pointer;
-    accent-color: var(--accent);
+    accent-color: var(--brand-accent);
     border: 2px solid rgba(255, 255, 255, 0.8);
     border-radius: var(--radius-sm);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -3883,7 +3905,7 @@ select.form-control {
 }
 
 .media-card.selected {
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
     box-shadow: 0 0 0 2px var(--brand-200);
 }
 
@@ -3907,7 +3929,7 @@ select.form-control {
 .media-select-all-link {
     background: none;
     border: none;
-    color: var(--accent);
+    color: var(--brand-accent);
     cursor: pointer;
     font-size: var(--text-sm);
     font-weight: 500;
@@ -3916,7 +3938,7 @@ select.form-control {
 }
 
 .media-select-all-link:hover {
-    color: var(--accent-hover);
+    color: var(--brand-accent-hover);
 }
 
 /* Pagination */
@@ -3967,7 +3989,7 @@ select.form-control {
     display: block;
     height: 100%;
     width: var(--progress, 0%);
-    background: var(--accent);
+    background: var(--brand-accent);
     transition: width 0.2s ease;
 }
 
@@ -4210,7 +4232,7 @@ select.form-control {
 
 .avatar-trigger:focus {
     outline: none;
-    box-shadow: 0 0 0 2px var(--accent);
+    box-shadow: 0 0 0 2px var(--brand-accent);
 }
 
 .avatar-img {
@@ -4237,7 +4259,7 @@ select.form-control {
     height: 56px;
     border: none;
     border-radius: var(--radius-full);
-    background: var(--accent);
+    background: var(--brand-accent);
     color: var(--text-on-accent);
     cursor: pointer;
     box-shadow: var(--shadow-lg);
@@ -4249,14 +4271,14 @@ select.form-control {
 }
 
 .fab:hover {
-    background: var(--accent-hover);
+    background: var(--brand-accent-hover);
     transform: scale(1.05);
     box-shadow: var(--shadow-xl);
 }
 
 .fab:focus {
     outline: none;
-    box-shadow: var(--shadow-lg), 0 0 0 3px var(--accent-subtle);
+    box-shadow: var(--shadow-lg), 0 0 0 3px var(--brand-accent-subtle);
 }
 
 .fab:active {
@@ -4270,7 +4292,7 @@ select.form-control {
 
 .select-item[aria-selected="true"] {
     font-weight: 600;
-    color: var(--accent);
+    color: var(--brand-accent);
 }
 
 /* ── Select trigger ─────────────────────────────────── */
@@ -4342,30 +4364,6 @@ select.form-control {
     background: var(--bg-elevated);
     border: 1px solid var(--border-default);
     transform: rotate(45deg);
-}
-
-/* ── Tooltip ────────────────────────────────────────── */
-
-.tooltip-content {
-    display: none;
-    position: fixed;
-    background: var(--text-primary);
-    color: var(--text-on-accent);
-    font-size: var(--text-xs);
-    padding: 3px var(--space-2);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-sm);
-    white-space: nowrap;
-    z-index: 950;
-    pointer-events: none;
-}
-
-[data-publr-component="tooltip"][data-publr-state="open"] > .tooltip-content {
-    display: block;
-}
-
-#publr-portal .tooltip-content {
-    display: block;
 }
 
 /* ── Toast ──────────────────────────────────────────── */
@@ -4475,8 +4473,8 @@ select.form-control {
 }
 
 .tab-trigger[aria-selected="true"] {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
+    color: var(--brand-accent);
+    border-bottom-color: var(--brand-accent);
 }
 
 .tab-panel {
@@ -4525,8 +4523,8 @@ select.form-control {
 }
 
 .switch-input:checked + .switch-track {
-    background: var(--accent);
-    border-color: var(--accent);
+    background: var(--brand-accent);
+    border-color: var(--brand-accent);
 }
 
 .switch-input:checked + .switch-track .switch-thumb {
@@ -4583,7 +4581,7 @@ select.form-control {
 }
 
 .check-input:checked + .check-indicator {
-    background: var(--accent);
+    background: var(--brand-accent);
 }
 
 .check-input:checked + .check-indicator::after {
@@ -4627,7 +4625,7 @@ select.form-control {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--brand-accent);
 }
 
 /* ── Setup / Login Pages ──────────────────────────── */
@@ -4700,7 +4698,7 @@ select.form-control {
 
 .auth-form .form-input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
     box-shadow: 0 0 0 3px var(--border-focus);
 }
 
@@ -4723,7 +4721,7 @@ select.form-control {
 .auth-button {
     width: 100%;
     padding: 0.625rem 1rem;
-    background: var(--accent);
+    background: var(--brand-accent);
     color: var(--text-on-accent);
     border: none;
     border-radius: 6px;
@@ -4735,7 +4733,7 @@ select.form-control {
 }
 
 .auth-button:hover {
-    background: var(--accent-hover);
+    background: var(--brand-accent-hover);
 }
 
 /* ── Design System Page ────────────────────────────── */
@@ -4999,7 +4997,7 @@ select.form-control {
 
 .ds-spacing-bar {
     height: 24px;
-    background: var(--accent);
+    background: var(--brand-accent);
     border-radius: var(--radius-sm);
     min-width: 4px;
 }
@@ -5032,7 +5030,7 @@ select.form-control {
 .ds-radius-box {
     width: 80px;
     height: 80px;
-    background: var(--accent);
+    background: var(--brand-accent);
 }
 
 .ds-radius-info {
@@ -5234,8 +5232,8 @@ select.form-control {
 }
 
 .image-picker-modal-folder.active {
-    background: var(--accent-subtle);
-    color: var(--accent);
+    background: var(--brand-accent-subtle);
+    color: var(--brand-accent);
 }
 
 .image-picker-modal-folder .icon {
@@ -5286,8 +5284,8 @@ select.form-control {
 }
 
 .image-picker-modal-tag.active {
-    background: var(--accent);
-    border-color: var(--accent);
+    background: var(--brand-accent);
+    border-color: var(--brand-accent);
     color: white;
 }
 
@@ -5368,7 +5366,7 @@ select.form-control {
 }
 
 .image-picker-modal-search:focus-within {
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
     box-shadow: 0 0 0 3px var(--border-focus);
 }
 
@@ -5411,17 +5409,17 @@ select.form-control {
 }
 
 .image-picker-modal-item:hover {
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
 }
 
 .image-picker-modal-item:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
     box-shadow: 0 0 0 3px var(--border-focus);
 }
 
 .image-picker-modal-item.selected {
-    border-color: var(--accent);
+    border-color: var(--brand-accent);
     box-shadow: 0 0 0 3px var(--border-focus);
 }
 

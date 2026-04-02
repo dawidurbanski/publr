@@ -4,7 +4,11 @@ const Dialog = @import("../components/dialog.zig").Dialog;
 const Dropdown = @import("../components/dropdown.zig").Dropdown;
 const SelectMenu = @import("../components/select_menu.zig").SelectMenu;
 const Popover = @import("../components/popover.zig").Popover;
-const Tooltip = @import("../components/tooltip.zig").Tooltip;
+const ui = @import("publr_ui");
+const UiTooltip = ui.tooltip.Tooltip;
+const UiTooltipTrigger = ui.tooltip.TooltipTrigger;
+const UiTooltipPortal = ui.tooltip.TooltipPortal;
+const UiTooltipContent = ui.tooltip.TooltipContent;
 const Tabs = @import("../components/tabs.zig").Tabs;
 const SwitchInput = @import("../components/switch_input.zig").SwitchInput;
 const CheckboxGroup = @import("../components/checkbox_group.zig").CheckboxGroup;
@@ -148,14 +152,18 @@ pub fn Components() {
             <p class="showcase-desc">Hover or focus shows a small label after 200ms delay.</p>
             <div class="showcase-example">
                 <div class="showcase-row">
-                    <Tooltip
-                        trigger_label="Hover me"
-                        text="This is a tooltip"
-                    />
-                    <Tooltip
-                        trigger_label="Focus me"
-                        text="Tooltips work on focus too"
-                    />
+                    <UiTooltip>
+                        <UiTooltipTrigger><button class="btn">Hover me</button></UiTooltipTrigger>
+                        <UiTooltipPortal>
+                            <UiTooltipContent>This is a tooltip</UiTooltipContent>
+                        </UiTooltipPortal>
+                    </UiTooltip>
+                    <UiTooltip>
+                        <UiTooltipTrigger><button class="btn">Focus me</button></UiTooltipTrigger>
+                        <UiTooltipPortal>
+                            <UiTooltipContent>Tooltips work on focus too</UiTooltipContent>
+                        </UiTooltipPortal>
+                    </UiTooltip>
                 </div>
             </div>
         </section>

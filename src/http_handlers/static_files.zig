@@ -28,6 +28,10 @@ const PublrCss = static.Asset("publr.css", publr_ui.css);
 const PublrCoreJs = static.Asset("publr-core.js", publr_ui.core_js);
 const PublrDialogJs = static.Asset("publr-dialog.js", publr_ui.dialog_js);
 const PublrDropdownJs = static.Asset("publr-dropdown.js", publr_ui.dropdown_js);
+const PublrPortalJs = static.Asset("publr-portal.js", publr_ui.portal_js);
+const PublrPositionJs = static.Asset("publr-position.js", publr_ui.position_js);
+const PublrToastJs = static.Asset("publr-toast.js", publr_ui.toast_js);
+const PublrTooltipJs = static.Asset("publr-tooltip.js", publr_ui.tooltip_js);
 
 const AssetEntry = struct {
     asset: type,
@@ -52,6 +56,10 @@ const asset_map = .{
     .{ "publr-core.js", AssetEntry{ .asset = PublrCoreJs, .disk_path = null } },
     .{ "publr-dialog.js", AssetEntry{ .asset = PublrDialogJs, .disk_path = null } },
     .{ "publr-dropdown.js", AssetEntry{ .asset = PublrDropdownJs, .disk_path = null } },
+    .{ "publr-portal.js", AssetEntry{ .asset = PublrPortalJs, .disk_path = null } },
+    .{ "publr-position.js", AssetEntry{ .asset = PublrPositionJs, .disk_path = null } },
+    .{ "publr-toast.js", AssetEntry{ .asset = PublrToastJs, .disk_path = null } },
+    .{ "publr-tooltip.js", AssetEntry{ .asset = PublrTooltipJs, .disk_path = null } },
 };
 
 pub fn handleStatic(ctx: *Context) !void {

@@ -1,8 +1,11 @@
 // Admin layout template - topbar nav with conditional section sidebar
 
-const Icon = @import("publr_ui").icon.Icon;
-const IconName = @import("publr_ui").icon.Name;
-const Size = @import("publr_ui").icon.Size;
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Size = ui.icon.Size;
+const ToastRegion = ui.toast.ToastRegion;
+const TooltipProvider = ui.tooltip.TooltipProvider;
 
 pub fn Layout(props: struct {
     title: []const u8,
@@ -65,41 +68,48 @@ pub fn Layout(props: struct {
                     </nav>
                 </div>
             </header>
-            <div class="admin-body">
-                {if (props.section_sidebar_html.len > 0) (
-                    <aside class="section-sidebar">
-                        <div class="section-sidebar-group">
-                            <h6 class="section-sidebar-group-title">
-                                <Icon name={IconName.folder} size={Size.sm} />
-                                Content types
-                            </h6>
-                            <nav class="section-sidebar-nav">
-                                {@raw props.section_sidebar_html}
-                            </nav>
-                        </div>
-                    </aside>
-                )}
-                <main class="main-content">
-                    <div class="content-wrapper">
-                        <div class="content-body">
-                            <div class="page-title-wrapper">
-                                <div class="page-title-subtitle">
-                                    <h1 class="page-title">{props.title}</h1>
-                                    {@raw props.subtitle}
-                                </div>
-                                {@raw props.page_title_actions}
+            <TooltipProvider>
+                <div class="admin-body">
+                    {if (props.section_sidebar_html.len > 0) (
+                        <aside class="section-sidebar">
+                            <div class="section-sidebar-group">
+                                <h6 class="section-sidebar-group-title">
+                                    <Icon name={IconName.folder} size={Size.sm} />
+                                    Content types
+                                </h6>
+                                <nav class="section-sidebar-nav">
+                                    {@raw props.section_sidebar_html}
+                                </nav>
                             </div>
-                            {@raw props.content}
+                        </aside>
+                    )}
+                    <main class="main-content">
+                        <div class="content-wrapper">
+                            <div class="content-body">
+                                <div class="page-title-wrapper">
+                                    <div class="page-title-subtitle">
+                                        <h1 class="page-title">{props.title}</h1>
+                                        {@raw props.subtitle}
+                                    </div>
+                                    {@raw props.page_title_actions}
+                                </div>
+                                {@raw props.content}
+                            </div>
                         </div>
-                    </div>
-                </main>
-            </div>
+                    </main>
+                </div>
+            </TooltipProvider>
             {if (props.bottom_bar.len > 0) (
                 <div class="bottom-bar-content">
                     {@raw props.bottom_bar}
                 </div>
             )}
+            <ToastRegion />
             <script type="module" src="/static/publr-core.js"></script>
+            <script type="module" src="/static/publr-portal.js"></script>
+            <script type="module" src="/static/publr-position.js"></script>
+            <script type="module" src="/static/publr-toast.js"></script>
+            <script type="module" src="/static/publr-tooltip.js"></script>
             <script type="module" src="/static/interact/index.js"></script>
             <script src="/static/admin.js"></script>
             <script src="/static/media-selection.js"></script>
