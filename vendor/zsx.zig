@@ -99,6 +99,18 @@ pub fn withDefaults(comptime Defaults: type, raw: anytype) WithDefaultsReturn(De
     }
 }
 
+/// Concatenate class strings with spaces. Comptime string builder for class attributes.
+/// Usage: class={mix(.{"flex", "gap-md", font, pad})}
+pub inline fn mix(comptime parts: anytype) []const u8 {
+    comptime var result: []const u8 = "";
+    inline for (parts) |part| {
+        if (part.len > 0) {
+            result = result ++ (if (result.len == 0) "" else " ") ++ part;
+        }
+    }
+    return result;
+}
+
 };
 
 pub const fmt_jsx = struct {
@@ -998,9 +1010,72 @@ fn transpileDirectory(allocator: Allocator, input_dir: []const u8, output_dir: [
         }
     }
 
+    // Phase 2a: Extract class patterns from component sources
+    var component_class_patterns = std.StringHashMapUnmanaged([]const ClassPattern){};
+    defer {
+        var pat_iter = component_class_patterns.iterator();
+        while (pat_iter.next()) |entry| {
+            for (entry.value_ptr.*) |p| {
+                allocator.free(p.prefix);
+                allocator.free(p.prop_name);
+                if (p.value_map) |vm| {
+                    for (vm) |m| {
+                        allocator.free(m.enum_value);
+                        allocator.free(m.classes);
+                    }
+                    allocator.free(vm);
+                }
+            }
+            allocator.free(entry.value_ptr.*);
+        }
+        component_class_patterns.deinit(allocator);
+    }
+
+    {
+        var reg_iter = component_registry.iterator();
+        while (reg_iter.next()) |entry| {
+            const comp_name = entry.key_ptr.*;
+            const comp_rel = entry.value_ptr.*;
+            const comp_path = try fs.path.join(allocator, &.{ input_dir, comp_rel });
+            defer allocator.free(comp_path);
+
+            const comp_source = fs.cwd().readFileAlloc(allocator, comp_path, 1024 * 1024) catch continue;
+            defer allocator.free(comp_source);
+
+            const patterns = extractClassPatterns(allocator, comp_source) catch continue;
+            if (patterns.len > 0) {
+                try component_class_patterns.put(allocator, comp_name, patterns);
+            } else {
+                allocator.free(patterns);
+            }
+        }
+    }
+
     // Phase 2: Transpile each file
+    var css_classes = std.StringHashMapUnmanaged(void){};
+    defer {
+        var css_it = css_classes.keyIterator();
+        while (css_it.next()) |key| allocator.free(key.*);
+        css_classes.deinit(allocator);
+    }
+
     for (zsx_files.items) |rel_path| {
-        try transpileFile(allocator, input_dir, output_dir, rel_path, &component_registry);
+        try transpileFile(allocator, input_dir, output_dir, rel_path, &component_registry, &css_classes, &component_class_patterns);
+    }
+
+    // Write css_classes.txt to output dir
+    {
+        const css_path = try std.fmt.allocPrint(allocator, "{s}/css_classes.txt", .{output_dir});
+        defer allocator.free(css_path);
+
+        var css_file = try fs.cwd().createFile(css_path, .{});
+        defer css_file.close();
+
+        var class_iter = css_classes.keyIterator();
+        while (class_iter.next()) |key| {
+            try css_file.writeAll(key.*);
+            try css_file.writeAll("\n");
+        }
     }
 
     // Phase 3: Generate views.zig namespace module
@@ -1010,7 +1085,15 @@ fn transpileDirectory(allocator: Allocator, input_dir: []const u8, output_dir: [
     try generateGalleryDefaults(allocator, input_dir, output_dir, zsx_files.items);
 }
 
-fn transpileFile(allocator: Allocator, input_dir: []const u8, output_dir: []const u8, rel_path: []const u8, component_registry: *const std.StringHashMapUnmanaged([]const u8)) !void {
+fn transpileFile(
+    allocator: Allocator,
+    input_dir: []const u8,
+    output_dir: []const u8,
+    rel_path: []const u8,
+    component_registry: *const std.StringHashMapUnmanaged([]const u8),
+    css_classes: ?*std.StringHashMapUnmanaged(void),
+    component_class_patterns: ?*const std.StringHashMapUnmanaged([]const ClassPattern),
+) !void {
     const input_path = try fs.path.join(allocator, &.{ input_dir, rel_path });
     defer allocator.free(input_path);
 
@@ -1022,14 +1105,15 @@ fn transpileFile(allocator: Allocator, input_dir: []const u8, output_dir: []cons
     const output_path = try std.fmt.allocPrint(allocator, "{s}/{s}.zig", .{ output_dir, zig_name });
     defer allocator.free(output_path);
 
-    // Skip if output is newer than input
-    const input_stat = try fs.cwd().statFile(input_path);
-    if (fs.cwd().statFile(output_path)) |output_stat| {
-        if (output_stat.mtime >= input_stat.mtime) return;
-    } else |_| {}
-
     const source = try fs.cwd().readFileAlloc(allocator, input_path, 1024 * 1024);
     defer allocator.free(source);
+
+    // Skip Zig generation if output is newer than input, but always collect CSS classes
+    const input_stat = try fs.cwd().statFile(input_path);
+    const skip_zig_gen = if (fs.cwd().statFile(output_path)) |output_stat|
+        output_stat.mtime >= input_stat.mtime
+    else |_|
+        false;
 
     // Scan for PascalCase component usage and build imports
     var component_imports = std.ArrayListUnmanaged(ComponentImport){};
@@ -1043,18 +1127,22 @@ fn transpileFile(allocator: Allocator, input_dir: []const u8, output_dir: []cons
     var parser = Parser.init(allocator, source, input_path);
     defer parser.deinit();
     parser.component_imports = component_imports.items;
+    parser.css_classes = css_classes;
+    parser.component_class_patterns = component_class_patterns;
     const zig_code = try parser.generate();
     defer allocator.free(zig_code);
 
-    // Write output
-    const out_dir = fs.path.dirname(output_path) orelse ".";
-    fs.cwd().makePath(out_dir) catch |err| {
-        if (err != error.PathAlreadyExists) return err;
-    };
+    // Write output (skip if Zig is already up to date)
+    if (!skip_zig_gen) {
+        const out_dir = fs.path.dirname(output_path) orelse ".";
+        fs.cwd().makePath(out_dir) catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+        };
 
-    var file = try fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(zig_code);
+        var file = try fs.cwd().createFile(output_path, .{});
+        defer file.close();
+        try file.writeAll(zig_code);
+    }
 }
 
 pub const ComponentImport = struct {
@@ -1062,12 +1150,208 @@ pub const ComponentImport = struct {
     import_path: []const u8, // relative @import path, e.g. "../components/dialog.zig"
 };
 
+pub const ClassPattern = struct {
+    kind: enum { prefix, field_map },
+    prefix: []const u8,
+    prop_name: []const u8,
+    value_map: ?[]const ValueMapping = null,
+};
+
+pub const ValueMapping = struct {
+    enum_value: []const u8,
+    classes: []const u8,
+};
+
+/// Extract class patterns from a component source file.
+/// Recognizes two patterns:
+///   1. class={` prefix-${@raw @tagName(props.X)} `} → prefix pattern
+///   2. @field(mapName, @tagName(props.X)) → field_map pattern
+pub fn extractClassPatterns(allocator: Allocator, source: []const u8) ![]ClassPattern {
+    var patterns = std.ArrayListUnmanaged(ClassPattern){};
+
+    var pos: usize = 0;
+    while (pos < source.len) {
+        // Pattern 1: class={` prefix-${@raw @tagName(props.X)} `}
+        if (pos + 8 < source.len and mem.startsWith(u8, source[pos..], "class={`")) {
+            const bt_start = pos + 8;
+            // Find the closing `}
+            var bt_end = bt_start;
+            while (bt_end < source.len and source[bt_end] != '`') : (bt_end += 1) {}
+            if (bt_end < source.len) {
+                const bt_content = source[bt_start..bt_end];
+                // Look for ${@raw @tagName(props.X)} pattern
+                if (mem.indexOf(u8, bt_content, "${@raw @tagName(props.")) |tag_start| {
+                    const prefix = mem.trim(u8, bt_content[0..tag_start], " \t\n\r");
+                    const after_props = bt_content[tag_start + 22 ..]; // skip "${@raw @tagName(props."
+                    if (mem.indexOf(u8, after_props, ")}")) |name_end| {
+                        const prop_name = after_props[0..name_end];
+                        try patterns.append(allocator, .{
+                            .kind = .prefix,
+                            .prefix = try allocator.dupe(u8, prefix),
+                            .prop_name = try allocator.dupe(u8, prop_name),
+                        });
+                    }
+                }
+                pos = bt_end + 1;
+                continue;
+            }
+        }
+
+        // Pattern 2: @field(mapName, @tagName(props.X))
+        if (pos + 7 < source.len and mem.startsWith(u8, source[pos..], "@field(")) {
+            const field_start = pos + 7;
+            // Find the comma separating map name from @tagName
+            if (mem.indexOf(u8, source[field_start..], ", @tagName(props.")) |comma_offset| {
+                const map_path = mem.trim(u8, source[field_start .. field_start + comma_offset], " \t\n\r");
+                const after_tag = source[field_start + comma_offset + 17 ..]; // skip ", @tagName(props."
+                if (mem.indexOf(u8, after_tag, "))")) |name_end| {
+                    const prop_name = after_tag[0..name_end];
+                    // Extract value mappings from the map definition in source
+                    const value_map = try extractFieldMapValues(allocator, source, map_path);
+                    try patterns.append(allocator, .{
+                        .kind = .field_map,
+                        .prefix = try allocator.dupe(u8, map_path),
+                        .prop_name = try allocator.dupe(u8, prop_name),
+                        .value_map = value_map,
+                    });
+                }
+            }
+        }
+
+        pos += 1;
+    }
+
+    return try patterns.toOwnedSlice(allocator);
+}
+
+/// Given source and a map path like "sizes.font", find the const definition
+/// and extract .key = "value" pairs.
+pub fn extractFieldMapValues(allocator: Allocator, source: []const u8, map_path: []const u8) ![]const ValueMapping {
+    var mappings = std.ArrayListUnmanaged(ValueMapping){};
+
+    // Split map_path on "." to find nested access (e.g., "sizes.font")
+    // First find the root identifier
+    const dot_pos = mem.indexOf(u8, map_path, ".");
+    const root_name = if (dot_pos) |dp| map_path[0..dp] else map_path;
+
+    // Find "const <root_name> =" or "var <root_name> ="
+    const search_const = blk: {
+        var search_buf: [256]u8 = undefined;
+        const prefix = "const ";
+        const suffix = " =";
+        if (prefix.len + root_name.len + suffix.len > search_buf.len) break :blk null;
+        @memcpy(search_buf[0..prefix.len], prefix);
+        @memcpy(search_buf[prefix.len .. prefix.len + root_name.len], root_name);
+        @memcpy(search_buf[prefix.len + root_name.len .. prefix.len + root_name.len + suffix.len], suffix);
+        break :blk mem.indexOf(u8, source, search_buf[0 .. prefix.len + root_name.len + suffix.len]);
+    };
+
+    const def_start = search_const orelse return try mappings.toOwnedSlice(allocator);
+
+    // Find the struct literal body - look for the opening brace
+    var search_pos = def_start;
+    while (search_pos < source.len and source[search_pos] != '{') : (search_pos += 1) {}
+    if (search_pos >= source.len) return try mappings.toOwnedSlice(allocator);
+
+    // If we have a nested path like "sizes.font", we need to find the nested field
+    if (dot_pos) |dp| {
+        const field_name = map_path[dp + 1 ..];
+        // Find ".field_name = " or ".field_name=" inside the struct
+        var nest_pos = search_pos;
+        while (nest_pos < source.len) {
+            if (source[nest_pos] == '.' and nest_pos + 1 + field_name.len < source.len) {
+                if (mem.eql(u8, source[nest_pos + 1 .. nest_pos + 1 + field_name.len], field_name)) {
+                    // Found the field, now find its opening brace
+                    search_pos = nest_pos + 1 + field_name.len;
+                    while (search_pos < source.len and source[search_pos] != '{') : (search_pos += 1) {}
+                    break;
+                }
+            }
+            nest_pos += 1;
+        }
+    }
+
+    if (search_pos >= source.len) return try mappings.toOwnedSlice(allocator);
+
+    // Now parse .key = "value" pairs within this brace-delimited block
+    var brace_depth: usize = 0;
+    var scan = search_pos;
+    while (scan < source.len) {
+        switch (source[scan]) {
+            '{' => brace_depth += 1,
+            '}' => {
+                brace_depth -= 1;
+                if (brace_depth == 0) break;
+            },
+            '.' => {
+                if (brace_depth == 1) {
+                    // Parse .key = "value"
+                    scan += 1;
+                    const key_start = scan;
+                    while (scan < source.len and (std.ascii.isAlphanumeric(source[scan]) or source[scan] == '_')) : (scan += 1) {}
+                    const key = source[key_start..scan];
+                    if (key.len == 0) continue;
+
+                    // Skip to = and then to opening quote
+                    while (scan < source.len and source[scan] != '"') : (scan += 1) {}
+                    if (scan >= source.len) break;
+                    scan += 1; // skip opening "
+                    const val_start = scan;
+                    while (scan < source.len and source[scan] != '"') : (scan += 1) {}
+                    const val = source[val_start..scan];
+
+                    try mappings.append(allocator, .{
+                        .enum_value = try allocator.dupe(u8, key),
+                        .classes = try allocator.dupe(u8, val),
+                    });
+                }
+            },
+            else => {},
+        }
+        scan += 1;
+    }
+
+    return try mappings.toOwnedSlice(allocator);
+}
+
 /// Transpile a ZSX source string to Zig code. Public API for use by .publr code generation.
 pub fn transpileSource(allocator: Allocator, source: []const u8, source_path: []const u8, component_imports: []const ComponentImport) ![]u8 {
     var parser = Parser.init(allocator, source, source_path);
     defer parser.deinit();
     parser.component_imports = component_imports;
     return try parser.generate();
+}
+
+pub const TranspileResult = struct {
+    zig_code: []u8,
+    css_classes: std.StringHashMapUnmanaged(void),
+
+    pub fn deinit(self: *TranspileResult, allocator: Allocator) void {
+        allocator.free(self.zig_code);
+        var it = self.css_classes.keyIterator();
+        while (it.next()) |key| allocator.free(key.*);
+        self.css_classes.deinit(allocator);
+    }
+};
+
+pub fn transpileWithCssCollection(
+    allocator: Allocator,
+    source: []const u8,
+    source_path: []const u8,
+    component_imports: []const ComponentImport,
+    component_class_patterns: ?*const std.StringHashMapUnmanaged([]const ClassPattern),
+) !TranspileResult {
+    var css_classes = std.StringHashMapUnmanaged(void){};
+    var parser = Parser.init(allocator, source, source_path);
+    defer parser.deinit();
+    parser.component_imports = component_imports;
+    parser.css_classes = &css_classes;
+    parser.component_class_patterns = component_class_patterns;
+    const zig_code = try parser.generate();
+    return .{
+        .zig_code = zig_code,
+        .css_classes = css_classes,
+    };
 }
 
 /// Scan source for PascalCase tag usage and resolve to component @imports
@@ -1527,6 +1811,8 @@ const Parser = struct {
     indent: usize = 1,
     component_imports: []const ComponentImport = &.{},
     children_depth: u8 = 0, // nesting depth for children anonymous functions
+    css_classes: ?*std.StringHashMapUnmanaged(void) = null,
+    component_class_patterns: ?*const std.StringHashMapUnmanaged([]const ClassPattern) = null,
 
     const Error = error{
         UnexpectedChar,
@@ -2516,6 +2802,21 @@ const Parser = struct {
                 try self.write("=\\\"");
                 try self.writeEscaped(attr.value);
                 try self.write("\\\"");
+
+                // Collect CSS classes from static class attributes
+                if (self.css_classes) |css_map| {
+                    if (mem.eql(u8, attr.name, "class")) {
+                        var it = mem.tokenizeAny(u8, attr.value, " \t\n\r");
+                        while (it.next()) |token| {
+                            if (!css_map.contains(token)) {
+                                const duped = self.allocator.dupe(u8, token) catch continue;
+                                css_map.put(self.allocator, duped, {}) catch {
+                                    self.allocator.free(duped);
+                                };
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -2580,6 +2881,7 @@ const Parser = struct {
         try self.write(", .{");
         try self.emitComponentProps(attrs);
         try self.write(" });\n");
+        try self.collectComponentCssClasses(name, attrs);
     }
 
     fn emitComponentCallWithChildren(self: *Parser, name: []const u8, attrs: []const Attr) Error!void {
@@ -2630,6 +2932,7 @@ const Parser = struct {
         try self.write(" .children = _children_buf_");
         try self.write(depth_suffix);
         try self.write(".items });\n");
+        try self.collectComponentCssClasses(name, attrs);
 
         self.indent -= 1;
         try self.writeIndent();
@@ -2663,6 +2966,60 @@ const Parser = struct {
                     try self.write("\"");
                 }
                 first = false;
+            }
+        }
+    }
+
+    fn collectComponentCssClasses(self: *Parser, name: []const u8, attrs: []const Attr) Error!void {
+        const css_map = self.css_classes orelse return;
+        const patterns_map = self.component_class_patterns orelse return;
+        const patterns = patterns_map.get(name) orelse return;
+
+        for (patterns) |pattern| {
+            // Find the attr that matches this pattern's prop_name
+            var enum_value: ?[]const u8 = null;
+            for (attrs) |attr| {
+                if (!attr.is_spread and mem.eql(u8, attr.name, pattern.prop_name)) {
+                    // Enum attrs come as ".value" (with leading dot)
+                    if (attr.value.len > 1 and attr.value[0] == '.') {
+                        enum_value = attr.value[1..];
+                    }
+                    break;
+                }
+            }
+            const ev = enum_value orelse continue;
+
+            switch (pattern.kind) {
+                .prefix => {
+                    // Concatenate prefix + enum value (e.g., "badge-" + "xs" = "badge-xs")
+                    const class = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ pattern.prefix, ev }) catch continue;
+                    if (!css_map.contains(class)) {
+                        css_map.put(self.allocator, class, {}) catch {
+                            self.allocator.free(class);
+                        };
+                    } else {
+                        self.allocator.free(class);
+                    }
+                },
+                .field_map => {
+                    // Look up enum value in the value_map
+                    const value_map = pattern.value_map orelse continue;
+                    for (value_map) |mapping| {
+                        if (mem.eql(u8, mapping.enum_value, ev)) {
+                            // Split classes on spaces and add each
+                            var it = mem.tokenizeAny(u8, mapping.classes, " \t\n\r");
+                            while (it.next()) |token| {
+                                if (!css_map.contains(token)) {
+                                    const duped = self.allocator.dupe(u8, token) catch continue;
+                                    css_map.put(self.allocator, duped, {}) catch {
+                                        self.allocator.free(duped);
+                                    };
+                                }
+                            }
+                            break;
+                        }
+                    }
+                },
             }
         }
     }
@@ -2881,5 +3238,7 @@ const Parser = struct {
 };
 
 // views.zig namespace generation tests
+
+// CSS class collection tests
 
 };
