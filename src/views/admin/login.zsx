@@ -1,4 +1,18 @@
 // Login page (standalone, no admin layout)
+
+const ui = @import("publr_ui");
+const Card = ui.card.Card;
+const CardHeader = ui.card.CardHeader;
+const CardTitle = ui.card.CardTitle;
+const CardDescription = ui.card.CardDescription;
+const CardContent = ui.card.CardContent;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const Input = ui.text_input.Input;
+const Button = ui.button.Button;
+const Stack = ui.stack.Stack;
+const Text = ui.text.Text;
+
 pub fn Login(props: struct {
     error_message: []const u8,
     csrf_token: []const u8,
@@ -12,50 +26,51 @@ pub fn Login(props: struct {
                 content="width=device-width, initial-scale=1"
             />
             <title>Login - Publr</title>
+            <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
         </head>
         <body>
-            <div class="auth-container">
-                <div class="auth-card">
-                    <div class="auth-header">
-                        <div class="auth-logo">Publr</div>
-                        <h1 class="auth-title">Welcome back</h1>
-                        <p class="auth-subtitle">Sign in to your account</p>
-                    </div>
+            <div class="min-h-screen flex items-center justify-center bg-muted p-4">
+                <Card>
+                    <CardHeader>
+                        <Text size=.lg weight=.bold>Publr</Text>
+                        <CardTitle>Welcome back</CardTitle>
+                        <CardDescription>Sign in to your account</CardDescription>
+                    </CardHeader>
 
-                    {if (props.error_message.len > 0) (
-                        <div class="auth-error">{props.error_message}</div>
-                    )}
+                    <CardContent>
+                        {if (props.error_message.len > 0) (
+                            <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                                <Text size=.sm color=.destructive>{props.error_message}</Text>
+                            </div>
+                        )}
 
-                    <form method="POST" action="/admin/login" class="auth-form">
-                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <div class="form-group">
-                            <label class="form-label" for="email">Email</label>
-                            <input
-                                type="email"
-                                id="email"
-                                name="email"
-                                class="form-input"
-                                required="required"
-                                autocomplete="email"
-                            />
-                        </div>
+                        <form method="POST" action="/admin/login">
+                            <Stack gap=.lg>
+                                <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                <Field>
+                                    <FieldLabel html_for="email">Email</FieldLabel>
+                                    <Input
+                                        input_type=.email
+                                        name="email"
+                                        required={true}
+                                    />
+                                </Field>
 
-                        <div class="form-group">
-                            <label class="form-label" for="password">Password</label>
-                            <input
-                                type="password"
-                                id="password"
-                                name="password"
-                                class="form-input"
-                                required="required"
-                                autocomplete="current-password"
-                            />
-                        </div>
+                                <Field>
+                                    <FieldLabel html_for="password">Password</FieldLabel>
+                                    <Input
+                                        input_type=.password
+                                        name="password"
+                                        required={true}
+                                    />
+                                </Field>
 
-                        <button type="submit" class="auth-button">Sign In</button>
-                    </form>
-                </div>
+                                <Button button_type=.submit hierarchy=.primary label="Sign In" />
+                            </Stack>
+                        </form>
+                    </CardContent>
+                </Card>
             </div>
         </body>
     </html>

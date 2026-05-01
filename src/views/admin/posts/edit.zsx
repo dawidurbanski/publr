@@ -1,5 +1,15 @@
 // Post edit template — split into content + sidebar for edit layout
 
+const ui = @import("publr_ui");
+const Button = ui.button.Button;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const Input = ui.text_input.Input;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
+const Stack = ui.stack.Stack;
+const Heading = ui.heading.Heading;
+
 const PostData = struct {
     title: []const u8,
     slug: []const u8,
@@ -35,40 +45,36 @@ pub fn Edit(props: struct {
         <input type="hidden" name="fields" value="" id="publish-fields" />
         <div class="form-group" data-field="title">
             <div class="form-label-row">
-                <label for="title">Title</label>
+                <FieldLabel html_for="title">Title</FieldLabel>
                 <div class="field-check-row">
                     <span class="field-editor-badge" data-field="title"></span>
                     <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="title" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 </div>
             </div>
-            <input
-                type="text"
-                id="title"
+            <Input
+                input_type=.text
                 name="title"
                 value={props.post.title}
-                class="form-control"
-                required=""
+                required={true}
             />
         </div>
         <div class="form-group" data-field="slug">
             <div class="form-label-row">
-                <label for="slug">Slug</label>
+                <FieldLabel html_for="slug">Slug</FieldLabel>
                 <div class="field-check-row">
                     <span class="field-editor-badge" data-field="slug"></span>
                     <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="slug" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
                 </div>
             </div>
-            <input
-                type="text"
-                id="slug"
+            <Input
+                input_type=.text
                 name="slug"
                 value={props.post.slug}
-                class="form-control"
             />
         </div>
         <div class="form-group" data-field="body">
             <div class="form-label-row">
-                <label for="content">Content</label>
+                <FieldLabel html_for="content">Content</FieldLabel>
                 <div class="field-check-row">
                     <span class="field-editor-badge" data-field="body"></span>
                     <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="body" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
@@ -92,8 +98,8 @@ pub fn EditSidebar(props: struct {
     history_html: []const u8 = "",
     release_html: []const u8 = "",
 }) {
-    <div class="edit-sidebar-section">
-        <div class="edit-sidebar-actions">
+    <div class="p-4 border-b border-border">
+        <Stack gap=.sm>
             <div class="autosave-status" id="autosave-status"></div>
             {if (props.post.is_draft) (
                 <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn">
@@ -116,12 +122,12 @@ pub fn EditSidebar(props: struct {
             {if (props.release_html.len > 0) (
                 {@raw props.release_html}
             )}
-        </div>
+        </Stack>
     </div>
-    <div class="edit-sidebar-section">
-        <h3 class="edit-sidebar-title">Details</h3>
-        <div class="edit-sidebar-field">
-            <label for="date" class="form-label-sm">Publish Date</label>
+    <div class="p-4 border-b border-border">
+        <Heading level=.h3 size=.xs>Details</Heading>
+        <Stack gap=.sm>
+            <Text size=.sm color=.muted as=.label>Publish Date</Text>
             <input
                 type="date"
                 id="date"
@@ -130,11 +136,11 @@ pub fn EditSidebar(props: struct {
                 class="form-control"
                 form="entry-form"
             />
-        </div>
+        </Stack>
     </div>
-    <div class="edit-sidebar-section">
-        <h3 class="edit-sidebar-title">Featured Image</h3>
-        <div class="edit-sidebar-field">
+    <div class="p-4 border-b border-border">
+        <Heading level=.h3 size=.xs>Featured Image</Heading>
+        <Stack gap=.sm>
             {if (props.post.featured_image.len > 0) (
                 <div class="image-picker" data-publr-component="image-picker" data-publr-state="selected" data-publr-accept="image/*">
                     <input type="hidden" name="featured_image" value={props.post.featured_image} data-publr-part="value" form="entry-form" />
@@ -158,18 +164,18 @@ pub fn EditSidebar(props: struct {
                     </div>
                     <div class="image-picker-actions">
                         <button type="button" class="btn btn-sm" data-publr-part="trigger">Select Image</button>
-                        <button type="button" class="btn btn-sm btn-ghost hidden" data-publr-part="remove">Remove</button>
+                        <button type="button" class="btn btn-sm btn-ghost" data-publr-part="remove">Remove</button>
                     </div>
                     <div class="image-picker-alt" data-publr-part="alt"></div>
                 </div>
             )}
-        </div>
+        </Stack>
     </div>
     {if (props.history_html.len > 0) (
         {@raw props.history_html}
     )}
     {if (props.delete_url.len > 0) (
-        <div class="edit-sidebar-section edit-sidebar-danger">
+        <div class="p-4 mt-auto">
             <form method="POST" action={props.delete_url} onsubmit="return confirm('Delete this post permanently?')">
                 <input type="hidden" name="_csrf" value={props.csrf_token} />
                 <button type="submit" class="btn btn-danger btn-sm btn-full">Delete Post</button>

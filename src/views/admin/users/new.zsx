@@ -1,37 +1,43 @@
 // Add user template
+
+const ui = @import("publr_ui");
+const Button = ui.button.Button;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const Input = ui.text_input.Input;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
+
 pub fn New(props: struct {
     error_message: []const u8,
     csrf_token: []const u8,
 }) {
     {if (props.error_message.len > 0) (
-        <div class="auth-error">{props.error_message}</div>
+        <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+            <Text size=.sm color=.destructive>{props.error_message}</Text>
+        </div>
     )}
 
     <form method="POST" action="/admin/settings/users" class="form">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
-        <div class="form-group">
-            <label for="display_name">Display Name</label>
-            <input
-                type="text"
-                id="display_name"
+        <Field>
+            <FieldLabel>Display Name</FieldLabel>
+            <Input
+                input_type=.text
                 name="display_name"
-                class="form-control"
-                required=""
+                required={true}
             />
-        </div>
-        <div class="form-group">
-            <label for="email">Email</label>
-            <input
-                type="email"
-                id="email"
+        </Field>
+        <Field>
+            <FieldLabel>Email</FieldLabel>
+            <Input
+                input_type=.email
                 name="email"
-                class="form-control"
-                required=""
-                autocomplete="email"
+                required={true}
             />
-        </div>
-        <div class="form-group">
-            <label for="password">Password</label>
+        </Field>
+        <Field>
+            <FieldLabel>Password</FieldLabel>
             <input
                 type="password"
                 id="password"
@@ -41,9 +47,9 @@ pub fn New(props: struct {
                 minlength="8"
                 autocomplete="new-password"
             />
-        </div>
-        <div class="form-group">
-            <label for="confirm_password">Confirm Password</label>
+        </Field>
+        <Field>
+            <FieldLabel>Confirm Password</FieldLabel>
             <input
                 type="password"
                 id="confirm_password"
@@ -53,10 +59,10 @@ pub fn New(props: struct {
                 minlength="8"
                 autocomplete="new-password"
             />
-        </div>
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Create User</button>
-            <a href="/admin/settings/users" class="btn">Cancel</a>
-        </div>
+        </Field>
+        <Flex gap=.md>
+            <Button button_type=.submit hierarchy=.primary label="Create User" />
+            <Button hierarchy=.secondary label="Cancel" href="/admin/settings/users" />
+        </Flex>
     </form>
 }

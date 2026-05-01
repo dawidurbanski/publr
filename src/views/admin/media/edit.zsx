@@ -2,8 +2,18 @@
 
 const std = @import("std");
 
-const Icon = @import("publr_ui").icon.Icon;
-const IconName = @import("publr_ui").icon.Name;
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Stack = ui.stack.Stack;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
+const Button = ui.button.Button;
+const Badge = ui.badge.Badge;
+const BadgeVariant = ui.badge.Variant;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const Input = ui.text_input.Input;
 
 const MediaData = struct {
     id: []const u8,
@@ -49,8 +59,8 @@ pub fn Edit(props: struct {
     tags_display: []const u8,
     current_folder_id: []const u8,
 }) {
-    <div class="media-edit">
-        <div class="media-edit-preview">
+    <div class="flex min-h-0">
+        <div class="flex-1 flex flex-col p-6">
             {if (props.media.is_image) (
                 <div class="media-preview-image" data-publr-component="focal-point" data-publr-value={props.media.focal_point} data-publr-input="focal_point">
                     <img src={props.media.preview_url} alt={props.media.filename} draggable="false" data-publr-part="image" />
@@ -67,48 +77,47 @@ pub fn Edit(props: struct {
                 </div>
             )}
 
-            <div class="media-file-meta">
-                <div class="media-meta-item">
-                    <span class="media-meta-label">Size</span>
-                    <span class="media-meta-value">{props.media.size_display}</span>
-                </div>
-                <div class="media-meta-item">
-                    <span class="media-meta-label">Type</span>
-                    <span class="media-meta-value">{props.media.mime_type}</span>
-                </div>
+            <Flex gap=.xl>
+                <Stack gap=.none>
+                    <Text size=.xs color=.muted as=.span>Size</Text>
+                    <Text size=.sm weight=.medium as=.span>{props.media.size_display}</Text>
+                </Stack>
+                <Stack gap=.none>
+                    <Text size=.xs color=.muted as=.span>Type</Text>
+                    <Text size=.sm weight=.medium as=.span>{props.media.mime_type}</Text>
+                </Stack>
                 {if (props.media.dimensions.len > 0) (
-                    <div class="media-meta-item">
-                        <span class="media-meta-label">Dimensions</span>
-                        <span class="media-meta-value">{props.media.dimensions}</span>
-                    </div>
+                    <Stack gap=.none>
+                        <Text size=.xs color=.muted as=.span>Dimensions</Text>
+                        <Text size=.sm weight=.medium as=.span>{props.media.dimensions}</Text>
+                    </Stack>
                 ) else (<span></span>)}
-                <div class="media-meta-item">
-                    <span class="media-meta-label">Uploaded</span>
-                    <span class="media-meta-value">{props.media.created_at}</span>
-                </div>
-            </div>
+                <Stack gap=.none>
+                    <Text size=.xs color=.muted as=.span>Uploaded</Text>
+                    <Text size=.sm weight=.medium as=.span>{props.media.created_at}</Text>
+                </Stack>
+            </Flex>
         </div>
 
-        <div class="media-edit-panel">
-            <form method="POST" action={props.action} class="form media-edit-form">
+        <div class="w-96 shrink-0 border-l border-border overflow-y-auto flex flex-col">
+            <form method="POST" action={props.action} class="form">
                 <input type="hidden" name="_csrf" value={props.csrf_token} />
 
-                <div class="media-panel-section">
-                    <div class="form-group">
-                        <label for="alt_text">Alt Text</label>
-                        <input
-                            type="text"
-                            id="alt_text"
+                <div class="p-4 border-b border-border">
+                <Stack gap=.lg>
+                    <Field>
+                        <FieldLabel>Alt Text</FieldLabel>
+                        <Input
+                            input_type=.text
                             name="alt_text"
                             value={props.media.alt_text}
-                            class="form-control"
                             placeholder="Describe this image for accessibility"
                         />
                         <span class="form-hint">Describes the image for screen readers and when images fail to load.</span>
-                    </div>
+                    </Field>
 
-                    <div class="form-group">
-                        <label for="caption">Caption</label>
+                    <Field>
+                        <FieldLabel>Caption</FieldLabel>
                         <textarea
                             id="caption"
                             name="caption"
@@ -116,22 +125,20 @@ pub fn Edit(props: struct {
                             rows="2"
                             placeholder="Optional caption displayed below the media"
                         >{props.media.caption}</textarea>
-                    </div>
+                    </Field>
 
-                    <div class="form-group">
-                        <label for="credit">Credit</label>
-                        <input
-                            type="text"
-                            id="credit"
+                    <Field>
+                        <FieldLabel>Credit</FieldLabel>
+                        <Input
+                            input_type=.text
                             name="credit"
                             value={props.media.credit}
-                            class="form-control"
                             placeholder="Photo by..."
                         />
-                    </div>
+                    </Field>
 
-                    <div class="form-group">
-                        <label for="focal_point">Focal Point</label>
+                    <Field>
+                        <FieldLabel>Focal Point</FieldLabel>
                         <input
                             type="text"
                             id="focal_point"
@@ -140,12 +147,14 @@ pub fn Edit(props: struct {
                             class="form-control"
                             readonly=""
                         />
-                    </div>
+                    </Field>
+                </Stack>
                 </div>
 
-                <div class="media-panel-section">
-                    <div class="form-group">
-                        <label for="folder">Folder</label>
+                <div class="p-4 border-b border-border">
+                <Stack gap=.lg>
+                    <Field>
+                        <FieldLabel>Folder</FieldLabel>
                         <select id="folder" name="folder" class="form-control">
                             <option value="">Default</option>
                             {for (props.folders) |folder| (
@@ -156,10 +165,10 @@ pub fn Edit(props: struct {
                                 )}
                             )}
                         </select>
-                    </div>
+                    </Field>
 
-                    <div class="form-group">
-                        <label>Tags</label>
+                    <Field>
+                        <FieldLabel>Tags</FieldLabel>
                         <div class="tag-picker" data-publr-component="tag-picker">
                             <div class="tag-picker-selected" data-publr-part="selected">
                                 {for (props.all_tags) |tag| (
@@ -190,52 +199,60 @@ pub fn Edit(props: struct {
                             </div>
                             <input type="hidden" name="tags" data-publr-part="hidden" value={props.tags_display} />
                         </div>
-                    </div>
+                    </Field>
+                </Stack>
                 </div>
 
-                <div class="media-panel-section">
+                <div class="p-4 border-b border-border">
                     <div class="media-visibility">
                         <div class="media-visibility-info">
                             <span class="form-label">Visibility</span>
-                            <span class={if (props.media.is_private) ("badge badge-draft") else ("badge badge-published")}>{props.media.visibility}</span>
+                            {if (props.media.is_private) (
+                                <Badge label={props.media.visibility} variant={BadgeVariant.secondary} />
+                            ) else (
+                                <Badge label={props.media.visibility} variant={BadgeVariant.success} />
+                            )}
                         </div>
                     </div>
                 </div>
 
-                <div class="media-panel-section media-panel-details">
-                    <div class="media-detail-row">
-                        <span class="media-detail-label">Filename</span>
-                        <span class="media-detail-value">{props.media.filename}</span>
-                    </div>
-                    <div class="media-detail-row">
-                        <span class="media-detail-label">URL</span>
+                <div class="p-4 border-b border-border">
+                <Stack gap=.md>
+                    <Stack gap=.none>
+                        <Text size=.xs color=.muted as=.span>Filename</Text>
+                        <Text size=.sm as=.span>{props.media.filename}</Text>
+                    </Stack>
+                    <Stack gap=.none>
+                        <Text size=.xs color=.muted as=.span>URL</Text>
                         <a href={props.media.media_url} class="media-url-link" target="_blank">{props.media.media_url}</a>
-                    </div>
+                    </Stack>
+                </Stack>
                 </div>
 
-                <div class="media-panel-actions">
-                    <button type="submit" class="btn btn-primary">Save</button>
-                    <a href="/admin/media" class="btn" onclick="if(history.length>1){history.back();return false}">Cancel</a>
+                <div class="p-4 border-b border-border">
+                <Flex gap=.sm>
+                    <Button button_type=.submit hierarchy=.primary label="Save" />
+                    <Button hierarchy=.secondary label="Cancel" href="/admin/media" onclick="if(history.length>1){history.back();return false}" />
+                </Flex>
                 </div>
             </form>
 
-            <div class="media-panel-footer">
-                <div class="media-footer-actions">
+            <div class="mt-auto p-4 border-t border-border">
+                <Flex justify=.between>
                     <form method="POST" action={props.toggle_url} class="media-visibility-form">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
                         {if (props.media.is_private) (
-                            <button type="submit" class="btn btn-sm">Make Public</button>
+                            <Button button_type=.submit hierarchy=.secondary size=.sm label="Make Public" />
                         ) else (
-                            <button type="submit" class="btn btn-sm">Make Private</button>
+                            <Button button_type=.submit hierarchy=.secondary size=.sm label="Make Private" />
                         )}
                     </form>
                     <form method="POST" action={props.delete_url}>
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this file permanently? This cannot be undone.')">
-                            Delete
-                        </button>
+                        <Button button_type=.submit hierarchy=.destructive size=.sm label="Delete"
+                            onclick="return confirm('Delete this file permanently? This cannot be undone.')" />
                     </form>
-                </div>
+                </Flex>
             </div>
         </div>
     </div>

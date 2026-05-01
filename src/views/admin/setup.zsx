@@ -1,4 +1,20 @@
 // Setup wizard page (standalone, no admin layout)
+
+const ui = @import("publr_ui");
+const Card = ui.card.Card;
+const CardHeader = ui.card.CardHeader;
+const CardTitle = ui.card.CardTitle;
+const CardDescription = ui.card.CardDescription;
+const CardContent = ui.card.CardContent;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const FieldDescription = ui.form_field.FieldDescription;
+const Input = ui.text_input.Input;
+const Button = ui.button.Button;
+const Stack = ui.stack.Stack;
+const Text = ui.text.Text;
+const Separator = ui.separator.Separator;
+
 pub fn Setup(props: struct {
     error_message: []const u8,
     csrf_token: []const u8,
@@ -13,75 +29,72 @@ pub fn Setup(props: struct {
                 content="width=device-width, initial-scale=1"
             />
             <title>Setup - Publr</title>
+            <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
             {if (props.bg_dark) (
                 <style>{"body { background: #0a0d12 !important; } .auth-container { min-height: 100vh; } .auth-card { background: #181d27; border: 1px solid #333; } .auth-title, .auth-logo { color: #e0e0e0; } .auth-subtitle, .form-label, .form-hint { color: #888; } .form-input { background: #252b37; color: #e0e0e0; border-color: #414651; } .auth-error { background: #3d1418; border-color: #7a271a; color: #fda29b; }"}</style>
             )}
         </head>
         <body>
-            <div class="auth-container">
-                <div class="auth-card">
-                    <div class="auth-header">
-                        <div class="auth-logo">Publr</div>
-                        <h1 class="auth-title">Welcome!</h1>
-                        <p class="auth-subtitle">Create your admin account to get started</p>
-                    </div>
+            <div class="min-h-screen flex items-center justify-center bg-muted p-4">
+                <Card>
+                    <CardHeader>
+                        <Text size=.lg weight=.bold>Publr</Text>
+                        <CardTitle>Welcome!</CardTitle>
+                        <CardDescription>Create your admin account to get started</CardDescription>
+                    </CardHeader>
 
-                    {if (props.error_message.len > 0) (
-                        <div class="auth-error">{props.error_message}</div>
-                    )}
+                    <CardContent>
+                        {if (props.error_message.len > 0) (
+                            <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                                <Text size=.sm color=.destructive>{props.error_message}</Text>
+                            </div>
+                        )}
 
-                    <form method="POST" action="/admin/setup" id="setup-form" class="auth-form">
-                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <div class="form-group">
-                            <label class="form-label" for="email">Email</label>
-                            <input
-                                type="email"
-                                id="email"
-                                name="email"
-                                class="form-input"
-                                required="required"
-                                autocomplete="email"
-                            />
-                        </div>
+                        <form method="POST" action="/admin/setup" id="setup-form">
+                            <Stack gap=.lg>
+                                <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                <Field>
+                                    <FieldLabel html_for="email">Email</FieldLabel>
+                                    <Input
+                                        input_type=.email
+                                        name="email"
+                                        required={true}
+                                    />
+                                </Field>
 
-                        <div class="form-group">
-                            <label class="form-label" for="password">Password</label>
-                            <input
-                                type="password"
-                                id="password"
-                                name="password"
-                                class="form-input"
-                                required="required"
-                                minlength="8"
-                                autocomplete="new-password"
-                            />
-                            <p class="form-hint">At least 8 characters</p>
-                        </div>
+                                <Field>
+                                    <FieldLabel html_for="password">Password</FieldLabel>
+                                    <Input
+                                        input_type=.password
+                                        name="password"
+                                        required={true}
+                                    />
+                                    <FieldDescription>At least 8 characters</FieldDescription>
+                                </Field>
 
-                        <div class="form-group">
-                            <label class="form-label" for="confirm_password">Confirm Password</label>
-                            <input
-                                type="password"
-                                id="confirm_password"
-                                name="confirm_password"
-                                class="form-input"
-                                required="required"
-                                minlength="8"
-                                autocomplete="new-password"
-                            />
-                        </div>
+                                <Field>
+                                    <FieldLabel html_for="confirm_password">Confirm Password</FieldLabel>
+                                    <Input
+                                        input_type=.password
+                                        name="confirm_password"
+                                        required={true}
+                                    />
+                                </Field>
 
-                        <button type="submit" class="auth-button">Create Account</button>
-                    </form>
+                                <Button button_type=.submit hierarchy=.primary label="Create Account" />
+                            </Stack>
+                        </form>
 
-                    <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e9eaeb;">
-                        <button type="button" id="recompile-btn" style="width: 100%; padding: 0.6rem; border: 1px solid #d5d7da; border-radius: 8px; background: transparent; color: #535862; font-size: 0.875rem; cursor: pointer;">
-                            {"Recompile (Dark Mode)"}
-                        </button>
-                        <p id="recompile-status" style="margin-top: 0.5rem; font-size: 0.75rem; color: #717680; text-align: center;"></p>
-                    </div>
-                </div>
+                        <Separator spacing=.lg />
+                        <Stack gap=.sm>
+                            <button type="button" id="recompile-btn" style="width: 100%; padding: 0.6rem; border: 1px solid #d5d7da; border-radius: 8px; background: transparent; color: #535862; font-size: 0.875rem; cursor: pointer;">
+                                {"Recompile (Dark Mode)"}
+                            </button>
+                            <p id="recompile-status" style="margin-top: 0.5rem; font-size: 0.75rem; color: #717680; text-align: center;"></p>
+                        </Stack>
+                    </CardContent>
+                </Card>
             </div>
 
             <script>{@raw "document.getElementById('recompile-btn').addEventListener('click',async function(){var btn=this,status=document.getElementById('recompile-status');btn.disabled=true;btn.textContent='Loading compiler...';status.textContent='';try{var worker=new Worker('/compiler-worker.js',{type:'module'});worker.onmessage=async function(e){if(e.data.type==='status'){status.textContent=e.data.message}else if(e.data.type==='ready'){btn.textContent='Compiling full CMS...';worker.postMessage({type:'compile-full-cms',config:{setup_bg_dark:true}})}else if(e.data.type==='log'){if(e.data.message.startsWith('[stderr]'))status.textContent=e.data.message}else if(e.data.type==='compiled'){worker.terminate();btn.textContent='Uploading...';status.textContent='Compiled '+e.data.binary.byteLength+' bytes, swapping...';try{var resp=await fetch('/admin/system/swap-binary',{method:'POST',headers:{'Content-Type':'application/wasm'},body:e.data.binary});if(resp.ok){btn.textContent='Reloading...';setTimeout(function(){location.reload()},500)}else{var j=await resp.json();btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Swap failed: '+(j.error||resp.status)}}catch(err){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Upload failed: '+err.message}}else if(e.data.type==='error'){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Error: '+e.data.message;worker.terminate()}};worker.postMessage({type:'init'})}catch(e){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Error: '+e.message}});"}</script>
