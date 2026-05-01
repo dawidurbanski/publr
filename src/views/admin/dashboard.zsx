@@ -15,6 +15,9 @@ const TableCell = ui.table.TableCell;
 const TableHead = ui.table.TableHead;
 const TableHeader = ui.table.TableHeader;
 const TableRow = ui.table.TableRow;
+const Grid = ui.grid.Grid;
+const Stack = ui.stack.Stack;
+const Text = ui.text.Text;
 
 const Post = struct {
     id: []const u8,
@@ -31,49 +34,41 @@ pub fn Dashboard(props: struct {
     has_posts: bool,
     recent_posts: []const Post,
 }) {
-    <div class="dashboard-stats-grid">
-        <div class="dashboard-stat-card">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Posts</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <p class="dashboard-stat-value">{props.posts_count}</p>
-                </CardContent>
-            </Card>
-        </div>
-        <div class="dashboard-stat-card">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Pages</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <p class="dashboard-stat-value">{props.pages_count}</p>
-                </CardContent>
-            </Card>
-        </div>
-        <div class="dashboard-stat-card">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Media</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <p class="dashboard-stat-value">{props.media_count}</p>
-                </CardContent>
-            </Card>
-        </div>
-        <div class="dashboard-stat-card">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Users</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <p class="dashboard-stat-value">{props.users_count}</p>
-                </CardContent>
-            </Card>
-        </div>
-    </div>
-    <div class="dashboard-recent-posts">
+    <Grid columns=.auto_fill gap=.lg>
+        <Card>
+            <CardHeader>
+                <CardTitle>Posts</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <Text size=.lg weight=.bold>{props.posts_count}</Text>
+            </CardContent>
+        </Card>
+        <Card>
+            <CardHeader>
+                <CardTitle>Pages</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <Text size=.lg weight=.bold>{props.pages_count}</Text>
+            </CardContent>
+        </Card>
+        <Card>
+            <CardHeader>
+                <CardTitle>Media</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <Text size=.lg weight=.bold>{props.media_count}</Text>
+            </CardContent>
+        </Card>
+        <Card>
+            <CardHeader>
+                <CardTitle>Users</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <Text size=.lg weight=.bold>{props.users_count}</Text>
+            </CardContent>
+        </Card>
+    </Grid>
+    <Stack gap=.lg>
         <Card>
             <CardHeader>
                 <CardTitle>Recent Posts</CardTitle>
@@ -90,7 +85,7 @@ pub fn Dashboard(props: struct {
                     <TableBody>
                         {for (props.recent_posts) |post| (
                             <TableRow>
-                                <TableCell><a href={post.id} class="dashboard-post-link">{post.title}</a></TableCell>
+                                <TableCell><a href={post.id}>{post.title}</a></TableCell>
                                 <TableCell>
                                     <Badge
                                         label={if (std.mem.eql(u8, post.status, "published")) ("Published") else if (std.mem.eql(u8, post.status, "draft")) ("Draft") else if (std.mem.eql(u8, post.status, "scheduled")) ("Scheduled") else if (std.mem.eql(u8, post.status, "changed")) ("Changed") else (post.status)}
@@ -105,11 +100,11 @@ pub fn Dashboard(props: struct {
                 </Table>
             ) else (
                 <CardContent>
-                    <p class="dashboard-empty-state">
+                    <Text color=.muted>
                         No posts yet. <a href="/admin/content/post/new">Create your first post</a>
-                    </p>
+                    </Text>
                 </CardContent>
             )}
         </Card>
-    </div>
+    </Stack>
 }
