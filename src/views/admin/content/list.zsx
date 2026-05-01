@@ -1,9 +1,38 @@
 // Content list template — generic content type list view
-// Matches posts/list.zsx structure 1:1 for consistent admin UI
 
-const Icon = @import("publr_ui").icon.Icon;
-const IconName = @import("publr_ui").icon.Name;
-const Size = @import("publr_ui").icon.Size;
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const IconSize = ui.icon.Size;
+const Button = ui.button.Button;
+const Badge = ui.badge.Badge;
+const BadgeVariant = ui.badge.Variant;
+const BadgeSize = ui.badge.Size;
+const Table = ui.table.Table;
+const TableHeader = ui.table.TableHeader;
+const TableBody = ui.table.TableBody;
+const TableRow = ui.table.TableRow;
+const TableHead = ui.table.TableHead;
+const TableCell = ui.table.TableCell;
+const DropdownMenu = ui.dropdown.DropdownMenu;
+const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
+const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
+const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
+const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
+const Empty = ui.empty.Empty;
+const EmptyTitle = ui.empty.EmptyTitle;
+const EmptyDescription = ui.empty.EmptyDescription;
+const EmptyContent = ui.empty.EmptyContent;
+const Pagination = ui.pagination.Pagination;
+const PaginationContent = ui.pagination.PaginationContent;
+const PaginationItem = ui.pagination.PaginationItem;
+const PaginationLink = ui.pagination.PaginationLink;
+const PaginationPrevious = ui.pagination.PaginationPrevious;
+const PaginationNext = ui.pagination.PaginationNext;
+const PaginationEllipsis = ui.pagination.PaginationEllipsis;
+const Checkbox = ui.checkbox.Checkbox;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
 
 const PageUrl = struct {
     page_num: []const u8,
@@ -42,8 +71,8 @@ pub fn List(props: struct {
     base_path: []const u8,
 }) {
     {if (props.available_authors.len > 0) (
-        <div class="table-filters">
-            <form method="get" action={props.base_path} class="table-filter-form">
+        <Flex gap=.md items=.center>
+            <form method="get" action={props.base_path}>
                 <select name="author" class="form-control form-control-sm" onchange="this.form.submit()" aria-label="Filter by author">
                     <option value="">All authors</option>
                     {for (props.available_authors) |author| (
@@ -52,109 +81,100 @@ pub fn List(props: struct {
                 </select>
             </form>
             {if (props.active_author_filter.len > 0) (
-                <a href={props.base_path} class="btn btn-sm table-filter-clear" title="Clear filter">
-                    <Icon name={IconName.x_close} size={Size.sm} /> Clear filter
-                </a>
+                <Button hierarchy=.tertiary size=.sm label="Clear filter" icon=.x_close href={props.base_path} />
             )}
-        </div>
+        </Flex>
     )}
     {if (props.has_entries) (
         <div>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th class="table-col-check">
-                            <input type="checkbox" class="table-checkbox" aria-label="Select all" />
-                        </th>
-                        <th class="table-col-thumb"></th>
-                        <th class="table-sortable">
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead class="w-10">
+                            <Checkbox name="select-all" />
+                        </TableHead>
+                        <TableHead class="w-10"></TableHead>
+                        <TableHead>
                             Title
-                            <span class="table-sort-icon"><Icon name={IconName.chevron_up} /></span>
-                        </th>
-                        <th>Author</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                        <th class="actions-col"></th>
-                    </tr>
-                </thead>
-                <tbody>
+                            <Icon name={IconName.chevron_up} size={IconSize.sm} />
+                        </TableHead>
+                        <TableHead>Author</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead class="w-10"></TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
                     {for (props.entries) |entry| (
-                        <tr>
-                            <td class="table-col-check">
-                                <input type="checkbox" class="table-checkbox" aria-label="Select entry" />
-                            </td>
-                            <td class="table-col-thumb">
-                                <div class="table-thumb"><Icon name={IconName.file} /></div>
-                            </td>
-                            <td class="table-col-strong">
-                                <a href={entry.edit_url}>{entry.title}</a>
-                            </td>
-                            <td>
-                                <span class="table-cell-icon">
-                                    {@raw entry.authors_html}
-                                </span>
-                            </td>
-                            <td>
-                                <span class="table-cell-icon">
-                                    {if (@import("std").mem.eql(u8, entry.status, "published")) (
-                                        <span class="table-cell-icon-prefix" style="color: var(--color-success)"><Icon name={IconName.dot_filled} class="icon icon-dot" /></span>
-                                    ) else if (@import("std").mem.eql(u8, entry.status, "changed")) (
-                                        <span class="table-cell-icon-prefix" style="color: var(--color-warning)"><Icon name={IconName.dot_half} class="icon icon-dot" /></span>
-                                    ) else (
-                                        <span class="table-cell-icon-prefix"><Icon name={IconName.dot_outline} class="icon icon-dot" /></span>
-                                    )}
-                                    <span class={if (@import("std").mem.eql(u8, entry.status, "published")) ("badge badge-published") else if (@import("std").mem.eql(u8, entry.status, "changed")) ("badge badge-changed") else ("badge badge-draft")}>{entry.status}</span>
-                                </span>
-                            </td>
-                            <td>{entry.date}</td>
-                            <td class="actions-col">
-                                <div data-publr-component="dropdown">
-                                    <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        <Icon name={IconName.more} />
-                                    </button>
-                                    <div class="dropdown-menu" data-publr-part="content">
-                                        <a href={entry.edit_url} class="dropdown-item">Edit</a>
-                                        <hr class="dropdown-divider" />
-                                        <button class="dropdown-item dropdown-item-danger">Delete</button>
-                                    </div>
-                                </div>
-                            </td>
-                        </tr>
+                        <TableRow>
+                            <TableCell class="w-10">
+                                <Checkbox name="select-entry" value={entry.id} />
+                            </TableCell>
+                            <TableCell class="w-10">
+                                <Icon name={IconName.file} />
+                            </TableCell>
+                            <TableCell>
+                                <a href={entry.edit_url} class="font-medium">{entry.title}</a>
+                            </TableCell>
+                            <TableCell>
+                                {@raw entry.authors_html}
+                            </TableCell>
+                            <TableCell>
+                                {if (@import("std").mem.eql(u8, entry.status, "published")) (
+                                    <Badge label="published" variant={BadgeVariant.success} size={BadgeSize.sm} />
+                                ) else if (@import("std").mem.eql(u8, entry.status, "changed")) (
+                                    <Badge label="changed" variant={BadgeVariant.warning} size={BadgeSize.sm} />
+                                ) else (
+                                    <Badge label="draft" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
+                                )}
+                            </TableCell>
+                            <TableCell>{entry.date}</TableCell>
+                            <TableCell class="w-10">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger>
+                                        <Button hierarchy=.tertiary size=.sm label="" icon=.more />
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent>
+                                        <DropdownMenuItem href={entry.edit_url}>Edit</DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem variant=.destructive>Delete</DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </TableCell>
+                        </TableRow>
                     )}
-                </tbody>
-            </table>
-            <div class="table-footer">
-                <span class="table-item-count">{props.total_count} items</span>
+                </TableBody>
+            </Table>
+            <Flex justify=.between items=.center>
+                <Text size=.sm color=.muted>{props.total_count} items</Text>
                 {if (props.total_pages > 1) (
-                    <nav class="pagination" aria-label="Content pagination">
-                        <span class="pagination-label">Page:</span>
-                        {if (props.prev_page_url.len > 0) (
-                            <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></a>
-                        ) else (
-                            <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></span>
-                        )}
-                        {for (props.page_urls) |pg| (
-                            {if (pg.is_ellipsis) (
-                                <span class="pagination-ellipsis">...</span>
-                            ) else if (pg.is_current) (
-                                <span class="pagination-page active">{pg.page_num}</span>
-                            ) else (
-                                <a href={pg.url} class="pagination-page">{pg.page_num}</a>
+                    <Pagination>
+                        <PaginationContent>
+                            <PaginationItem>
+                                <PaginationPrevious href={props.prev_page_url} disabled={props.prev_page_url.len == 0} />
+                            </PaginationItem>
+                            {for (props.page_urls) |pg| (
+                                {if (pg.is_ellipsis) (
+                                    <PaginationItem><PaginationEllipsis /></PaginationItem>
+                                ) else (
+                                    <PaginationItem><PaginationLink href={pg.url} is_active={pg.is_current}>{pg.page_num}</PaginationLink></PaginationItem>
+                                )}
                             )}
-                        )}
-                        {if (props.next_page_url.len > 0) (
-                            <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></a>
-                        ) else (
-                            <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></span>
-                        )}
-                    </nav>
+                            <PaginationItem>
+                                <PaginationNext href={props.next_page_url} disabled={props.next_page_url.len == 0} />
+                            </PaginationItem>
+                        </PaginationContent>
+                    </Pagination>
                 )}
-            </div>
+            </Flex>
         </div>
     ) else (
-        <div class="empty-state">
-            <p>No entries yet.</p>
-            <a href={props.new_url} class="btn btn-primary">Create your first entry</a>
-        </div>
+        <Empty>
+            <EmptyTitle>No entries yet</EmptyTitle>
+            <EmptyDescription>Create your first entry to get started.</EmptyDescription>
+            <EmptyContent>
+                <Button hierarchy=.primary label="Create first entry" href={props.new_url} />
+            </EmptyContent>
+        </Empty>
     )}
 }

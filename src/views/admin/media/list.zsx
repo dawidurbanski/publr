@@ -2,9 +2,21 @@
 
 const std = @import("std");
 
-const Icon = @import("publr_ui").icon.Icon;
-const IconName = @import("publr_ui").icon.Name;
-const Size = @import("publr_ui").icon.Size;
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Size = ui.icon.Size;
+const Stack = ui.stack.Stack;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
+const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
+const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
+const Pagination = ui.pagination.Pagination;
+const PaginationContent = ui.pagination.PaginationContent;
+const PaginationItem = ui.pagination.PaginationItem;
+const PaginationLink = ui.pagination.PaginationLink;
+const PaginationPrevious = ui.pagination.PaginationPrevious;
+const PaginationNext = ui.pagination.PaginationNext;
 
 const MediaItem = struct {
     id: []const u8,
@@ -183,15 +195,16 @@ pub fn List(props: struct {
         ) else (<span></span>)}
     </div>
 
-    <div class="media-layout">
-        <aside class="media-sidebar">
-            <div class="media-sidebar-section">
-                <div class="media-sidebar-header">
-                    <h3 class="media-sidebar-title">Folders</h3>
+    <Flex gap=.xl>
+        <div class="w-48 shrink-0">
+        <Stack gap=.xl>
+            <Stack gap=.sm>
+                <Flex justify=.between items=.center>
+                    <Text size=.xs color=.muted weight=.semibold as=.div>Folders</Text>
                     <button type="button" class="btn-icon-sm" data-publr-action="create-toplevel" aria-label="New folder">
                         <Icon name={IconName.folder_plus} size={Size.sm} />
                     </button>
-                </div>
+                </Flex>
                 <ul class="media-folder-list">
                     <li class={if (std.mem.eql(u8, props.active_folder, "default")) ("media-folder-item active") else ("media-folder-item")}>
                         <div class="media-folder-row">
@@ -232,12 +245,12 @@ pub fn List(props: struct {
                                         <button class="btn-icon-sm" data-publr-part="trigger" aria-label="Folder actions">
                                             <Icon name={IconName.more} />
                                         </button>
-                                        <div class="dropdown-menu" data-publr-part="content">
+                                        <DropdownMenuContent>
                                             <button type="button" class="dropdown-item" data-publr-part="item" data-publr-action="rename-folder" data-folder-id={folder.id} data-folder-name={folder.name}>Rename</button>
                                             <button type="button" class="dropdown-item" data-publr-part="item" data-publr-action="move-folder" data-folder-id={folder.id} data-folder-name={folder.name}>Move to...</button>
-                                            <hr class="dropdown-divider" />
+                                            <DropdownMenuSeparator />
                                             <button type="button" class="dropdown-item dropdown-item-danger" data-publr-part="item" data-publr-action="delete-folder" data-folder-id={folder.id}>Delete</button>
-                                        </div>
+                                        </DropdownMenuContent>
                                     </div>
                                 </span>
                             </div>
@@ -261,15 +274,15 @@ pub fn List(props: struct {
                         </div>
                     </div>
                 </div>
-            </div>
+            </Stack>
 
-            <div class="media-sidebar-section">
-                <div class="media-sidebar-header">
-                    <h3 class="media-sidebar-title">Tags</h3>
+            <Stack gap=.sm>
+                <Flex justify=.between items=.center>
+                    <Text size=.xs color=.muted weight=.semibold as=.div>Tags</Text>
                     <button type="button" class="btn-icon-sm" data-publr-component="inline-create" data-publr-part="trigger" data-publr-target="tag-create-form" aria-label="New tag">
                         <Icon name={IconName.plus_circle} size={Size.sm} />
                     </button>
-                </div>
+                </Flex>
                 <div class="media-tag-list">
                     {for (props.tags) |tag| (
                         {if (tag.is_disabled) (
@@ -297,11 +310,11 @@ pub fn List(props: struct {
                         </button>
                     </div>
                 </form>
-            </div>
+            </Stack>
 
             {if (props.year_options.len > 0) (
-                <div class="media-sidebar-section">
-                    <h3 class="media-sidebar-title">Date</h3>
+                <Stack gap=.sm>
+                    <Text size=.xs color=.muted weight=.semibold as=.div>Date</Text>
                     <form method="GET" action="/admin/media" class="media-date-filter">
                         {for (props.date_hidden_params) |param| (
                             <input type="hidden" name={param.name} value={param.value} />
@@ -327,11 +340,11 @@ pub fn List(props: struct {
                             )}
                         </select>
                     </form>
-                </div>
+                </Stack>
             ) else (<span></span>)}
 
-            <div class="media-sidebar-section media-sidebar-filesystem">
-                <h3 class="media-sidebar-title">Filesystem</h3>
+            <Stack gap=.sm class="media-sidebar-filesystem">
+                <Text size=.xs color=.muted weight=.semibold as=.div>Filesystem</Text>
                 {if (props.scan_result != null) (
                     {if (props.scan_result.? > 0) (
                         <div class="media-sync-notice">
@@ -360,10 +373,11 @@ pub fn List(props: struct {
                         <span class="media-tag-count">{props.unreviewed_count}</span>
                     </a>
                 ) else (<span></span>)}
-            </div>
-        </aside>
+            </Stack>
+        </Stack>
+        </div>
 
-        <div class="media-content">
+        <div class="flex-1 min-w-0">
             {if (props.has_media) (
                 {if (std.mem.eql(u8, props.view_mode, "grid")) (
                     <div class="media-grid">
@@ -434,14 +448,14 @@ pub fn List(props: struct {
                                             <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
                                                 <Icon name={IconName.more} />
                                             </button>
-                                            <div class="dropdown-menu" data-publr-part="content">
+                                            <DropdownMenuContent>
                                                 <a href={item.edit_url} class="dropdown-item">Edit</a>
-                                                <hr class="dropdown-divider" />
+                                                <DropdownMenuSeparator />
                                                 <form method="POST" action={item.delete_url}>
                                                     <input type="hidden" name="_csrf" value={props.csrf_token} />
                                                     <button type="submit" class="dropdown-item dropdown-item-danger" onclick="return confirm('Delete this file permanently?')">Delete</button>
                                                 </form>
-                                            </div>
+                                            </DropdownMenuContent>
                                         </div>
                                     </td>
                                 </tr>
@@ -465,7 +479,7 @@ pub fn List(props: struct {
                 )}
             )}
         </div>
-    </div>
+    </Flex>
 
 
     <div data-publr-component="dialog" data-publr-state="closed" id="bulk-add-tag-dialog">
@@ -583,35 +597,80 @@ pub fn BottomBar(props: struct {
     page_urls: []const PageUrl,
     csrf_token: []const u8,
 }) {
-    <div class="media-bottom-bar" data-active-folder={props.active_folder}>
-        <div class="media-bottom-bar-left">
+    <div class="flex flex-row justify-between items-center border-t border-border" data-active-folder={props.active_folder}>
+        <div>
             {if (props.total_pages > 1) (
-                <nav class="pagination" aria-label="Media pagination">
-                    <span class="pagination-label">Page:</span>
-                    {if (props.prev_page_url.len > 0) (
-                        <a href={props.prev_page_url} class="pagination-btn" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></a>
-                    ) else (
-                        <span class="pagination-btn disabled" aria-label="Previous page"><Icon name={IconName.chevron_left} size={Size.sm} /></span>
-                    )}
-                    {for (props.page_urls) |pg| (
-                        {if (pg.is_current) (
-                            <span class="pagination-page active">{pg.page_num}</span>
-                        ) else (
-                            <a href={pg.url} class="pagination-page">{pg.page_num}</a>
+                <Pagination>
+                    <PaginationContent>
+                        <PaginationItem>
+                            {if (props.prev_page_url.len > 0) (
+                                <PaginationPrevious href={props.prev_page_url} />
+                            ) else (
+                                <PaginationPrevious disabled={true} />
+                            )}
+                        </PaginationItem>
+                        {for (props.page_urls) |pg| (
+                            <PaginationItem>
+                                <PaginationLink href={pg.url} is_active={pg.is_current}>{pg.page_num}</PaginationLink>
+                            </PaginationItem>
                         )}
-                    )}
-                    {if (props.next_page_url.len > 0) (
-                        <a href={props.next_page_url} class="pagination-btn" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></a>
-                    ) else (
-                        <span class="pagination-btn disabled" aria-label="Next page"><Icon name={IconName.chevron_right} size={Size.sm} /></span>
-                    )}
-                </nav>
+                        <PaginationItem>
+                            {if (props.next_page_url.len > 0) (
+                                <PaginationNext href={props.next_page_url} />
+                            ) else (
+                                <PaginationNext disabled={true} />
+                            )}
+                        </PaginationItem>
+                    </PaginationContent>
+                </Pagination>
             ) else (<span></span>)}
         </div>
-        <div class="media-bottom-bar-right">
+        <Flex gap=.sm items=.center>
             <div class="media-upload-progress" id="upload-progress" style="display:none">
                 <div class="upload-progress-bar" id="upload-progress-bar"></div>
                 <span class="upload-progress-text" id="upload-progress-text">Uploading...</span>
+            </div>
+        </Flex>
+    </div>
+}
+
+pub fn MediaControls(props: struct {
+    filtered_count: u32,
+    view_mode: []const u8,
+    view_grid_url: []const u8,
+    view_list_url: []const u8,
+    active_folder: []const u8 = "",
+}) {
+    <Flex justify=.between items=.center gap=.lg>
+        <Flex gap=.md items=.center>
+            <label for="media-select-all"><Text size=.sm color=.muted as=.span>Select all:</Text></label>
+            <input type="checkbox" class="media-select-all" id="media-select-all" aria-label="Select all" />
+            <Flex gap=.md items=.center>
+                <span>
+                    <Text size=.sm color=.muted as=.span id="media-count-default">{props.filtered_count} files</Text>
+                    <span id="media-selection-info"><span id="media-selection-count">0</span> selected</span>
+                </span>
+                <div data-publr-component="dropdown" class="media-bulk-actions">
+                    <button class="btn btn-sm" id="media-bulk-actions-btn" data-publr-part="trigger">Bulk Actions</button>
+                    <DropdownMenuContent>
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="delete">Delete</button>
+                        <DropdownMenuSeparator />
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="add-tag">Add Tag...</button>
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="remove-tag">Remove Tag...</button>
+                        <DropdownMenuSeparator />
+                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="move-folder">Move to Folder...</button>
+                    </DropdownMenuContent>
+                </div>
+            </Flex>
+        </Flex>
+        <Flex items=.center gap=.md>
+            <div class="media-view-toggle">
+                <a href={props.view_grid_url} class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active") else ("media-view-btn")} aria-label="Grid view">
+                    <Icon name={IconName.grid} />
+                </a>
+                <a href={props.view_list_url} class={if (std.mem.eql(u8, props.view_mode, "list")) ("media-view-btn active") else ("media-view-btn")} aria-label="List view">
+                    <Icon name={IconName.list} />
+                </a>
             </div>
             {if (props.active_folder.len > 0 and !std.mem.eql(u8, props.active_folder, "default")) (
                 <button type="button" class="btn btn-sm" id="upload-default-btn">Upload to default</button>
@@ -623,47 +682,6 @@ pub fn BottomBar(props: struct {
                     <Icon name={IconName.upload} /> Upload
                 </button>
             )}
-        </div>
-    </div>
-}
-
-pub fn MediaControls(props: struct {
-    filtered_count: u32,
-    view_mode: []const u8,
-    view_grid_url: []const u8,
-    view_list_url: []const u8,
-}) {
-    <div class="media-toolbar">
-        <div class="media-toolbar-left">
-            <label for="media-select-all" class="media-count">Select all:</label>
-            <input type="checkbox" class="media-select-all" id="media-select-all" aria-label="Select all" />
-            <span class="media-selection-info">
-                <span>  
-                    <span class="media-count" id="media-count-default">{props.filtered_count} files</span>
-                    <span id="media-selection-info"><span id="media-selection-count">0</span> selected</span>
-                </span>
-                <div data-publr-component="dropdown" class="media-bulk-actions">
-                    <button class="btn btn-sm" id="media-bulk-actions-btn" data-publr-part="trigger">Bulk Actions</button>
-                    <div class="dropdown-menu" data-publr-part="content">
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="delete">Delete</button>
-                        <hr class="dropdown-divider" />
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="add-tag">Add Tag...</button>
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="remove-tag">Remove Tag...</button>
-                        <hr class="dropdown-divider" />
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="move-folder">Move to Folder...</button>
-                    </div>
-                </div>
-            </span>
-        </div>
-        <div class="media-toolbar-right">
-            <div class="media-view-toggle">
-                <a href={props.view_grid_url} class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active") else ("media-view-btn")} aria-label="Grid view">
-                    <Icon name={IconName.grid} />
-                </a>
-                <a href={props.view_list_url} class={if (std.mem.eql(u8, props.view_mode, "list")) ("media-view-btn active") else ("media-view-btn")} aria-label="List view">
-                    <Icon name={IconName.list} />
-                </a>
-            </div>
-        </div>
-    </div>
+        </Flex>
+    </Flex>
 }

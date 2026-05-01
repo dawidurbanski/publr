@@ -1,3 +1,22 @@
+const ui = @import("publr_ui");
+const Badge = ui.badge.Badge;
+const BadgeVariant = ui.badge.Variant;
+const BadgeSize = ui.badge.Size;
+const Table = ui.table.Table;
+const TableHeader = ui.table.TableHeader;
+const TableBody = ui.table.TableBody;
+const TableRow = ui.table.TableRow;
+const TableHead = ui.table.TableHead;
+const TableCell = ui.table.TableCell;
+const Card = ui.card.Card;
+const CardHeader = ui.card.CardHeader;
+const CardTitle = ui.card.CardTitle;
+const CardContent = ui.card.CardContent;
+const Empty = ui.empty.Empty;
+const EmptyTitle = ui.empty.EmptyTitle;
+const Stack = ui.stack.Stack;
+const Text = ui.text.Text;
+
 const TypeRow = struct {
     id: []const u8,
     name: []const u8,
@@ -19,59 +38,64 @@ pub fn ContentTypes(props: struct {
     total_count: []const u8,
     rows: []const TypeRow,
 }) {
-    <div class="panel">
-        <div class="panel-header">
-            <h2>Content Types</h2>
-            <span class="badge">{props.total_count}</span>
-        </div>
-        <div class="panel-body">
+    <Card>
+        <CardHeader>
+            <CardTitle>Content Types <Badge label={props.total_count} variant={BadgeVariant.secondary} size={BadgeSize.sm} /></CardTitle>
+        </CardHeader>
+        <CardContent>
             {if (!props.has_types) (
-                <p class="empty-state">No content types registered.</p>
+                <Empty>
+                    <EmptyTitle>No content types registered.</EmptyTitle>
+                </Empty>
             ) else (
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Name</th>
-                            <th>i18n</th>
-                            <th>Workflow</th>
-                            <th>Fields</th>
-                            <th>Synced</th>
-                            <th>Fallback</th>
-                            <th>Permissions</th>
-                            <th>Flags</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>ID</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>i18n</TableHead>
+                            <TableHead>Workflow</TableHead>
+                            <TableHead>Fields</TableHead>
+                            <TableHead>Synced</TableHead>
+                            <TableHead>Fallback</TableHead>
+                            <TableHead>Permissions</TableHead>
+                            <TableHead>Flags</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
                         {for (props.rows) |row| (
-                            <tr>
-                                <td><code>{row.id}</code></td>
-                                <td>
-                                    <div>{row.name}</div>
-                                    <div class="text-muted">{row.name_plural}</div>
-                                </td>
-                                <td>
-                                    <div>{row.localized}</div>
-                                    <div class="text-muted">{row.locales}</div>
-                                </td>
-                                <td>{row.workflow}</td>
-                                <td>{row.fields_count}</td>
-                                <td>{row.synced_count}</td>
-                                <td>{row.fallback_count}</td>
-                                <td>{row.permissions_count}</td>
-                                <td>
+                            <TableRow>
+                                <TableCell><code>{row.id}</code></TableCell>
+                                <TableCell>
+                                    <Stack gap=.none>
+                                        <Text>{row.name}</Text>
+                                        <Text size=.xs color=.muted>{row.name_plural}</Text>
+                                    </Stack>
+                                </TableCell>
+                                <TableCell>
+                                    <Stack gap=.none>
+                                        <Text>{row.localized}</Text>
+                                        <Text size=.xs color=.muted>{row.locales}</Text>
+                                    </Stack>
+                                </TableCell>
+                                <TableCell>{row.workflow}</TableCell>
+                                <TableCell>{row.fields_count}</TableCell>
+                                <TableCell>{row.synced_count}</TableCell>
+                                <TableCell>{row.fallback_count}</TableCell>
+                                <TableCell>{row.permissions_count}</TableCell>
+                                <TableCell>
                                     {if (row.internal) (
-                                        <span class="badge">internal</span>
+                                        <Badge label="internal" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
                                     )}
                                     {if (row.taxonomy) (
-                                        <span class="badge">taxonomy</span>
+                                        <Badge label="taxonomy" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
                                     )}
-                                </td>
-                            </tr>
+                                </TableCell>
+                            </TableRow>
                         )}
-                    </tbody>
-                </table>
+                    </TableBody>
+                </Table>
             )}
-        </div>
-    </div>
+        </CardContent>
+    </Card>
 }

@@ -2,8 +2,28 @@
 
 const std = @import("std");
 
-const Icon = @import("publr_ui").icon.Icon;
-const IconName = @import("publr_ui").icon.Name;
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Button = ui.button.Button;
+const Badge = ui.badge.Badge;
+const BadgeVariant = ui.badge.Variant;
+const BadgeSize = ui.badge.Size;
+const Table = ui.table.Table;
+const TableHeader = ui.table.TableHeader;
+const TableBody = ui.table.TableBody;
+const TableRow = ui.table.TableRow;
+const TableHead = ui.table.TableHead;
+const TableCell = ui.table.TableCell;
+const DropdownMenu = ui.dropdown.DropdownMenu;
+const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
+const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
+const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
+const Empty = ui.empty.Empty;
+const EmptyTitle = ui.empty.EmptyTitle;
+const EmptyDescription = ui.empty.EmptyDescription;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
 
 const Release = struct {
     id: []const u8,
@@ -22,51 +42,63 @@ pub fn List(props: struct {
 }) {
     {if (props.has_releases) (
         <div>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Status</th>
-                        <th>Items</th>
-                        <th>Author</th>
-                        <th>Created</th>
-                        <th class="actions-col"></th>
-                    </tr>
-                </thead>
-                <tbody>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Items</TableHead>
+                        <TableHead>Author</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead class="w-10"></TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
                     {for (props.releases) |release| (
-                        <tr>
-                            <td class="table-col-strong">
-                                <a href={release.detail_url}>{release.name}</a>
-                            </td>
-                            <td>
-                                <span class={if (std.mem.eql(u8, release.status, "pending")) ("badge badge-pending") else if (std.mem.eql(u8, release.status, "released")) ("badge badge-released") else if (std.mem.eql(u8, release.status, "reverted")) ("badge badge-reverted") else if (std.mem.eql(u8, release.status, "scheduled")) ("badge badge-scheduled") else if (std.mem.eql(u8, release.status, "archived")) ("badge badge-archived") else ("badge badge-draft")}>{release.status}</span>
-                            </td>
-                            <td>{release.item_count}</td>
-                            <td>{release.author}</td>
-                            <td>{release.date}</td>
-                            <td class="actions-col">
-                                <div data-publr-component="dropdown">
-                                    <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        <Icon name={IconName.more} />
-                                    </button>
-                                    <div class="dropdown-menu" data-publr-part="content">
-                                        <a href={release.detail_url} class="dropdown-item">View Details</a>
-                                    </div>
-                                </div>
-                            </td>
-                        </tr>
+                        <TableRow>
+                            <TableCell>
+                                <a href={release.detail_url} class="font-medium">{release.name}</a>
+                            </TableCell>
+                            <TableCell>
+                                {if (std.mem.eql(u8, release.status, "pending")) (
+                                    <Badge label="pending" variant={BadgeVariant.warning} size={BadgeSize.sm} />
+                                ) else if (std.mem.eql(u8, release.status, "released")) (
+                                    <Badge label="released" variant={BadgeVariant.success} size={BadgeSize.sm} />
+                                ) else if (std.mem.eql(u8, release.status, "reverted")) (
+                                    <Badge label="reverted" variant={BadgeVariant.@"error"} size={BadgeSize.sm} />
+                                ) else if (std.mem.eql(u8, release.status, "scheduled")) (
+                                    <Badge label="scheduled" variant={BadgeVariant.outline} size={BadgeSize.sm} />
+                                ) else if (std.mem.eql(u8, release.status, "archived")) (
+                                    <Badge label="archived" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
+                                ) else (
+                                    <Badge label="draft" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
+                                )}
+                            </TableCell>
+                            <TableCell>{release.item_count}</TableCell>
+                            <TableCell>{release.author}</TableCell>
+                            <TableCell>{release.date}</TableCell>
+                            <TableCell class="w-10">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger>
+                                        <Button hierarchy=.tertiary size=.sm label="" icon=.more />
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent>
+                                        <DropdownMenuItem href={release.detail_url}>View Details</DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </TableCell>
+                        </TableRow>
                     )}
-                </tbody>
-            </table>
-            <div class="table-footer">
-                <span class="table-item-count">{props.releases.len} releases</span>
-            </div>
+                </TableBody>
+            </Table>
+            <Flex justify=.between items=.center>
+                <Text size=.sm color=.muted>{props.releases.len} releases</Text>
+            </Flex>
         </div>
     ) else (
-        <div class="empty-state">
-            <p>No releases yet.</p>
-            <p class="empty-state-hint">Releases let you batch-publish multiple entries at once.</p>
-        </div>
+        <Empty>
+            <EmptyTitle>No releases yet</EmptyTitle>
+            <EmptyDescription>Releases let you batch-publish multiple entries at once.</EmptyDescription>
+        </Empty>
     )}
 }

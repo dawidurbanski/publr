@@ -1,7 +1,27 @@
 // Users list template
 
-const Icon = @import("publr_ui").icon.Icon;
-const IconName = @import("publr_ui").icon.Name;
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Button = ui.button.Button;
+const Table = ui.table.Table;
+const TableHeader = ui.table.TableHeader;
+const TableBody = ui.table.TableBody;
+const TableRow = ui.table.TableRow;
+const TableHead = ui.table.TableHead;
+const TableCell = ui.table.TableCell;
+const DropdownMenu = ui.dropdown.DropdownMenu;
+const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
+const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
+const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
+const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
+const Empty = ui.empty.Empty;
+const EmptyTitle = ui.empty.EmptyTitle;
+const EmptyDescription = ui.empty.EmptyDescription;
+const EmptyContent = ui.empty.EmptyContent;
+const Checkbox = ui.checkbox.Checkbox;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
 
 const User = struct {
     id: []const u8,
@@ -18,67 +38,70 @@ pub fn List(props: struct {
 }) {
     {if (props.has_users) (
         <div>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th class="table-col-check">
-                            <input type="checkbox" class="table-checkbox" aria-label="Select all" />
-                        </th>
-                        <th class="table-col-thumb"></th>
-                        <th class="table-sortable">
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead class="w-10">
+                            <Checkbox name="select-all" />
+                        </TableHead>
+                        <TableHead class="w-10"></TableHead>
+                        <TableHead>
                             Name
-                            <span class="table-sort-icon"><Icon name={IconName.chevron_up} /></span>
-                        </th>
-                        <th>Email</th>
-                        <th class="actions-col"></th>
-                    </tr>
-                </thead>
-                <tbody>
+                            <Icon name={IconName.chevron_up} />
+                        </TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead class="w-10"></TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
                     {for (props.users) |user| (
-                        <tr>
-                            <td class="table-col-check">
-                                <input type="checkbox" class="table-checkbox" aria-label="Select user" />
-                            </td>
-                            <td class="table-col-thumb">
-                                <div class="table-thumb"><Icon name={IconName.users} /></div>
-                            </td>
-                            <td>
-                                <a href={user.edit_url}>
+                        <TableRow>
+                            <TableCell class="w-10">
+                                <Checkbox name="select-user" value={user.id} />
+                            </TableCell>
+                            <TableCell class="w-10">
+                                <Icon name={IconName.users} />
+                            </TableCell>
+                            <TableCell>
+                                <a href={user.edit_url} class="font-medium">
                                     {if (user.display_name.len > 0) (
                                         <span>{user.display_name}</span>
                                     ) else (
                                         <span>{user.email}</span>
                                     )}
                                 </a>
-                            </td>
-                            <td>{user.email}</td>
-                            <td class="actions-col">
-                                <div data-publr-component="dropdown">
-                                    <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                        <Icon name={IconName.more} />
-                                    </button>
-                                    <div class="dropdown-menu" data-publr-part="content">
-                                        <a href={user.edit_url} class="dropdown-item">Edit</a>
-                                        <hr class="dropdown-divider" />
+                            </TableCell>
+                            <TableCell>{user.email}</TableCell>
+                            <TableCell class="w-10">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger>
+                                        <Button hierarchy=.tertiary size=.sm label="" icon=.more />
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent>
+                                        <DropdownMenuItem href={user.edit_url}>Edit</DropdownMenuItem>
+                                        <DropdownMenuSeparator />
                                         <form method="POST" action={user.delete_url} style="margin: 0;">
                                             <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                            <button type="submit" class="dropdown-item dropdown-item-danger">Delete</button>
+                                            <DropdownMenuItem variant=.destructive>Delete</DropdownMenuItem>
                                         </form>
-                                    </div>
-                                </div>
-                            </td>
-                        </tr>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </TableCell>
+                        </TableRow>
                     )}
-                </tbody>
-            </table>
-            <div class="table-footer">
-                <span class="table-item-count">{props.users.len} users</span>
-            </div>
+                </TableBody>
+            </Table>
+            <Flex justify=.between items=.center>
+                <Text size=.sm color=.muted>{props.users.len} users</Text>
+            </Flex>
         </div>
     ) else (
-        <div class="empty-state">
-            <p>No users yet.</p>
-            <a href="/admin/settings/users/new" class="btn btn-primary">Add your first user</a>
-        </div>
+        <Empty>
+            <EmptyTitle>No users yet</EmptyTitle>
+            <EmptyDescription>Add your first team member.</EmptyDescription>
+            <EmptyContent>
+                <Button hierarchy=.primary label="Add your first user" href="/admin/settings/users/new" />
+            </EmptyContent>
+        </Empty>
     )}
 }
