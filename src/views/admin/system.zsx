@@ -1,19 +1,30 @@
 // Admin system page — recompile button and system status
 
+const ui = @import("publr_ui");
+const Button = ui.button.Button;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const Input = ui.text_input.Input;
+const Stack = ui.stack.Stack;
+const Heading = ui.heading.Heading;
+const Text = ui.text.Text;
+
 pub fn System(props: struct {
     csrf_token: []const u8,
     config_text: []const u8,
 }) {
-    <div class="form-section">
-        <h2 class="form-section-title">Recompilation</h2>
-        <p class="form-section-desc">Rebuild the CMS binary with your current plugins and configuration.</p>
+    <Stack gap=.lg>
+        <Heading level=.h2 size=.md>Recompilation</Heading>
+        <Text size=.sm color=.muted>Rebuild the CMS binary with your current plugins and configuration.</Text>
         <input type="hidden" name="_csrf" value={props.csrf_token} />
-        <div class="form-group" style="margin-top: var(--space-xl); max-width: 400px;">
-            <label class="form-label" for="config-text">{"configText (comptime)"}</label>
-            <input type="text" id="config-text" class="form-control" value={props.config_text} />
+        <div style="max-width: 400px;">
+            <Field>
+                <FieldLabel>{"configText (comptime)"}</FieldLabel>
+                <Input input_type=.text name="config-text" value={props.config_text} />
+            </Field>
         </div>
-        <div style="margin-top: var(--space-xl);">
-            <button type="button" id="recompile-btn" class="btn btn-primary">Save & Recompile</button>
+        <div>
+            <Button hierarchy=.primary label="Save & Recompile" id="recompile-btn" />
         </div>
-    </div>
+    </Stack>
 }

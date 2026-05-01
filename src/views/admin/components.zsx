@@ -5,6 +5,7 @@ const Dropdown = @import("../components/dropdown.zig").Dropdown;
 const SelectMenu = @import("../components/select_menu.zig").SelectMenu;
 const Popover = @import("../components/popover.zig").Popover;
 const ui = @import("publr_ui");
+const Button = ui.button.Button;
 const UiTooltip = ui.tooltip.Tooltip;
 const UiTooltipTrigger = ui.tooltip.TooltipTrigger;
 const UiTooltipPortal = ui.tooltip.TooltipPortal;
@@ -153,13 +154,13 @@ pub fn Components() {
             <div class="showcase-example">
                 <div class="showcase-row">
                     <UiTooltip>
-                        <UiTooltipTrigger><button class="btn">Hover me</button></UiTooltipTrigger>
+                        <UiTooltipTrigger><Button hierarchy=.secondary label="Hover me" /></UiTooltipTrigger>
                         <UiTooltipPortal>
                             <UiTooltipContent>This is a tooltip</UiTooltipContent>
                         </UiTooltipPortal>
                     </UiTooltip>
                     <UiTooltip>
-                        <UiTooltipTrigger><button class="btn">Focus me</button></UiTooltipTrigger>
+                        <UiTooltipTrigger><Button hierarchy=.secondary label="Focus me" /></UiTooltipTrigger>
                         <UiTooltipPortal>
                             <UiTooltipContent>Tooltips work on focus too</UiTooltipContent>
                         </UiTooltipPortal>

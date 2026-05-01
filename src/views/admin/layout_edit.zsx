@@ -1,8 +1,17 @@
 // Edit layout — no left sidebar, topbar with logo, back nav bar, right sidebar shell
 
-const Icon = @import("publr_ui").icon.Icon;
-const IconName = @import("publr_ui").icon.Name;
-const Size = @import("publr_ui").icon.Size;
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Size = ui.icon.Size;
+const Button = ui.button.Button;
+const Flex = ui.flex.Flex;
+const Heading = ui.heading.Heading;
+const DropdownMenu = ui.dropdown.DropdownMenu;
+const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
+const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
+const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
+const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
 
 pub fn LayoutEdit(props: struct {
     title: []const u8,
@@ -26,55 +35,53 @@ pub fn LayoutEdit(props: struct {
             <link rel="stylesheet" href="/static/admin.css" />
         </head>
         <body class="admin admin-edit">
-            <header class="top-bar">
-                <div class="top-bar-meta">
-                    <div class="top-bar-left">
-                        <a href="/admin" class="logo">Publr</a>
-                    </div>
-                    <div class="top-bar-right">
-                        <div class="bottom-bar-left">
-                            <a href="/admin/settings" class="settings-link">
-                                <span class="nav-icon"><Icon name={IconName.settings} size={Size.md} /></span>
-                            </a>
-                        </div>
-                        <div data-publr-component="dropdown" class="avatar-dropdown">
-                            <button data-publr-part="trigger" class="avatar-trigger" aria-label="User menu">
-                                <img src={props.user_gravatar_url} alt="" class="avatar-img" />
-                            </button>
-                            <div class="dropdown-menu dropdown-menu-right" data-publr-part="content">
-                                <a href="/admin/users/profile" class="dropdown-item">Profile</a>
-                                <a href="/admin/settings" class="dropdown-item">Settings</a>
-                                <hr class="dropdown-divider" />
-                                <form method="POST" action="/admin/logout">
-                                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                    <button type="submit" class="dropdown-item">Logout</button>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
+            <header class="border-b border-border bg-muted/40">
+                <div class="px-4 py-3">
+                    <Flex justify=.between items=.center>
+                        <a href="/admin" class="text-lg font-semibold tracking-tight text-foreground no-underline hover:no-underline">Publr</a>
+                        <Flex gap=.sm items=.center>
+                            <Button hierarchy=.tertiary size=.sm label="" icon=.settings href="/admin/settings" />
+                            <DropdownMenu>
+                                <DropdownMenuTrigger>
+                                    <button class="avatar-trigger" aria-label="User menu">
+                                        <img src={props.user_gravatar_url} alt="" class="avatar-img" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent>
+                                    <DropdownMenuItem href="/admin/users/profile">Profile</DropdownMenuItem>
+                                    <DropdownMenuItem href="/admin/settings">Settings</DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <form method="POST" action="/admin/logout">
+                                        <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                        <DropdownMenuItem>Logout</DropdownMenuItem>
+                                    </form>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </Flex>
+                    </Flex>
                 </div>
-                <div class="top-bar-nav-wrapper">
-                    <nav class="topbar-nav">
-                        {@raw props.topbar_nav_html}
-                    </nav>
-                </div>
+                <nav class="topbar-nav">
+                    {@raw props.topbar_nav_html}
+                </nav>
             </header>
-            <div class="edit-body">
-                <div class="edit-area">
-                    <div class="edit-nav">
-                        <div class="edit-nav-left">
-                            <a href={props.back_url} class="back-btn" aria-label="Back">
-                                <span class="back-btn-icon"><Icon name={IconName.arrow_left} size={Size.md} /></span>
-                            </a>
-                            <span class="edit-nav-title">{props.title}</span>
-                        </div>
-                        <div class="edit-nav-presence" id="presence-users"></div>
+            <div class="flex flex-1 min-h-0">
+                <div class="flex-1 min-w-0 flex flex-col overflow-y-auto">
+                    <div class="px-4 py-3">
+                        <Flex justify=.between items=.center>
+                            <Flex gap=.md items=.center>
+                                <a href={props.back_url} class="text-muted-foreground hover:text-foreground no-underline" aria-label="Back">
+                                    <Icon name={IconName.arrow_left} size={Size.md} />
+                                </a>
+                                <Heading level=.h1 size=.lg>{props.title}</Heading>
+                            </Flex>
+                            <div id="presence-users"></div>
+                        </Flex>
                     </div>
-                    <main class="edit-content">
+                    <main class="flex-1 flex justify-center p-8">
                         {@raw props.content}
                     </main>
                 </div>
-                <aside class="edit-sidebar">
+                <aside class="w-80 shrink-0 border-l border-border bg-background overflow-y-auto flex flex-col">
                     {@raw props.sidebar}
                 </aside>
             </div>

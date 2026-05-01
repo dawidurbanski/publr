@@ -3,9 +3,25 @@
 const ui = @import("publr_ui");
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
-const Size = ui.icon.Size;
+const IconSize = ui.icon.Size;
 const ToastRegion = ui.toast.ToastRegion;
 const TooltipProvider = ui.tooltip.TooltipProvider;
+const Button = ui.button.Button;
+const DropdownMenu = ui.dropdown.DropdownMenu;
+const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
+const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
+const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
+const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
+const Stack = ui.stack.Stack;
+const Flex = ui.flex.Flex;
+const Heading = ui.heading.Heading;
+const Text = ui.text.Text;
+const Separator = ui.separator.Separator;
+const SidebarContainer = ui.sidebar.SidebarContainer;
+const SidebarContent = ui.sidebar.SidebarContent;
+const SidebarGroup = ui.sidebar.SidebarGroup;
+const SidebarGroupLabel = ui.sidebar.SidebarGroupLabel;
+const SidebarGroupContent = ui.sidebar.SidebarGroupContent;
 
 pub fn Layout(props: struct {
     title: []const u8,
@@ -22,10 +38,7 @@ pub fn Layout(props: struct {
     <html>
         <head>
             <meta charset="utf-8" />
-            <meta
-                name="viewport"
-                content="width=device-width, initial-scale=1"
-            />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
             <title>{props.title} - Publr Admin</title>
             <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
@@ -35,75 +48,76 @@ pub fn Layout(props: struct {
                 <span id="recompile-bar-text"></span>
                 <a id="recompile-bar-action" href="#" style="display:none;"></a>
             </div>
-            <header class="top-bar">
-                <div class="top-bar-meta">
-                    <div class="top-bar-left">
-                        <a href="/admin" class="logo">Publr</a>
+
+            <header class="border-b border-border bg-muted/40">
+                <Flex justify=.between items=.center gap=.lg>
+                    <div class="px-4 py-3">
+                        <a href="/admin" class="text-lg font-semibold tracking-tight text-foreground no-underline hover:no-underline">Publr</a>
                     </div>
-                    <div class="top-bar-right">
-                        <div class="bottom-bar-left">
-                            <a href="/admin/settings" class="settings-link">
-                                <span class="nav-icon"><Icon name={IconName.settings} size={Size.md} /></span>
-                            </a>
-                        </div>
-                        <div data-publr-component="dropdown" class="avatar-dropdown">
-                            <button data-publr-part="trigger" class="avatar-trigger" aria-label="User menu">
-                                <img src={props.user_gravatar_url} alt="" class="avatar-img" />
-                            </button>
-                            <div class="dropdown-menu dropdown-menu-right" data-publr-part="content">
-                                <a href="/admin/users/profile" class="dropdown-item">Profile</a>
-                                <a href="/admin/settings" class="dropdown-item">Settings</a>
-                                <hr class="dropdown-divider" />
+                    <Flex gap=.sm items=.center>
+                        <Button hierarchy=.tertiary size=.sm label="" icon=.settings href="/admin/settings" />
+                        <DropdownMenu>
+                            <DropdownMenuTrigger>
+                                <button class="avatar-trigger" aria-label="User menu">
+                                    <img src={props.user_gravatar_url} alt="" class="avatar-img" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent>
+                                <DropdownMenuItem href="/admin/users/profile">Profile</DropdownMenuItem>
+                                <DropdownMenuItem href="/admin/settings">Settings</DropdownMenuItem>
+                                <DropdownMenuSeparator />
                                 <form method="POST" action="/admin/logout">
                                     <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                    <button type="submit" class="dropdown-item">Logout</button>
+                                    <DropdownMenuItem>Logout</DropdownMenuItem>
                                 </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="top-bar-nav-wrapper">
-                    <nav class="topbar-nav">
-                        {@raw props.topbar_nav_html}
-                    </nav>
-                </div>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <div class="w-1"></div>
+                    </Flex>
+                </Flex>
+                <nav class="topbar-nav">
+                    {@raw props.topbar_nav_html}
+                </nav>
             </header>
+
             <TooltipProvider>
-                <div class="admin-body">
+                <div class="flex flex-row items-stretch flex-1 min-h-0">
                     {if (props.section_sidebar_html.len > 0) (
-                        <aside class="section-sidebar">
-                            <div class="section-sidebar-group">
-                                <h6 class="section-sidebar-group-title">
-                                    <Icon name={IconName.folder} size={Size.sm} />
-                                    Content types
-                                </h6>
-                                <nav class="section-sidebar-nav">
-                                    {@raw props.section_sidebar_html}
-                                </nav>
-                            </div>
-                        </aside>
+                        <SidebarContainer>
+                            <SidebarContent>
+                                <SidebarGroup>
+                                    <SidebarGroupLabel>
+                                        <Icon name={IconName.folder} size={IconSize.sm} />
+                                        Content types
+                                    </SidebarGroupLabel>
+                                    <SidebarGroupContent>
+                                        {@raw props.section_sidebar_html}
+                                    </SidebarGroupContent>
+                                </SidebarGroup>
+                            </SidebarContent>
+                        </SidebarContainer>
                     )}
-                    <main class="main-content">
-                        <div class="content-wrapper">
-                            <div class="content-body">
-                                <div class="page-title-wrapper">
-                                    <div class="page-title-subtitle">
-                                        <h1 class="page-title">{props.title}</h1>
-                                        {@raw props.subtitle}
-                                    </div>
-                                    {@raw props.page_title_actions}
-                                </div>
-                                {@raw props.content}
-                            </div>
-                        </div>
+                    <main class="flex-1 min-w-0 overflow-y-auto">
+                        <Stack gap=.lg padding=.xl>
+                            <Flex justify=.between items=.end>
+                                <Stack gap=.xs>
+                                    <Heading level=.h1 size=.lg>{props.title}</Heading>
+                                    {@raw props.subtitle}
+                                </Stack>
+                                {@raw props.page_title_actions}
+                            </Flex>
+                            {@raw props.content}
+                        </Stack>
                     </main>
                 </div>
             </TooltipProvider>
+
             {if (props.bottom_bar.len > 0) (
-                <div class="bottom-bar-content">
+                <div class="border-t border-border px-4 py-2">
                     {@raw props.bottom_bar}
                 </div>
             )}
+
             <ToastRegion />
             <script type="module" src="/static/publr-core.js"></script>
             <script type="module" src="/static/publr-portal.js"></script>
