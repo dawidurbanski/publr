@@ -111,6 +111,29 @@ pub inline fn mix(comptime parts: anytype) []const u8 {
     return result;
 }
 
+/// Runtime string concatenation used by transpiled backtick templates that
+/// appear as component-prop values (struct field initializers). The transpiler
+/// converts `\`prefix ${expr} suffix\`` in component-prop position into a
+/// `concatRt(&.{ "prefix ", expr, " suffix" })` call so the value is a single
+/// `[]const u8` expression suitable for a struct field.
+///
+/// Allocates from page_allocator. Allocations are short-lived (live only for
+/// the duration of a render) and freed implicitly on WASM page reclaim or
+/// arena reset; we do not free here because the returned slice is consumed
+/// by downstream `writer.writeAll` calls in the same render frame.
+pub fn concatRt(parts: []const []const u8) []const u8 {
+    var total: usize = 0;
+    for (parts) |p| total += p.len;
+    if (total == 0) return "";
+    const buf = std.heap.page_allocator.alloc(u8, total) catch return "";
+    var i: usize = 0;
+    for (parts) |p| {
+        @memcpy(buf[i .. i + p.len], p);
+        i += p.len;
+    }
+    return buf;
+}
+
 };
 
 pub const fmt_jsx = struct {
@@ -2959,7 +2982,14 @@ const Parser = struct {
                 try self.write(attr.name);
                 try self.write(" = ");
                 if (attr.is_expr) {
-                    try self.write(attr.value);
+                    if (attr.value.len >= 2 and attr.value[0] == '`' and attr.value[attr.value.len - 1] == '`') {
+                        // Backtick template in component-prop position.
+                        // Emit `zsx.concatRt(&.{ "lit", expr, ... })` so the
+                        // value is a single []const u8 expression.
+                        try self.emitBacktickAsConcat(attr.value[1 .. attr.value.len - 1]);
+                    } else {
+                        try self.write(attr.value);
+                    }
                 } else {
                     try self.write("\"");
                     try self.write(attr.value);
@@ -3085,6 +3115,64 @@ const Parser = struct {
         try self.write("writeAll(\"");
         try self.writeEscaped(text);
         try self.write("\");\n");
+    }
+
+    /// Emit a backtick template as a `zsx.concatRt(&.{...})` expression.
+    /// Used when the template appears as a component-prop value, where the
+    /// surrounding context expects a single `[]const u8` expression rather
+    /// than a sequence of writer calls.
+    /// Both `${expr}` and `${@raw expr}` are emitted as raw expression
+    /// references (the caller is responsible for `expr` being `[]const u8`).
+    fn emitBacktickAsConcat(self: *Parser, content: []const u8) Error!void {
+        try self.write("zsx.concatRt(&.{");
+        var i: usize = 0;
+        var text_start: usize = 0;
+        var first = true;
+
+        while (i < content.len) {
+            if (i + 1 < content.len and content[i] == '$' and content[i + 1] == '{') {
+                // Emit preceding literal text segment
+                if (i > text_start) {
+                    if (!first) try self.write(", ") else try self.write(" ");
+                    try self.write("\"");
+                    try self.writeEscaped(content[text_start..i]);
+                    try self.write("\"");
+                    first = false;
+                }
+
+                i += 2; // skip ${
+
+                const is_raw = i + 5 <= content.len and mem.eql(u8, content[i .. i + 5], "@raw ");
+                if (is_raw) i += 5;
+
+                const expr_start = i;
+                var depth: usize = 1;
+                while (i < content.len and depth > 0) {
+                    if (content[i] == '{') depth += 1;
+                    if (content[i] == '}') depth -= 1;
+                    if (depth > 0) i += 1;
+                }
+                const expr = mem.trim(u8, content[expr_start..i], " \t\n\r");
+                if (i < content.len) i += 1; // skip }
+
+                if (!first) try self.write(", ") else try self.write(" ");
+                try self.write(expr);
+                first = false;
+                text_start = i;
+            } else {
+                i += 1;
+            }
+        }
+
+        // Emit trailing literal segment
+        if (text_start < content.len) {
+            if (!first) try self.write(", ") else try self.write(" ");
+            try self.write("\"");
+            try self.writeEscaped(content[text_start..content.len]);
+            try self.write("\"");
+        }
+
+        try self.write(" })");
     }
 
     fn emitBacktickString(self: *Parser, content: []const u8, use_escape: bool) Error!void {

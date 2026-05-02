@@ -102,6 +102,18 @@ pub fn withDefaults(comptime Defaults: type, raw: anytype) WithDefaultsReturn(De
     }
 }
 
+/// Concatenate class strings with spaces. Comptime string builder for class attributes.
+/// Usage: class={mix(.{"flex", "gap-md", font, pad})}
+pub inline fn mix(comptime parts: anytype) []const u8 {
+    comptime var result: []const u8 = "";
+    inline for (parts) |part| {
+        if (part.len > 0) {
+            result = result ++ (if (result.len == 0) "" else " ") ++ part;
+        }
+    }
+    return result;
+}
+
 };
 
 pub const icons_data = struct {
@@ -278,6 +290,42 @@ pub fn get(name: Name) []const u8 {
 }
 };
 
+pub const alert = struct {
+
+/// Alert — status message box.
+///
+/// Usage:
+///   <Alert variant=.destructive>Something went wrong.</Alert>
+///   <Alert variant=.warning>Unsaved changes.</Alert>
+pub const Variant = enum { destructive, warning, success, info };
+pub const AlertProps = struct {
+    variant: Variant = .info,
+    class: []const u8 = "",
+    children: []const u8 = "",
+};
+pub fn Alert(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AlertProps, _props);
+    const base_class = switch (props.variant) {
+        .destructive => "rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive",
+        .warning => "rounded-lg border border-warning/50 bg-warning/10 p-3 text-sm text-warning",
+        .success => "rounded-lg border border-success/50 bg-success/10 p-3 text-sm text-success",
+        .info => "rounded-lg border border-border bg-muted p-3 text-sm text-foreground",
+    };
+    try writer.writeAll("<div data-publr-component=\"alert\" role=\"alert\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll(base_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
+    try writer.writeAll("\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n");
+    try writer.writeAll("</div>");
+}
+
+};
+
 pub const avatar = struct {
 
 /// Avatar — user identity with image, initials fallback, badge, and grouping.
@@ -311,6 +359,7 @@ pub const Size = enum { sm, default, lg };
 pub const AvatarProps = struct {
     size: Size = .default,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Avatar(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarProps, _props);
@@ -324,6 +373,8 @@ const props = runtime.withDefaults(AvatarProps, _props);
     try writer.writeAll(" class=\"");
     try writer.writeAll("relative inline-flex items-center justify-center rounded-full shrink-0 ");
     try writer.writeAll(dimensions);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -335,44 +386,68 @@ const props = runtime.withDefaults(AvatarProps, _props);
 pub const AvatarImageProps = struct {
     src: []const u8 = "",
     alt: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn AvatarImage(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarImageProps, _props);
-    try writer.writeAll("<img data-publr-part=\"image\" class=\"absolute inset-0 h-full w-full rounded-full object-cover\"");
+    try writer.writeAll("<img data-publr-part=\"image\"");
     try writer.writeAll(" src=\"");
     try runtime.render(writer, props.src);
     try writer.writeAll("\"");
     try writer.writeAll(" alt=\"");
     try runtime.render(writer, props.alt);
     try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("absolute inset-0 h-full w-full rounded-full object-cover ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
     try writer.writeAll(">");
 }
 
 pub const AvatarFallbackProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn AvatarFallback(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarFallbackProps, _props);
-    try writer.writeAll("<span data-publr-part=\"fallback\" class=\"flex h-full w-full items-center justify-center rounded-full bg-muted text-muted-foreground font-medium uppercase\">");
+    try writer.writeAll("<span data-publr-part=\"fallback\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex h-full w-full items-center justify-center rounded-full bg-muted text-muted-foreground font-medium uppercase ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
     try writer.writeAll("</span>");
 }
 
-pub const AvatarBadgeProps = struct {};
-pub fn AvatarBadge(writer: anytype, props: anytype) !void {
-    _ = props;
-    try writer.writeAll("<span data-publr-part=\"badge\" class=\"absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background bg-success\">");
+pub const AvatarBadgeProps = struct {
+    class: []const u8 = "",
+};
+pub fn AvatarBadge(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(AvatarBadgeProps, _props);
+    try writer.writeAll("<span data-publr-part=\"badge\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background bg-success ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("</span>");
 }
 
 pub const AvatarGroupProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn AvatarGroup(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarGroupProps, _props);
-    try writer.writeAll("<div data-publr-component=\"avatar-group\" class=\"flex -space-x-2\">");
+    try writer.writeAll("<div data-publr-component=\"avatar-group\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex -space-x-2 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -382,6 +457,7 @@ const props = runtime.withDefaults(AvatarGroupProps, _props);
 pub const AvatarGroupCountProps = struct {
     count: []const u8 = "0",
     size: Size = .default,
+    class: []const u8 = "",
 };
 pub fn AvatarGroupCount(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarGroupCountProps, _props);
@@ -392,6 +468,8 @@ const props = runtime.withDefaults(AvatarGroupCountProps, _props);
     try writer.writeAll(" class=\"");
     try writer.writeAll("relative inline-flex items-center justify-center rounded-full border-2 border-background bg-muted font-medium text-muted-foreground ");
     try writer.writeAll(dimensions);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n        +");
@@ -562,6 +640,7 @@ pub const BadgeProps = struct {
     label: []const u8 = "Badge",
     variant: Variant = .default,
     size: Size = .md,
+    class: []const u8 = "",
 };
 pub fn Badge(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BadgeProps, _props);
@@ -594,6 +673,8 @@ const props = runtime.withDefaults(BadgeProps, _props);
     try writer.writeAll(size_classes);
     try writer.writeAll(" ");
     try writer.writeAll(variant_classes);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -641,10 +722,16 @@ const props = runtime.withDefaults(BreadcrumbProps, _props);
 
 pub const BreadcrumbListProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn BreadcrumbList(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbListProps, _props);
-    try writer.writeAll("<ol class=\"flex items-center gap-1.5 flex-wrap\">");
+    try writer.writeAll("<ol");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex items-center gap-1.5 flex-wrap ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -653,10 +740,16 @@ const props = runtime.withDefaults(BreadcrumbListProps, _props);
 
 pub const BreadcrumbItemProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn BreadcrumbItem(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbItemProps, _props);
-    try writer.writeAll("<li class=\"inline-flex items-center gap-1.5\">");
+    try writer.writeAll("<li");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("inline-flex items-center gap-1.5 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -666,12 +759,17 @@ const props = runtime.withDefaults(BreadcrumbItemProps, _props);
 pub const BreadcrumbLinkProps = struct {
     href: []const u8 = "#",
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn BreadcrumbLink(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbLinkProps, _props);
-    try writer.writeAll("<a class=\"text-sm text-muted-foreground hover:text-foreground transition-colors\"");
+    try writer.writeAll("<a");
     try writer.writeAll(" href=\"");
     try runtime.render(writer, props.href);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-sm text-muted-foreground hover:text-foreground transition-colors ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -682,30 +780,50 @@ const props = runtime.withDefaults(BreadcrumbLinkProps, _props);
 
 pub const BreadcrumbPageProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn BreadcrumbPage(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbPageProps, _props);
-    try writer.writeAll("<span aria-current=\"page\" class=\"text-sm font-medium text-foreground\">");
+    try writer.writeAll("<span aria-current=\"page\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-sm font-medium text-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
     try writer.writeAll("</span>");
 }
 
-pub const BreadcrumbSeparatorProps = struct {};
-pub fn BreadcrumbSeparator(writer: anytype, props: anytype) !void {
-    _ = props;
-    try writer.writeAll("<li role=\"presentation\" class=\"text-muted-foreground\">");
+pub const BreadcrumbSeparatorProps = struct {
+    class: []const u8 = "",
+};
+pub fn BreadcrumbSeparator(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbSeparatorProps, _props);
+    try writer.writeAll("<li role=\"presentation\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try Icon(writer, .{ .name = .chevron_right,  .size = 14,  .class = "text-muted-foreground" });
     try writer.writeAll("\n");
     try writer.writeAll("</li>");
 }
 
-pub const BreadcrumbEllipsisProps = struct {};
-pub fn BreadcrumbEllipsis(writer: anytype, props: anytype) !void {
-    _ = props;
-    try writer.writeAll("<li class=\"text-sm text-muted-foreground\">");
+pub const BreadcrumbEllipsisProps = struct {
+    class: []const u8 = "",
+};
+pub fn BreadcrumbEllipsis(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(BreadcrumbEllipsisProps, _props);
+    try writer.writeAll("<li");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-sm text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("...");
     try writer.writeAll("</li>");
 }
@@ -1026,6 +1144,7 @@ pub const ButtonProps = struct {
     href: []const u8 = "",
     id: []const u8 = "",
     full_width: bool = false,
+    class: []const u8 = "",
 };
 pub fn Button(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(ButtonProps, _props);
@@ -1094,6 +1213,8 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(focus);
         try writer.writeAll(" ");
         try writer.writeAll(width);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1125,6 +1246,8 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(focus);
         try writer.writeAll(" ");
         try writer.writeAll(width);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" disabled=\"");
         try runtime.render(writer, true);
@@ -1163,6 +1286,8 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(focus);
         try writer.writeAll(" ");
         try writer.writeAll(width);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1207,10 +1332,16 @@ pub const card = struct {
 // ── Sub-components ──────────────────────────────────
 pub const CardProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Card(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CardProps, _props);
-    try writer.writeAll("<div data-publr-component=\"card\" class=\"rounded-lg border border-border bg-card text-card-foreground shadow-sm\">");
+    try writer.writeAll("<div data-publr-component=\"card\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("rounded-lg border border-border bg-card text-card-foreground shadow-sm ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -1219,10 +1350,16 @@ const props = runtime.withDefaults(CardProps, _props);
 
 pub const CardHeaderProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn CardHeader(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CardHeaderProps, _props);
-    try writer.writeAll("<div data-publr-part=\"header\" class=\"flex flex-col space-y-1.5 p-6 pb-0\">");
+    try writer.writeAll("<div data-publr-part=\"header\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex flex-col space-y-1.5 p-6 pb-0 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -1231,30 +1368,48 @@ const props = runtime.withDefaults(CardHeaderProps, _props);
 
 pub const CardTitleProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn CardTitle(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CardTitleProps, _props);
-    try writer.writeAll("<h3 data-publr-part=\"title\" class=\"text-lg font-semibold text-foreground\">");
+    try writer.writeAll("<h3 data-publr-part=\"title\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-lg font-semibold text-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</h3>");
 }
 
 pub const CardDescriptionProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn CardDescription(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CardDescriptionProps, _props);
-    try writer.writeAll("<p data-publr-part=\"description\" class=\"text-sm text-muted-foreground\">");
+    try writer.writeAll("<p data-publr-part=\"description\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-sm text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</p>");
 }
 
 pub const CardActionProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn CardAction(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CardActionProps, _props);
-    try writer.writeAll("<div data-publr-part=\"action\" class=\"ml-auto\">");
+    try writer.writeAll("<div data-publr-part=\"action\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("ml-auto ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -1263,10 +1418,16 @@ const props = runtime.withDefaults(CardActionProps, _props);
 
 pub const CardContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn CardContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CardContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" class=\"p-6\">");
+    try writer.writeAll("<div data-publr-part=\"content\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("p-6 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -1275,10 +1436,16 @@ const props = runtime.withDefaults(CardContentProps, _props);
 
 pub const CardFooterProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn CardFooter(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CardFooterProps, _props);
-    try writer.writeAll("<div data-publr-part=\"footer\" class=\"flex items-center p-6 pt-0\">");
+    try writer.writeAll("<div data-publr-part=\"footer\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex items-center p-6 pt-0 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -1456,6 +1623,7 @@ pub const CheckboxProps = struct {
     checked: CheckedState = .unchecked,
     disabled: bool = false,
     invalid: bool = false,
+    class: []const u8 = "",
 };
 pub fn Checkbox(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(CheckboxProps, _props);
@@ -1471,9 +1639,13 @@ const props = runtime.withDefaults(CheckboxProps, _props);
     const is_checked = props.checked == .checked;
     const is_indeterminate = props.checked == .indeterminate;
     if (props.disabled and is_checked) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\"");
+        try writer.writeAll("<label data-publr-component=\"checkbox\"");
         try writer.writeAll(" data-publr-state=\"");
         try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex items-start gap-2 cursor-not-allowed opacity-50 ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1519,9 +1691,13 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else if (props.disabled and is_indeterminate) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\"");
+        try writer.writeAll("<label data-publr-component=\"checkbox\"");
         try writer.writeAll(" data-publr-state=\"");
         try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex items-start gap-2 cursor-not-allowed opacity-50 ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1564,9 +1740,13 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else if (props.disabled) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\"");
+        try writer.writeAll("<label data-publr-component=\"checkbox\"");
         try writer.writeAll(" data-publr-state=\"");
         try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex items-start gap-2 cursor-not-allowed opacity-50 ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1609,9 +1789,13 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else if (is_checked) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-pointer\"");
+        try writer.writeAll("<label data-publr-component=\"checkbox\"");
         try writer.writeAll(" data-publr-state=\"");
         try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex items-start gap-2 cursor-pointer ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1654,9 +1838,13 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else if (is_indeterminate) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-pointer\"");
+        try writer.writeAll("<label data-publr-component=\"checkbox\"");
         try writer.writeAll(" data-publr-state=\"");
         try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex items-start gap-2 cursor-pointer ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1696,9 +1884,13 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" class=\"flex items-start gap-2 cursor-pointer\"");
+        try writer.writeAll("<label data-publr-component=\"checkbox\"");
         try writer.writeAll(" data-publr-state=\"");
         try runtime.render(writer, state);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex items-start gap-2 cursor-pointer ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -1753,18 +1945,37 @@ pub const Padding = enum { none, sm, md, lg, xl };
 pub const ContainerProps = struct {
     size: ContainerSize = .lg,
     padding: Padding = .lg,
+    class: []const u8 = "",
     children: []const u8 = "",
 };
 pub fn Container(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(ContainerProps, _props);
-    const size_class = if (props.size == .sm) "max-w-lg" else if (props.size == .md) "max-w-3xl" else if (props.size == .lg) "max-w-5xl" else if (props.size == .xl) "max-w-7xl" else "max-w-full";
-    const pad = if (props.padding == .none) "" else if (props.padding == .sm) "px-3 py-2" else if (props.padding == .md) "px-4 py-3" else if (props.padding == .lg) "px-6 py-4" else "px-8 py-6";
+    const base = "w-full mx-auto";
+
+    const size_class = switch (props.size) {
+        .sm => "max-w-lg",
+        .md => "max-w-3xl",
+        .lg => "max-w-5xl",
+        .xl => "max-w-7xl",
+        .full => "max-w-full",
+    };
+
+    const pad = switch (props.padding) {
+        .none => "",
+        .sm => "px-3 py-2",
+        .md => "px-4 py-3",
+        .lg => "px-6 py-4",
+        .xl => "px-8 py-6",
+    };
     try writer.writeAll("<div data-publr-component=\"container\"");
     try writer.writeAll(" class=\"");
-    try writer.writeAll("w-full mx-auto ");
+    try writer.writeAll(base);
+    try writer.writeAll(" ");
     try writer.writeAll(size_class);
     try writer.writeAll(" ");
     try writer.writeAll(pad);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -1808,15 +2019,20 @@ pub const DialogProps = struct {
     id: []const u8 = "",
     dismissable: bool = true,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Dialog(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogProps, _props);
-    try writer.writeAll("<div data-publr-component=\"dialog\" data-publr-state=\"closed\" class=\"group inline-block\"");
+    try writer.writeAll("<div data-publr-component=\"dialog\" data-publr-state=\"closed\"");
     try writer.writeAll(" data-publr-id=\"");
     try runtime.render(writer, props.id);
     try writer.writeAll("\"");
     try writer.writeAll(" data-publr-dismissable=\"");
     try runtime.render(writer, if (props.dismissable) "true" else "false");
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("group inline-block ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -1839,10 +2055,16 @@ const props = runtime.withDefaults(DialogTriggerProps, _props);
 
 pub const DialogOverlayProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DialogOverlay(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogOverlayProps, _props);
-    try writer.writeAll("<div data-publr-part=\"overlay\" class=\"fixed inset-0 z-50 flex items-center justify-center bg-black/50 opacity-0 pointer-events-none transition-opacity group-data-[publr-state=open]:opacity-100 group-data-[publr-state=open]:pointer-events-auto\">");
+    try writer.writeAll("<div data-publr-part=\"overlay\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("fixed inset-0 z-50 flex items-center justify-center bg-black/50 opacity-0 pointer-events-none transition-opacity group-data-[publr-state=open]:opacity-100 group-data-[publr-state=open]:pointer-events-auto ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -1851,10 +2073,16 @@ const props = runtime.withDefaults(DialogOverlayProps, _props);
 
 pub const DialogContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DialogContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"publr-dialog-title\" aria-describedby=\"publr-dialog-description\" class=\"bg-popover text-popover-foreground rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border border-border\">");
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"publr-dialog-title\" aria-describedby=\"publr-dialog-description\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("bg-popover text-popover-foreground rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border border-border ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -1875,20 +2103,32 @@ const props = runtime.withDefaults(DialogCloseProps, _props);
 
 pub const DialogTitleProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DialogTitle(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogTitleProps, _props);
-    try writer.writeAll("<h3 id=\"publr-dialog-title\" data-publr-part=\"title\" class=\"text-lg font-semibold text-foreground\">");
+    try writer.writeAll("<h3 id=\"publr-dialog-title\" data-publr-part=\"title\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-lg font-semibold text-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</h3>");
 }
 
 pub const DialogDescriptionProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DialogDescription(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogDescriptionProps, _props);
-    try writer.writeAll("<p id=\"publr-dialog-description\" data-publr-part=\"description\" class=\"mt-2 text-sm text-muted-foreground\">");
+    try writer.writeAll("<p id=\"publr-dialog-description\" data-publr-part=\"description\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mt-2 text-sm text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</p>");
 }
@@ -2119,10 +2359,16 @@ pub const Icon = root.icon.Icon;
 // ── Sub-components ──────────────────────────────────
 pub const DropdownMenuProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DropdownMenu(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuProps, _props);
-    try writer.writeAll("<div data-publr-component=\"dropdown\" data-publr-state=\"closed\" class=\"group relative inline-block\">");
+    try writer.writeAll("<div data-publr-component=\"dropdown\" data-publr-state=\"closed\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("group relative inline-block ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2143,10 +2389,16 @@ const props = runtime.withDefaults(DropdownMenuTriggerProps, _props);
 
 pub const DropdownMenuContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DropdownMenuContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" role=\"menu\" class=\"hidden group-data-[publr-state=open]:block min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg\">");
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"menu\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("hidden group-data-[publr-state=open]:block min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2165,10 +2417,16 @@ const props = runtime.withDefaults(DropdownMenuGroupProps, _props);
 
 pub const DropdownMenuLabelProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DropdownMenuLabel(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuLabelProps, _props);
-    try writer.writeAll("<span data-publr-part=\"label\" class=\"block px-2 py-1.5 text-xs font-semibold text-muted-foreground\">");
+    try writer.writeAll("<span data-publr-part=\"label\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("block px-2 py-1.5 text-xs font-semibold text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2181,6 +2439,7 @@ pub const DropdownMenuItemProps = struct {
     disabled: bool = false,
     href: []const u8 = "",
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn DropdownMenuItem(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuItemProps, _props);
@@ -2204,7 +2463,9 @@ const props = runtime.withDefaults(DropdownMenuItemProps, _props);
         try runtime.render(writer, props.href);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, item_class);
+        try writer.writeAll(item_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -2220,7 +2481,9 @@ const props = runtime.withDefaults(DropdownMenuItemProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, item_class);
+        try writer.writeAll(item_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" disabled=\"");
         try runtime.render(writer, true);
@@ -2239,7 +2502,9 @@ const props = runtime.withDefaults(DropdownMenuItemProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, item_class);
+        try writer.writeAll(item_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -2249,10 +2514,17 @@ const props = runtime.withDefaults(DropdownMenuItemProps, _props);
     }
 }
 
-pub const DropdownMenuSeparatorProps = struct {};
-pub fn DropdownMenuSeparator(writer: anytype, props: anytype) !void {
-    _ = props;
-    try writer.writeAll("<div data-publr-part=\"separator\" role=\"separator\" class=\"my-1 h-px bg-border\">");
+pub const DropdownMenuSeparatorProps = struct {
+    class: []const u8 = "",
+};
+pub fn DropdownMenuSeparator(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DropdownMenuSeparatorProps, _props);
+    try writer.writeAll("<div data-publr-part=\"separator\" role=\"separator\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("my-1 h-px bg-border ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("</div>");
 }
 
@@ -2474,10 +2746,16 @@ pub const Button = root.button.Button;
 // ── Sub-components ──────────────────────────────────
 pub const EmptyProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Empty(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(EmptyProps, _props);
-    try writer.writeAll("<div data-publr-component=\"empty\" class=\"flex flex-col items-center justify-center py-12 px-4 text-center\">");
+    try writer.writeAll("<div data-publr-component=\"empty\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex flex-col items-center justify-center py-12 px-4 text-center ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2487,13 +2765,16 @@ const props = runtime.withDefaults(EmptyProps, _props);
 pub const EmptyMediaProps = struct {
     variant: enum { default, icon } = .default,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn EmptyMedia(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(EmptyMediaProps, _props);
     const wrapper_class = if (props.variant == .icon) "rounded-full bg-muted p-3 mb-4" else "mb-4";
     try writer.writeAll("<div data-publr-part=\"media\"");
     try writer.writeAll(" class=\"");
-    try runtime.render(writer, wrapper_class);
+    try writer.writeAll(wrapper_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -2504,30 +2785,48 @@ const props = runtime.withDefaults(EmptyMediaProps, _props);
 
 pub const EmptyTitleProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn EmptyTitle(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(EmptyTitleProps, _props);
-    try writer.writeAll("<h3 data-publr-part=\"title\" class=\"text-lg font-semibold text-foreground\">");
+    try writer.writeAll("<h3 data-publr-part=\"title\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-lg font-semibold text-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</h3>");
 }
 
 pub const EmptyDescriptionProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn EmptyDescription(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(EmptyDescriptionProps, _props);
-    try writer.writeAll("<p data-publr-part=\"description\" class=\"mt-1 text-sm text-muted-foreground max-w-sm\">");
+    try writer.writeAll("<p data-publr-part=\"description\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mt-1 text-sm text-muted-foreground max-w-sm ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</p>");
 }
 
 pub const EmptyContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn EmptyContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(EmptyContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" class=\"mt-4\">");
+    try writer.writeAll("<div data-publr-part=\"content\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mt-4 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2653,10 +2952,16 @@ pub const form_field = struct {
 // ── Sub-components ──────────────────────────────────
 pub const FieldSetProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldSet(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldSetProps, _props);
-    try writer.writeAll("<fieldset data-publr-component=\"field-set\" class=\"space-y-6\">");
+    try writer.writeAll("<fieldset data-publr-component=\"field-set\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("space-y-6 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2667,6 +2972,7 @@ pub const LegendVariant = enum { legend, label };
 pub const FieldLegendProps = struct {
     variant: LegendVariant = .legend,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldLegend(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldLegendProps, _props);
@@ -2676,7 +2982,9 @@ const props = runtime.withDefaults(FieldLegendProps, _props);
         "text-lg font-semibold text-foreground";
     try writer.writeAll("<legend");
     try writer.writeAll(" class=\"");
-    try runtime.render(writer, cls);
+    try writer.writeAll(cls);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll(props.children);
@@ -2685,10 +2993,16 @@ const props = runtime.withDefaults(FieldLegendProps, _props);
 
 pub const FieldGroupProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldGroup(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldGroupProps, _props);
-    try writer.writeAll("<div data-publr-component=\"field-group\" class=\"flex flex-col gap-4\">");
+    try writer.writeAll("<div data-publr-component=\"field-group\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex flex-col gap-4 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2700,6 +3014,7 @@ pub const FieldProps = struct {
     orientation: Orientation = .vertical,
     invalid: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Field(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldProps, _props);
@@ -2714,7 +3029,9 @@ const props = runtime.withDefaults(FieldProps, _props);
     try runtime.render(writer, invalid_attr);
     try writer.writeAll("\"");
     try writer.writeAll(" class=\"");
-    try runtime.render(writer, layout);
+    try writer.writeAll(layout);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -2725,10 +3042,16 @@ const props = runtime.withDefaults(FieldProps, _props);
 
 pub const FieldContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldContentProps, _props);
-    try writer.writeAll("<div class=\"flex flex-col gap-0.5\">");
+    try writer.writeAll("<div");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex flex-col gap-0.5 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -2739,14 +3062,19 @@ pub const FieldLabelProps = struct {
     html_for: []const u8 = "",
     required: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldLabel(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldLabelProps, _props);
     const has_for = props.html_for.len > 0;
     if (has_for and props.required) {
-        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\"");
+        try writer.writeAll("<label");
         try writer.writeAll(" for=\"");
         try runtime.render(writer, props.html_for);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-sm font-medium text-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -2758,9 +3086,13 @@ const props = runtime.withDefaults(FieldLabelProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else if (has_for) {
-        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\"");
+        try writer.writeAll("<label");
         try writer.writeAll(" for=\"");
         try runtime.render(writer, props.html_for);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-sm font-medium text-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -2768,7 +3100,12 @@ const props = runtime.withDefaults(FieldLabelProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else if (props.required) {
-        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\">");
+        try writer.writeAll("<label");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-sm font-medium text-foreground ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
         try writer.writeAll("\n");
         try writer.writeAll(props.children);
         try writer.writeAll("\n");
@@ -2778,7 +3115,12 @@ const props = runtime.withDefaults(FieldLabelProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</label>");
     } else {
-        try writer.writeAll("<label class=\"text-sm font-medium text-foreground\">");
+        try writer.writeAll("<label");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("text-sm font-medium text-foreground ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
         try writer.writeAll("\n");
         try writer.writeAll(props.children);
         try writer.writeAll("\n");
@@ -2788,22 +3130,34 @@ const props = runtime.withDefaults(FieldLabelProps, _props);
 
 pub const FieldDescriptionProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldDescription(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldDescriptionProps, _props);
-    try writer.writeAll("<p class=\"text-xs text-muted-foreground\">");
+    try writer.writeAll("<p");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-xs text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</p>");
 }
 
 pub const FieldSeparatorProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldSeparator(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldSeparatorProps, _props);
     const has_children = props.children.len > 0;
     if (has_children) {
-        try writer.writeAll("<div class=\"relative my-4\">");
+        try writer.writeAll("<div");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("relative my-4 ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
         try writer.writeAll("\n");
         try writer.writeAll("<div class=\"absolute inset-0 flex items-center\">");
         try writer.writeAll("<span class=\"w-full border-t border-border\">");
@@ -2820,17 +3174,28 @@ const props = runtime.withDefaults(FieldSeparatorProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</div>");
     } else {
-        try writer.writeAll("<div class=\"my-4 h-px bg-border\">");
+        try writer.writeAll("<div");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("my-4 h-px bg-border ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
         try writer.writeAll("</div>");
     }
 }
 
 pub const FieldErrorProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn FieldError(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FieldErrorProps, _props);
-    try writer.writeAll("<p class=\"text-xs text-error\" role=\"alert\">");
+    try writer.writeAll("<p role=\"alert\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-xs text-error ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</p>");
 }
@@ -2987,40 +3352,59 @@ const props = runtime.withDefaults(FieldDemoProps, _props);
 
 pub const flex = struct {
 
-/// Flex — generic flexbox container.
+/// Flex — horizontal layout shorthand.
 ///
 /// Usage:
-///   <Flex justify=.between items=.center gap=.md>
-///       <Heading level=.h1 size=.lg>Title</Heading>
-///       <Button label="Create" />
-///   </Flex>
+///   <Flex justify=.between items=.center gap=.md>left right</Flex>
+///   <Flex gap=.sm border=.bottom padding=.lg>toolbar items</Flex>
 pub const Gap = enum { none, xs, sm, md, lg, xl, @"2xl" };
 pub const Align = enum { start, center, end, stretch, baseline };
-pub const Justify = enum { start, center, end, between, around };
+pub const Justify = enum { start, center, end, between };
 pub const Wrap = enum { nowrap, wrap };
+pub const Border = enum { none, bottom, top, left, right, all };
+pub const Background = enum { none, default, muted, card };
 pub const FlexProps = struct {
     gap: Gap = .none,
     items: Align = .center,
     justify: Justify = .start,
     wrap: Wrap = .nowrap,
+    padding: Gap = .none,
+    border: Border = .none,
+    background: Background = .none,
+    grow: bool = false,
+    class: []const u8 = "",
     children: []const u8 = "",
 };
 pub fn Flex(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(FlexProps, _props);
-    const gap_class = if (props.gap == .none) "" else if (props.gap == .xs) "gap-1" else if (props.gap == .sm) "gap-2" else if (props.gap == .md) "gap-3" else if (props.gap == .lg) "gap-4" else if (props.gap == .xl) "gap-6" else "gap-8";
-    const align_class = if (props.items == .start) "items-start" else if (props.items == .center) "items-center" else if (props.items == .end) "items-end" else if (props.items == .baseline) "items-baseline" else "items-stretch";
-    const justify_class = if (props.justify == .start) "" else if (props.justify == .center) "justify-center" else if (props.justify == .end) "justify-end" else if (props.justify == .between) "justify-between" else "justify-around";
-    const wrap_class = if (props.wrap == .wrap) "flex-wrap" else "";
+    const gap_c = if (props.gap == .none) "" else if (props.gap == .xs) "gap-1" else if (props.gap == .sm) "gap-2" else if (props.gap == .md) "gap-3" else if (props.gap == .lg) "gap-4" else if (props.gap == .xl) "gap-6" else "gap-8";
+    const items_c = if (props.items == .start) "items-start" else if (props.items == .center) "items-center" else if (props.items == .end) "items-end" else if (props.items == .baseline) "items-baseline" else "items-stretch";
+    const justify_c = if (props.justify == .center) "justify-center" else if (props.justify == .end) "justify-end" else if (props.justify == .between) "justify-between" else "";
+    const wrap_c = if (props.wrap == .wrap) "flex-wrap" else "";
+    const pad_c = if (props.padding == .none) "" else if (props.padding == .xs) "p-1" else if (props.padding == .sm) "p-2" else if (props.padding == .md) "p-3" else if (props.padding == .lg) "p-4" else if (props.padding == .xl) "p-6" else "p-8";
+    const border_c = if (props.border == .bottom) "border-b border-border" else if (props.border == .top) "border-t border-border" else if (props.border == .left) "border-l border-border" else if (props.border == .right) "border-r border-border" else if (props.border == .all) "border border-border" else "";
+    const bg_c = if (props.background == .default) "bg-background" else if (props.background == .muted) "bg-muted" else if (props.background == .card) "bg-card" else "";
+    const grow_c = if (props.grow) "flex-1 min-w-0" else "";
     try writer.writeAll("<div data-publr-component=\"flex\"");
     try writer.writeAll(" class=\"");
     try writer.writeAll("flex flex-row ");
-    try writer.writeAll(gap_class);
+    try writer.writeAll(gap_c);
     try writer.writeAll(" ");
-    try writer.writeAll(align_class);
+    try writer.writeAll(items_c);
     try writer.writeAll(" ");
-    try writer.writeAll(justify_class);
+    try writer.writeAll(justify_c);
     try writer.writeAll(" ");
-    try writer.writeAll(wrap_class);
+    try writer.writeAll(wrap_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(pad_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(border_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(bg_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(grow_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -3042,6 +3426,7 @@ pub const Gap = enum { none, xs, sm, md, lg, xl, @"2xl" };
 pub const GridProps = struct {
     columns: Columns = .three,
     gap: Gap = .lg,
+    class: []const u8 = "",
     children: []const u8 = "",
 };
 pub fn Grid(writer: anytype, _props: anytype) !void {
@@ -3054,6 +3439,8 @@ const props = runtime.withDefaults(GridProps, _props);
     try writer.writeAll(cols);
     try writer.writeAll(" ");
     try writer.writeAll(gap_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -3076,15 +3463,18 @@ pub const HeadingSize = enum { xs, sm, md, lg, xl };
 pub const HeadingProps = struct {
     level: Level = .h2,
     size: HeadingSize = .md,
+    class: []const u8 = "",
     children: []const u8 = "",
 };
 pub fn Heading(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(HeadingProps, _props);
-    const class = if (props.size == .xs) "text-sm font-semibold tracking-tight text-foreground" else if (props.size == .sm) "text-md font-semibold tracking-tight text-foreground" else if (props.size == .md) "text-lg font-semibold tracking-tight text-foreground" else if (props.size == .lg) "text-xl font-semibold tracking-tight text-foreground" else "text-2xl font-bold tracking-tight text-foreground";
+    const base_class = if (props.size == .xs) "text-sm font-semibold tracking-tight text-foreground" else if (props.size == .sm) "text-md font-semibold tracking-tight text-foreground" else if (props.size == .md) "text-lg font-semibold tracking-tight text-foreground" else if (props.size == .lg) "text-xl font-semibold tracking-tight text-foreground" else "text-2xl font-bold tracking-tight text-foreground";
     if (props.level == .h1) {
         try writer.writeAll("<h1 data-publr-component=\"heading\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(base_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -3092,7 +3482,9 @@ const props = runtime.withDefaults(HeadingProps, _props);
     } else if (props.level == .h2) {
         try writer.writeAll("<h2 data-publr-component=\"heading\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(base_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -3100,7 +3492,9 @@ const props = runtime.withDefaults(HeadingProps, _props);
     } else if (props.level == .h3) {
         try writer.writeAll("<h3 data-publr-component=\"heading\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(base_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -3108,7 +3502,9 @@ const props = runtime.withDefaults(HeadingProps, _props);
     } else if (props.level == .h4) {
         try writer.writeAll("<h4 data-publr-component=\"heading\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(base_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -3116,7 +3512,9 @@ const props = runtime.withDefaults(HeadingProps, _props);
     } else if (props.level == .h5) {
         try writer.writeAll("<h5 data-publr-component=\"heading\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(base_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -3124,7 +3522,9 @@ const props = runtime.withDefaults(HeadingProps, _props);
     } else {
         try writer.writeAll("<h6 data-publr-component=\"heading\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(base_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -3208,10 +3608,16 @@ pub const Icon = root.icon.Icon;
 // ── Sub-components ──────────────────────────────────
 pub const InputGroupProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn InputGroup(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputGroupProps, _props);
-    try writer.writeAll("<div data-publr-component=\"input-group\" class=\"relative flex items-center\">");
+    try writer.writeAll("<div data-publr-component=\"input-group\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("relative flex items-center ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -3222,6 +3628,7 @@ pub const AddonAlign = enum { inline_start, inline_end };
 pub const InputGroupAddonProps = struct {
     align_to: AddonAlign = .inline_start,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn InputGroupAddon(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputGroupAddonProps, _props);
@@ -3231,7 +3638,9 @@ const props = runtime.withDefaults(InputGroupAddonProps, _props);
         "absolute left-0 inset-y-0 flex items-center pl-3 pointer-events-none";
     try writer.writeAll("<div data-publr-part=\"addon\"");
     try writer.writeAll(" class=\"");
-    try runtime.render(writer, cls);
+    try writer.writeAll(cls);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -3246,6 +3655,7 @@ pub const InputGroupInputProps = struct {
     has_start_addon: bool = false,
     has_end_addon: bool = false,
     disabled: bool = false,
+    class: []const u8 = "",
 };
 pub fn InputGroupInput(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputGroupInputProps, _props);
@@ -3264,6 +3674,8 @@ const props = runtime.withDefaults(InputGroupInputProps, _props);
         try writer.writeAll(" class=\"");
         try writer.writeAll("flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ");
         try writer.writeAll(padding);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" disabled=\"");
         try runtime.render(writer, true);
@@ -3280,6 +3692,8 @@ const props = runtime.withDefaults(InputGroupInputProps, _props);
         try writer.writeAll(" class=\"");
         try writer.writeAll("flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ");
         try writer.writeAll(padding);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
     }
@@ -3289,16 +3703,21 @@ pub const InputGroupTextareaProps = struct {
     placeholder: []const u8 = "",
     name: []const u8 = "",
     disabled: bool = false,
+    class: []const u8 = "",
 };
 pub fn InputGroupTextarea(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputGroupTextareaProps, _props);
     if (props.disabled) {
-        try writer.writeAll("<textarea data-publr-part=\"textarea\" class=\"flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y\"");
+        try writer.writeAll("<textarea data-publr-part=\"textarea\"");
         try writer.writeAll(" name=\"");
         try runtime.render(writer, props.name);
         try writer.writeAll("\"");
         try writer.writeAll(" placeholder=\"");
         try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" disabled=\"");
         try runtime.render(writer, true);
@@ -3306,12 +3725,16 @@ const props = runtime.withDefaults(InputGroupTextareaProps, _props);
         try writer.writeAll(">");
         try writer.writeAll("</textarea>");
     } else {
-        try writer.writeAll("<textarea data-publr-part=\"textarea\" class=\"flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y\"");
+        try writer.writeAll("<textarea data-publr-part=\"textarea\"");
         try writer.writeAll(" name=\"");
         try runtime.render(writer, props.name);
         try writer.writeAll("\"");
         try writer.writeAll(" placeholder=\"");
         try runtime.render(writer, props.placeholder);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("</textarea>");
@@ -3320,10 +3743,16 @@ const props = runtime.withDefaults(InputGroupTextareaProps, _props);
 
 pub const InputGroupButtonProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn InputGroupButton(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputGroupButtonProps, _props);
-    try writer.writeAll("<button data-publr-part=\"button\" class=\"inline-flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors pointer-events-auto\">");
+    try writer.writeAll("<button data-publr-part=\"button\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("inline-flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors pointer-events-auto ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -3332,10 +3761,16 @@ const props = runtime.withDefaults(InputGroupButtonProps, _props);
 
 pub const InputGroupTextProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn InputGroupText(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputGroupTextProps, _props);
-    try writer.writeAll("<span class=\"text-sm text-muted-foreground\">");
+    try writer.writeAll("<span");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-sm text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</span>");
 }
@@ -3446,6 +3881,7 @@ pub const InputProps = struct {
     disabled: bool = false,
     invalid: bool = false,
     required: bool = false,
+    class: []const u8 = "",
 };
 pub fn Input(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputProps, _props);
@@ -3474,6 +3910,8 @@ const props = runtime.withDefaults(InputProps, _props);
         try writer.writeAll(base);
         try writer.writeAll(" ");
         try writer.writeAll(border);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" aria-invalid=\"");
         try runtime.render(writer, if (props.invalid) "true" else "false");
@@ -3503,6 +3941,8 @@ const props = runtime.withDefaults(InputProps, _props);
         try writer.writeAll(base);
         try writer.writeAll(" ");
         try writer.writeAll(border);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" aria-invalid=\"");
         try runtime.render(writer, if (props.invalid) "true" else "false");
@@ -3529,6 +3969,8 @@ const props = runtime.withDefaults(InputProps, _props);
         try writer.writeAll(base);
         try writer.writeAll(" ");
         try writer.writeAll(border);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" aria-invalid=\"");
         try runtime.render(writer, if (props.invalid) "true" else "false");
@@ -3555,6 +3997,8 @@ const props = runtime.withDefaults(InputProps, _props);
         try writer.writeAll(base);
         try writer.writeAll(" ");
         try writer.writeAll(border);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" aria-invalid=\"");
         try runtime.render(writer, if (props.invalid) "true" else "false");
@@ -3570,6 +4014,7 @@ pub const TextareaProps = struct {
     disabled: bool = false,
     invalid: bool = false,
     required: bool = false,
+    class: []const u8 = "",
 };
 pub fn Textarea(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TextareaProps, _props);
@@ -3585,6 +4030,8 @@ const props = runtime.withDefaults(TextareaProps, _props);
         try writer.writeAll(" class=\"");
         try writer.writeAll("flex w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(border);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" aria-invalid=\"");
         try runtime.render(writer, if (props.invalid) "true" else "false");
@@ -3606,6 +4053,8 @@ const props = runtime.withDefaults(TextareaProps, _props);
         try writer.writeAll(" class=\"");
         try writer.writeAll("flex w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(border);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" aria-invalid=\"");
         try runtime.render(writer, if (props.invalid) "true" else "false");
@@ -3658,10 +4107,16 @@ const props = runtime.withDefaults(PaginationProps, _props);
 
 pub const PaginationContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn PaginationContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PaginationContentProps, _props);
-    try writer.writeAll("<ul class=\"flex items-center gap-1\">");
+    try writer.writeAll("<ul");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex items-center gap-1 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -3682,6 +4137,7 @@ pub const PaginationLinkProps = struct {
     href: []const u8 = "#",
     is_active: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn PaginationLink(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PaginationLinkProps, _props);
@@ -3690,7 +4146,8 @@ const props = runtime.withDefaults(PaginationLinkProps, _props);
         try writer.writeAll("<span aria-current=\"page\"");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" bg-accent text-accent-foreground");
+        try writer.writeAll(" bg-accent text-accent-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -3704,7 +4161,8 @@ const props = runtime.withDefaults(PaginationLinkProps, _props);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground");
+        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -3717,6 +4175,7 @@ const props = runtime.withDefaults(PaginationLinkProps, _props);
 pub const PaginationPreviousProps = struct {
     href: []const u8 = "#",
     disabled: bool = false,
+    class: []const u8 = "",
 };
 pub fn PaginationPrevious(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PaginationPreviousProps, _props);
@@ -3725,7 +4184,8 @@ const props = runtime.withDefaults(PaginationPreviousProps, _props);
         try writer.writeAll("<span");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" text-muted-foreground opacity-50 cursor-not-allowed");
+        try writer.writeAll(" text-muted-foreground opacity-50 cursor-not-allowed ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -3739,7 +4199,8 @@ const props = runtime.withDefaults(PaginationPreviousProps, _props);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground");
+        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -3752,6 +4213,7 @@ const props = runtime.withDefaults(PaginationPreviousProps, _props);
 pub const PaginationNextProps = struct {
     href: []const u8 = "#",
     disabled: bool = false,
+    class: []const u8 = "",
 };
 pub fn PaginationNext(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PaginationNextProps, _props);
@@ -3760,7 +4222,8 @@ const props = runtime.withDefaults(PaginationNextProps, _props);
         try writer.writeAll("<span");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" text-muted-foreground opacity-50 cursor-not-allowed");
+        try writer.writeAll(" text-muted-foreground opacity-50 cursor-not-allowed ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -3774,7 +4237,8 @@ const props = runtime.withDefaults(PaginationNextProps, _props);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground");
+        try writer.writeAll(" text-muted-foreground hover:bg-accent/50 hover:text-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -3784,10 +4248,17 @@ const props = runtime.withDefaults(PaginationNextProps, _props);
     }
 }
 
-pub const PaginationEllipsisProps = struct {};
-pub fn PaginationEllipsis(writer: anytype, props: anytype) !void {
-    _ = props;
-    try writer.writeAll("<span class=\"inline-flex items-center justify-center h-8 w-8 text-sm text-muted-foreground\">");
+pub const PaginationEllipsisProps = struct {
+    class: []const u8 = "",
+};
+pub fn PaginationEllipsis(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PaginationEllipsisProps, _props);
+    try writer.writeAll("<span");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("inline-flex items-center justify-center h-8 w-8 text-sm text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("...");
     try writer.writeAll("</span>");
 }
@@ -4118,12 +4589,17 @@ pub const Button = root.button.Button;
 pub const PopoverProps = struct {
     modal: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Popover(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverProps, _props);
-    try writer.writeAll("<div data-publr-component=\"popover\" data-publr-state=\"closed\" class=\"group relative inline-block\"");
+    try writer.writeAll("<div data-publr-component=\"popover\" data-publr-state=\"closed\"");
     try writer.writeAll(" data-publr-modal=\"");
     try runtime.render(writer, props.modal);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("group relative inline-block ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -4153,10 +4629,11 @@ pub const PopoverContentProps = struct {
     align_offset: u16 = 0,
     avoid_collisions: bool = true,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn PopoverContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" role=\"dialog\" class=\"hidden group-data-[publr-state=open]:block w-72 rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md\"");
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"dialog\"");
     try writer.writeAll(" data-publr-side=\"");
     try runtime.render(writer, props.side);
     try writer.writeAll("\"");
@@ -4172,6 +4649,10 @@ const props = runtime.withDefaults(PopoverContentProps, _props);
     try writer.writeAll(" data-publr-avoid-collisions=\"");
     try runtime.render(writer, props.avoid_collisions);
     try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("hidden group-data-[publr-state=open]:block w-72 rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
@@ -4181,10 +4662,16 @@ const props = runtime.withDefaults(PopoverContentProps, _props);
 
 pub const PopoverHeaderProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn PopoverHeader(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverHeaderProps, _props);
-    try writer.writeAll("<div data-publr-part=\"header\" class=\"mb-3\">");
+    try writer.writeAll("<div data-publr-part=\"header\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mb-3 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -4193,40 +4680,65 @@ const props = runtime.withDefaults(PopoverHeaderProps, _props);
 
 pub const PopoverTitleProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn PopoverTitle(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverTitleProps, _props);
-    try writer.writeAll("<h4 data-publr-part=\"title\" class=\"text-sm font-semibold text-foreground\">");
+    try writer.writeAll("<h4 data-publr-part=\"title\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-sm font-semibold text-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</h4>");
 }
 
 pub const PopoverDescriptionProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn PopoverDescription(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverDescriptionProps, _props);
-    try writer.writeAll("<p data-publr-part=\"description\" class=\"text-sm text-muted-foreground\">");
+    try writer.writeAll("<p data-publr-part=\"description\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-sm text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</p>");
 }
 
 pub const PopoverCloseProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn PopoverClose(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverCloseProps, _props);
-    try writer.writeAll("<button data-publr-part=\"close\" class=\"text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">");
+    try writer.writeAll("<button data-publr-part=\"close\" aria-label=\"Close\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-muted-foreground hover:text-foreground transition-colors ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
     try writer.writeAll("</button>");
 }
 
-pub const PopoverArrowProps = struct {};
-pub fn PopoverArrow(writer: anytype, props: anytype) !void {
-    _ = props;
-    try writer.writeAll("<div data-publr-part=\"arrow\" class=\"absolute w-2.5 h-2.5 bg-popover border border-border rotate-45\">");
+pub const PopoverArrowProps = struct {
+    class: []const u8 = "",
+};
+pub fn PopoverArrow(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(PopoverArrowProps, _props);
+    try writer.writeAll("<div data-publr-part=\"arrow\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("absolute w-2.5 h-2.5 bg-popover border border-border rotate-45 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("</div>");
 }
 
@@ -4401,6 +4913,7 @@ pub const RadioGroupProps = struct {
     orientation: Orientation = .vertical,
     disabled: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn RadioGroup(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(RadioGroupProps, _props);
@@ -4411,9 +4924,13 @@ const props = runtime.withDefaults(RadioGroupProps, _props);
 
     const has_legend = props.legend.len > 0;
     if (props.disabled) {
-        try writer.writeAll("<fieldset data-publr-component=\"radio-group\" class=\"space-y-3\"");
+        try writer.writeAll("<fieldset data-publr-component=\"radio-group\"");
         try writer.writeAll(" data-publr-name=\"");
         try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("space-y-3 ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" disabled=\"");
         try runtime.render(writer, true);
@@ -4438,9 +4955,13 @@ const props = runtime.withDefaults(RadioGroupProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</fieldset>");
     } else {
-        try writer.writeAll("<fieldset data-publr-component=\"radio-group\" class=\"space-y-3\"");
+        try writer.writeAll("<fieldset data-publr-component=\"radio-group\"");
         try writer.writeAll(" data-publr-name=\"");
         try runtime.render(writer, props.name);
+        try writer.writeAll("\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("space-y-3 ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -4470,6 +4991,7 @@ pub const RadioGroupItemProps = struct {
     description: []const u8 = "",
     name: []const u8 = "",
     disabled: bool = false,
+    class: []const u8 = "",
 };
 pub fn RadioGroupItem(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(RadioGroupItemProps, _props);
@@ -4477,7 +4999,12 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
     const radio_class = "mt-0.5 h-4 w-4 shrink-0 rounded-full border border-input bg-background text-primary accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
     if (props.disabled) {
         if (props.name.len > 0) {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\">");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\"");
+            try writer.writeAll(" class=\"");
+            try writer.writeAll("flex items-start gap-2 cursor-not-allowed opacity-50 ");
+            try writer.writeAll(props.class);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
             try writer.writeAll("\n");
             try writer.writeAll("<input type=\"radio\"");
             try writer.writeAll(" name=\"");
@@ -4510,7 +5037,12 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
             try writer.writeAll("\n");
             try writer.writeAll("</label>");
         } else {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50\">");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\"");
+            try writer.writeAll(" class=\"");
+            try writer.writeAll("flex items-start gap-2 cursor-not-allowed opacity-50 ");
+            try writer.writeAll(props.class);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
             try writer.writeAll("\n");
             try writer.writeAll("<input type=\"radio\"");
             try writer.writeAll(" value=\"");
@@ -4542,7 +5074,12 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
         }
     } else {
         if (props.name.len > 0) {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-pointer\">");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\"");
+            try writer.writeAll(" class=\"");
+            try writer.writeAll("flex items-start gap-2 cursor-pointer ");
+            try writer.writeAll(props.class);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
             try writer.writeAll("\n");
             try writer.writeAll("<input type=\"radio\"");
             try writer.writeAll(" name=\"");
@@ -4572,7 +5109,12 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
             try writer.writeAll("\n");
             try writer.writeAll("</label>");
         } else {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-pointer\">");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\"");
+            try writer.writeAll(" class=\"");
+            try writer.writeAll("flex items-start gap-2 cursor-pointer ");
+            try writer.writeAll(props.class);
+            try writer.writeAll("\"");
+            try writer.writeAll(">");
             try writer.writeAll("\n");
             try writer.writeAll("<input type=\"radio\"");
             try writer.writeAll(" value=\"");
@@ -4676,12 +5218,17 @@ pub const SelectProps = struct {
     name: []const u8 = "",
     default_value: []const u8 = "",
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Select(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectProps, _props);
-    try writer.writeAll("<div data-publr-component=\"select\" data-publr-state=\"closed\" class=\"inline-block\"");
+    try writer.writeAll("<div data-publr-component=\"select\" data-publr-state=\"closed\"");
     try writer.writeAll(" data-publr-default-value=\"");
     try runtime.render(writer, props.default_value);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("inline-block ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -4702,6 +5249,7 @@ const props = runtime.withDefaults(SelectProps, _props);
 pub const SelectTriggerProps = struct {
     children: []const u8 = "",
     disabled: bool = false,
+    class: []const u8 = "",
 };
 pub fn SelectTrigger(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectTriggerProps, _props);
@@ -4709,7 +5257,9 @@ const props = runtime.withDefaults(SelectTriggerProps, _props);
     if (props.disabled) {
         try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" aria-expanded=\"false\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, base);
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" disabled=\"");
         try runtime.render(writer, true);
@@ -4724,7 +5274,9 @@ const props = runtime.withDefaults(SelectTriggerProps, _props);
     } else {
         try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" aria-expanded=\"false\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, base);
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -4738,10 +5290,16 @@ const props = runtime.withDefaults(SelectTriggerProps, _props);
 
 pub const SelectValueProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SelectValue(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectValueProps, _props);
-    try writer.writeAll("<span class=\"text-muted-foreground truncate\" data-publr-part=\"label\">");
+    try writer.writeAll("<span data-publr-part=\"label\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("text-muted-foreground truncate ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -4750,10 +5308,16 @@ const props = runtime.withDefaults(SelectValueProps, _props);
 
 pub const SelectContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SelectContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" role=\"listbox\" class=\"hidden min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg\">");
+    try writer.writeAll("<div data-publr-part=\"content\" role=\"listbox\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("hidden min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -4772,10 +5336,16 @@ const props = runtime.withDefaults(SelectGroupProps, _props);
 
 pub const SelectLabelProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SelectLabel(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectLabelProps, _props);
-    try writer.writeAll("<div class=\"px-2 py-1.5 text-xs font-semibold text-muted-foreground\">");
+    try writer.writeAll("<div");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("px-2 py-1.5 text-xs font-semibold text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</div>");
 }
@@ -4784,11 +5354,12 @@ pub const SelectItemProps = struct {
     value: []const u8 = "",
     disabled: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SelectItem(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectItemProps, _props);
     const state = if (props.disabled) "disabled" else "unselected";
-    const class = if (props.disabled)
+    const item_class = if (props.disabled)
         "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground opacity-50 outline-none pointer-events-none cursor-default"
     else
         "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent cursor-pointer";
@@ -4801,7 +5372,9 @@ const props = runtime.withDefaults(SelectItemProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(item_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -4825,7 +5398,9 @@ const props = runtime.withDefaults(SelectItemProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(item_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -4843,10 +5418,17 @@ const props = runtime.withDefaults(SelectItemProps, _props);
     }
 }
 
-pub const SelectSeparatorProps = struct {};
-pub fn SelectSeparator(writer: anytype, props: anytype) !void {
-    _ = props;
-    try writer.writeAll("<div role=\"separator\" class=\"my-1 h-px bg-border\">");
+pub const SelectSeparatorProps = struct {
+    class: []const u8 = "",
+};
+pub fn SelectSeparator(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SelectSeparatorProps, _props);
+    try writer.writeAll("<div role=\"separator\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("my-1 h-px bg-border ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("</div>");
 }
 
@@ -5104,6 +5686,7 @@ pub const Spacing = enum { none, sm, md, lg, xl };
 pub const SeparatorProps = struct {
     direction: Direction = .horizontal,
     spacing: Spacing = .none,
+    class: []const u8 = "",
 };
 pub fn Separator(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SeparatorProps, _props);
@@ -5114,6 +5697,8 @@ const props = runtime.withDefaults(SeparatorProps, _props);
     try writer.writeAll(base);
     try writer.writeAll(" ");
     try writer.writeAll(margin);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("</div>");
@@ -5162,10 +5747,16 @@ pub const Icon = root.icon.Icon;
 // ── Sub-components ──────────────────────────────────
 pub const SidebarContainerProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarContainer(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarContainerProps, _props);
-    try writer.writeAll("<nav data-publr-component=\"sidebar\" class=\"flex h-full w-56 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border\">");
+    try writer.writeAll("<nav data-publr-component=\"sidebar\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex h-full w-56 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5174,10 +5765,16 @@ const props = runtime.withDefaults(SidebarContainerProps, _props);
 
 pub const SidebarHeaderProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarHeader(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarHeaderProps, _props);
-    try writer.writeAll("<div data-publr-part=\"header\" class=\"flex items-center gap-2 px-3 py-4 border-b border-sidebar-border\">");
+    try writer.writeAll("<div data-publr-part=\"header\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex items-center gap-2 px-3 py-4 border-b border-sidebar-border ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5186,10 +5783,16 @@ const props = runtime.withDefaults(SidebarHeaderProps, _props);
 
 pub const SidebarContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" class=\"flex-1 overflow-y-auto px-2 py-2\">");
+    try writer.writeAll("<div data-publr-part=\"content\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("flex-1 overflow-y-auto px-2 py-2 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5198,10 +5801,16 @@ const props = runtime.withDefaults(SidebarContentProps, _props);
 
 pub const SidebarFooterProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarFooter(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarFooterProps, _props);
-    try writer.writeAll("<div data-publr-part=\"footer\" class=\"border-t border-sidebar-border px-2 py-2\">");
+    try writer.writeAll("<div data-publr-part=\"footer\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("border-t border-sidebar-border px-2 py-2 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5210,10 +5819,16 @@ const props = runtime.withDefaults(SidebarFooterProps, _props);
 
 pub const SidebarGroupProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarGroup(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarGroupProps, _props);
-    try writer.writeAll("<div data-publr-part=\"section\" data-publr-state=\"open\" class=\"mb-2\">");
+    try writer.writeAll("<div data-publr-part=\"section\" data-publr-state=\"open\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mb-2 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5223,11 +5838,17 @@ const props = runtime.withDefaults(SidebarGroupProps, _props);
 pub const SidebarGroupLabelProps = struct {
     children: []const u8 = "",
     collapsible: bool = false,
+    class: []const u8 = "",
 };
 pub fn SidebarGroupLabel(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarGroupLabelProps, _props);
     if (props.collapsible) {
-        try writer.writeAll("<button data-publr-part=\"section-trigger\" class=\"flex w-full items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-sidebar-foreground\">");
+        try writer.writeAll("<button data-publr-part=\"section-trigger\"");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("flex w-full items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-sidebar-foreground ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
         try writer.writeAll("\n");
         try writer.writeAll(props.children);
         try writer.writeAll("\n");
@@ -5235,7 +5856,12 @@ const props = runtime.withDefaults(SidebarGroupLabelProps, _props);
         try writer.writeAll("\n");
         try writer.writeAll("</button>");
     } else {
-        try writer.writeAll("<span class=\"block px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider\">");
+        try writer.writeAll("<span");
+        try writer.writeAll(" class=\"");
+        try writer.writeAll("block px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\"");
+        try writer.writeAll(">");
         try writer.writeAll("\n");
         try writer.writeAll(props.children);
         try writer.writeAll("\n");
@@ -5245,10 +5871,16 @@ const props = runtime.withDefaults(SidebarGroupLabelProps, _props);
 
 pub const SidebarGroupContentProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarGroupContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarGroupContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"section-content\" class=\"mt-0.5 space-y-0.5\">");
+    try writer.writeAll("<div data-publr-part=\"section-content\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mt-0.5 space-y-0.5 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5257,10 +5889,16 @@ const props = runtime.withDefaults(SidebarGroupContentProps, _props);
 
 pub const SidebarMenuProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarMenu(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarMenuProps, _props);
-    try writer.writeAll("<div class=\"space-y-0.5\">");
+    try writer.writeAll("<div");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("space-y-0.5 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5281,6 +5919,7 @@ pub const SidebarMenuButtonProps = struct {
     href: []const u8 = "#",
     is_active: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarMenuButton(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarMenuButtonProps, _props);
@@ -5292,7 +5931,8 @@ const props = runtime.withDefaults(SidebarMenuButtonProps, _props);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" bg-sidebar-primary text-sidebar-primary-foreground");
+        try writer.writeAll(" bg-sidebar-primary text-sidebar-primary-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -5306,7 +5946,8 @@ const props = runtime.withDefaults(SidebarMenuButtonProps, _props);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
         try writer.writeAll(base);
-        try writer.writeAll(" text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground");
+        try writer.writeAll(" text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -5318,10 +5959,16 @@ const props = runtime.withDefaults(SidebarMenuButtonProps, _props);
 
 pub const SidebarMenuBadgeProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn SidebarMenuBadge(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarMenuBadgeProps, _props);
-    try writer.writeAll("<span class=\"ml-auto inline-flex items-center rounded-full bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-sidebar-accent-foreground\">");
+    try writer.writeAll("<span");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("ml-auto inline-flex items-center rounded-full bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-sidebar-accent-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5547,47 +6194,80 @@ const props = runtime.withDefaults(SidebarProps, _props);
 
 pub const stack = struct {
 
-/// Stack — flex column or row with semantic gap.
+/// Stack — universal layout container.
 ///
 /// Usage:
-///   <Stack gap=.lg>
-///       <Heading level=.h1 size=.lg>Title</Heading>
-///   </Stack>
-///   <Stack direction=.horizontal gap=.md items=.center>
-///       <Icon name=.settings />
-///       <Text>Settings</Text>
-///   </Stack>
+///   <Stack gap=.lg padding=.xl>content</Stack>
+///   <Stack direction=.horizontal gap=.md items=.center>items</Stack>
+///   <Stack border=.bottom background=.muted padding=.lg>header</Stack>
+///   <Stack width=.panel border=.left overflow=.scroll grow={true}>sidebar</Stack>
 pub const Direction = enum { vertical, horizontal };
 pub const Gap = enum { none, xs, sm, md, lg, xl, @"2xl" };
 pub const Align = enum { start, center, end, stretch, baseline };
-pub const Justify = enum { start, center, end, between, around };
+pub const Justify = enum { start, center, end, between };
+pub const Border = enum { none, bottom, top, left, right, all };
+pub const Background = enum { none, default, muted, card };
+pub const Overflow = enum { visible, scroll };
+pub const Width = enum { auto, full, sidebar, panel };
+pub const MinHeight = enum { auto, screen };
 pub const StackProps = struct {
     direction: Direction = .vertical,
     gap: Gap = .md,
     items: Align = .stretch,
     justify: Justify = .start,
     padding: Gap = .none,
+    border: Border = .none,
+    background: Background = .none,
+    overflow: Overflow = .visible,
+    width: Width = .auto,
+    grow: bool = false,
+    push: bool = false,
+    min_height: MinHeight = .auto,
+    class: []const u8 = "",
     children: []const u8 = "",
 };
 pub fn Stack(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(StackProps, _props);
     const dir = if (props.direction == .horizontal) "flex-row" else "flex-col";
-    const gap_class = if (props.gap == .none) "" else if (props.gap == .xs) "gap-1" else if (props.gap == .sm) "gap-2" else if (props.gap == .md) "gap-3" else if (props.gap == .lg) "gap-4" else if (props.gap == .xl) "gap-6" else "gap-8";
-    const align_class = if (props.items == .start) "items-start" else if (props.items == .center) "items-center" else if (props.items == .end) "items-end" else if (props.items == .baseline) "items-baseline" else "items-stretch";
-    const justify_class = if (props.justify == .start) "" else if (props.justify == .center) "justify-center" else if (props.justify == .end) "justify-end" else if (props.justify == .between) "justify-between" else "justify-around";
-    const pad = if (props.padding == .none) "" else if (props.padding == .xs) "p-1" else if (props.padding == .sm) "p-2" else if (props.padding == .md) "p-3" else if (props.padding == .lg) "p-4" else if (props.padding == .xl) "p-6" else "p-8";
+    const gap_c = if (props.gap == .none) "" else if (props.gap == .xs) "gap-1" else if (props.gap == .sm) "gap-2" else if (props.gap == .md) "gap-3" else if (props.gap == .lg) "gap-4" else if (props.gap == .xl) "gap-6" else "gap-8";
+    const items_c = if (props.items == .start) "items-start" else if (props.items == .center) "items-center" else if (props.items == .end) "items-end" else if (props.items == .baseline) "items-baseline" else "items-stretch";
+    const justify_c = if (props.justify == .center) "justify-center" else if (props.justify == .end) "justify-end" else if (props.justify == .between) "justify-between" else "";
+    const pad_c = if (props.padding == .none) "" else if (props.padding == .xs) "p-1" else if (props.padding == .sm) "p-2" else if (props.padding == .md) "p-3" else if (props.padding == .lg) "p-4" else if (props.padding == .xl) "p-6" else "p-8";
+    const border_c = if (props.border == .bottom) "border-b border-border" else if (props.border == .top) "border-t border-border" else if (props.border == .left) "border-l border-border" else if (props.border == .right) "border-r border-border" else if (props.border == .all) "border border-border" else "";
+    const bg_c = if (props.background == .default) "bg-background" else if (props.background == .muted) "bg-muted" else if (props.background == .card) "bg-card" else "";
+    const overflow_c = if (props.overflow == .scroll) "overflow-y-auto" else "";
+    const width_c = if (props.width == .full) "w-full" else if (props.width == .sidebar) "w-56 shrink-0" else if (props.width == .panel) "w-80 shrink-0" else "";
+    const grow_c = if (props.grow) "flex-1 min-w-0" else "";
+    const push_c = if (props.push) (if (props.direction == .horizontal) "ml-auto" else "mt-auto") else "";
+    const mh_c = if (props.min_height == .screen) "min-h-screen" else "";
     try writer.writeAll("<div data-publr-component=\"stack\"");
     try writer.writeAll(" class=\"");
     try writer.writeAll("flex ");
     try writer.writeAll(dir);
     try writer.writeAll(" ");
-    try writer.writeAll(gap_class);
+    try writer.writeAll(gap_c);
     try writer.writeAll(" ");
-    try writer.writeAll(align_class);
+    try writer.writeAll(items_c);
     try writer.writeAll(" ");
-    try writer.writeAll(justify_class);
+    try writer.writeAll(justify_c);
     try writer.writeAll(" ");
-    try writer.writeAll(pad);
+    try writer.writeAll(pad_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(border_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(bg_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(overflow_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(width_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(grow_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(push_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(mh_c);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -5618,6 +6298,7 @@ pub const SwitchProps = struct {
     size: Size = .md,
     checked: bool = false,
     disabled: bool = false,
+    class: []const u8 = "",
 };
 pub fn Switch(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SwitchProps, _props);
@@ -5658,7 +6339,9 @@ const props = runtime.withDefaults(SwitchProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, container_class);
+        try writer.writeAll(container_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -5715,7 +6398,9 @@ const props = runtime.withDefaults(SwitchProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, container_class);
+        try writer.writeAll(container_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -5769,7 +6454,9 @@ const props = runtime.withDefaults(SwitchProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, container_class);
+        try writer.writeAll(container_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -5823,7 +6510,9 @@ const props = runtime.withDefaults(SwitchProps, _props);
         try runtime.render(writer, state);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, container_class);
+        try writer.writeAll(container_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -5903,10 +6592,16 @@ pub const Icon = root.icon.Icon;
 // ── Sub-components ──────────────────────────────────
 pub const TableProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Table(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TableProps, _props);
-    try writer.writeAll("<div data-publr-component=\"table\" class=\"w-full overflow-auto rounded-lg border border-border\">");
+    try writer.writeAll("<div data-publr-component=\"table\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("w-full overflow-auto rounded-lg border border-border ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll("<table class=\"w-full caption-bottom\">");
     try writer.writeAll("\n");
@@ -5919,20 +6614,32 @@ const props = runtime.withDefaults(TableProps, _props);
 
 pub const TableCaptionProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TableCaption(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TableCaptionProps, _props);
-    try writer.writeAll("<caption class=\"mt-4 text-sm text-muted-foreground\">");
+    try writer.writeAll("<caption");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mt-4 text-sm text-muted-foreground ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll(props.children);
     try writer.writeAll("</caption>");
 }
 
 pub const TableHeaderProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TableHeader(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TableHeaderProps, _props);
-    try writer.writeAll("<thead data-publr-part=\"header\" class=\"bg-muted/40\">");
+    try writer.writeAll("<thead data-publr-part=\"header\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("bg-muted/40 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5953,10 +6660,16 @@ const props = runtime.withDefaults(TableBodyProps, _props);
 
 pub const TableFooterProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TableFooter(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TableFooterProps, _props);
-    try writer.writeAll("<tfoot data-publr-part=\"footer\" class=\"border-t border-border bg-muted/40\">");
+    try writer.writeAll("<tfoot data-publr-part=\"footer\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("border-t border-border bg-muted/40 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -5965,10 +6678,16 @@ const props = runtime.withDefaults(TableFooterProps, _props);
 
 pub const TableRowProps = struct {
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TableRow(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TableRowProps, _props);
-    try writer.writeAll("<tr class=\"border-b border-border hover:bg-accent/50 transition-colors\">");
+    try writer.writeAll("<tr");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("border-b border-border hover:bg-accent/50 transition-colors ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
+    try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n");
@@ -6587,6 +7306,7 @@ pub const Variant = enum { default, line };
 pub const TabsListProps = struct {
     variant: Variant = .default,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TabsList(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TabsListProps, _props);
@@ -6599,7 +7319,9 @@ const props = runtime.withDefaults(TabsListProps, _props);
     try runtime.render(writer, props.variant);
     try writer.writeAll("\"");
     try writer.writeAll(" class=\"");
-    try runtime.render(writer, list_class);
+    try writer.writeAll(list_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -6612,10 +7334,11 @@ pub const TabsTriggerProps = struct {
     value: []const u8 = "",
     disabled: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TabsTrigger(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TabsTriggerProps, _props);
-    const class = "px-3 py-1.5 text-sm font-medium rounded-md transition-colors data-[publr-state=active]:bg-background data-[publr-state=active]:text-foreground data-[publr-state=active]:shadow-xs data-[publr-state=inactive]:text-muted-foreground data-[publr-state=inactive]:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground";
+    const trigger_class = "px-3 py-1.5 text-sm font-medium rounded-md transition-colors data-[publr-state=active]:bg-background data-[publr-state=active]:text-foreground data-[publr-state=active]:shadow-xs data-[publr-state=inactive]:text-muted-foreground data-[publr-state=inactive]:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground";
     if (props.disabled) {
         try writer.writeAll("<button data-publr-part=\"trigger\" data-publr-state=\"inactive\" role=\"tab\" aria-selected=\"false\" aria-disabled=\"true\" tabindex=\"-1\"");
         try writer.writeAll(" data-publr-tab=\"");
@@ -6630,7 +7353,9 @@ const props = runtime.withDefaults(TabsTriggerProps, _props);
         try runtime.escape(writer, props.value);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(trigger_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(" disabled=\"");
         try runtime.render(writer, true);
@@ -6654,7 +7379,9 @@ const props = runtime.withDefaults(TabsTriggerProps, _props);
         try runtime.escape(writer, props.value);
         try writer.writeAll("\"");
         try writer.writeAll(" class=\"");
-        try runtime.render(writer, class);
+        try writer.writeAll(trigger_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll("\n");
@@ -6667,10 +7394,11 @@ const props = runtime.withDefaults(TabsTriggerProps, _props);
 pub const TabsContentProps = struct {
     value: []const u8 = "",
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TabsContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TabsContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" data-publr-state=\"inactive\" role=\"tabpanel\" class=\"mt-4 text-sm text-foreground\"");
+    try writer.writeAll("<div data-publr-part=\"content\" data-publr-state=\"inactive\" role=\"tabpanel\"");
     try writer.writeAll(" data-publr-tab=\"");
     try runtime.render(writer, props.value);
     try writer.writeAll("\"");
@@ -6681,6 +7409,10 @@ const props = runtime.withDefaults(TabsContentProps, _props);
     try writer.writeAll(" aria-labelledby=\"");
     try writer.writeAll("publr-tab-trigger-");
     try runtime.escape(writer, props.value);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("mt-4 text-sm text-foreground ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(" hidden=\"");
     try runtime.render(writer, true);
@@ -6880,6 +7612,7 @@ pub const TextProps = struct {
     color: TextColor = .default,
     weight: TextWeight = .normal,
     as: TextElement = .p,
+    class: []const u8 = "",
     children: []const u8 = "",
 };
 pub fn Text(writer: anytype, _props: anytype) !void {
@@ -6895,6 +7628,8 @@ const props = runtime.withDefaults(TextProps, _props);
         try writer.writeAll(color_class);
         try writer.writeAll(" ");
         try writer.writeAll(weight_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -6907,6 +7642,8 @@ const props = runtime.withDefaults(TextProps, _props);
         try writer.writeAll(color_class);
         try writer.writeAll(" ");
         try writer.writeAll(weight_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -6919,6 +7656,8 @@ const props = runtime.withDefaults(TextProps, _props);
         try writer.writeAll(color_class);
         try writer.writeAll(" ");
         try writer.writeAll(weight_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -6931,6 +7670,8 @@ const props = runtime.withDefaults(TextProps, _props);
         try writer.writeAll(color_class);
         try writer.writeAll(" ");
         try writer.writeAll(weight_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
         try writer.writeAll("\"");
         try writer.writeAll(">");
         try writer.writeAll(props.children);
@@ -6966,6 +7707,7 @@ pub const ToastProps = struct {
     message: []const u8 = "Changes saved successfully",
     variant: Variant = .default,
     show_close: bool = true,
+    class: []const u8 = "",
 };
 pub fn Toast(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(ToastProps, _props);
@@ -6975,9 +7717,13 @@ const props = runtime.withDefaults(ToastProps, _props);
         .@"error" => "border-error/30",
         .warning => "border-warning/30",
     };
-    try writer.writeAll("<div data-publr-component=\"toast\" class=\"pointer-events-auto\"");
+    try writer.writeAll("<div data-publr-component=\"toast\"");
     try writer.writeAll(" data-publr-variant=\"");
     try runtime.render(writer, props.variant);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("pointer-events-auto ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -7180,10 +7926,11 @@ pub const TooltipProps = struct {
     delay_duration: DelayDuration = .default,
     disable_hoverable_content: bool = false,
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn Tooltip(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TooltipProps, _props);
-    try writer.writeAll("<div data-publr-component=\"tooltip\" class=\"inline-block\"");
+    try writer.writeAll("<div data-publr-component=\"tooltip\"");
     try writer.writeAll(" data-publr-state=\"");
     try runtime.render(writer, if (props.default_open) "open" else "closed");
     try writer.writeAll("\"");
@@ -7192,6 +7939,10 @@ const props = runtime.withDefaults(TooltipProps, _props);
     try writer.writeAll("\"");
     try writer.writeAll(" data-publr-disable-hoverable-content=\"");
     try runtime.render(writer, props.disable_hoverable_content);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("inline-block ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
@@ -7236,10 +7987,11 @@ pub const TooltipContentProps = struct {
     hide_when_detached: bool = false,
     aria_label: []const u8 = "",
     children: []const u8 = "",
+    class: []const u8 = "",
 };
 pub fn TooltipContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TooltipContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" data-state=\"closed\" role=\"tooltip\" class=\"hidden px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium shadow-md whitespace-nowrap\"");
+    try writer.writeAll("<div data-publr-part=\"content\" data-state=\"closed\" role=\"tooltip\"");
     try writer.writeAll(" data-publr-side=\"");
     try runtime.render(writer, props.side);
     try writer.writeAll("\"");
@@ -7270,6 +8022,10 @@ const props = runtime.withDefaults(TooltipContentProps, _props);
     try writer.writeAll(" aria-label=\"");
     try runtime.render(writer, props.aria_label);
     try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("hidden px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium shadow-md whitespace-nowrap ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("\n");
     try writer.writeAll(props.children);
@@ -7280,15 +8036,20 @@ const props = runtime.withDefaults(TooltipContentProps, _props);
 pub const TooltipArrowProps = struct {
     width: u16 = 10,
     height: u16 = 5,
+    class: []const u8 = "",
 };
 pub fn TooltipArrow(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TooltipArrowProps, _props);
-    try writer.writeAll("<div data-publr-part=\"arrow\" class=\"absolute w-2.5 h-1.5 bg-primary rotate-45\"");
+    try writer.writeAll("<div data-publr-part=\"arrow\"");
     try writer.writeAll(" data-publr-arrow-width=\"");
     try runtime.render(writer, props.width);
     try writer.writeAll("\"");
     try writer.writeAll(" data-publr-arrow-height=\"");
     try runtime.render(writer, props.height);
+    try writer.writeAll("\"");
+    try writer.writeAll(" class=\"");
+    try writer.writeAll("absolute w-2.5 h-1.5 bg-primary rotate-45 ");
+    try writer.writeAll(props.class);
     try writer.writeAll("\"");
     try writer.writeAll(">");
     try writer.writeAll("</div>");
@@ -7356,8 +8117,6 @@ const props = runtime.withDefaults(TooltipDemoProps, _props);
 };
 
 pub const css =
-    \\/*! tailwindcss v4.2.2 | MIT License | https://tailwindcss.com */
-    \\@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:inline))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-space-y-reverse:0;--tw-space-x-reverse:0;--tw-divide-y-reverse:0;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial}}}@layer theme{:root,:host{--font-sans:"Geist", -apple-system, BlinkMacSystemFont, sans-serif;--font-mono:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;--color-gray-50:oklch(98.5% .002 247.839);--color-gray-100:oklch(96.7% .003 264.542);--color-gray-200:oklch(92.8% .006 264.531);--color-gray-300:oklch(87.2% .01 258.338);--color-gray-400:oklch(70.7% .022 261.325);--color-gray-500:oklch(55.1% .027 264.364);--color-gray-600:oklch(44.6% .03 256.802);--color-gray-700:oklch(37.3% .034 259.733);--color-gray-800:oklch(27.8% .033 256.848);--color-gray-900:oklch(21% .034 264.665);--color-gray-950:oklch(13% .028 261.692);--color-black:#000;--color-white:#fff;--spacing:.25rem;--container-sm:24rem;--container-md:28rem;--font-weight-medium:500;--font-weight-semibold:600;--tracking-tight:-.025em;--tracking-wider:.05em;--leading-relaxed:1.625;--animate-spin:spin 1s linear infinite;--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4, 0, .2, 1);--default-font-family:"Geist", -apple-system, BlinkMacSystemFont, sans-serif;--default-mono-font-family:var(--font-mono)}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring{outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab, red, red)){::placeholder{color:color-mix(in oklab, currentcolor 50%, transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}*{border-color:var(--border)}body{background-color:var(--background);color:var(--foreground);font-family:var(--font-sans);margin:0}}@layer components{[data-publr-component=avatar-group]>[data-publr-component=avatar]{box-shadow:0 0 0 2px var(--background)}}@layer utilities{.pointer-events-auto{pointer-events:auto}.pointer-events-none{pointer-events:none}.collapse{visibility:collapse}.visible{visibility:visible}.sr-only{clip-path:inset(50%);white-space:nowrap;border-width:0;width:1px;height:1px;margin:-1px;padding:0;position:absolute;overflow:hidden}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.sticky{position:sticky}.inset-0{inset:calc(var(--spacing) * 0)}.inset-y-0{inset-block:calc(var(--spacing) * 0)}.start{inset-inline-start:var(--spacing)}.end{inset-inline-end:var(--spacing)}.top-1{top:calc(var(--spacing) * 1)}.top-1\/2{top:50%}.right-0{right:calc(var(--spacing) * 0)}.bottom-0{bottom:calc(var(--spacing) * 0)}.left-0{left:calc(var(--spacing) * 0)}.left-0\.5{left:calc(var(--spacing) * .5)}.left-2{left:calc(var(--spacing) * 2)}.left-2\.5{left:calc(var(--spacing) * 2.5)}.z-50{z-index:50}.container{width:100%}@media (min-width:40rem){.container{max-width:40rem}}@media (min-width:48rem){.container{max-width:48rem}}@media (min-width:64rem){.container{max-width:64rem}}@media (min-width:80rem){.container{max-width:80rem}}@media (min-width:96rem){.container{max-width:96rem}}.m-0{margin:calc(var(--spacing) * 0)}.mx-1{margin-inline:calc(var(--spacing) * 1)}.mx-4{margin-inline:calc(var(--spacing) * 4)}.my-1{margin-block:calc(var(--spacing) * 1)}.my-4{margin-block:calc(var(--spacing) * 4)}.mt-0{margin-top:calc(var(--spacing) * 0)}.mt-0\.5{margin-top:calc(var(--spacing) * .5)}.mt-1{margin-top:calc(var(--spacing) * 1)}.mt-2{margin-top:calc(var(--spacing) * 2)}.mt-3{margin-top:calc(var(--spacing) * 3)}.mt-4{margin-top:calc(var(--spacing) * 4)}.mt-6{margin-top:calc(var(--spacing) * 6)}.-mr-1{margin-right:calc(var(--spacing) * -1)}.mr-0\.5{margin-right:calc(var(--spacing) * .5)}.mb-2{margin-bottom:calc(var(--spacing) * 2)}.mb-3{margin-bottom:calc(var(--spacing) * 3)}.mb-4{margin-bottom:calc(var(--spacing) * 4)}.ml-0\.5{margin-left:calc(var(--spacing) * .5)}.ml-1\.5{margin-left:calc(var(--spacing) * 1.5)}.ml-2{margin-left:calc(var(--spacing) * 2)}.ml-3{margin-left:calc(var(--spacing) * 3)}.ml-auto{margin-left:auto}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.inline-block{display:inline-block}.inline-flex{display:inline-flex}.table{display:table}.h-1\.5{height:calc(var(--spacing) * 1.5)}.h-2\.5{height:calc(var(--spacing) * 2.5)}.h-3{height:calc(var(--spacing) * 3)}.h-3\.5{height:calc(var(--spacing) * 3.5)}.h-4{height:calc(var(--spacing) * 4)}.h-5{height:calc(var(--spacing) * 5)}.h-6{height:calc(var(--spacing) * 6)}.h-7{height:calc(var(--spacing) * 7)}.h-8{height:calc(var(--spacing) * 8)}.h-10{height:calc(var(--spacing) * 10)}.h-14{height:calc(var(--spacing) * 14)}.h-\[25vh\]{height:25vh}.h-full{height:100%}.h-px{height:1px}.h-screen{height:100vh}.min-h-0{min-height:calc(var(--spacing) * 0)}.min-h-20{min-height:calc(var(--spacing) * 20)}.w-2{width:calc(var(--spacing) * 2)}.w-2\.5{width:calc(var(--spacing) * 2.5)}.w-2\/5{width:40%}.w-3{width:calc(var(--spacing) * 3)}.w-3\.5{width:calc(var(--spacing) * 3.5)}.w-4{width:calc(var(--spacing) * 4)}.w-5{width:calc(var(--spacing) * 5)}.w-6{width:calc(var(--spacing) * 6)}.w-7{width:calc(var(--spacing) * 7)}.w-8{width:calc(var(--spacing) * 8)}.w-10{width:calc(var(--spacing) * 10)}.w-12{width:calc(var(--spacing) * 12)}.w-14{width:calc(var(--spacing) * 14)}.w-48{width:calc(var(--spacing) * 48)}.w-56{width:calc(var(--spacing) * 56)}.w-72{width:calc(var(--spacing) * 72)}.w-full{width:100%}.max-w-md{max-width:var(--container-md)}.max-w-sm{max-width:var(--container-sm)}.min-w-0{min-width:calc(var(--spacing) * 0)}.min-w-48{min-width:calc(var(--spacing) * 48)}.flex-1{flex:1}.shrink-0{flex-shrink:0}.caption-bottom{caption-side:bottom}.-translate-y-1{--tw-translate-y:calc(var(--spacing) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.rotate-45{rotate:45deg}.transform{transform:var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,)}.animate-spin{animation:var(--animate-spin)}.cursor-default{cursor:default}.cursor-not-allowed{cursor:not-allowed}.cursor-pointer{cursor:pointer}.resize-y{resize:vertical}.grid-cols-\[repeat\(auto-fill\,minmax\(200px\,1fr\)\)\]{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.flex-col{flex-direction:column}.flex-row{flex-direction:row}.flex-wrap{flex-wrap:wrap}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.gap-0{gap:calc(var(--spacing) * 0)}.gap-0\.5{gap:calc(var(--spacing) * .5)}.gap-1{gap:calc(var(--spacing) * 1)}.gap-1\.5{gap:calc(var(--spacing) * 1.5)}.gap-2{gap:calc(var(--spacing) * 2)}.gap-2\.5{gap:calc(var(--spacing) * 2.5)}.gap-3{gap:calc(var(--spacing) * 3)}.gap-4{gap:calc(var(--spacing) * 4)}.gap-5{gap:calc(var(--spacing) * 5)}:where(.space-y-0\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-1\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 1.5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 1.5) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-3>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 3) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-6>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 6) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 6) * calc(1 - var(--tw-space-y-reverse)))}:where(.-space-x-2>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing) * -2) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing) * -2) * calc(1 - var(--tw-space-x-reverse)))}:where(.divide-y>:not(:last-child)){--tw-divide-y-reverse:0;border-bottom-style:var(--tw-border-style);border-top-style:var(--tw-border-style);border-top-width:calc(1px * var(--tw-divide-y-reverse));border-bottom-width:calc(1px * calc(1 - var(--tw-divide-y-reverse)))}:where(.divide-gray-100>:not(:last-child)){border-color:var(--color-gray-100)}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded{border-radius:.25rem}.rounded-full{border-radius:3.40282e38px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) * .8)}.rounded-xl{border-radius:calc(var(--radius) * 1.4)}.border{border-style:var(--tw-border-style);border-width:1px}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-l-2{border-left-style:var(--tw-border-style);border-left-width:2px}.border-background{border-color:var(--background)}.border-border{border-color:var(--border)}.border-error,.border-error\/20{border-color:var(--error)}@supports (color:color-mix(in lab, red, red)){.border-error\/20{border-color:color-mix(in oklab, var(--error) 20%, transparent)}}.border-error\/30{border-color:var(--error)}@supports (color:color-mix(in lab, red, red)){.border-error\/30{border-color:color-mix(in oklab, var(--error) 30%, transparent)}}.border-gray-200{border-color:var(--color-gray-200)}.border-gray-300{border-color:var(--color-gray-300)}.border-gray-700{border-color:var(--color-gray-700)}.border-gray-800{border-color:var(--color-gray-800)}.border-input{border-color:var(--input)}.border-sidebar-border{border-color:var(--sidebar-border)}.border-success\/20{border-color:var(--success)}@supports (color:color-mix(in lab, red, red)){.border-success\/20{border-color:color-mix(in oklab, var(--success) 20%, transparent)}}.border-success\/30{border-color:var(--success)}@supports (color:color-mix(in lab, red, red)){.border-success\/30{border-color:color-mix(in oklab, var(--success) 30%, transparent)}}.border-transparent{border-color:#0000}.border-warning\/20{border-color:var(--warning)}@supports (color:color-mix(in lab, red, red)){.border-warning\/20{border-color:color-mix(in oklab, var(--warning) 20%, transparent)}}.border-warning\/30{border-color:var(--warning)}@supports (color:color-mix(in lab, red, red)){.border-warning\/30{border-color:color-mix(in oklab, var(--warning) 30%, transparent)}}.bg-accent,.bg-accent\/50{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.bg-accent\/50{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.bg-background{background-color:var(--background)}.bg-black{background-color:var(--color-black)}.bg-black\/50{background-color:#00000080}@supports (color:color-mix(in lab, red, red)){.bg-black\/50{background-color:color-mix(in oklab, var(--color-black) 50%, transparent)}}.bg-border{background-color:var(--border)}.bg-card{background-color:var(--card)}.bg-destructive,.bg-destructive\/10{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.bg-destructive\/10{background-color:color-mix(in oklab, var(--destructive) 10%, transparent)}}.bg-error,.bg-error\/10{background-color:var(--error)}@supports (color:color-mix(in lab, red, red)){.bg-error\/10{background-color:color-mix(in oklab, var(--error) 10%, transparent)}}.bg-gray-50{background-color:var(--color-gray-50)}.bg-gray-100{background-color:var(--color-gray-100)}.bg-gray-200{background-color:var(--color-gray-200)}.bg-gray-700{background-color:var(--color-gray-700)}.bg-gray-800{background-color:var(--color-gray-800)}.bg-gray-900{background-color:var(--color-gray-900)}.bg-gray-950{background-color:var(--color-gray-950)}.bg-input{background-color:var(--input)}.bg-muted,.bg-muted\/40{background-color:var(--muted)}@supports (color:color-mix(in lab, red, red)){.bg-muted\/40{background-color:color-mix(in oklab, var(--muted) 40%, transparent)}}.bg-popover{background-color:var(--popover)}.bg-primary{background-color:var(--primary)}.bg-secondary{background-color:var(--secondary)}.bg-sidebar{background-color:var(--sidebar)}.bg-sidebar-accent{background-color:var(--sidebar-accent)}.bg-sidebar-primary{background-color:var(--sidebar-primary)}.bg-success,.bg-success\/10{background-color:var(--success)}@supports (color:color-mix(in lab, red, red)){.bg-success\/10{background-color:color-mix(in oklab, var(--success) 10%, transparent)}}.bg-transparent{background-color:#0000}.bg-warning,.bg-warning\/10{background-color:var(--warning)}@supports (color:color-mix(in lab, red, red)){.bg-warning\/10{background-color:color-mix(in oklab, var(--warning) 10%, transparent)}}.bg-white{background-color:var(--color-white)}.object-cover{object-fit:cover}.p-1{padding:calc(var(--spacing) * 1)}.p-3{padding:calc(var(--spacing) * 3)}.p-4{padding:calc(var(--spacing) * 4)}.p-6{padding:calc(var(--spacing) * 6)}.px-1\.5{padding-inline:calc(var(--spacing) * 1.5)}.px-2{padding-inline:calc(var(--spacing) * 2)}.px-2\.5{padding-inline:calc(var(--spacing) * 2.5)}.px-3{padding-inline:calc(var(--spacing) * 3)}.px-3\.5{padding-inline:calc(var(--spacing) * 3.5)}.px-4{padding-inline:calc(var(--spacing) * 4)}.px-5{padding-inline:calc(var(--spacing) * 5)}.px-\[30px\]{padding-inline:30px}.py-0\.5{padding-block:calc(var(--spacing) * .5)}.py-1{padding-block:calc(var(--spacing) * 1)}.py-1\.5{padding-block:calc(var(--spacing) * 1.5)}.py-2{padding-block:calc(var(--spacing) * 2)}.py-2\.5{padding-block:calc(var(--spacing) * 2.5)}.py-3{padding-block:calc(var(--spacing) * 3)}.py-4{padding-block:calc(var(--spacing) * 4)}.py-12{padding-block:calc(var(--spacing) * 12)}.pt-0{padding-top:calc(var(--spacing) * 0)}.pt-2{padding-top:calc(var(--spacing) * 2)}.pr-3{padding-right:calc(var(--spacing) * 3)}.pr-10{padding-right:calc(var(--spacing) * 10)}.pb-0{padding-bottom:calc(var(--spacing) * 0)}.pb-4{padding-bottom:calc(var(--spacing) * 4)}.pl-3{padding-left:calc(var(--spacing) * 3)}.pl-8{padding-left:calc(var(--spacing) * 8)}.pl-10{padding-left:calc(var(--spacing) * 10)}.text-center{text-align:center}.text-left{text-align:left}.text-lg{font-size:1.125rem;line-height:var(--tw-leading,1.75rem)}.text-md{font-size:1rem;line-height:var(--tw-leading,1.5rem)}.text-sm{font-size:.875rem;line-height:var(--tw-leading,1.25rem)}.text-xs{font-size:.75rem;line-height:var(--tw-leading,1.125rem)}.text-\[10px\]{font-size:10px}.leading-relaxed{--tw-leading:var(--leading-relaxed);line-height:var(--leading-relaxed)}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.tracking-tight{--tw-tracking:var(--tracking-tight);letter-spacing:var(--tracking-tight)}.tracking-wider{--tw-tracking:var(--tracking-wider);letter-spacing:var(--tracking-wider)}.whitespace-nowrap{white-space:nowrap}.text-accent-foreground{color:var(--accent-foreground)}.text-card-foreground{color:var(--card-foreground)}.text-destructive{color:var(--destructive)}.text-error{color:var(--error)}.text-error-foreground{color:var(--error-foreground)}.text-foreground{color:var(--foreground)}.text-gray-300{color:var(--color-gray-300)}.text-gray-400{color:var(--color-gray-400)}.text-gray-500{color:var(--color-gray-500)}.text-gray-600{color:var(--color-gray-600)}.text-gray-700{color:var(--color-gray-700)}.text-gray-900{color:var(--color-gray-900)}.text-muted-foreground{color:var(--muted-foreground)}.text-popover-foreground{color:var(--popover-foreground)}.text-primary{color:var(--primary)}.text-primary-foreground{color:var(--primary-foreground)}.text-secondary-foreground{color:var(--secondary-foreground)}.text-sidebar-accent-foreground{color:var(--sidebar-accent-foreground)}.text-sidebar-foreground{color:var(--sidebar-foreground)}.text-sidebar-primary-foreground{color:var(--sidebar-primary-foreground)}.text-success{color:var(--success)}.text-success-foreground{color:var(--success-foreground)}.text-warning{color:var(--warning)}.text-warning-foreground{color:var(--warning-foreground)}.text-white{color:var(--color-white)}.uppercase{text-transform:uppercase}.placeholder-muted-foreground::placeholder{color:var(--muted-foreground)}.accent-foreground{accent-color:var(--foreground)}.accent-primary{accent-color:var(--primary)}.opacity-0{opacity:0}.opacity-50{opacity:.5}.shadow{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 8px 24px var(--tw-shadow-color,oklch(0% 0 0/.12));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-md{--tw-shadow:0 2px 8px var(--tw-shadow-color,oklch(0% 0 0/.08));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-sm{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,oklch(0% 0 0/.06));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-xl{--tw-shadow:0 20px 25px -5px var(--tw-shadow-color,#0000001a), 0 8px 10px -6px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-xs{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,oklch(0% 0 0/.05));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring,.ring-1{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-error{--tw-ring-color:var(--error)}.ring-ring{--tw-ring-color:var(--ring)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.blur{--tw-blur:blur(8px);filter:var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)}.filter{filter:var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-colors{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-transform{transition-property:transform,translate,scale,rotate;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.outline-none{--tw-outline-style:none;outline-style:none}.select-all{-webkit-user-select:all;user-select:all}.group-data-\[publr-state\=open\]\:pointer-events-auto:is(:where(.group)[data-publr-state=open] *){pointer-events:auto}.group-data-\[publr-state\=open\]\:block:is(:where(.group)[data-publr-state=open] *){display:block}.group-data-\[publr-state\=open\]\:opacity-100:is(:where(.group)[data-publr-state=open] *),.group-data-\[publr-state\=selected\]\:opacity-100:is(:where(.group)[data-publr-state=selected] *){opacity:1}.peer-checked\:translate-x-4:is(:where(.peer):checked~*){--tw-translate-x:calc(var(--spacing) * 4);translate:var(--tw-translate-x) var(--tw-translate-y)}.peer-checked\:translate-x-5:is(:where(.peer):checked~*){--tw-translate-x:calc(var(--spacing) * 5);translate:var(--tw-translate-x) var(--tw-translate-y)}.peer-checked\:translate-x-6:is(:where(.peer):checked~*){--tw-translate-x:calc(var(--spacing) * 6);translate:var(--tw-translate-x) var(--tw-translate-y)}.peer-checked\:bg-primary:is(:where(.peer):checked~*){background-color:var(--primary)}.file\:border-0::file-selector-button{border-style:var(--tw-border-style);border-width:0}.file\:bg-transparent::file-selector-button{background-color:#0000}.file\:text-sm::file-selector-button{font-size:.875rem;line-height:var(--tw-leading,1.25rem)}.file\:text-foreground::file-selector-button{color:var(--foreground)}.placeholder\:text-muted-foreground::placeholder{color:var(--muted-foreground)}@media (hover:hover){.hover\:bg-accent:hover,.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.hover\:bg-destructive\/10:hover{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-destructive\/10:hover{background-color:color-mix(in oklab, var(--destructive) 10%, transparent)}}.hover\:bg-destructive\/90:hover{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-destructive\/90:hover{background-color:color-mix(in oklab, var(--destructive) 90%, transparent)}}.hover\:bg-gray-50:hover{background-color:var(--color-gray-50)}.hover\:bg-gray-700:hover{background-color:var(--color-gray-700)}.hover\:bg-primary\/90:hover{background-color:var(--primary)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-primary\/90:hover{background-color:color-mix(in oklab, var(--primary) 90%, transparent)}}.hover\:bg-sidebar-accent:hover{background-color:var(--sidebar-accent)}.hover\:text-accent-foreground:hover{color:var(--accent-foreground)}.hover\:text-foreground:hover{color:var(--foreground)}.hover\:text-gray-600:hover{color:var(--color-gray-600)}.hover\:text-gray-700:hover{color:var(--color-gray-700)}.hover\:text-primary\/80:hover{color:var(--primary)}@supports (color:color-mix(in lab, red, red)){.hover\:text-primary\/80:hover{color:color-mix(in oklab, var(--primary) 80%, transparent)}}.hover\:text-sidebar-accent-foreground:hover{color:var(--sidebar-accent-foreground)}.hover\:text-sidebar-foreground:hover{color:var(--sidebar-foreground)}.hover\:text-white:hover{color:var(--color-white)}}.focus\:border-sidebar-ring:focus{border-color:var(--sidebar-ring)}.focus\:ring-1:focus{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus\:ring-2:focus{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus\:ring-sidebar-ring:focus{--tw-ring-color:var(--sidebar-ring)}.focus\:ring-offset-2:focus{--tw-ring-offset-width:2px;--tw-ring-offset-shadow:var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)}.focus\:outline-hidden:focus{--tw-outline-style:none;outline-style:none}@media (forced-colors:active){.focus\:outline-hidden:focus{outline-offset:2px;outline:2px solid #0000}}.focus-visible\:bg-accent:focus-visible{background-color:var(--accent)}.focus-visible\:bg-destructive\/10:focus-visible{background-color:var(--destructive)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-destructive\/10:focus-visible{background-color:color-mix(in oklab, var(--destructive) 10%, transparent)}}.focus-visible\:text-accent-foreground:focus-visible{color:var(--accent-foreground)}.focus-visible\:ring-2:focus-visible{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-4:focus-visible{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(4px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-ring:focus-visible{--tw-ring-color:var(--ring)}.focus-visible\:ring-offset-2:focus-visible{--tw-ring-offset-width:2px;--tw-ring-offset-shadow:var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)}.focus-visible\:outline-hidden:focus-visible{--tw-outline-style:none;outline-style:none}@media (forced-colors:active){.focus-visible\:outline-hidden:focus-visible{outline-offset:2px;outline:2px solid #0000}}.focus-visible\:outline-none:focus-visible{--tw-outline-style:none;outline-style:none}.disabled\:pointer-events-none:disabled{pointer-events:none}.disabled\:cursor-not-allowed:disabled{cursor:not-allowed}.disabled\:text-muted-foreground:disabled{color:var(--muted-foreground)}.disabled\:opacity-50:disabled{opacity:.5}@media (hover:hover){.disabled\:hover\:text-muted-foreground:disabled:hover{color:var(--muted-foreground)}}.data-\[publr-state\=active\]\:bg-background[data-publr-state=active]{background-color:var(--background)}.data-\[publr-state\=active\]\:text-foreground[data-publr-state=active]{color:var(--foreground)}.data-\[publr-state\=active\]\:shadow-xs[data-publr-state=active]{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,oklch(0% 0 0/.05));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.data-\[publr-state\=inactive\]\:text-muted-foreground[data-publr-state=inactive]{color:var(--muted-foreground)}@media (hover:hover){.data-\[publr-state\=inactive\]\:hover\:text-foreground[data-publr-state=inactive]:hover{color:var(--foreground)}}.data-\[publr-state\=open\]\:pointer-events-auto[data-publr-state=open]{pointer-events:auto}.data-\[publr-state\=open\]\:opacity-100[data-publr-state=open]{opacity:1}}:root{--radius:.5rem;--background:oklch(100% 0 0);--foreground:oklch(14.5% 0 0);--card:oklch(100% 0 0);--card-foreground:oklch(14.5% 0 0);--popover:oklch(100% 0 0);--popover-foreground:oklch(14.5% 0 0);--primary:oklch(55% .17 250);--primary-foreground:oklch(98.5% 0 0);--secondary:oklch(97% 0 0);--secondary-foreground:oklch(20.5% 0 0);--muted:oklch(97% 0 0);--muted-foreground:oklch(55.6% 0 0);--accent:oklch(97% 0 0);--accent-foreground:oklch(20.5% 0 0);--destructive:oklch(57.7% .245 27.325);--error:oklch(57.7% .245 27.325);--error-foreground:oklch(98.5% 0 0);--success:oklch(56% .16 145);--success-foreground:oklch(98.5% 0 0);--warning:oklch(68% .16 75);--warning-foreground:oklch(21% .034 46);--border:oklch(92.2% 0 0);--input:oklch(88.2% 0 0);--ring:oklch(55% .17 250);--sidebar:oklch(98.5% 0 0);--sidebar-foreground:oklch(14.5% 0 0);--sidebar-primary:oklch(55% .17 250);--sidebar-primary-foreground:oklch(98.5% 0 0);--sidebar-accent:oklch(97% 0 0);--sidebar-accent-foreground:oklch(20.5% 0 0);--sidebar-border:oklch(92.2% 0 0);--sidebar-ring:oklch(55% .17 250)}.dark{--background:oklch(14.5% 0 0);--foreground:oklch(98.5% 0 0);--card:oklch(20.5% 0 0);--card-foreground:oklch(98.5% 0 0);--popover:oklch(20.5% 0 0);--popover-foreground:oklch(98.5% 0 0);--primary:oklch(65% .17 250);--primary-foreground:oklch(14.5% 0 0);--secondary:oklch(26.9% 0 0);--secondary-foreground:oklch(98.5% 0 0);--muted:oklch(26.9% 0 0);--muted-foreground:oklch(70.8% 0 0);--accent:oklch(26.9% 0 0);--accent-foreground:oklch(98.5% 0 0);--destructive:oklch(70.4% .191 22.216);--error:oklch(70.4% .191 22.216);--error-foreground:oklch(98.5% 0 0);--success:oklch(65% .16 145);--success-foreground:oklch(14.5% 0 0);--warning:oklch(75% .16 75);--warning-foreground:oklch(14.5% 0 0);--border:oklch(100% 0 0/.1);--input:oklch(100% 0 0/.15);--ring:oklch(65% .17 250);--sidebar:oklch(20.5% 0 0);--sidebar-foreground:oklch(98.5% 0 0);--sidebar-primary:oklch(65% .17 250);--sidebar-primary-foreground:oklch(98.5% 0 0);--sidebar-accent:oklch(26.9% 0 0);--sidebar-accent-foreground:oklch(98.5% 0 0);--sidebar-border:oklch(100% 0 0/.1);--sidebar-ring:oklch(65% .17 250)}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}@keyframes spin{to{transform:rotate(360deg)}}
     \\
 ;
 

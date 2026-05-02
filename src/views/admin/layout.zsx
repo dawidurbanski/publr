@@ -40,6 +40,7 @@ pub fn Layout(props: struct {
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1" />
             <title>{props.title} - Publr Admin</title>
+            <link rel="stylesheet" href="/static/tokens.css" />
             <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
         </head>

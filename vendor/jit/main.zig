@@ -1,0 +1,263 @@
+/// Publr JIT CSS Compiler — POC
+///
+/// Full pipeline in one process:
+///   1. Reads .zsx template
+///   2. Transpiles via ZSX (imported as module)
+///   3. Collects CSS classes during transpilation
+///   4. Resolves classes to CSS rules
+///   5. Outputs CSS to stdout
+///
+/// Usage:
+///   zig build run -- test_input/page.zsx
+
+const std = @import("std");
+const zsx = @import("zsx");
+const resolver = @import("resolver.zig");
+
+/// Base CSS — Preflight reset + `--tw-*` defaults + keyframes.
+/// Token values (:root, .dark) are NOT here — each consumer provides its own
+/// (e.g. design-system/src/styles/input.css, or CMS's admin-tokens.css).
+const base_css =
+    \\/* ── Preflight (subset of Tailwind v4 reset) ── */
+    \\*, *::before, *::after, ::backdrop {
+    \\  box-sizing: border-box;
+    \\  border-style: solid;
+    \\  border-color: var(--border);
+    \\  border-width: 0;
+    \\  --tw-ring-inset: ;
+    \\  --tw-ring-offset-width: 0px;
+    \\  --tw-ring-offset-color: #fff;
+    \\  --tw-ring-color: var(--ring);
+    \\  --tw-ring-offset-shadow: 0 0 #0000;
+    \\  --tw-ring-shadow: 0 0 #0000;
+    \\  --tw-shadow: 0 0 #0000;
+    \\}
+    \\
+    \\html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }
+    \\body { margin: 0; line-height: inherit; font-family: "Geist", -apple-system, BlinkMacSystemFont, sans-serif; background-color: var(--background); color: var(--foreground); }
+    \\h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; margin: 0; }
+    \\p { margin: 0; }
+    \\a { color: inherit; text-decoration: inherit; }
+    \\button, input, select, textarea { font-family: inherit; font-size: 100%; line-height: inherit; color: inherit; margin: 0; padding: 0; }
+    \\button { background-color: transparent; background-image: none; cursor: pointer; }
+    \\button, [type='button'], [type='reset'], [type='submit'] { -webkit-appearance: button; }
+    \\img, svg, video, canvas { display: block; max-width: 100%; height: auto; }
+    \\
+    \\/* ── Component layer (from input.css @layer components) ── */
+    \\[data-publr-component="avatar-group"] > [data-publr-component="avatar"] {
+    \\  box-shadow: 0 0 0 2px var(--background);
+    \\}
+    \\
+    \\/* ── Animations ── */
+    \\@keyframes publr-spin {
+    \\  from { transform: rotate(0deg); }
+    \\  to   { transform: rotate(360deg); }
+    \\}
+    \\
+;
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    if (args.len < 2) {
+        var stderr = std.fs.File.stderr().writer(&.{});
+        try stderr.interface.writeAll("Usage: jit <css_classes.txt> [scan_path...]\n");
+        try stderr.interface.writeAll("  <css_classes.txt>  Class manifest produced by ZSX transpiler.\n");
+        try stderr.interface.writeAll("  [scan_path...]     Optional .zig files or directories to scan for\n");
+        try stderr.interface.writeAll("                     class-shaped string literals (catches switch-arm classes\n");
+        try stderr.interface.writeAll("                     that aren't in the manifest).\n");
+        try stderr.interface.writeAll("  Emits CSS to stdout; reports unresolved candidates on stderr.\n");
+        std.process.exit(1);
+    }
+
+    var all_classes = std.StringHashMapUnmanaged(void){};
+    defer {
+        var it = all_classes.keyIterator();
+        while (it.next()) |key| allocator.free(key.*);
+        all_classes.deinit(allocator);
+    }
+
+    // 1. Read class manifest produced by ZSX transpiler
+    const manifest = try std.fs.cwd().readFileAlloc(allocator, args[1], 1024 * 1024);
+    defer allocator.free(manifest);
+
+    var lines = std.mem.tokenizeAny(u8, manifest, "\n\r");
+    while (lines.next()) |line| {
+        if (line.len > 0 and !all_classes.contains(line)) {
+            const duped = try allocator.dupe(u8, line);
+            try all_classes.put(allocator, duped, {});
+        }
+    }
+
+    // 2. Scan additional paths for class-shaped string literals.
+    //    Catches classes inside switch arms and other Zig code that the
+    //    ZSX transpiler's pattern matcher doesn't see.
+    for (args[2..]) |scan_path| {
+        try scanPath(allocator, scan_path, &all_classes);
+    }
+
+    // Sort for deterministic output
+    var sorted: std.ArrayListUnmanaged([]const u8) = .{};
+    defer sorted.deinit(allocator);
+    {
+        var it = all_classes.keyIterator();
+        while (it.next()) |key| {
+            try sorted.append(allocator, key.*);
+        }
+    }
+    std.mem.sort([]const u8, sorted.items, {}, struct {
+        pub fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.lessThan);
+
+    // Emit CSS
+    var stdout = std.fs.File.stdout().writer(&.{});
+    try stdout.interface.writeAll("/* Generated by Publr JIT CSS Compiler */\n\n");
+    try stdout.interface.writeAll(base_css);
+    try stdout.interface.writeByte('\n');
+
+    var resolved: u32 = 0;
+    var unresolved: std.ArrayListUnmanaged([]const u8) = .{};
+    defer unresolved.deinit(allocator);
+    for (sorted.items) |candidate| {
+        if (try resolver.resolve(allocator, candidate)) |css_result| {
+            var css = css_result;
+            defer css.deinit(allocator);
+            try stdout.interface.writeAll(css.items);
+            try stdout.interface.writeByte('\n');
+            resolved += 1;
+        } else {
+            try unresolved.append(allocator, candidate);
+        }
+    }
+
+    var stderr = std.fs.File.stderr().writer(&.{});
+    try stderr.interface.print("{d} classes → {d} CSS rules ({d} unresolved)\n", .{
+        sorted.items.len,
+        resolved,
+        unresolved.items.len,
+    });
+    if (unresolved.items.len > 0) {
+        try stderr.interface.writeAll("UNRESOLVED:\n");
+        for (unresolved.items) |c| {
+            try stderr.interface.print("  {s}\n", .{c});
+        }
+    }
+}
+
+/// Walk `path` (file or directory) and extract class-shaped string literals
+/// from any `.zig` files found. Adds matches to `classes`.
+fn scanPath(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    classes: *std.StringHashMapUnmanaged(void),
+) !void {
+    const stat = std.fs.cwd().statFile(path) catch |err| switch (err) {
+        error.FileNotFound => return, // silently skip missing paths
+        else => return err,
+    };
+
+    switch (stat.kind) {
+        .file => try scanZigFile(allocator, path, classes),
+        .directory => {
+            var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+            defer dir.close();
+            var walker = try dir.walk(allocator);
+            defer walker.deinit();
+            while (try walker.next()) |entry| {
+                if (entry.kind != .file) continue;
+                if (!std.mem.endsWith(u8, entry.basename, ".zig")) continue;
+                const full_path = try std.fs.path.join(allocator, &.{ path, entry.path });
+                defer allocator.free(full_path);
+                try scanZigFile(allocator, full_path, classes);
+            }
+        },
+        else => return,
+    }
+}
+
+fn scanZigFile(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    classes: *std.StringHashMapUnmanaged(void),
+) !void {
+    const content = std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => return err,
+    };
+    defer allocator.free(content);
+
+    // Simple approach: split the entire file content into tokens at any character
+    // that's NOT part of a Tailwind class name. Then filter each token with
+    // looksLikeClass. This works for .zig, .js, .html, .zsx — no need to parse
+    // string delimiters, which fail in mixed JS/HTML template literals.
+    var i: usize = 0;
+    while (i < content.len) {
+        // Skip non-class characters
+        while (i < content.len and !isClassChar(content[i])) : (i += 1) {}
+        if (i >= content.len) break;
+        const start = i;
+        // Consume class characters
+        while (i < content.len and isClassChar(content[i])) : (i += 1) {}
+        const token = content[start..i];
+        if (!looksLikeClass(token)) continue;
+        if (classes.contains(token)) continue;
+        const duped = try allocator.dupe(u8, token);
+        try classes.put(allocator, duped, {});
+    }
+}
+
+fn isClassChar(c: u8) bool {
+    return switch (c) {
+        'a'...'z', 'A'...'Z', '0'...'9', '-', '_', ':', '[', ']', '=', '/', '.', '%', '#', '(', ')', ',' => true,
+        else => false,
+    };
+}
+
+/// Heuristic — does this token look like a Tailwind class name?
+/// Cheap filter; the resolver will return null for non-classes harmlessly,
+/// so the goal here is to keep the unresolved-report signal-to-noise high.
+fn looksLikeClass(s: []const u8) bool {
+    if (s.len < 2) return false;
+    // Must start with a-z OR `-` (negative utilities like -mr-1).
+    if (!((s[0] >= 'a' and s[0] <= 'z') or s[0] == '-')) return false;
+    if (s[0] == '-' and !(s[1] >= 'a' and s[1] <= 'z')) return false;
+    // Reject if any char is outside the set we recognize as Tailwind-ish.
+    for (s) |c| {
+        switch (c) {
+            'a'...'z', 'A'...'Z', '0'...'9', '-', '_', ':', '[', ']', '=', '/', '.', '%', '#', ',', '(', ')' => {},
+            else => return false,
+        }
+    }
+    // Reject file-path-shaped tokens: anything ending with a known extension.
+    const exts = [_][]const u8{ ".zig", ".zsx", ".css", ".js", ".ts", ".tsx", ".html", ".md", ".zon", ".sh" };
+    for (exts) |ext| {
+        if (std.mem.endsWith(u8, s, ext)) return false;
+    }
+    // Reject relative-path-shaped tokens.
+    if (std.mem.startsWith(u8, s, "..") or std.mem.startsWith(u8, s, "./")) return false;
+    // To survive the filter, the token must be either:
+    //   (a) a known short single-word static utility, OR
+    //   (b) contain a `-` (most utilities: gap-1, bg-primary, flex-col), OR
+    //   (c) contain a `:` (variant like hover:bg-accent), OR
+    //   (d) contain a `[` (arbitrary value or data-attr like w-[380px]).
+    const short_statics = [_][]const u8{
+        "flex",      "block",      "hidden",  "grid",     "fixed",    "absolute",
+        "relative",  "sticky",     "inline",  "static",   "table",    "contents",
+        "italic",    "underline",  "rounded", "border",   "uppercase", "lowercase",
+        "capitalize", "truncate",  "shadow",  "ring",     "transition",
+    };
+    for (short_statics) |w| {
+        if (std.mem.eql(u8, s, w)) return true;
+    }
+    if (std.mem.indexOfScalar(u8, s, '-')) |_| return true;
+    if (std.mem.indexOfScalar(u8, s, ':')) |_| return true;
+    if (std.mem.indexOfScalar(u8, s, '[')) |_| return true;
+    return false;
+}

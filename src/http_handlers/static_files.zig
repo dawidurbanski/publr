@@ -24,7 +24,8 @@ const InteractWebSocket = static.Asset("websocket.js", @embedFile("static_intera
 const InteractPresence = static.Asset("presence.js", @embedFile("static_interact_presence_js"));
 
 const publr_ui = @import("publr_ui");
-const PublrCss = static.Asset("publr.css", publr_ui.css);
+const PublrCss = static.Asset("publr.css", @embedFile("static_jit_css"));
+const TokensCss = static.Asset("tokens.css", @embedFile("static_tokens_css"));
 const PublrCoreJs = static.Asset("publr-core.js", publr_ui.core_js);
 const PublrDialogJs = static.Asset("publr-dialog.js", publr_ui.dialog_js);
 const PublrDropdownJs = static.Asset("publr-dropdown.js", publr_ui.dropdown_js);
@@ -52,6 +53,7 @@ const asset_map = .{
     .{ "media-selection.js", AssetEntry{ .asset = MediaSelectionJs, .disk_path = "static/media-selection.js" } },
     .{ "interact/websocket.js", AssetEntry{ .asset = InteractWebSocket, .disk_path = "static/interact/websocket.js" } },
     .{ "interact/presence.js", AssetEntry{ .asset = InteractPresence, .disk_path = "static/interact/presence.js" } },
+    .{ "tokens.css", AssetEntry{ .asset = TokensCss, .disk_path = "vendor/tokens.css" } },
     .{ "publr.css", AssetEntry{ .asset = PublrCss, .disk_path = null } },
     .{ "publr-core.js", AssetEntry{ .asset = PublrCoreJs, .disk_path = null } },
     .{ "publr-dialog.js", AssetEntry{ .asset = PublrDialogJs, .disk_path = null } },

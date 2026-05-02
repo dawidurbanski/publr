@@ -164,6 +164,31 @@ pub fn build(b: *std.Build) void {
     exe.step.dependOn(&transpile_zsx_cmd.step);
     exe.step.dependOn(&transpile_theme_cmd.step);
 
+    // ── JIT CSS compiler ────────────────────────────────────────────────────
+    // Runs after ZSX transpile. Scans the class manifest (css_classes.txt),
+    // the vendored DS components (publr_ui.zig), and the generated admin
+    // views for class-shaped string literals. Emits utility CSS to stdout,
+    // captured and embedded as a static asset at /static/publr.css.
+    const jit_compiler = b.addExecutable(.{
+        .name = "jit",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("vendor/jit/main.zig"),
+            .target = b.graph.host,
+            .imports = &.{.{ .name = "zsx", .module = zsx }},
+        }),
+    });
+
+    const jit_cmd = b.addRunArtifact(jit_compiler);
+    jit_cmd.setCwd(b.path("."));
+    // arg 1: class manifest from ZSX transpiler
+    jit_cmd.addFileArg(gen_views.path(b, "css_classes.txt"));
+    // arg 2+: paths to scan for class-shaped string literals
+    jit_cmd.addFileArg(b.path("vendor/publr_ui.zig"));
+    jit_cmd.addDirectoryArg(gen_views);
+    jit_cmd.has_side_effects = true;
+    jit_cmd.step.dependOn(&transpile_zsx_cmd.step);
+    const jit_css_output = jit_cmd.captureStdOut();
+
     // Note: preBuild/postBuild hooks from publr.zon run during `publr build` CLI,
     // not during `zig build`. This avoids hard failures when tools aren't installed.
 
@@ -229,6 +254,14 @@ pub fn build(b: *std.Build) void {
     // Embed static assets
     exe.root_module.addAnonymousImport("static_admin_css", .{
         .root_source_file = b.path("static/admin.css"),
+    });
+    // JIT-emitted utility CSS (replaces the old Tailwind output from publr_ui.css)
+    exe.root_module.addAnonymousImport("static_jit_css", .{
+        .root_source_file = jit_css_output,
+    });
+    // DS token definitions (:root, .dark) — vendored from design-system/src/styles/input.css
+    exe.root_module.addAnonymousImport("static_tokens_css", .{
+        .root_source_file = b.path("vendor/tokens.css"),
     });
     exe.root_module.addAnonymousImport("static_admin_js", .{
         .root_source_file = b.path("static/admin.js"),
