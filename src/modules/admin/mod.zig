@@ -15,6 +15,7 @@ const plugin_releases = @import("plugin_releases");
 /// All registered admin pages.
 const all_pages = [_]admin_api.Page{
     plugin_dashboard.page,
+    plugin_dashboard.page_v2,
 } ++ plugin_content.content_pages ++ [_]admin_api.Page{
     plugin_releases.page,
     plugin_media.page,

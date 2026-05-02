@@ -1,0 +1,110 @@
+// Dashboard v2 — minimal-CSS spike, patched after first iteration revealed:
+//  - admin.css `a { color: var(--primary) }` beats Tailwind utilities (specificity)
+//    → primary Buttons rendered as <a> show blue-on-blue text. Workaround: use
+//      <button> form (no href) where possible, or hierarchy=.secondary for nav.
+//  - layout has no built-in padding → wrap in Container.
+//  - Stat columns collapse to label width without min-w → use Stack with min-w-32
+//    via a wrapping <div>, OR accept and use a clean inline pattern.
+const std = @import("std");
+const ui = @import("publr_ui");
+
+const Container = ui.container.Container;
+const Grid = ui.grid.Grid;
+const Heading = ui.heading.Heading;
+const Text = ui.text.Text;
+const Stack = ui.stack.Stack;
+const Flex = ui.flex.Flex;
+const Button = ui.button.Button;
+const Separator = ui.separator.Separator;
+const Badge = ui.badge.Badge;
+const BadgeVariant = ui.badge.Variant;
+const Empty = ui.empty.Empty;
+
+const Post = struct {
+    id: []const u8,
+    title: []const u8,
+    status: []const u8,
+    date: []const u8,
+};
+
+pub fn DashboardV2(props: struct {
+    posts_count: []const u8,
+    pages_count: []const u8,
+    media_count: []const u8,
+    users_count: []const u8,
+    has_posts: bool,
+    recent_posts: []const Post,
+}) {
+    <Container size=.lg padding=.lg>
+        <Stack gap=.xl>
+            <Stack gap=.xs>
+                <Heading level=.h1 size=.xl>Welcome back</Heading>
+                <Text color=.muted>Here's what's happening with your site.</Text>
+            </Stack>
+
+            <Flex gap=.lg>
+                <div class="flex-1">
+                    <Stack gap=.xs>
+                        <Text size=.xs color=.muted>Posts</Text>
+                        <Heading level=.h2 size=.lg>{props.posts_count}</Heading>
+                    </Stack>
+                </div>
+                <div class="flex-1">
+                    <Stack gap=.xs>
+                        <Text size=.xs color=.muted>Pages</Text>
+                        <Heading level=.h2 size=.lg>{props.pages_count}</Heading>
+                    </Stack>
+                </div>
+                <div class="flex-1">
+                    <Stack gap=.xs>
+                        <Text size=.xs color=.muted>Media</Text>
+                        <Heading level=.h2 size=.lg>{props.media_count}</Heading>
+                    </Stack>
+                </div>
+                <div class="flex-1">
+                    <Stack gap=.xs>
+                        <Text size=.xs color=.muted>Users</Text>
+                        <Heading level=.h2 size=.lg>{props.users_count}</Heading>
+                    </Stack>
+                </div>
+            </Flex>
+
+            <Separator />
+
+            <Stack gap=.md>
+                <Heading level=.h2 size=.sm>Quick actions</Heading>
+                <Flex gap=.sm wrap=.wrap>
+                    <Button label="New post" hierarchy=.secondary href="/admin/content/post/new" />
+                    <Button label="Upload media" hierarchy=.secondary href="/admin/media" />
+                    <Button label="Manage users" hierarchy=.secondary href="/admin/users" />
+                </Flex>
+            </Stack>
+
+            <Separator />
+
+            <Stack gap=.md>
+                <Heading level=.h2 size=.sm>Recent posts</Heading>
+                {if (props.has_posts) (
+                    <Stack gap=.sm>
+                        {for (props.recent_posts) |post| (
+                            <Flex gap=.md justify=.between>
+                                <a href={post.id}>{post.title}</a>
+                                <Badge
+                                    label={if (std.mem.eql(u8, post.status, "published")) ("Published") else if (std.mem.eql(u8, post.status, "draft")) ("Draft") else if (std.mem.eql(u8, post.status, "scheduled")) ("Scheduled") else (post.status)}
+                                    variant={if (std.mem.eql(u8, post.status, "published")) (BadgeVariant.success) else if (std.mem.eql(u8, post.status, "scheduled")) (BadgeVariant.warning) else (BadgeVariant.secondary)}
+                                />
+                            </Flex>
+                        )}
+                    </Stack>
+                ) else (
+                    <Empty>
+                        <Stack gap=.sm items=.center>
+                            <Text color=.muted>No posts yet.</Text>
+                            <Button label="Create your first post" hierarchy=.secondary href="/admin/content/post/new" />
+                        </Stack>
+                    </Empty>
+                )}
+            </Stack>
+        </Stack>
+    </Container>
+}

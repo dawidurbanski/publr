@@ -44,3 +44,37 @@ fn handleDashboard(ctx: *Context) !void {
 
     ctx.html(registry.renderPage(page, ctx, content));
 }
+
+pub const page_v2 = admin.registerPage(.{
+    .id = "dashboard-v2",
+    .title = "Dashboard v2",
+    .path = "/dashboard-v2",
+    .icon = .home,
+    .position = 11,
+    .setup = setupV2,
+});
+
+fn setupV2(app: *admin.PageApp) void {
+    app.render(handleDashboardV2);
+}
+
+fn handleDashboardV2(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else null;
+
+    const media_count_num: u32 = if (db) |d| media.countMedia(d, .{}) catch 0 else 0;
+    const media_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{media_count_num}) catch "0";
+
+    const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
+    const posts: []const Post = &.{};
+
+    const content = tpl.render(views.admin.dashboard_v2.DashboardV2, .{.{
+        .posts_count = "0",
+        .pages_count = "0",
+        .media_count = media_count_str,
+        .users_count = "0",
+        .has_posts = false,
+        .recent_posts = posts,
+    }});
+
+    ctx.html(registry.renderPage(page_v2, ctx, content));
+}
