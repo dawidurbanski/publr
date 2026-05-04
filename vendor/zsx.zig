@@ -1825,6 +1825,118 @@ fn makeZigName(allocator: Allocator, base: []const u8) ![]u8 {
     return result;
 }
 
+/// Parsed shape of a single `try <writer>.writeAll("<literal>");` line.
+const WriteAllLine = struct {
+    indent: []const u8,
+    writer: []const u8,
+    literal: []const u8,
+};
+
+/// Try to recognize the line as `try <writer>.writeAll("<literal>");`.
+/// Returns null for any other shape (control flow, prints, raw children flushes).
+/// The literal slice still contains escape sequences as written (\\, \", \n, …) —
+/// merging two literals byte-wise produces a valid Zig string literal.
+fn parseWriteAllLine(line: []const u8) ?WriteAllLine {
+    var i: usize = 0;
+    while (i < line.len and (line[i] == ' ' or line[i] == '\t')) : (i += 1) {}
+    const indent = line[0..i];
+
+    const try_kw = "try ";
+    if (i + try_kw.len > line.len) return null;
+    if (!std.mem.eql(u8, line[i .. i + try_kw.len], try_kw)) return null;
+    i += try_kw.len;
+
+    // Find ".writeAll(\"" — the writer is everything between `try ` and that.
+    const sentinel = ".writeAll(\"";
+    const dot_idx = std.mem.indexOfPos(u8, line, i, sentinel) orelse return null;
+    const writer = line[i..dot_idx];
+    // The writer must be a plain identifier (no parens, no method calls) so we
+    // can safely treat it as a value reused across coalesced calls. Anything
+    // more complex (e.g. `_buf.writer(_alloc)`) means the line was emitted
+    // before the writer-cache landed — bail out and pass through unchanged.
+    for (writer) |c| switch (c) {
+        'a'...'z', 'A'...'Z', '0'...'9', '_' => {},
+        else => return null,
+    };
+    if (writer.len == 0) return null;
+    i = dot_idx + sentinel.len;
+
+    // Find the closing `"` of the literal, respecting `\<x>` escapes so we
+    // don't terminate inside a `\"` sequence.
+    var j = i;
+    while (j < line.len) : (j += 1) {
+        if (line[j] == '\\') {
+            j += 1;
+            if (j >= line.len) return null;
+            continue;
+        }
+        if (line[j] == '"') break;
+    }
+    if (j >= line.len) return null;
+    const literal = line[i..j];
+
+    // Suffix must be `");` exactly.
+    const suffix = "\");";
+    if (j + suffix.len > line.len) return null;
+    if (!std.mem.eql(u8, line[j .. j + suffix.len], suffix)) return null;
+    // Anything after `");` (besides whitespace) means a different statement.
+    var k: usize = j + suffix.len;
+    while (k < line.len) : (k += 1) {
+        if (line[k] != ' ' and line[k] != '\t') return null;
+    }
+
+    return .{ .indent = indent, .writer = writer, .literal = literal };
+}
+
+/// Merge runs of `try <writer>.writeAll("a"); / try <writer>.writeAll("b");`
+/// (same writer + same indent) into one call. See `generate()` for why.
+fn coalesceWriteAlls(allocator: Allocator, input: []const u8) ![]u8 {
+    var out: std.ArrayListUnmanaged(u8) = .{};
+    errdefer out.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < input.len) {
+        const line_end = std.mem.indexOfScalarPos(u8, input, i, '\n') orelse input.len;
+        const line = input[i..line_end];
+
+        if (parseWriteAllLine(line)) |first| {
+            // Merge subsequent lines that match writer + indent.
+            var combined: std.ArrayListUnmanaged(u8) = .{};
+            defer combined.deinit(allocator);
+            try combined.appendSlice(allocator, first.literal);
+
+            var j = if (line_end < input.len) line_end + 1 else input.len;
+            while (j < input.len) {
+                const next_end = std.mem.indexOfScalarPos(u8, input, j, '\n') orelse input.len;
+                const next_line = input[j..next_end];
+                const next = parseWriteAllLine(next_line) orelse break;
+                if (!std.mem.eql(u8, next.indent, first.indent)) break;
+                if (!std.mem.eql(u8, next.writer, first.writer)) break;
+                try combined.appendSlice(allocator, next.literal);
+                j = if (next_end < input.len) next_end + 1 else input.len;
+            }
+
+            try out.appendSlice(allocator, first.indent);
+            try out.appendSlice(allocator, "try ");
+            try out.appendSlice(allocator, first.writer);
+            try out.appendSlice(allocator, ".writeAll(\"");
+            try out.appendSlice(allocator, combined.items);
+            try out.appendSlice(allocator, "\");\n");
+            i = j;
+        } else {
+            try out.appendSlice(allocator, line);
+            if (line_end < input.len) {
+                try out.append(allocator, '\n');
+                i = line_end + 1;
+            } else {
+                i = line_end;
+            }
+        }
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
 const Parser = struct {
     allocator: Allocator,
     source: []const u8,
@@ -1886,7 +1998,15 @@ const Parser = struct {
         // Parse file content
         try self.parseFile();
 
-        return try self.output.toOwnedSlice(self.allocator);
+        // Post-process: coalesce adjacent `try <writer>.writeAll("...");` lines.
+        // Templates with lots of static markup can produce hundreds of these,
+        // and Zig's semantic-analysis backwards-branch quota (default 1000) is
+        // exhausted around ~600 such calls inside a function body. Merging
+        // contiguous literal writes into a single call keeps generated code
+        // inside the default ceiling regardless of template size.
+        const raw = try self.output.toOwnedSlice(self.allocator);
+        defer self.allocator.free(raw);
+        return try coalesceWriteAlls(self.allocator, raw);
     }
 
     fn parseFile(self: *Parser) Error!void {
@@ -2865,6 +2985,14 @@ const Parser = struct {
                         try self.write(attr.name);
                         try self.write("=\\\"\");\n");
                         const inner = attr.value[1 .. attr.value.len - 1];
+                        // For class attrs, also harvest the LITERAL tokens out
+                        // of the template (everything outside `${...}`) so the
+                        // JIT manifest sees them. Without this, components that
+                        // use `class={`bg-card ${@raw props.class}`}` ship to
+                        // consumers with no `bg-card` rule generated.
+                        if (mem.eql(u8, attr.name, "class")) {
+                            try self.collectBacktickClasses(inner);
+                        }
                         try self.emitBacktickString(inner, true);
                         try self.writeIndent();
                         try self.writeTryWriter();
@@ -2922,7 +3050,10 @@ const Parser = struct {
             else => "x",
         };
 
-        // Create children buffer using page allocator (freed when scope exits)
+        // Create children buffer using page allocator (freed when scope exits).
+        // The cached writer (`_children_w_<n>`) is declared right after so every
+        // subsequent `writeAll` reuses it instead of constructing a fresh writer
+        // each call — see `writeWriterVar` for why this matters for branch-quota.
         try self.writeIndent();
         try self.write("var _children_buf_");
         try self.write(depth_suffix);
@@ -2937,6 +3068,23 @@ const Parser = struct {
         try self.write(".deinit(_children_alloc_");
         try self.write(depth_suffix);
         try self.write(");\n");
+        // The writer is `const` because writing through it mutates the
+        // underlying ArrayListUnmanaged via the held pointer, not the writer
+        // struct itself. The trailing `_ = &<var>;` keeps Zig happy when the
+        // children body delegates entirely to nested component calls and
+        // never references the writer directly.
+        try self.writeIndent();
+        try self.write("const _children_w_");
+        try self.write(depth_suffix);
+        try self.write(" = _children_buf_");
+        try self.write(depth_suffix);
+        try self.write(".writer(_children_alloc_");
+        try self.write(depth_suffix);
+        try self.write(");\n");
+        try self.writeIndent();
+        try self.write("_ = &_children_w_");
+        try self.write(depth_suffix);
+        try self.write(";\n");
 
         // Render children into the buffer
         self.children_depth += 1;
@@ -2996,6 +3144,58 @@ const Parser = struct {
                     try self.write("\"");
                 }
                 first = false;
+            }
+        }
+    }
+
+    /// Walk a backtick-template literal (already stripped of its outer backticks)
+    /// and add every whitespace-separated token from the LITERAL portions to
+    /// `css_classes`. `${...}` interpolations are skipped (those resolve at
+    /// runtime — out of scope for the build-time class manifest). Used so the
+    /// design-system pattern `class={`bg-card ${@raw props.class}`}` ships
+    /// `bg-card` to consumers' JIT manifests.
+    fn collectBacktickClasses(self: *Parser, inner: []const u8) Error!void {
+        const css_map = self.css_classes orelse return;
+        var i: usize = 0;
+        var literal_start: usize = 0;
+        while (i < inner.len) {
+            // Detect `${` interpolation start.
+            if (i + 1 < inner.len and inner[i] == '$' and inner[i + 1] == '{') {
+                // Tokenize the literal segment we just passed over.
+                if (i > literal_start) {
+                    var it = mem.tokenizeAny(u8, inner[literal_start..i], " \t\n\r");
+                    while (it.next()) |token| {
+                        if (!css_map.contains(token)) {
+                            const duped = self.allocator.dupe(u8, token) catch continue;
+                            css_map.put(self.allocator, duped, {}) catch {
+                                self.allocator.free(duped);
+                            };
+                        }
+                    }
+                }
+                // Skip past matching `}`. Track brace depth so nested `{}`
+                // inside the interpolation don't trip us up.
+                i += 2;
+                var depth: usize = 1;
+                while (i < inner.len and depth > 0) : (i += 1) {
+                    if (inner[i] == '{') depth += 1;
+                    if (inner[i] == '}') depth -= 1;
+                }
+                literal_start = i;
+                continue;
+            }
+            i += 1;
+        }
+        // Trailing literal segment after the last interpolation.
+        if (literal_start < inner.len) {
+            var it = mem.tokenizeAny(u8, inner[literal_start..], " \t\n\r");
+            while (it.next()) |token| {
+                if (!css_map.contains(token)) {
+                    const duped = self.allocator.dupe(u8, token) catch continue;
+                    css_map.put(self.allocator, duped, {}) catch {
+                        self.allocator.free(duped);
+                    };
+                }
             }
         }
     }
@@ -3272,22 +3472,25 @@ const Parser = struct {
         }
     }
 
-    /// Emit the current writer variable name (changes in children context)
+    /// Emit the current writer variable name (changes in children context).
+    /// Children-context writers are declared once per buffer block as
+    /// `var _children_w_<n> = _children_buf_<n>.writer(_children_alloc_<n>);`
+    /// — referencing the cached identifier here avoids reconstructing the
+    /// writer on every call. Critical for branch-quota: every `anytype`
+    /// `writer.writeAll(...)` call costs semantic-analysis budget; reducing
+    /// the per-call expression from a method chain to a single identifier
+    /// keeps large templates inside Zig's default 1000-branch ceiling.
     fn writeWriterVar(self: *Parser) Error!void {
         if (self.children_depth == 0) {
             try self.write("writer");
         } else {
-            // Children are pre-rendered to depth-specific buffer
             const depth_suffix: []const u8 = switch (self.children_depth - 1) {
                 0 => "0", 1 => "1", 2 => "2", 3 => "3", 4 => "4",
                 5 => "5", 6 => "6", 7 => "7", 8 => "8", 9 => "9",
                 else => "x",
             };
-            try self.write("_children_buf_");
+            try self.write("_children_w_");
             try self.write(depth_suffix);
-            try self.write(".writer(_children_alloc_");
-            try self.write(depth_suffix);
-            try self.write(")");
         }
     }
 
