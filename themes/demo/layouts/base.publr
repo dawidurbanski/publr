@@ -1,7 +1,3 @@
----
-const std = @import("std");
-const ts = std.time.timestamp();
----
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,20 +7,6 @@ const ts = std.time.timestamp();
   <link rel="stylesheet" href="/theme/theme.css" />
 </head>
 <body class="bg-white text-gray-900 antialiased">
-  <div class="max-w-2xl mx-auto px-6 py-8">
-    <header class="border-b border-gray-200 pb-4 mb-8">
-      <nav class="flex items-center gap-6">
-        <a href="/"><img src="/theme/images/logo.svg" alt="Publr" width="28" height="28" /></a>
-        <a href="/posts" class="font-medium text-gray-500 hover:text-gray-900">Posts</a>
-        <a href="/pages" class="font-medium text-gray-500 hover:text-gray-900">Pages</a>
-      </nav>
-    </header>
-    <main>
-      {@raw props.children}
-    </main>
-    <footer class="mt-12 pt-6 border-t border-gray-200 text-gray-400 text-sm">
-      Generated at: <strong>{ts}</strong>
-    </footer>
-  </div>
+  {@raw props.children}
 </body>
 </html>

@@ -1,0 +1,22 @@
+// Demo theme — runtime overrides on top of the JIT's default palette.
+// Loaded by `cms/build.zig` via `jit --theme=themes/demo/theme.zon ...`.
+//
+// Merge semantics (jit.extendThemeRuntime): overrides matching tokens by
+// name; new tokens append. Anything not listed here keeps the default.
+.{
+    .tokens = .{
+        // ── Rebrand: tilt indigo (the demo's primary accent) toward Publr ──
+        // Visible everywhere `bg-indigo-*`, `text-indigo-*`, `ring-indigo-*`
+        // appear in the .publr templates. To see it, edit anywhere and
+        // reload — the override re-runs through the JIT at build time.
+        .{ .name = "color-indigo-300", .value = "#a8b3f5" },
+        .{ .name = "color-indigo-400", .value = "#7787ed" },
+        .{ .name = "color-indigo-500", .value = "#565dd9" },
+
+        // ── Demo-specific brand tokens (NEW — additions to the palette) ───
+        // Use as `bg-publr-brand`, `text-publr-brand-fg` etc. in templates.
+        .{ .name = "color-publr-brand", .value = "#565dd9" },
+        .{ .name = "color-publr-brand-fg", .value = "#ffffff" },
+        .{ .name = "color-publr-brand-muted", .value = "#ebf6ff" },
+    },
+}
