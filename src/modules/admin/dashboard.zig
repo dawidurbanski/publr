@@ -7,6 +7,8 @@ const tpl = @import("tpl");
 const views = @import("views");
 const registry = @import("registry");
 const auth_middleware = @import("auth_middleware");
+const csrf = @import("csrf");
+const gravatar = @import("gravatar");
 const media = @import("media");
 
 pub const page = admin.registerPage(.{
@@ -67,6 +69,12 @@ fn handleDashboardV2(ctx: *Context) !void {
     const Post = struct { id: []const u8, title: []const u8, status: []const u8, date: []const u8 };
     const posts: []const Post = &.{};
 
+    // dashboard_v2 is a self-contained page (its own <html>/<head>/<body>),
+    // so we render it directly without registry.renderPage — no admin shell.
+    const csrf_token = csrf.ensureToken(ctx);
+    const user_email = auth_middleware.getUserEmail(ctx) orelse "";
+    const gravatar_url = gravatar.url(user_email, 32);
+
     const content = tpl.render(views.admin.dashboard_v2.DashboardV2, .{.{
         .posts_count = "0",
         .pages_count = "0",
@@ -74,7 +82,9 @@ fn handleDashboardV2(ctx: *Context) !void {
         .users_count = "0",
         .has_posts = false,
         .recent_posts = posts,
+        .user_gravatar_url = gravatar_url.slice(),
+        .csrf_token = csrf_token,
     }});
 
-    ctx.html(registry.renderPage(page_v2, ctx, content));
+    ctx.html(content);
 }

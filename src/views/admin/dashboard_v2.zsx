@@ -1,24 +1,29 @@
-// Dashboard v2 — minimal-CSS spike, patched after first iteration revealed:
-//  - admin.css `a { color: var(--primary) }` beats Tailwind utilities (specificity)
-//    → primary Buttons rendered as <a> show blue-on-blue text. Workaround: use
-//      <button> form (no href) where possible, or hierarchy=.secondary for nav.
-//  - layout has no built-in padding → wrap in Container.
-//  - Stat columns collapse to label width without min-w → use Stack with min-w-32
-//    via a wrapping <div>, OR accept and use a clean inline pattern.
-const std = @import("std");
+// Dashboard v2 — multi-column admin layout (icon rail + top bar + main + aside).
+//
+// Architecture:
+//   • `class="dark"` on <html> activates the `.dark { --card, --foreground, … }`
+//     scope from tokens.css. Every semantic utility (`bg-card`, `text-foreground`,
+//     `border-border`, `text-muted-foreground`, `bg-muted`, `text-primary`,
+//     `bg-sidebar`, `text-sidebar-foreground`, `border-sidebar-border`)
+//     auto-resolves to its dark-mode value.
+//   • Three-column shell: left icon rail (w-20) + secondary aside (w-96, xl+) + main.
+//   • All structural typography/UI goes through Heading/Text/Card/Avatar/Icon/Button.
+//     Inline <svg> is forbidden — use the Icon component from publr_ui.
+//
+// Bypasses the standard admin shell (modules/admin/dashboard.zig calls
+// ctx.html(content) directly), so this page owns its <html>/<head>/<body>.
 const ui = @import("publr_ui");
-
-const Container = ui.container.Container;
-const Grid = ui.grid.Grid;
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
 const Heading = ui.heading.Heading;
 const Text = ui.text.Text;
-const Stack = ui.stack.Stack;
 const Flex = ui.flex.Flex;
+const Stack = ui.stack.Stack;
+const Card = ui.card.Card;
+const CardContent = ui.card.CardContent;
+const Avatar = ui.avatar.Avatar;
+const AvatarImage = ui.avatar.AvatarImage;
 const Button = ui.button.Button;
-const Separator = ui.separator.Separator;
-const Badge = ui.badge.Badge;
-const BadgeVariant = ui.badge.Variant;
-const Empty = ui.empty.Empty;
 
 const Post = struct {
     id: []const u8,
@@ -34,77 +39,199 @@ pub fn DashboardV2(props: struct {
     users_count: []const u8,
     has_posts: bool,
     recent_posts: []const Post,
+    user_gravatar_url: []const u8,
+    csrf_token: []const u8,
 }) {
-    <Container size=.lg padding=.lg>
-        <Stack gap=.xl>
-            <Stack gap=.xs>
-                <Heading level=.h1 size=.xl>Welcome back</Heading>
-                <Text color=.muted>Here's what's happening with your site.</Text>
-            </Stack>
-
-            <Flex gap=.lg>
-                <div class="flex-1">
-                    <Stack gap=.xs>
-                        <Text size=.xs color=.muted>Posts</Text>
-                        <Heading level=.h2 size=.lg>{props.posts_count}</Heading>
-                    </Stack>
-                </div>
-                <div class="flex-1">
-                    <Stack gap=.xs>
-                        <Text size=.xs color=.muted>Pages</Text>
-                        <Heading level=.h2 size=.lg>{props.pages_count}</Heading>
-                    </Stack>
-                </div>
-                <div class="flex-1">
-                    <Stack gap=.xs>
-                        <Text size=.xs color=.muted>Media</Text>
-                        <Heading level=.h2 size=.lg>{props.media_count}</Heading>
-                    </Stack>
-                </div>
-                <div class="flex-1">
-                    <Stack gap=.xs>
-                        <Text size=.xs color=.muted>Users</Text>
-                        <Heading level=.h2 size=.lg>{props.users_count}</Heading>
-                    </Stack>
-                </div>
-            </Flex>
-
-            <Separator />
-
-            <Stack gap=.md>
-                <Heading level=.h2 size=.sm>Quick actions</Heading>
-                <Flex gap=.sm wrap=.wrap>
-                    <Button label="New post" hierarchy=.secondary href="/admin/content/post/new" />
-                    <Button label="Upload media" hierarchy=.secondary href="/admin/media" />
-                    <Button label="Manage users" hierarchy=.secondary href="/admin/users" />
+    <!DOCTYPE html>
+    <html class="dark h-full bg-background">
+        <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Dashboard - Publr Admin</title>
+            <link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
+            <link rel="stylesheet" href="/static/tokens.css" />
+            <link rel="stylesheet" href="/static/publr.css" />
+            <style>{@raw ".theme-toggle-sun{display:none}.dark .theme-toggle-sun{display:block}.dark .theme-toggle-moon{display:none}"}</style>
+            <script>
+                {@raw "(function(){var t=localStorage.getItem('publr-theme');if(t==='light')document.documentElement.classList.remove('dark');else if(t==='dark')document.documentElement.classList.add('dark');})();"}
+            </script>
+        </head>
+        <body class="h-full bg-background text-foreground">
+            <div class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-50 lg:block lg:w-20 lg:overflow-y-auto lg:bg-sidebar lg:pb-4 border-r border-sidebar-border">
+                <Flex justify=.center items=.center class="h-16 shrink-0">
+                    <a href="/admin" aria-label="Publr" class="text-sidebar-foreground">
+                        <svg fill="none" viewBox="0 0 42 48" xmlns="http://www.w3.org/2000/svg" width="28" height="32" aria-hidden="true">
+                            <path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="currentColor" fill-rule="evenodd" />
+                        </svg>
+                    </a>
                 </Flex>
-            </Stack>
+                <nav class="mt-4">
+                    <ul role="list" class="flex flex-col items-center gap-1 list-none p-0">
+                        <li>
+                            <a href="/admin/content/post" class="group flex rounded-md p-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" title="Content">
+                                <Icon name=.bookmark size={24} class="shrink-0" />
+                                <span class="sr-only">Content</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/admin/releases" class="group flex rounded-md p-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" title="Releases">
+                                <Icon name=.copy size={24} class="shrink-0" />
+                                <span class="sr-only">Releases</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/admin/content-types" class="group flex rounded-md p-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" title="Content Types">
+                                <Icon name=.package size={24} class="shrink-0" />
+                                <span class="sr-only">Content Types</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/admin/media" class="group flex rounded-md p-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" title="Media">
+                                <Icon name=.image size={24} class="shrink-0" />
+                                <span class="sr-only">Media</span>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
 
-            <Separator />
+            <div class="lg:pl-20">
+                <header class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-sidebar-border bg-sidebar px-4 sm:gap-x-6 sm:px-6 lg:px-8">
+                    <Flex items=.center gap=.md class="flex-1 self-stretch">
+                        <label for="dashboard-search" class="flex flex-1 items-center gap-2">
+                            <Icon name=.search size={20} class="shrink-0 text-muted-foreground" />
+                            <input
+                                id="dashboard-search"
+                                name="search"
+                                type="search"
+                                placeholder="Search"
+                                aria-label="Search"
+                                class="block size-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                            />
+                        </label>
+                        <Flex items=.center gap=.sm>
+                            <button
+                                type="button"
+                                id="theme-toggle"
+                                aria-label="Toggle theme"
+                                class="inline-flex items-center justify-center p-2 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                            >
+                                <Icon name={IconName.sun} size={14} class="theme-toggle-sun" />
+                                <Icon name={IconName.moon} size={14} class="theme-toggle-moon" />
+                            </button>
+                            <div aria-hidden="true" class="hidden lg:block lg:h-6 lg:w-px lg:bg-sidebar-border"></div>
+                            <a href="/admin/users/profile" aria-label="Profile" class="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                                <Avatar size=.sm>
+                                    <AvatarImage src={props.user_gravatar_url} alt="" class="outline -outline-offset-1 outline-border" />
+                                </Avatar>
+                            </a>
+                        </Flex>
+                    </Flex>
+                </header>
 
-            <Stack gap=.md>
-                <Heading level=.h2 size=.sm>Recent posts</Heading>
-                {if (props.has_posts) (
-                    <Stack gap=.sm>
-                        {for (props.recent_posts) |post| (
-                            <Flex gap=.md justify=.between>
-                                <a href={post.id}>{post.title}</a>
-                                <Badge
-                                    label={if (std.mem.eql(u8, post.status, "published")) ("Published") else if (std.mem.eql(u8, post.status, "draft")) ("Draft") else if (std.mem.eql(u8, post.status, "scheduled")) ("Scheduled") else (post.status)}
-                                    variant={if (std.mem.eql(u8, post.status, "published")) (BadgeVariant.success) else if (std.mem.eql(u8, post.status, "scheduled")) (BadgeVariant.warning) else (BadgeVariant.secondary)}
-                                />
-                            </Flex>
-                        )}
-                    </Stack>
-                ) else (
-                    <Empty>
-                        <Stack gap=.sm items=.center>
-                            <Text color=.muted>No posts yet.</Text>
-                            <Button label="Create your first post" hierarchy=.secondary href="/admin/content/post/new" />
+                <main class="xl:pl-96">
+                    <div class="px-4 py-8 sm:px-6 lg:px-8">
+                        <Stack gap=.lg>
+                            <Heading level=.h1 size=.lg>Dashboard</Heading>
+
+                            <section aria-labelledby="overview-title">
+                                <Heading level=.h2 size=.xs class="sr-only" id="overview-title">Overview</Heading>
+                                <Card>
+                                    <CardContent>
+                                        <Heading level=.h3 size=.sm>Overview</Heading>
+                                        <Text size=.sm color=.muted class="mt-1">Activity across your site.</Text>
+                                        <Flex as=.ul gap=.lg wrap=.wrap class="mt-6 list-none p-0">
+                                            <li class="flex-1">
+                                                <Text as=.div size=.sm color=.muted weight=.medium>Posts</Text>
+                                                <Text as=.div size=.lg weight=.semibold class="mt-1">{props.posts_count}</Text>
+                                            </li>
+                                            <li class="flex-1">
+                                                <Text as=.div size=.sm color=.muted weight=.medium>Pages</Text>
+                                                <Text as=.div size=.lg weight=.semibold class="mt-1">{props.pages_count}</Text>
+                                            </li>
+                                            <li class="flex-1">
+                                                <Text as=.div size=.sm color=.muted weight=.medium>Media</Text>
+                                                <Text as=.div size=.lg weight=.semibold class="mt-1">{props.media_count}</Text>
+                                            </li>
+                                            <li class="flex-1">
+                                                <Text as=.div size=.sm color=.muted weight=.medium>Users</Text>
+                                                <Text as=.div size=.lg weight=.semibold class="mt-1">{props.users_count}</Text>
+                                            </li>
+                                        </Flex>
+                                    </CardContent>
+                                </Card>
+                            </section>
+
+                            <section aria-labelledby="quick-actions-title">
+                                <Heading level=.h2 size=.xs class="sr-only" id="quick-actions-title">Quick actions</Heading>
+                                <Card>
+                                    <CardContent>
+                                        <Heading level=.h3 size=.sm>Quick actions</Heading>
+                                        <ul role="list" class="mt-4 grid grid-cols-1 gap-2 list-none p-0 sm:grid-cols-2">
+                                            <li>
+                                                <a href="/admin/content/post/new" class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground">
+                                                    <Icon name=.plus_circle size={20} class="shrink-0 text-primary" />
+                                                    New post
+                                                </a>
+                                            </li>
+                                            <li>
+                                                <a href="/admin/media" class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground">
+                                                    <Icon name=.upload size={20} class="shrink-0 text-primary" />
+                                                    Upload media
+                                                </a>
+                                            </li>
+                                            <li>
+                                                <a href="/admin/users" class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground">
+                                                    <Icon name=.users size={20} class="shrink-0 text-primary" />
+                                                    Manage users
+                                                </a>
+                                            </li>
+                                            <li>
+                                                <a href="/admin/settings" class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground">
+                                                    <Icon name=.settings size={20} class="shrink-0 text-primary" />
+                                                    Settings
+                                                </a>
+                                            </li>
+                                        </ul>
+                                        <form method="POST" action="/admin/logout" class="mt-4 border-t border-border pt-4">
+                                            <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                            <Button button_type=.submit hierarchy=.tertiary size=.sm full_width={true} icon=.logout label="Sign out" class="justify-start" />
+                                        </form>
+                                    </CardContent>
+                                </Card>
+                            </section>
+
+                            <footer class="border-t border-border pt-6">
+                                <Text as=.span size=.sm color=.muted>&copy; 2026 Publr. All rights reserved.</Text>
+                            </footer>
                         </Stack>
-                    </Empty>
-                )}
-            </Stack>
-        </Stack>
-    </Container>
+                    </div>
+                </main>
+            </div>
+
+            <aside class="fixed top-16 bottom-0 left-20 hidden w-96 overflow-y-auto border-r border-sidebar-border bg-background px-4 py-6 sm:px-6 lg:px-8 xl:block">
+                <Stack gap=.md>
+                    <Heading level=.h2 size=.sm>Recent posts</Heading>
+                    {if (props.has_posts) (
+                        <ul role="list" class="divide-y divide-border list-none p-0">
+                            {for (props.recent_posts) |post| (
+                                <li class="flex items-center justify-between gap-4 py-3">
+                                    <a href={post.id} class="truncate text-sm font-medium text-foreground hover:text-primary">{post.title}</a>
+                                    <Text as=.span size=.xs color=.muted class="shrink-0">{post.date}</Text>
+                                </li>
+                            )}
+                        </ul>
+                    ) else (
+                        <Flex justify=.center class="mt-2">
+                            <Text size=.sm color=.muted>No posts yet.</Text>
+                        </Flex>
+                    )}
+                </Stack>
+            </aside>
+
+            <script>
+                {@raw "document.getElementById('theme-toggle').addEventListener('click',function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('publr-theme',d?'dark':'light');});"}
+            </script>
+        </body>
+    </html>
 }
