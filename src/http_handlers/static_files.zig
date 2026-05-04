@@ -10,6 +10,7 @@ pub fn setDevMode(dev_mode: bool) void {
 
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
 const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
+const LogoSvg = static.Asset("logo.svg", @embedFile("static_logo_svg"));
 
 const InteractCore = static.Asset("core.js", @embedFile("static_interact_core_js"));
 const InteractToggle = static.Asset("toggle.js", @embedFile("static_interact_toggle_js"));
@@ -24,7 +25,9 @@ const InteractWebSocket = static.Asset("websocket.js", @embedFile("static_intera
 const InteractPresence = static.Asset("presence.js", @embedFile("static_interact_presence_js"));
 
 const publr_ui = @import("publr_ui");
-const PublrCss = static.Asset("publr.css", @embedFile("static_jit_css"));
+const PreflightCss = @embedFile("static_preflight_css");
+const JitUtilitiesCss = @embedFile("static_jit_css");
+const PublrCss = static.Asset("publr.css", PreflightCss ++ "\n" ++ JitUtilitiesCss);
 const TokensCss = static.Asset("tokens.css", @embedFile("static_tokens_css"));
 const PublrCoreJs = static.Asset("publr-core.js", publr_ui.core_js);
 const PublrDialogJs = static.Asset("publr-dialog.js", publr_ui.dialog_js);
@@ -42,6 +45,7 @@ const AssetEntry = struct {
 const asset_map = .{
     .{ "admin.css", AssetEntry{ .asset = AdminCss, .disk_path = "static/admin.css" } },
     .{ "admin.js", AssetEntry{ .asset = AdminJs, .disk_path = "static/admin.js" } },
+    .{ "logo.svg", AssetEntry{ .asset = LogoSvg, .disk_path = "static/logo.svg" } },
     .{ "interact/core.js", AssetEntry{ .asset = InteractCore, .disk_path = "static/interact/core.js" } },
     .{ "interact/toggle.js", AssetEntry{ .asset = InteractToggle, .disk_path = "static/interact/toggle.js" } },
     .{ "interact/portal.js", AssetEntry{ .asset = InteractPortal, .disk_path = "static/interact/portal.js" } },
@@ -110,7 +114,11 @@ pub fn handleThemeStatic(ctx: *Context) !void {
 
     inline for (theme_static.files) |entry| {
         if (std.mem.eql(u8, file, entry.path)) {
-            if (is_dev_mode) {
+            // Dev mode reads from disk so changes appear without rebuild —
+            // except for synthetic entries (build-generated, no disk file),
+            // which carry an empty disk_path and fall through to the embedded
+            // bytes.
+            if (is_dev_mode and entry.disk_path.len > 0) {
                 const content = std.fs.cwd().readFileAlloc(std.heap.page_allocator, entry.disk_path, 4 * 1024 * 1024) catch {
                     ctx.response.setStatus("404 Not Found");
                     ctx.response.setContentType("text/plain");

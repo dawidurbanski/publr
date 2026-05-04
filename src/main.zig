@@ -5,6 +5,7 @@ const ssg = @import("ssg.zig");
 const core_init = @import("core_init");
 const cli_main = @import("cli_main");
 const publr_config = @import("publr_config");
+const build_options = @import("build_options");
 const collaboration_config = @import("collaboration_config.zig");
 
 pub fn main() !void {
@@ -391,7 +392,14 @@ fn runWithWatchers(
         }
     }
 
-    const build_suffix = "zig build -Dwatch";
+    // Propagate -Dminify=<resolved> so the watcher rebuild preserves the
+    // user's CSS minify choice. Without this, every file-change rebuild
+    // falls back to the optimize-based default (Debug → unminified) even
+    // when the user started the session with -Dminify=true.
+    const build_suffix = if (build_options.minify_css)
+        "zig build -Dwatch -Dminify=true"
+    else
+        "zig build -Dwatch -Dminify=false";
     @memcpy(cmd_buf[cmd_offset..][0..build_suffix.len], build_suffix);
     cmd_offset += build_suffix.len;
     cmd_buf[cmd_offset] = 0;

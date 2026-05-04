@@ -5,6 +5,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const watch_mode = b.option(bool, "watch", "Skip preBuild hooks and init_db (used by --watch rebuilds)") orelse false;
     const setup_bg_dark = b.option(bool, "setup-bg-dark", "Use dark background on setup page (comptime config demo)") orelse false;
+    // CSS minify override. Default null = follow the optimize gate (Debug
+    // unminified, Release minified). Set explicitly with -Dminify=true/false
+    // to override — e.g. `zig build run -Dminify=true` for a Debug build that
+    // ships minified CSS, or `-Dminify=false` to inspect a release build's
+    // generated CSS in readable form.
+    const minify_css = b.option(bool, "minify", "Minify generated CSS (default: follows -Doptimize)");
 
     // External source tree options (for recompilation from ~/.publr/src/)
     const config_path = b.option([]const u8, "config-path", "Absolute path to publr.zon (external source tree builds)");
@@ -165,10 +171,13 @@ pub fn build(b: *std.Build) void {
     exe.step.dependOn(&transpile_theme_cmd.step);
 
     // ── JIT CSS compiler ────────────────────────────────────────────────────
-    // Runs after ZSX transpile. Scans the class manifest (css_classes.txt),
-    // the vendored DS components (publr_ui.zig), and the generated admin
-    // views for class-shaped string literals. Emits utility CSS to stdout,
+    // Runs after ZSX transpile. Reads the class manifest (css_classes.txt)
+    // produced by the ZSX/.publr transpilers and emits utility CSS to stdout,
     // captured and embedded as a static asset at /static/publr.css.
+    //
+    // Class collection is the transpilers' job; this build no longer scans
+    // Zig sources for class-shaped literals (see
+    // `memory/project_jit_input_scope.md`).
     const jit_compiler = b.addExecutable(.{
         .name = "jit",
         .root_module = b.createModule(.{
@@ -180,14 +189,78 @@ pub fn build(b: *std.Build) void {
 
     const jit_cmd = b.addRunArtifact(jit_compiler);
     jit_cmd.setCwd(b.path("."));
-    // arg 1: class manifest from ZSX transpiler
+    // Layer the design-system semantic palette so JIT auto-generates
+    // `bg-card`, `text-foreground`, `border-border`, etc. utilities that
+    // the publr_ui components emit. ds-tokens.zon chains each `--color-{name}`
+    // to the unprefixed `var(--{name})` defined in tokens.css, preserving
+    // the existing `:root` / `.dark` cascade for runtime light/dark
+    // switching. Vendored from design-system/src/styles/ds-tokens.zon.
+    jit_cmd.addPrefixedFileArg("--theme=", b.path("vendor/jit/ds-tokens.zon"));
+    // Debug builds: keep CSS readable for devtools. Release builds: rely on
+    // the JIT CLI's default (minified). `-Dminify=true|false` overrides this.
+    // Same gate applied to theme_jit_cmd. The resolved value is also baked
+    // into the binary (build_options module) so the --watch rebuild loop in
+    // main.zig can propagate the flag — without that, the next rebuild
+    // triggered by a source change drops -Dminify=true and emits unminified
+    // CSS.
+    const should_minify = minify_css orelse (optimize != .Debug);
+    if (!should_minify) jit_cmd.addArg("--no-minify");
+
+    // Comptime build options surfaced to main.zig (used by the --watch
+    // rebuild command builder).
+    const build_opts = b.addOptions();
+    build_opts.addOption(bool, "minify_css", should_minify);
+    // First manifest: classes from CMS's own admin .zsx templates.
     jit_cmd.addFileArg(gen_views.path(b, "css_classes.txt"));
-    // arg 2+: paths to scan for class-shaped string literals
-    jit_cmd.addFileArg(b.path("vendor/publr_ui.zig"));
-    jit_cmd.addDirectoryArg(gen_views);
+    // Second manifest: classes baked into publr_ui.zig — invisible to the
+    // local transpiler because the components arrived pre-amalgamated.
+    // Without this, classes like `bg-card`, `text-card-foreground`,
+    // `text-popover-foreground`, etc. emitted by Card/Heading/Text wouldn't
+    // get utility rules generated. Re-vendor with `vendor-design-system.sh`
+    // after design-system .zsx changes.
+    jit_cmd.addFileArg(b.path("vendor/publr_ui.classes.txt"));
     jit_cmd.has_side_effects = true;
     jit_cmd.step.dependOn(&transpile_zsx_cmd.step);
     const jit_css_output = jit_cmd.captureStdOut();
+
+    // Theme JIT: same compiler, fed by the theme's class manifest produced by
+    // the .publr → ZSX → transpile chain. Output is served at /theme.css.
+    // We use `--prepend` so the public stylesheet ships with preflight inline,
+    // matching the standalone-resource convention (no separate /preflight.css).
+    //
+    // If the theme directory contains `theme.zon`, pass it via `--theme=` so
+    // the theme can override / extend the JIT's default-theme tokens at the
+    // consumer's BUILD time (the JIT's runtime). Per
+    // `memory/project_jit_theme_comptime.md`: the JIT is theme-agnostic; the
+    // override is merged with `jit.extendThemeRuntime` and the resulting CSS
+    // is fully baked into this build's output. No theme.zon = use the
+    // embedded default-theme.zon.
+    const theme_zon_rel = b.pathJoin(&.{ theme_path, "theme.zon" });
+    const has_theme_zon = blk: {
+        if (project_dir != null) break :blk false; // external builds skip — keep the path simple
+        b.build_root.handle.access(theme_zon_rel, .{}) catch break :blk false;
+        break :blk true;
+    };
+
+    const theme_jit_cmd = b.addRunArtifact(jit_compiler);
+    theme_jit_cmd.setCwd(b.path("."));
+    // Layer the DS semantic palette first so theme.zon brand overrides win
+    // when both define the same `color-{name}`. Public themes that use
+    // `bg-card`/`text-foreground` etc. through publr_ui get them for free.
+    theme_jit_cmd.addPrefixedFileArg("--theme=", b.path("vendor/jit/ds-tokens.zon"));
+    if (!should_minify) theme_jit_cmd.addArg("--no-minify");
+    if (has_theme_zon) {
+        // Use the explicit-flag form so the manifest stays as the trailing
+        // positional. addPrefixedFileArg attaches the file dependency so
+        // theme.zon edits trigger a rebuild.
+        theme_jit_cmd.addPrefixedFileArg("--theme=", b.path(theme_zon_rel));
+    }
+    theme_jit_cmd.addArg("--prepend");
+    theme_jit_cmd.addFileArg(b.path("vendor/jit/preflight.css"));
+    theme_jit_cmd.addFileArg(gen_theme.path(b, "css_classes.txt"));
+    theme_jit_cmd.has_side_effects = true;
+    theme_jit_cmd.step.dependOn(&transpile_theme_cmd.step);
+    const theme_jit_css_output = theme_jit_cmd.captureStdOut();
 
     // Note: preBuild/postBuild hooks from publr.zon run during `publr build` CLI,
     // not during `zig build`. This avoids hard failures when tools aren't installed.
@@ -241,6 +314,7 @@ pub fn build(b: *std.Build) void {
             b.path("publr.zon"),
     });
     exe.root_module.addImport("publr_config", publr_config_module);
+    exe.root_module.addOptions("build_options", build_opts);
     // Theme config: theme's own publr.zon, or empty fallback
     if (theme_config_module) |m| {
         exe.root_module.addImport("theme_config", m);
@@ -255,9 +329,17 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addAnonymousImport("static_admin_css", .{
         .root_source_file = b.path("static/admin.css"),
     });
+    exe.root_module.addAnonymousImport("static_logo_svg", .{
+        .root_source_file = b.path("static/logo.svg"),
+    });
     // JIT-emitted utility CSS (replaces the old Tailwind output from publr_ui.css)
     exe.root_module.addAnonymousImport("static_jit_css", .{
         .root_source_file = jit_css_output,
+    });
+    // Preflight (resets, --tw-* defaults, keyframes) — vendored alongside the
+    // JIT engine so that publr.css is preflight + utilities concatenated.
+    exe.root_module.addAnonymousImport("static_preflight_css", .{
+        .root_source_file = b.path("vendor/jit/preflight.css"),
     });
     // DS token definitions (:root, .dark) — vendored from design-system/src/styles/input.css
     exe.root_module.addAnonymousImport("static_tokens_css", .{
@@ -319,7 +401,9 @@ pub fn build(b: *std.Build) void {
             \\
         ) catch @panic("OOM");
 
-        // Collect theme static files
+        // Collect theme static files. `theme.css` is reserved for the JIT
+        // pipeline — any disk copy is treated as a placeholder and ignored
+        // here so the synthetic JIT-generated entry below wins.
         var file_count: usize = 0;
         const local_static_dir = if (project_dir) |_| null else b.build_root.handle.openDir(theme_static_path, .{ .iterate = true }) catch null;
         if (local_static_dir) |*sd| {
@@ -330,6 +414,7 @@ pub fn build(b: *std.Build) void {
             while (walker.next() catch @panic("walk error")) |entry| {
                 if (entry.kind != .file) continue;
                 const rel = entry.path;
+                if (std.mem.eql(u8, rel, "theme.css")) continue;
                 const import_name = sanitizeImportName(b.allocator, rel);
                 const mime = getMimeForBuild(rel);
                 const disk = b.pathJoin(&.{ theme_static_path, rel });
@@ -342,6 +427,13 @@ pub fn build(b: *std.Build) void {
                 file_count += 1;
             }
         }
+
+        // Synthetic entry: JIT-emitted theme.css, served at /theme.css.
+        // disk_path is empty — there is no disk file to reload from in dev.
+        w.writeAll(
+            \\    .{ .path = "theme.css", .data = @embedFile("static_theme_jit_css"), .content_type = "text/css", .disk_path = "" },
+            \\
+        ) catch @panic("OOM");
 
         w.writeAll(
             \\};
@@ -363,12 +455,18 @@ pub fn build(b: *std.Build) void {
             defer walker2.deinit();
             while (walker2.next() catch @panic("walk error")) |entry2| {
                 if (entry2.kind != .file) continue;
+                if (std.mem.eql(u8, entry2.path, "theme.css")) continue;
                 const import_name2 = sanitizeImportName(b.allocator, entry2.path);
                 mod.addAnonymousImport(import_name2, .{
                     .root_source_file = b.path(b.pathJoin(&.{ theme_static_path, entry2.path })),
                 });
             }
         }
+
+        // JIT-emitted theme.css from the .publr/ZSX class manifest.
+        mod.addAnonymousImport("static_theme_jit_css", .{
+            .root_source_file = theme_jit_css_output,
+        });
 
         break :blk mod;
     };
@@ -1090,6 +1188,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "db", .module = db_module },
             .{ .name = "csrf", .module = csrf_module },
             .{ .name = "auth_middleware", .module = auth_middleware_module },
+            .{ .name = "gravatar", .module = gravatar_module },
             .{ .name = "media", .module = media_module },
             .{ .name = "views", .module = views },
         },
