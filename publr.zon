@@ -2,7 +2,7 @@
     .name = "publr",
     .url = "http://localhost:8080",
     .description = "Publr CMS",
-    .theme = "minimal",
+    .theme = "demo",
     .site = .{},
-    .configText = "hello from comptime 222",
+    .configText = "hello from comptime 222 333",
 }
