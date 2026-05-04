@@ -1,0 +1,64 @@
+// Design-system semantic color palette (shadcn convention).
+//
+// These tokens register `--color-{name}` aliases with the JIT so the full
+// family of color utilities — `bg-card`, `text-foreground`, `border-border`,
+// `ring-ring`, `text-muted-foreground`, etc. — auto-generate from them.
+// Each value chains to the unprefixed `var(--{name})` defined in
+// `input.css` (and copied to the consumer as `tokens.css`), so the
+// `:root` / `.dark` blocks in CSS still drive the actual color values
+// at runtime. That keeps light/dark theming working unchanged: change
+// `--card` in tokens.css and `bg-card` follows.
+//
+// Add this file as a `--theme=` flag layered UNDER any consumer-specific
+// brand theme. JIT supports multiple `--theme=` flags; each merges on
+// top of the previous in argv order, so brand overrides win.
+//
+// Naming convention: `color-{semantic-name}` for surfaces/text/borders.
+// Pairs convention: `<role>` and `<role>-foreground` (e.g. `card` /
+// `card-foreground`) — text printed on top of the surface.
+.{
+    .tokens = .{
+        // ── Surfaces ──────────────────────────────────────────────────
+        .{ .name = "color-background", .value = "var(--background)" },
+        .{ .name = "color-foreground", .value = "var(--foreground)" },
+        .{ .name = "color-card", .value = "var(--card)" },
+        .{ .name = "color-card-foreground", .value = "var(--card-foreground)" },
+        .{ .name = "color-popover", .value = "var(--popover)" },
+        .{ .name = "color-popover-foreground", .value = "var(--popover-foreground)" },
+
+        // ── Actions / hierarchy ───────────────────────────────────────
+        .{ .name = "color-primary", .value = "var(--primary)" },
+        .{ .name = "color-primary-foreground", .value = "var(--primary-foreground)" },
+        .{ .name = "color-secondary", .value = "var(--secondary)" },
+        .{ .name = "color-secondary-foreground", .value = "var(--secondary-foreground)" },
+        .{ .name = "color-muted", .value = "var(--muted)" },
+        .{ .name = "color-muted-foreground", .value = "var(--muted-foreground)" },
+        .{ .name = "color-accent", .value = "var(--accent)" },
+        .{ .name = "color-accent-foreground", .value = "var(--accent-foreground)" },
+
+        // ── Semantic status ───────────────────────────────────────────
+        .{ .name = "color-destructive", .value = "var(--destructive)" },
+        .{ .name = "color-destructive-foreground", .value = "var(--error-foreground)" },
+        .{ .name = "color-error", .value = "var(--error)" },
+        .{ .name = "color-error-foreground", .value = "var(--error-foreground)" },
+        .{ .name = "color-success", .value = "var(--success)" },
+        .{ .name = "color-success-foreground", .value = "var(--success-foreground)" },
+        .{ .name = "color-warning", .value = "var(--warning)" },
+        .{ .name = "color-warning-foreground", .value = "var(--warning-foreground)" },
+
+        // ── Borders & focus rings ─────────────────────────────────────
+        .{ .name = "color-border", .value = "var(--border)" },
+        .{ .name = "color-input", .value = "var(--input)" },
+        .{ .name = "color-ring", .value = "var(--ring)" },
+
+        // ── Sidebar surfaces ──────────────────────────────────────────
+        .{ .name = "color-sidebar", .value = "var(--sidebar)" },
+        .{ .name = "color-sidebar-foreground", .value = "var(--sidebar-foreground)" },
+        .{ .name = "color-sidebar-primary", .value = "var(--sidebar-primary)" },
+        .{ .name = "color-sidebar-primary-foreground", .value = "var(--sidebar-primary-foreground)" },
+        .{ .name = "color-sidebar-accent", .value = "var(--sidebar-accent)" },
+        .{ .name = "color-sidebar-accent-foreground", .value = "var(--sidebar-accent-foreground)" },
+        .{ .name = "color-sidebar-border", .value = "var(--sidebar-border)" },
+        .{ .name = "color-sidebar-ring", .value = "var(--sidebar-ring)" },
+    },
+}

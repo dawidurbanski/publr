@@ -1,60 +1,31 @@
-/// Publr JIT CSS Compiler — POC
+/// Publr JIT CSS Compiler CLI.
 ///
-/// Full pipeline in one process:
-///   1. Reads .zsx template
-///   2. Transpiles via ZSX (imported as module)
-///   3. Collects CSS classes during transpilation
-///   4. Resolves classes to CSS rules
-///   5. Outputs CSS to stdout
+/// Reads a class manifest produced by the ZSX/.publr transpilers and emits
+/// utility CSS to stdout via `jit.compile()`.
+///
+/// Theme model: the JIT is theme-agnostic. By default it uses the embedded
+/// `default-theme.zon` (Tailwind v4.2.2 token set). Consumers pass their own
+/// theme at the JIT's runtime — which is the consumer's BUILD time — via
+/// `--theme=<path>`. The consumer's theme.zon may be a partial override; the
+/// JIT merges it onto the default before resolving.
+///
+/// Class collection is the upstream transpilers' job — never a file scanner
+/// here. See `memory/project_jit_input_scope.md`.
+///
+/// Preflight CSS (resets, `--tw-*` defaults, keyframes) lives in `preflight.css`
+/// and is prepended by build pipelines, not by this CLI.
 ///
 /// Usage:
-///   zig build run -- test_input/page.zsx
+///   jit [--theme=<theme.zon>] [--prepend=<preflight.css>] [--minify|--no-minify] <css_classes.txt>
+///     Compile classes to CSS. Output is minified by default; pass `--no-minify`
+///     for the readable indented form (typical for dev/debug builds).
+///   jit theme-from-css <input.css>
+///     Convert Tailwind @theme blocks to theme.zon (for migration).
 
 const std = @import("std");
-const zsx = @import("zsx");
-const resolver = @import("resolver.zig");
-
-/// Base CSS — Preflight reset + `--tw-*` defaults + keyframes.
-/// Token values (:root, .dark) are NOT here — each consumer provides its own
-/// (e.g. design-system/src/styles/input.css, or CMS's admin-tokens.css).
-const base_css =
-    \\/* ── Preflight (subset of Tailwind v4 reset) ── */
-    \\*, *::before, *::after, ::backdrop {
-    \\  box-sizing: border-box;
-    \\  border-style: solid;
-    \\  border-color: var(--border);
-    \\  border-width: 0;
-    \\  --tw-ring-inset: ;
-    \\  --tw-ring-offset-width: 0px;
-    \\  --tw-ring-offset-color: #fff;
-    \\  --tw-ring-color: var(--ring);
-    \\  --tw-ring-offset-shadow: 0 0 #0000;
-    \\  --tw-ring-shadow: 0 0 #0000;
-    \\  --tw-shadow: 0 0 #0000;
-    \\}
-    \\
-    \\html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }
-    \\body { margin: 0; line-height: inherit; font-family: "Geist", -apple-system, BlinkMacSystemFont, sans-serif; background-color: var(--background); color: var(--foreground); }
-    \\h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; margin: 0; }
-    \\p { margin: 0; }
-    \\a { color: inherit; text-decoration: inherit; }
-    \\button, input, select, textarea { font-family: inherit; font-size: 100%; line-height: inherit; color: inherit; margin: 0; padding: 0; }
-    \\button { background-color: transparent; background-image: none; cursor: pointer; }
-    \\button, [type='button'], [type='reset'], [type='submit'] { -webkit-appearance: button; }
-    \\img, svg, video, canvas { display: block; max-width: 100%; height: auto; }
-    \\
-    \\/* ── Component layer (from input.css @layer components) ── */
-    \\[data-publr-component="avatar-group"] > [data-publr-component="avatar"] {
-    \\  box-shadow: 0 0 0 2px var(--background);
-    \\}
-    \\
-    \\/* ── Animations ── */
-    \\@keyframes publr-spin {
-    \\  from { transform: rotate(0deg); }
-    \\  to   { transform: rotate(360deg); }
-    \\}
-    \\
-;
+const theme_from_css = @import("theme_from_css.zig");
+const jit = @import("jit.zig");
+const default_theme: jit.Theme = @import("default-theme.zon");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -65,199 +36,220 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        var stderr = std.fs.File.stderr().writer(&.{});
-        try stderr.interface.writeAll("Usage: jit <css_classes.txt> [scan_path...]\n");
-        try stderr.interface.writeAll("  <css_classes.txt>  Class manifest produced by ZSX transpiler.\n");
-        try stderr.interface.writeAll("  [scan_path...]     Optional .zig files or directories to scan for\n");
-        try stderr.interface.writeAll("                     class-shaped string literals (catches switch-arm classes\n");
-        try stderr.interface.writeAll("                     that aren't in the manifest).\n");
-        try stderr.interface.writeAll("  Emits CSS to stdout; reports unresolved candidates on stderr.\n");
+        try printUsage();
         std.process.exit(1);
     }
 
-    var all_classes = std.StringHashMapUnmanaged(void){};
-    defer {
-        var it = all_classes.keyIterator();
-        while (it.next()) |key| allocator.free(key.*);
-        all_classes.deinit(allocator);
+    if (std.mem.eql(u8, args[1], "theme-from-css")) {
+        try runThemeFromCss(allocator, args);
+        return;
     }
 
-    // 1. Read class manifest produced by ZSX transpiler
-    const manifest = try std.fs.cwd().readFileAlloc(allocator, args[1], 1024 * 1024);
-    defer allocator.free(manifest);
+    // Parse flags. `compile-classes` is accepted as an alias for the default
+    // mode (used by the visual-regression harness).
+    var arg_index: usize = 1;
+    if (std.mem.eql(u8, args[1], "compile-classes")) arg_index = 2;
 
-    var lines = std.mem.tokenizeAny(u8, manifest, "\n\r");
-    while (lines.next()) |line| {
-        if (line.len > 0 and !all_classes.contains(line)) {
-            const duped = try allocator.dupe(u8, line);
-            try all_classes.put(allocator, duped, {});
-        }
-    }
-
-    // 2. Scan additional paths for class-shaped string literals.
-    //    Catches classes inside switch arms and other Zig code that the
-    //    ZSX transpiler's pattern matcher doesn't see.
-    for (args[2..]) |scan_path| {
-        try scanPath(allocator, scan_path, &all_classes);
-    }
-
-    // Sort for deterministic output
-    var sorted: std.ArrayListUnmanaged([]const u8) = .{};
-    defer sorted.deinit(allocator);
-    {
-        var it = all_classes.keyIterator();
-        while (it.next()) |key| {
-            try sorted.append(allocator, key.*);
-        }
-    }
-    std.mem.sort([]const u8, sorted.items, {}, struct {
-        pub fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-            return std.mem.order(u8, a, b) == .lt;
-        }
-    }.lessThan);
-
-    // Emit CSS
-    var stdout = std.fs.File.stdout().writer(&.{});
-    try stdout.interface.writeAll("/* Generated by Publr JIT CSS Compiler */\n\n");
-    try stdout.interface.writeAll(base_css);
-    try stdout.interface.writeByte('\n');
-
-    var resolved: u32 = 0;
-    var unresolved: std.ArrayListUnmanaged([]const u8) = .{};
-    defer unresolved.deinit(allocator);
-    for (sorted.items) |candidate| {
-        if (try resolver.resolve(allocator, candidate)) |css_result| {
-            var css = css_result;
-            defer css.deinit(allocator);
-            try stdout.interface.writeAll(css.items);
-            try stdout.interface.writeByte('\n');
-            resolved += 1;
-        } else {
-            try unresolved.append(allocator, candidate);
-        }
-    }
-
-    var stderr = std.fs.File.stderr().writer(&.{});
-    try stderr.interface.print("{d} classes → {d} CSS rules ({d} unresolved)\n", .{
-        sorted.items.len,
-        resolved,
-        unresolved.items.len,
-    });
-    if (unresolved.items.len > 0) {
-        try stderr.interface.writeAll("UNRESOLVED:\n");
-        for (unresolved.items) |c| {
-            try stderr.interface.print("  {s}\n", .{c});
-        }
-    }
-}
-
-/// Walk `path` (file or directory) and extract class-shaped string literals
-/// from any `.zig` files found. Adds matches to `classes`.
-fn scanPath(
-    allocator: std.mem.Allocator,
-    path: []const u8,
-    classes: *std.StringHashMapUnmanaged(void),
-) !void {
-    const stat = std.fs.cwd().statFile(path) catch |err| switch (err) {
-        error.FileNotFound => return, // silently skip missing paths
-        else => return err,
-    };
-
-    switch (stat.kind) {
-        .file => try scanZigFile(allocator, path, classes),
-        .directory => {
-            var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
-            defer dir.close();
-            var walker = try dir.walk(allocator);
-            defer walker.deinit();
-            while (try walker.next()) |entry| {
-                if (entry.kind != .file) continue;
-                if (!std.mem.endsWith(u8, entry.basename, ".zig")) continue;
-                const full_path = try std.fs.path.join(allocator, &.{ path, entry.path });
-                defer allocator.free(full_path);
-                try scanZigFile(allocator, full_path, classes);
+    var prepend_path: ?[]const u8 = null;
+    // CLI default: minify. Build pipelines that want readable output (e.g.
+    // CMS Debug builds) pass `--no-minify` explicitly. Library callers of
+    // `jit.compile()` get the unminified form by default — see Options in
+    // compile.zig.
+    var minify: bool = true;
+    // `--theme=<path>` may be passed multiple times; each layer is merged on
+    // top of the previous in argv order, so the rightmost flag wins. This
+    // lets consumers stack a design-system token alias file underneath their
+    // brand theme without having to flatten them externally.
+    var theme_paths: std.array_list.Managed([]const u8) = .init(allocator);
+    defer theme_paths.deinit();
+    // Trailing positional args are class manifests. The build pipeline often
+    // needs multiple — one for the consumer's own ZSX/.publr templates, plus
+    // a vendored copy of `publr_ui.classes.txt` so design-system component
+    // classes (baked into the amalgamated publr_ui.zig and invisible to the
+    // consumer's transpiler) get rules generated in the JIT output. All
+    // listed manifests are concatenated and de-duplicated before compile.
+    var manifest_paths: std.array_list.Managed([]const u8) = .init(allocator);
+    defer manifest_paths.deinit();
+    while (arg_index < args.len) : (arg_index += 1) {
+        const a = args[arg_index];
+        if (std.mem.eql(u8, a, "--prepend")) {
+            arg_index += 1;
+            if (arg_index >= args.len) {
+                try printUsage();
+                std.process.exit(1);
             }
-        },
-        else => return,
-    }
-}
-
-fn scanZigFile(
-    allocator: std.mem.Allocator,
-    path: []const u8,
-    classes: *std.StringHashMapUnmanaged(void),
-) !void {
-    const content = std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024) catch |err| switch (err) {
-        error.FileNotFound => return,
-        else => return err,
-    };
-    defer allocator.free(content);
-
-    // Simple approach: split the entire file content into tokens at any character
-    // that's NOT part of a Tailwind class name. Then filter each token with
-    // looksLikeClass. This works for .zig, .js, .html, .zsx — no need to parse
-    // string delimiters, which fail in mixed JS/HTML template literals.
-    var i: usize = 0;
-    while (i < content.len) {
-        // Skip non-class characters
-        while (i < content.len and !isClassChar(content[i])) : (i += 1) {}
-        if (i >= content.len) break;
-        const start = i;
-        // Consume class characters
-        while (i < content.len and isClassChar(content[i])) : (i += 1) {}
-        const token = content[start..i];
-        if (!looksLikeClass(token)) continue;
-        if (classes.contains(token)) continue;
-        const duped = try allocator.dupe(u8, token);
-        try classes.put(allocator, duped, {});
-    }
-}
-
-fn isClassChar(c: u8) bool {
-    return switch (c) {
-        'a'...'z', 'A'...'Z', '0'...'9', '-', '_', ':', '[', ']', '=', '/', '.', '%', '#', '(', ')', ',' => true,
-        else => false,
-    };
-}
-
-/// Heuristic — does this token look like a Tailwind class name?
-/// Cheap filter; the resolver will return null for non-classes harmlessly,
-/// so the goal here is to keep the unresolved-report signal-to-noise high.
-fn looksLikeClass(s: []const u8) bool {
-    if (s.len < 2) return false;
-    // Must start with a-z OR `-` (negative utilities like -mr-1).
-    if (!((s[0] >= 'a' and s[0] <= 'z') or s[0] == '-')) return false;
-    if (s[0] == '-' and !(s[1] >= 'a' and s[1] <= 'z')) return false;
-    // Reject if any char is outside the set we recognize as Tailwind-ish.
-    for (s) |c| {
-        switch (c) {
-            'a'...'z', 'A'...'Z', '0'...'9', '-', '_', ':', '[', ']', '=', '/', '.', '%', '#', ',', '(', ')' => {},
-            else => return false,
+            prepend_path = args[arg_index];
+        } else if (std.mem.startsWith(u8, a, "--prepend=")) {
+            prepend_path = a["--prepend=".len..];
+        } else if (std.mem.eql(u8, a, "--theme")) {
+            arg_index += 1;
+            if (arg_index >= args.len) {
+                try printUsage();
+                std.process.exit(1);
+            }
+            try theme_paths.append(args[arg_index]);
+        } else if (std.mem.startsWith(u8, a, "--theme=")) {
+            try theme_paths.append(a["--theme=".len..]);
+        } else if (std.mem.eql(u8, a, "--minify")) {
+            minify = true;
+        } else if (std.mem.eql(u8, a, "--no-minify")) {
+            minify = false;
+        } else {
+            try manifest_paths.append(a);
         }
     }
-    // Reject file-path-shaped tokens: anything ending with a known extension.
-    const exts = [_][]const u8{ ".zig", ".zsx", ".css", ".js", ".ts", ".tsx", ".html", ".md", ".zon", ".sh" };
-    for (exts) |ext| {
-        if (std.mem.endsWith(u8, s, ext)) return false;
+    if (manifest_paths.items.len == 0) {
+        try printUsage();
+        std.process.exit(1);
     }
-    // Reject relative-path-shaped tokens.
-    if (std.mem.startsWith(u8, s, "..") or std.mem.startsWith(u8, s, "./")) return false;
-    // To survive the filter, the token must be either:
-    //   (a) a known short single-word static utility, OR
-    //   (b) contain a `-` (most utilities: gap-1, bg-primary, flex-col), OR
-    //   (c) contain a `:` (variant like hover:bg-accent), OR
-    //   (d) contain a `[` (arbitrary value or data-attr like w-[380px]).
-    const short_statics = [_][]const u8{
-        "flex",      "block",      "hidden",  "grid",     "fixed",    "absolute",
-        "relative",  "sticky",     "inline",  "static",   "table",    "contents",
-        "italic",    "underline",  "rounded", "border",   "uppercase", "lowercase",
-        "capitalize", "truncate",  "shadow",  "ring",     "transition",
-    };
-    for (short_statics) |w| {
-        if (std.mem.eql(u8, s, w)) return true;
+
+    try runCompile(allocator, manifest_paths.items, prepend_path, theme_paths.items, minify);
+}
+
+fn printUsage() !void {
+    var stderr_buf: [768]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&stderr_buf);
+    try stderr.interface.writeAll("Usage:\n");
+    try stderr.interface.writeAll("  jit [--theme=<theme.zon>] [--prepend=<file.css>] [--minify|--no-minify] <css_classes.txt>\n");
+    try stderr.interface.writeAll("    Compile classes to CSS. Manifest from ZSX/.publr transpiler.\n");
+    try stderr.interface.writeAll("    --theme:     override the embedded default theme. The override\n");
+    try stderr.interface.writeAll("                 is merged onto the default; partial themes are fine.\n");
+    try stderr.interface.writeAll("    --prepend:   write the contents of <file.css> before the JIT output\n");
+    try stderr.interface.writeAll("                 (typical use: prepend preflight.css).\n");
+    try stderr.interface.writeAll("    --minify:    compact whitespace (default).\n");
+    try stderr.interface.writeAll("    --no-minify: emit indented, readable CSS (dev/debug builds).\n");
+    try stderr.interface.writeAll("  jit theme-from-css <input.css>\n");
+    try stderr.interface.writeAll("    Convert Tailwind @theme blocks to theme.zon (for migration).\n");
+    try stderr.interface.flush();
+}
+
+/// Read a class manifest, run through `jit.compile()`, write CSS to stdout.
+/// If `theme_path` is provided, the file is parsed as ZON and merged onto the
+/// embedded default theme. `extra_count > 0` triggers a one-release
+/// transitional warning — the legacy CLI took `[scan_paths...]` after the
+/// manifest, but file scanning is out of scope per the input-scope rule.
+fn runCompile(
+    allocator: std.mem.Allocator,
+    manifest_paths: []const []const u8,
+    prepend_path: ?[]const u8,
+    theme_paths: []const []const u8,
+    minify: bool,
+) !void {
+    // Read every manifest, tokenize whitespace-separated, dedupe across all of
+    // them. Buffers stay alive until the end of the function because `classes`
+    // holds borrowed slices into them.
+    var manifest_buffers: std.array_list.Managed([]u8) = .init(allocator);
+    defer {
+        for (manifest_buffers.items) |b| allocator.free(b);
+        manifest_buffers.deinit();
     }
-    if (std.mem.indexOfScalar(u8, s, '-')) |_| return true;
-    if (std.mem.indexOfScalar(u8, s, ':')) |_| return true;
-    if (std.mem.indexOfScalar(u8, s, '[')) |_| return true;
-    return false;
+
+    var classes: std.ArrayListUnmanaged([]const u8) = .{};
+    defer classes.deinit(allocator);
+
+    var seen = std.StringHashMap(void).init(allocator);
+    defer seen.deinit();
+
+    for (manifest_paths) |p| {
+        const buf = try std.fs.cwd().readFileAlloc(allocator, p, 16 * 1024 * 1024);
+        try manifest_buffers.append(buf);
+        var it = std.mem.tokenizeAny(u8, buf, " \t\n\r");
+        while (it.next()) |c| {
+            if (c.len == 0) continue;
+            const gop = try seen.getOrPut(c);
+            if (gop.found_existing) continue;
+            try classes.append(allocator, c);
+        }
+    }
+
+    // Resolve the theme. Default is the embedded `default-theme.zon`. Each
+    // `--theme=<path>` flag layers on top in argv order via
+    // extendThemeRuntime, so the rightmost flag wins. Typical usage:
+    //   --theme=ds-tokens.zon   (semantic alias palette — design system)
+    //   --theme=brand.zon       (per-consumer brand overrides)
+    var loaded_zons: std.array_list.Managed([:0]u8) = .init(allocator);
+    defer {
+        for (loaded_zons.items) |b| allocator.free(b);
+        loaded_zons.deinit();
+    }
+    var loaded_themes: std.array_list.Managed(jit.Theme) = .init(allocator);
+    defer {
+        for (loaded_themes.items) |ut| std.zon.parse.free(allocator, ut);
+        loaded_themes.deinit();
+    }
+
+    for (theme_paths) |p| {
+        const bytes = try std.fs.cwd().readFileAllocOptions(
+            allocator,
+            p,
+            4 * 1024 * 1024,
+            null,
+            std.mem.Alignment.@"1",
+            0, // sentinel-terminated; std.zon.parse needs [:0]const u8
+        );
+        try loaded_zons.append(bytes);
+        const t = try std.zon.parse.fromSlice(jit.Theme, allocator, bytes, null, .{});
+        try loaded_themes.append(t);
+    }
+
+    // Chain merges: start from the embedded default, then layer each theme.
+    // Each intermediate result is freed once it's been folded into the next.
+    var merged_theme: jit.Theme = default_theme;
+    var owns_merged = false;
+    defer if (owns_merged) allocator.free(merged_theme.tokens);
+
+    for (loaded_themes.items) |ut| {
+        const next = try jit.extendThemeRuntime(allocator, merged_theme, ut);
+        if (owns_merged) allocator.free(merged_theme.tokens);
+        merged_theme = next;
+        owns_merged = true;
+    }
+
+    const css = try jit.compile(allocator, merged_theme, classes.items, .{ .minify = minify });
+    defer allocator.free(css);
+
+    var stdout_buf: [16 * 1024]u8 = undefined;
+    var stdout = std.fs.File.stdout().writer(&stdout_buf);
+    if (prepend_path) |p| {
+        const prepend = try std.fs.cwd().readFileAlloc(allocator, p, 4 * 1024 * 1024);
+        defer allocator.free(prepend);
+        try stdout.interface.writeAll(prepend);
+        try stdout.interface.writeByte('\n');
+    }
+    try stdout.interface.writeAll(css);
+    try stdout.interface.flush();
+}
+
+/// `jit theme-from-css <input.css>` — read CSS, emit theme.zon to stdout.
+/// Warnings (unsupported `@theme` modifiers, skipped nested at-rules) go to stderr.
+fn runThemeFromCss(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
+    if (args.len < 3) {
+        var stderr_buf: [256]u8 = undefined;
+        var stderr = std.fs.File.stderr().writer(&stderr_buf);
+        try stderr.interface.writeAll("Usage: jit theme-from-css <input.css>\n");
+        try stderr.interface.flush();
+        std.process.exit(1);
+    }
+
+    const css = try std.fs.cwd().readFileAlloc(allocator, args[2], 4 * 1024 * 1024);
+    defer allocator.free(css);
+
+    var warn_buffer: [4096]u8 = undefined;
+    var warn_iface = std.io.Writer.fixed(&warn_buffer);
+
+    const zon = try theme_from_css.convert(allocator, css, .{ .warn = &warn_iface });
+    defer allocator.free(zon);
+
+    var stdout_buf: [16 * 1024]u8 = undefined;
+    var stdout = std.fs.File.stdout().writer(&stdout_buf);
+    try stdout.interface.writeAll(zon);
+    try stdout.interface.flush();
+
+    const warns = warn_iface.buffered();
+    if (warns.len > 0) {
+        var stderr_buf: [256]u8 = undefined;
+        var stderr = std.fs.File.stderr().writer(&stderr_buf);
+        try stderr.interface.writeAll(warns);
+        try stderr.interface.flush();
+    }
 }
