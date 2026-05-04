@@ -421,11 +421,16 @@ fn runWithWatchers(
         @ptrCast(&cmd_buf),
     };
 
-    // Theme watcher: watches theme template + asset files → rebuild
+    // Theme watcher: watches theme template + asset files → rebuild.
+    // `.publr` covers content/layout templates; `.zon` covers `theme.zon`
+    // (token overrides) and `publr.zon` (theme manifest). Both are wired
+    // into the build graph as file deps so Zig re-runs the JIT step when
+    // they change, the embedded CSS is regenerated, and the server
+    // watcher restarts when the binary's mtime updates.
     const theme_argv = [_:null]?[*:0]const u8{
         "watchexec",
         "-e",
-        "publr",
+        "publr,zon",
         "-w",
         "themes",
         "-i",

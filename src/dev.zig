@@ -150,24 +150,54 @@ pub fn eventsHandler(ctx: *Context) !void {
     }
 }
 
-/// Get the latest mtime from source files (.zig and .zsx in src/, excluding gen/)
+/// Get the latest mtime from source files (.zig/.zsx in src/, plus
+/// .zon/.publr/.zsx in themes/). Mirrors the watchexec watchers in main.zig
+/// so the SSE `rebuilding` event fires the moment a trigger file changes —
+/// not at the end when the server binary is swapped in.
 fn getLatestSourceMtime() i128 {
-    var dir = std.fs.cwd().openDir("src", .{ .iterate = true }) catch return 0;
-    defer dir.close();
     var max_mtime: i128 = 0;
-    var walker = dir.walk(std.heap.page_allocator) catch return 0;
-    defer walker.deinit();
-    while (walker.next() catch null) |entry| {
-        if (entry.kind != .file) continue;
-        // Skip generated files
-        if (std.mem.startsWith(u8, entry.path, "gen/")) continue;
-        if (std.mem.endsWith(u8, entry.basename, ".zig") or
-            std.mem.endsWith(u8, entry.basename, ".zsx"))
-        {
+
+    // src/ — .zig and .zsx, skipping the generated tree
+    if (std.fs.cwd().openDir("src", .{ .iterate = true })) |dir_const| {
+        var dir = dir_const;
+        defer dir.close();
+        var walker = dir.walk(std.heap.page_allocator) catch return max_mtime;
+        defer walker.deinit();
+        while (walker.next() catch null) |entry| {
+            if (entry.kind != .file) continue;
+            if (std.mem.startsWith(u8, entry.path, "gen/")) continue;
+            if (std.mem.endsWith(u8, entry.basename, ".zig") or
+                std.mem.endsWith(u8, entry.basename, ".zsx"))
+            {
+                const stat = entry.dir.statFile(entry.basename) catch continue;
+                max_mtime = @max(max_mtime, stat.mtime);
+            }
+        }
+    } else |_| {}
+
+    // themes/ — .zon (theme.zon, publr.zon), .publr (templates), .zsx
+    // (theme components). Match the watchexec theme-watcher's ignore set:
+    // skip per-theme public/ and src/ subtrees.
+    if (std.fs.cwd().openDir("themes", .{ .iterate = true })) |dir_const| {
+        var dir = dir_const;
+        defer dir.close();
+        var walker = dir.walk(std.heap.page_allocator) catch return max_mtime;
+        defer walker.deinit();
+        while (walker.next() catch null) |entry| {
+            if (entry.kind != .file) continue;
+            // Mirror the `-i themes/*/public/**` and `-i themes/*/src/**`
+            // ignore patterns from the theme watcher in main.zig.
+            if (std.mem.indexOf(u8, entry.path, "/public/") != null) continue;
+            if (std.mem.indexOf(u8, entry.path, "/src/") != null) continue;
+            const is_trigger = std.mem.endsWith(u8, entry.basename, ".zon") or
+                std.mem.endsWith(u8, entry.basename, ".publr") or
+                std.mem.endsWith(u8, entry.basename, ".zsx");
+            if (!is_trigger) continue;
             const stat = entry.dir.statFile(entry.basename) catch continue;
             max_mtime = @max(max_mtime, stat.mtime);
         }
-    }
+    } else |_| {}
+
     return max_mtime;
 }
 
