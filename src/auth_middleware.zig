@@ -73,13 +73,22 @@ pub fn authMiddleware(ctx: *Context, next: NextFn) anyerror!void {
         }
     };
 
-    // Store user in context state for handlers
-    // Note: user memory is managed by auth module, will be freed on next request
-    ctx.setState("auth_user_id", @ptrCast(@constCast(user.id.ptr))) catch {};
-    ctx.setState("auth_user_email", @ptrCast(@constCast(user.email.ptr))) catch {};
+    // Copy into ctx.allocator with an explicit null terminator so the
+    // getters' null-scan stops at the real end of the string.
+    // user.id/email/display_name come from allocator.dupe() — no sentinel.
+    storeUserField(ctx, "auth_user_id", user.id);
+    storeUserField(ctx, "auth_user_email", user.email);
+    storeUserField(ctx, "auth_user_display_name", user.display_name);
 
     // Continue to handler
     return next(ctx);
+}
+
+fn storeUserField(ctx: *Context, key: []const u8, value: []const u8) void {
+    const buf = ctx.allocator.alloc(u8, value.len + 1) catch return;
+    @memcpy(buf[0..value.len], value);
+    buf[value.len] = 0;
+    ctx.setState(key, @ptrCast(buf.ptr)) catch {};
 }
 
 /// Parse a cookie value from the Cookie header
@@ -160,6 +169,16 @@ pub fn getUserEmail(ctx: *Context) ?[]const u8 {
     while (len < 256 and email_ptr[len] != 0) : (len += 1) {}
     if (len == 0) return null;
     return email_ptr[0..len];
+}
+
+/// Get authenticated user display name from context
+pub fn getUserDisplayName(ctx: *Context) ?[]const u8 {
+    const ptr = ctx.state.get("auth_user_display_name") orelse return null;
+    const name_ptr: [*]const u8 = @ptrCast(ptr);
+    var len: usize = 0;
+    while (len < 256 and name_ptr[len] != 0) : (len += 1) {}
+    if (len == 0) return null;
+    return name_ptr[0..len];
 }
 
 // =============================================================================

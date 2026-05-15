@@ -27,11 +27,9 @@ pub fn main() !void {
 
     // 1. Create directory structure
     for ([_][]const u8{
-        "src/schema", "src/schemas", "src/plugins", "src/tools",
-        "src/gen/views/admin/posts", "src/gen/views/admin/users",
-        "src/gen/views/admin/media", "src/gen/views/admin/releases",
-        "src/gen/views/components", "src/gen/views/error",
-        "vendor", "bindings",
+        "src/schema",                "src/schemas",               "src/plugins",               "src/tools",
+        "src/gen/views/admin/posts", "src/gen/views/admin/users", "src/gen/views/admin/media", "src/gen/views/admin/releases",
+        "src/gen/views/components",  "src/gen/views/error",       "vendor",                    "bindings",
     }) |sub| {
         var buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&buf, "{s}/{s}", .{ out_dir, sub }) catch unreachable;
@@ -160,9 +158,9 @@ fn compileWasiLibc(alloc: Allocator, out_dir: []const u8) !void {
     // The link step may fail (duplicate _start), but the .a files are
     // already compiled and cached by that point.
     var child = std.process.Child.init(&.{
-        "zig", "build-exe", dummy_path,
-        "-target", "wasm32-wasi", "-lc", "-fno-entry",
-        "--verbose-link",
+        "zig",        "build-exe",      dummy_path,
+        "-target",    "wasm32-wasi",    "-lc",
+        "-fno-entry", "--verbose-link",
     }, alloc);
     child.stderr_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
@@ -307,11 +305,10 @@ fn generateBindings(alloc: Allocator, out_dir: []const u8) !void {
 
     // SQLite bindings
     const sqlite_out = try runTranslateC(alloc, "vendor/sqlite3.h", &.{
-        "-I",           "vendor",
-        "-isystem",     wasi_include,
-        "-isystem",     generic_include,
-        "-DSQLITE_DQS=0",
-        "-DSQLITE_THREADSAFE=0",
+        "-I",                           "vendor",
+        "-isystem",                     wasi_include,
+        "-isystem",                     generic_include,
+        "-DSQLITE_DQS=0",               "-DSQLITE_THREADSAFE=0",
         "-DSQLITE_OMIT_LOAD_EXTENSION",
     });
     defer alloc.free(sqlite_out);
@@ -487,23 +484,21 @@ const modules = [_]Module{
     .{ .name = "plugin_dashboard", .src = "src/plugins/dashboard.zig", .deps = &.{ "admin_api", "middleware", "tpl", "db", "csrf", "auth_middleware", "media", "views", "registry" } },
     .{ .name = "plugin_users", .src = "src/plugins/users.zig", .deps = &.{ "admin_api", "middleware", "tpl", "auth", "csrf", "auth_middleware", "views", "registry" } },
     .{ .name = "plugin_settings", .src = "src/plugins/settings.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth", "auth_middleware", "views", "registry" } },
-    .{ .name = "plugin_components", .src = "src/plugins/components.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "views", "registry" } },
-    .{ .name = "plugin_design_system", .src = "src/plugins/design_system.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "views", "registry" } },
     .{ .name = "plugin_content_types", .src = "src/plugins/content_types.zig", .deps = &.{ "admin_api", "middleware", "tpl", "views", "schemas", "registry" } },
     .{ .name = "plugin_media", .src = "src/plugins/media.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "media", "media_sync", "storage", "schema_media", "media_handler", "db", "views", "wasm_storage", "registry" } },
     .{ .name = "plugin_releases", .src = "src/plugins/releases.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "cms", "views", "registry" } },
     // Registry (imports all plugins)
-    .{ .name = "registry", .src = "src/registry.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "gravatar", "views", "plugin_dashboard", "plugin_media", "plugin_users", "plugin_settings", "plugin_components", "plugin_design_system", "plugin_content_types", "plugin_releases" } },
+    .{ .name = "registry", .src = "src/registry.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "gravatar", "views", "plugin_dashboard", "plugin_media", "plugin_users", "plugin_settings", "plugin_content_types", "plugin_releases" } },
 };
 
 // Root module deps — what wasm_main.zig imports
 const root_deps = [_][]const u8{
-    "config",      "db",        "tpl",               "auth",
-    "middleware",   "admin_api", "registry",           "wasm_router",
-    "auth_middleware", "csrf",   "storage",
-    "svg_sanitize", "cms",      "media",              "image",
-    "schema_media", "media_handler", "wasm_storage",  "wasm_media_handler",
-    "views",       "seed",
+    "config",          "db",           "tpl",                "auth",
+    "middleware",      "admin_api",    "registry",           "wasm_router",
+    "auth_middleware", "csrf",         "storage",            "svg_sanitize",
+    "cms",             "media",        "image",              "schema_media",
+    "media_handler",   "wasm_storage", "wasm_media_handler", "views",
+    "seed",
 };
 
 fn writeManifest(alloc: Allocator, out_dir: []const u8) !void {
@@ -567,7 +562,7 @@ fn createTar(alloc: Allocator, out_dir: []const u8) !void {
     const tar_path = try std.fmt.allocPrint(alloc, "{s}/cms-source.tar.gz", .{out_dir});
     defer alloc.free(tar_path);
     var child = std.process.Child.init(&.{
-        "tar", "czf", tar_path, "-C", out_dir,
+        "tar", "czf",    tar_path,   "-C",         out_dir,
         "src", "vendor", "bindings", "config.zig", "build-manifest.json",
     }, alloc);
     child.stderr_behavior = .Inherit;

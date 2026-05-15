@@ -2,7 +2,9 @@ const std = @import("std");
 const core_init = @import("core_init");
 const cms = @import("cms");
 const Db = @import("db").Db;
-const schemas = @import("schemas");
+const schema_registry = @import("schema_registry");
+const post_starter = @import("starter_post");
+const page_starter = @import("starter_page");
 const auth_mod = @import("auth");
 
 pub const TestContext = struct {
@@ -15,6 +17,19 @@ pub fn initTestDb() !TestContext {
     errdefer db.deinit();
     try core_init.ensureSchema(&db);
     try core_init.seed(&db);
+
+    // Register the Post and Page starters so fixtures can save entries
+    // through the runtime registry. Mirrors what `publr starter add` does
+    // at the CLI — same code path third-party plugins use.
+    schema_registry.register(post_starter.def) catch |err| switch (err) {
+        error.DuplicateContentType => {},
+        else => return err,
+    };
+    schema_registry.register(page_starter.def) catch |err| switch (err) {
+        error.DuplicateContentType => {},
+        else => return err,
+    };
+
     try seedFixtures(&db);
 
     return .{
@@ -82,20 +97,21 @@ fn seedFixtures(db: *Db) !void {
     };
     if (created_user_id) |user_id| fixture_allocator.free(user_id);
 
+    // Use the runtime saveEntry wrapper so fixtures don't depend on
+    // the comptime-CT signature. Data goes in as a JSON string; the
+    // wrapper parses it through CT.parseData for compile-in types.
     if (!anchorExists(db, "e_test_post")) {
-        _ = try cms.saveEntry(schemas.Post, fixture_allocator, db, "e_test_post", schemas.Post.Data{
-            .title = "Fixture Post",
-            .slug = "fixture-post",
-            .body = "Fixture body",
-        }, .{ .status = "draft" });
+        var post_entry = cms.saveEntry(fixture_allocator, db, "post", "e_test_post",
+            \\{"title":"Fixture Post","slug":"fixture-post","body":"Fixture body"}
+        , .{ .status = "draft" }) catch |err| return err;
+        post_entry.deinit(fixture_allocator);
     }
 
     if (!anchorExists(db, "e_test_page")) {
-        _ = try cms.saveEntry(schemas.Page, fixture_allocator, db, "e_test_page", schemas.Page.Data{
-            .title = "Fixture Page",
-            .slug = "fixture-page",
-            .body = "Fixture body",
-        }, .{ .status = "draft" });
+        var page_entry = cms.saveEntry(fixture_allocator, db, "page", "e_test_page",
+            \\{"title":"Fixture Page","slug":"fixture-page","body":"Fixture body"}
+        , .{ .status = "draft" }) catch |err| return err;
+        page_entry.deinit(fixture_allocator);
     }
 }
 

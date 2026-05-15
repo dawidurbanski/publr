@@ -2,9 +2,21 @@ const std = @import("std");
 pub const runner_mod = @import("cli_runner.zig");
 
 pub fn initDb(runner: *runner_mod.CliTestRunner) !void {
-    var db_init = try runner.run(&.{"db", "init"});
+    var db_init = try runner.run(&.{ "db", "init" });
     defer db_init.deinit();
     try runner_mod.expectSuccess(db_init);
+
+    // After task 05, Post and Page no longer ship as compile-in defaults.
+    // Install them through the same `publr starter add` CLI third-party
+    // users would run — so existing CLI tests that operate on "post" and
+    // "page" keep working.
+    var add_post = try runner.run(&.{ "starter", "add", "post" });
+    defer add_post.deinit();
+    try runner_mod.expectSuccess(add_post);
+
+    var add_page = try runner.run(&.{ "starter", "add", "page" });
+    defer add_page.deinit();
+    try runner_mod.expectSuccess(add_page);
 }
 
 pub fn unique(prefix: []const u8) ![]u8 {

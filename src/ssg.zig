@@ -16,6 +16,7 @@ const theme_routes = @import("theme_routes");
 const theme_static = @import("theme_static");
 const cms = @import("cms");
 const schemas = @import("schemas");
+const schema_registry = @import("schema_registry");
 
 pub const BuildSummary = struct {
     pages: u32,
@@ -42,33 +43,35 @@ pub fn buildSite(allocator: Allocator, db: *Db, output_dir: []const u8) !BuildSu
         }
     }
 
-    // 2. Render dynamic routes (arena for entry queries)
+    // 2. Render dynamic routes (arena for entry queries). Each route's
+    // `content_type_id` is a handle (URL fragment); look up the matching
+    // content type via the runtime registry instead of `inline for`-ing the
+    // comptime tuple.
     inline for (theme_routes.route_table) |route| {
         if (route.kind == .dynamic) {
             if (route.content_type_id) |ct_id| {
-                inline for (schemas.content_types) |CT| {
-                    if (comptime std.mem.eql(u8, CT.handle, ct_id)) {
-                        var entry_arena = std.heap.ArenaAllocator.init(allocator);
-                        defer entry_arena.deinit();
-                        const ea = entry_arena.allocator();
-                        const entries = cms.listEntries(CT, ea, db, .{
-                            .status = "published",
-                            .limit = 10000,
-                        }) catch &.{};
-                        for (entries) |entry| {
-                            if (entry.slug) |slug| {
-                                if (substituteParams(allocator, route.pattern, slug)) |url| {
-                                    defer allocator.free(url);
-                                    const params = SsgParams{
-                                        .keys = &.{"slug"},
-                                        .values = &.{slug},
-                                    };
-                                    if (renderPageWithDeps(allocator, db, route.page, output_dir, url, params)) |bytes| {
-                                        summary.pages += 1;
-                                        summary.total_bytes += bytes;
-                                    } else |_| {}
+                const def = schema_registry.findByHandle(ct_id);
+                if (def) |type_def| {
+                    var entry_arena = std.heap.ArenaAllocator.init(allocator);
+                    defer entry_arena.deinit();
+                    const ea = entry_arena.allocator();
+                    const entries = cms.query.listEntries(ea, db, type_def.type_id, .{
+                        .status = "published",
+                        .limit = 10000,
+                    }) catch &.{};
+                    for (entries) |entry| {
+                        if (entry.slug) |slug| {
+                            if (substituteParams(allocator, route.pattern, slug)) |url| {
+                                defer allocator.free(url);
+                                const params = SsgParams{
+                                    .keys = &.{"slug"},
+                                    .values = &.{slug},
+                                };
+                                if (renderPageWithDeps(allocator, db, route.page, output_dir, url, params)) |bytes| {
+                                    summary.pages += 1;
+                                    summary.total_bytes += bytes;
                                 } else |_| {}
-                            }
+                            } else |_| {}
                         }
                     }
                 }
@@ -432,21 +435,19 @@ pub fn generateSitemapContent(allocator: Allocator, db: *Db) ![]const u8 {
     inline for (theme_routes.route_table) |route| {
         if (route.kind == .dynamic) {
             if (route.content_type_id) |ct_id| {
-                inline for (schemas.content_types) |CT| {
-                    if (comptime std.mem.eql(u8, CT.handle, ct_id)) {
-                        var sm_arena = std.heap.ArenaAllocator.init(allocator);
-                        defer sm_arena.deinit();
-                        const sma = sm_arena.allocator();
-                        const entries = cms.listEntries(CT, sma, db, .{
-                            .status = "published",
-                            .limit = 10000,
-                        }) catch &.{};
-                        for (entries) |entry| {
-                            if (entry.slug) |s| {
-                                if (substituteParams(sma, route.pattern, s)) |url| {
-                                    writeSitemapUrl(w, base_url, url, "0.6") catch {};
-                                } else |_| {}
-                            }
+                if (schema_registry.findByHandle(ct_id)) |type_def| {
+                    var sm_arena = std.heap.ArenaAllocator.init(allocator);
+                    defer sm_arena.deinit();
+                    const sma = sm_arena.allocator();
+                    const entries = cms.query.listEntries(sma, db, type_def.type_id, .{
+                        .status = "published",
+                        .limit = 10000,
+                    }) catch &.{};
+                    for (entries) |entry| {
+                        if (entry.slug) |s| {
+                            if (substituteParams(sma, route.pattern, s)) |url| {
+                                writeSitemapUrl(w, base_url, url, "0.6") catch {};
+                            } else |_| {}
                         }
                     }
                 }
