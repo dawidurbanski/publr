@@ -1,0 +1,35 @@
+// New release form
+
+const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
+const Button = ui.button.Button;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const Input = ui.text_input.Input;
+const Flex = ui.flex.Flex;
+
+pub const Props = struct {
+    csrf_token: []const u8,
+};
+
+pub fn New(props: Props) {
+    <PageHeader title="New Release" />
+
+    <form method="POST" action="/admin/action" class="form" style="max-width: 480px">
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="releases.create" />
+        <Field>
+            <FieldLabel>Release Name</FieldLabel>
+            <Input
+                input_type=.text
+                name="name"
+                required={true}
+                placeholder="e.g. Sprint 42, Holiday Update"
+            />
+        </Field>
+        <Flex gap=.md>
+            <Button button_type=.submit hierarchy=.primary label="Create Release" />
+            <Button hierarchy=.secondary label="Cancel" href="/admin/releases" />
+        </Flex>
+    </form>
+}

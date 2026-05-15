@@ -1,23 +1,20 @@
-// Admin dashboard template
+// Admin dashboard — composes Card / Heading / Text / Flex / Stack / Icon / Badge / Button.
+// Layout: 4-column stat grid + 2-column row (Recent posts + Activity).
+
 const std = @import("std");
 const ui = @import("publr_ui");
+const PageHeader = @import("../components/page_header.zig").PageHeader;
 
 const Badge = ui.badge.Badge;
 const BadgeSize = ui.badge.Size;
 const BadgeVariant = ui.badge.Variant;
+const Icon = ui.icon.Icon;
+const Button = ui.button.Button;
 const Card = ui.card.Card;
-const CardContent = ui.card.CardContent;
-const CardHeader = ui.card.CardHeader;
-const CardTitle = ui.card.CardTitle;
-const Table = ui.table.Table;
-const TableBody = ui.table.TableBody;
-const TableCell = ui.table.TableCell;
-const TableHead = ui.table.TableHead;
-const TableHeader = ui.table.TableHeader;
-const TableRow = ui.table.TableRow;
-const Grid = ui.grid.Grid;
-const Stack = ui.stack.Stack;
+const Heading = ui.heading.Heading;
 const Text = ui.text.Text;
+const Flex = ui.flex.Flex;
+const Stack = ui.stack.Stack;
 
 const Post = struct {
     id: []const u8,
@@ -26,85 +23,149 @@ const Post = struct {
     date: []const u8,
 };
 
-pub fn Dashboard(props: struct {
+const Activity = struct {
+    who: []const u8,
+    what: []const u8,
+    obj: []const u8,
+    time: []const u8,
+    is_system: bool = false,
+};
+
+fn StatCard(props: struct {
+    label: []const u8,
+    value: []const u8,
+    delta: []const u8 = "",
+    delta_positive: bool = true,
+}) void {
+    const delta_color = if (props.delta_positive) "text-success" else "text-muted-foreground";
+    <Card>
+        <div class="p-4">
+            <Text size=.xs color=.muted weight=.medium>{props.label}</Text>
+            <span class="block mt-1 text-2xl font-semibold tracking-tight text-foreground">{props.value}</span>
+            {if (props.delta.len > 0) (
+                <span class={`block mt-1 text-xs ${@raw delta_color}`}>{props.delta}</span>
+            )}
+        </div>
+    </Card>
+}
+
+fn RecentPostRow(props: struct {
+    id: []const u8,
+    title: []const u8,
+    status: []const u8,
+    date: []const u8,
+}) void {
+    const label =
+        if (std.mem.eql(u8, props.status, "published")) "Published"
+        else if (std.mem.eql(u8, props.status, "draft")) "Draft"
+        else if (std.mem.eql(u8, props.status, "scheduled")) "Scheduled"
+        else if (std.mem.eql(u8, props.status, "changed")) "Changed"
+        else props.status;
+    const variant: BadgeVariant =
+        if (std.mem.eql(u8, props.status, "published")) .success
+        else if (std.mem.eql(u8, props.status, "scheduled") or std.mem.eql(u8, props.status, "changed")) .warning
+        else if (std.mem.eql(u8, props.status, "draft")) .secondary
+        else .outline;
+
+    <a href={props.id} class="flex items-center gap-3 px-5 py-2.5 border-b border-border last:border-b-0 text-foreground no-underline hover:bg-muted/40 hover:no-underline">
+        <Icon name=.file size={14} class="shrink-0 text-muted-foreground opacity-55" />
+        <span class="flex-1 text-sm font-medium truncate">{props.title}</span>
+        <Badge label={label} variant={variant} size={BadgeSize.sm} />
+        <span class="w-20 text-right text-xs text-muted-foreground">{props.date}</span>
+    </a>
+}
+
+fn ActivityRow(props: struct {
+    who: []const u8,
+    what: []const u8,
+    obj: []const u8,
+    time: []const u8,
+    is_system: bool = false,
+}) void {
+    const initial: []const u8 =
+        if (props.is_system) "·"
+        else if (props.who.len > 0) props.who[0..1]
+        else "?";
+    const av_class = if (props.is_system)
+        "shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground text-xs font-medium uppercase"
+    else
+        "shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-muted text-foreground text-xs font-medium uppercase";
+
+    <Flex items=.start class="gap-2.5 py-2 border-b border-dashed border-border last:border-b-0">
+        <span class={av_class}>{initial}</span>
+        <div class="text-xs leading-normal min-w-0">
+            <span class="font-medium text-foreground">{props.who}</span>
+            <span class="text-muted-foreground"> {props.what} </span>
+            <span class="font-medium text-foreground">{props.obj}</span>
+            <div class="text-xs text-muted-foreground">{props.time}</div>
+        </div>
+    </Flex>
+}
+
+pub const Props = struct {
     posts_count: []const u8,
-    pages_count: []const u8,
-    media_count: []const u8,
-    users_count: []const u8,
+    posts_delta: []const u8 = "",
+    drafts_count: []const u8,
+    drafts_delta: []const u8 = "",
+    views_count: []const u8,
+    views_delta: []const u8 = "",
+    subscribers_count: []const u8,
+    subscribers_delta: []const u8 = "",
     has_posts: bool,
     recent_posts: []const Post,
-}) {
-    <Grid columns=.auto_fill gap=.lg>
-        <Card>
-            <CardHeader>
-                <CardTitle>Posts</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <Text size=.lg weight=.bold>{props.posts_count}</Text>
-            </CardContent>
-        </Card>
-        <Card>
-            <CardHeader>
-                <CardTitle>Pages</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <Text size=.lg weight=.bold>{props.pages_count}</Text>
-            </CardContent>
-        </Card>
-        <Card>
-            <CardHeader>
-                <CardTitle>Media</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <Text size=.lg weight=.bold>{props.media_count}</Text>
-            </CardContent>
-        </Card>
-        <Card>
-            <CardHeader>
-                <CardTitle>Users</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <Text size=.lg weight=.bold>{props.users_count}</Text>
-            </CardContent>
-        </Card>
-    </Grid>
+    activities: []const Activity = &.{},
+};
+
+pub fn Dashboard(props: Props) {
+    <PageHeader title="Dashboard" subtitle="Welcome back. Here's what's happening on your site.">
+        <Button hierarchy=.secondary size=.sm icon=.upload label="Export" />
+        <Button hierarchy=.primary size=.sm icon=.plus label="New post" />
+    </PageHeader>
+
     <Stack gap=.lg>
-        <Card>
-            <CardHeader>
-                <CardTitle>Recent Posts</CardTitle>
-            </CardHeader>
-            {if (props.has_posts) (
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Title</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Date</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {for (props.recent_posts) |post| (
-                            <TableRow>
-                                <TableCell><a href={post.id}>{post.title}</a></TableCell>
-                                <TableCell>
-                                    <Badge
-                                        label={if (std.mem.eql(u8, post.status, "published")) ("Published") else if (std.mem.eql(u8, post.status, "draft")) ("Draft") else if (std.mem.eql(u8, post.status, "scheduled")) ("Scheduled") else if (std.mem.eql(u8, post.status, "changed")) ("Changed") else (post.status)}
-                                        variant={if (std.mem.eql(u8, post.status, "published")) (BadgeVariant.success) else if (std.mem.eql(u8, post.status, "scheduled") or std.mem.eql(u8, post.status, "changed")) (BadgeVariant.warning) else if (std.mem.eql(u8, post.status, "draft")) (BadgeVariant.secondary) else (BadgeVariant.outline)}
-                                        size={BadgeSize.sm}
-                                    />
-                                </TableCell>
-                                <TableCell>{post.date}</TableCell>
-                            </TableRow>
-                        )}
-                    </TableBody>
-                </Table>
-            ) else (
-                <CardContent>
-                    <Text color=.muted>
-                        No posts yet. <a href="/admin/content/post/new">Create your first post</a>
-                    </Text>
-                </CardContent>
-            )}
-        </Card>
+        <div class="grid grid-cols-4 gap-3">
+            <StatCard label="Posts" value={props.posts_count} delta={props.posts_delta} />
+            <StatCard label="Drafts" value={props.drafts_count} delta={props.drafts_delta} />
+            <StatCard label="Views (7d)" value={props.views_count} delta={props.views_delta} />
+            <StatCard label="Subscribers" value={props.subscribers_count} delta={props.subscribers_delta} />
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+            <div class="col-span-2"><Card>
+                <div class="overflow-hidden rounded-lg">
+                    <Flex items=.center class="px-4 py-3 border-b border-border">
+                        <Heading level=.h2 size=.sm class="m-0">Recent posts</Heading>
+                        <a href="/admin/content" class="ml-auto text-sm text-primary no-underline hover:underline">View all →</a>
+                    </Flex>
+                    {if (props.has_posts) (
+                        <div>
+                            {for (props.recent_posts) |post| (
+                                <RecentPostRow id={post.id} title={post.title} status={post.status} date={post.date} />
+                            )}
+                        </div>
+                    ) else (
+                        <Stack gap=.xs class="px-4 py-10 items-center text-center">
+                            <Text size=.sm color=.muted>No posts yet.</Text>
+                            <a href="/admin/content/post/new" class="text-sm text-primary no-underline hover:underline">Create your first post →</a>
+                        </Stack>
+                    )}
+                </div>
+            </Card></div>
+
+            <Card>
+                <div class="p-4">
+                    <Heading level=.h2 size=.sm class="mb-3">Activity</Heading>
+                    {if (props.activities.len > 0) (
+                        <div>
+                            {for (props.activities) |a| (
+                                <ActivityRow who={a.who} what={a.what} obj={a.obj} time={a.time} is_system={a.is_system} />
+                            )}
+                        </div>
+                    ) else (
+                        <Text size=.sm color=.muted class="block text-center py-6">No recent activity.</Text>
+                    )}
+                </div>
+            </Card>
+        </div>
     </Stack>
 }

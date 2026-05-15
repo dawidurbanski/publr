@@ -3,6 +3,7 @@
 const std = @import("std");
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
 const Stack = ui.stack.Stack;
@@ -59,6 +60,8 @@ pub fn Edit(props: struct {
     tags_display: []const u8,
     current_folder_id: []const u8,
 }) {
+    <PageHeader title={props.media.filename} />
+
     <div class="flex min-h-0">
         <div class="flex-1 flex flex-col p-6">
             {if (props.media.is_image) (
@@ -100,8 +103,10 @@ pub fn Edit(props: struct {
         </div>
 
         <div class="w-96 shrink-0 border-l border-border overflow-y-auto flex flex-col">
-            <form method="POST" action={props.action} class="form">
+            <form method="POST" action="/admin/action" class="form">
                 <input type="hidden" name="_csrf" value={props.csrf_token} />
+                <input type="hidden" name="action" value="media.update" />
+                <input type="hidden" name="media_id" value={props.media.id} />
 
                 <div class="p-4 border-b border-border">
                 <Stack gap=.lg>
@@ -239,16 +244,20 @@ pub fn Edit(props: struct {
 
             <div class="mt-auto p-4 border-t border-border">
                 <Flex justify=.between>
-                    <form method="POST" action={props.toggle_url} class="media-visibility-form">
+                    <form method="POST" action="/admin/action" class="media-visibility-form">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="media.toggle_visibility" />
+                        <input type="hidden" name="media_id" value={props.media.id} />
                         {if (props.media.is_private) (
                             <Button button_type=.submit hierarchy=.secondary size=.sm label="Make Public" />
                         ) else (
                             <Button button_type=.submit hierarchy=.secondary size=.sm label="Make Private" />
                         )}
                     </form>
-                    <form method="POST" action={props.delete_url}>
+                    <form method="POST" action="/admin/action">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="media.delete" />
+                        <input type="hidden" name="media_id" value={props.media.id} />
                         <Button button_type=.submit hierarchy=.destructive size=.sm label="Delete"
                             onclick="return confirm('Delete this file permanently? This cannot be undone.')" />
                     </form>

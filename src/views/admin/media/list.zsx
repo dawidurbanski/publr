@@ -3,6 +3,7 @@
 const std = @import("std");
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
 const Size = ui.icon.Size;
@@ -90,7 +91,7 @@ const PageUrl = struct {
     is_current: bool,
 };
 
-const BreadcrumbItem = struct {
+pub const BreadcrumbItem = struct {
     name: []const u8,
     url: []const u8,
 };
@@ -149,9 +150,21 @@ pub fn List(props: struct {
     items_per_page: u32,
     filtered_count_str: []const u8,
     items_per_page_str: []const u8,
+    breadcrumbs: []const BreadcrumbItem,
 }) {
-    <form method="POST" action="/admin/media" enctype="multipart/form-data" id="media-upload-form" style="display:none">
+    <PageHeader title="Media">
+        <MediaControls
+            filtered_count={props.filtered_count}
+            view_mode={props.view_mode}
+            view_grid_url={props.view_grid_url}
+            view_list_url={props.view_list_url}
+        />
+    </PageHeader>
+    <Breadcrumbs items={props.breadcrumbs} />
+
+    <form method="POST" action="/admin/action" enctype="multipart/form-data" id="media-upload-form" style="display:none">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="media.upload" />
         <input type="hidden" name="folder_id" id="upload-folder-id" value="" />
         <input type="file" id="media-file-input" name="file" multiple="" />
     </form>
@@ -265,8 +278,9 @@ pub fn List(props: struct {
                             <p>Files will move to the parent folder.</p>
                             <div class="dialog-actions">
                                 <button data-publr-part="close" class="btn btn-sm">Cancel</button>
-                                <form method="POST" action="/admin/media/folders/delete">
+                                <form method="POST" action="/admin/action">
                                     <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                    <input type="hidden" name="action" value="media.folder_delete" />
                                     <input type="hidden" name="term_id" id="folder-delete-id" value="" />
                                     <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                                 </form>
@@ -301,8 +315,9 @@ pub fn List(props: struct {
                 {if (props.tags.len == 0) (
                     <span class="media-empty-hint" data-publr-component="inline-create" data-publr-part="empty-trigger" data-publr-target="tag-create-form">No tags yet</span>
                 ) else (<span></span>)}
-                <form method="POST" action="/admin/media/tags" class="inline-create-form" id="tag-create-form" style="display:none">
+                <form method="POST" action="/admin/action" class="inline-create-form" id="tag-create-form" style="display:none">
                     <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="action" value="media.tag_create" />
                     <div class="inline-create-row">
                         <input type="text" name="tag_name" placeholder="Tag name..." class="form-control form-control-sm" />
                         <button type="submit" class="btn-icon-sm btn-icon-confirm" aria-label="Create tag">
@@ -349,21 +364,24 @@ pub fn List(props: struct {
                     {if (props.scan_result.? > 0) (
                         <div class="media-sync-notice">
                             <span class="media-sync-notice-text">{props.scan_result.?}{" new files found"}</span>
-                            <form method="POST" action="/admin/media/sync" class="media-sync-inline">
+                            <form method="POST" action="/admin/action" class="media-sync-inline">
                                 <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                <input type="hidden" name="action" value="media.sync" />
                                 <button type="submit" class="btn btn-sm btn-primary">Sync now</button>
                             </form>
                         </div>
                     ) else (
                         <span class="media-sync-status">Up to date</span>
                     )}
-                    <form method="POST" action="/admin/media/scan" class="media-sync-check">
+                    <form method="POST" action="/admin/action" class="media-sync-check">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="media.scan" />
                         <button type="submit" class="media-sync-check-link">Check again</button>
                     </form>
                 ) else (
-                    <form method="POST" action="/admin/media/scan" class="media-sync-check">
+                    <form method="POST" action="/admin/action" class="media-sync-check">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="media.scan" />
                         <button type="submit" class="media-sync-check-link">Check for changes</button>
                     </form>
                 )}
@@ -451,8 +469,10 @@ pub fn List(props: struct {
                                             <DropdownMenuContent>
                                                 <a href={item.edit_url} class="dropdown-item">Edit</a>
                                                 <DropdownMenuSeparator />
-                                                <form method="POST" action={item.delete_url}>
+                                                <form method="POST" action="/admin/action">
                                                     <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                                    <input type="hidden" name="action" value="media.delete" />
+                                                    <input type="hidden" name="media_id" value={item.id} />
                                                     <button type="submit" class="dropdown-item dropdown-item-danger" onclick="return confirm('Delete this file permanently?')">Delete</button>
                                                 </form>
                                             </DropdownMenuContent>
@@ -488,8 +508,9 @@ pub fn List(props: struct {
             <div class="dialog-content">
                 <h3>Add Tag</h3>
                 <p>Select a tag to add to the selected items.</p>
-                <form method="POST" action="/admin/media/bulk/add-tag" id="bulk-add-tag-form">
+                <form method="POST" action="/admin/action" id="bulk-add-tag-form">
                     <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="action" value="media.bulk_add_tag" />
                     <input type="hidden" name="ids" id="bulk-add-tag-ids" value="" />
                     <input type="hidden" name="select_all" id="bulk-add-tag-select-all" value="" />
                     <input type="hidden" name="filter_folder" id="bulk-add-tag-filter-folder" value="" />
@@ -519,8 +540,9 @@ pub fn List(props: struct {
             <div class="dialog-content">
                 <h3>Remove Tag</h3>
                 <p>Select a tag to remove from the selected items.</p>
-                <form method="POST" action="/admin/media/bulk/remove-tag" id="bulk-remove-tag-form">
+                <form method="POST" action="/admin/action" id="bulk-remove-tag-form">
                     <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="action" value="media.bulk_remove_tag" />
                     <input type="hidden" name="ids" id="bulk-remove-tag-ids" value="" />
                     <input type="hidden" name="select_all" id="bulk-remove-tag-select-all" value="" />
                     <input type="hidden" name="filter_folder" id="bulk-remove-tag-filter-folder" value="" />
@@ -550,8 +572,9 @@ pub fn List(props: struct {
             <div class="dialog-content">
                 <h3>Move to Folder</h3>
                 <p>Select a folder to move the selected items to.</p>
-                <form method="POST" action="/admin/media/bulk/move-folder" id="bulk-move-folder-form">
+                <form method="POST" action="/admin/action" id="bulk-move-folder-form">
                     <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="action" value="media.bulk_move_folder" />
                     <input type="hidden" name="ids" id="bulk-move-folder-ids" value="" />
                     <input type="hidden" name="select_all" id="bulk-move-folder-select-all" value="" />
                     <input type="hidden" name="filter_folder" id="bulk-move-folder-filter-folder" value="" />
@@ -575,8 +598,9 @@ pub fn List(props: struct {
         </div>
     </div>
 
-    <form method="POST" id="bulk-delete-form" action="/admin/media/bulk/delete" style="display:none">
+    <form method="POST" id="bulk-delete-form" action="/admin/action" style="display:none">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="media.bulk_delete" />
         <input type="hidden" name="ids" id="bulk-delete-ids" value="" />
         <input type="hidden" name="select_all" id="bulk-delete-select-all" value="" />
         <input type="hidden" name="filter_folder" id="bulk-delete-filter-folder" value="" />

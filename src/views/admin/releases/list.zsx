@@ -3,6 +3,7 @@
 const std = @import("std");
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
 const Button = ui.button.Button;
@@ -40,6 +41,10 @@ pub fn List(props: struct {
     releases: []const Release,
     csrf_token: []const u8,
 }) {
+    <PageHeader title="Releases">
+        <Button hierarchy=.primary size=.sm icon=.plus label="New Release" href="/admin/releases/new" />
+    </PageHeader>
+
     {if (props.has_releases) (
         <div>
             <Table>

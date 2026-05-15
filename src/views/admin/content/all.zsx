@@ -1,0 +1,69 @@
+// "All Content" landing page at /admin/content.
+//
+// Empty state: rendered when no content types are registered yet.
+// Populated state: a card per content type linking to its list view.
+// Per-entry browsing happens at /admin/content/:type (see list.zsx).
+
+const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
+const Icon = ui.icon.Icon;
+const Button = ui.button.Button;
+const Card = ui.card.Card;
+const CardHeader = ui.card.CardHeader;
+const CardTitle = ui.card.CardTitle;
+const CardContent = ui.card.CardContent;
+const Empty = ui.empty.Empty;
+const EmptyTitle = ui.empty.EmptyTitle;
+const EmptyDescription = ui.empty.EmptyDescription;
+const EmptyContent = ui.empty.EmptyContent;
+const Stack = ui.stack.Stack;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
+
+pub const TypeCard = struct {
+    type_id: []const u8,
+    display_name: []const u8,
+    display_name_plural: []const u8,
+    icon: []const u8,
+    list_url: []const u8,
+    entry_count_label: []const u8,
+};
+
+pub fn AllContent(props: struct {
+    has_types: bool,
+    types: []const TypeCard,
+}) {
+    <PageHeader title="All Content" />
+
+    {if (!props.has_types) (
+        <Empty>
+            <EmptyTitle>No content types</EmptyTitle>
+            <EmptyDescription>
+                Install a starter content type with <code>publr starter add post</code>
+                or define a custom one through the admin.
+            </EmptyDescription>
+            <EmptyContent>
+                <Button hierarchy=.primary label="Manage content types" href="/admin/content-types" />
+            </EmptyContent>
+        </Empty>
+    ) else (
+        <Stack gap=.md>
+            {for (props.types) |t| (
+                <a href={t.list_url} class="no-underline">
+                    <Card>
+                        <CardContent>
+                            <Flex items=.center gap=.md>
+                                <Icon name=.file size={20} class="text-muted-foreground" />
+                                <Stack gap=.none class="flex-1">
+                                    <Text weight=.semibold>{t.display_name_plural}</Text>
+                                    <Text size=.xs color=.muted>{t.entry_count_label}</Text>
+                                </Stack>
+                                <Icon name=.chevron_right size={16} class="text-muted-foreground" />
+                            </Flex>
+                        </CardContent>
+                    </Card>
+                </a>
+            )}
+        </Stack>
+    )}
+}

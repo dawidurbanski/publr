@@ -3,6 +3,7 @@
 const std = @import("std");
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
 const Button = ui.button.Button;
 const Badge = ui.badge.Badge;
 const BadgeVariant = ui.badge.Variant;
@@ -26,7 +27,6 @@ const Item = struct {
     entry_title: []const u8,
     entry_status: []const u8,
     edit_url: []const u8,
-    remove_url: []const u8,
 };
 
 const Conflict = struct {
@@ -43,10 +43,7 @@ pub fn Detail(props: struct {
     date: []const u8,
     items: []const Item,
     csrf_token: []const u8,
-    publish_url: []const u8,
-    revert_url: []const u8,
-    re_release_url: []const u8,
-    archive_url: []const u8,
+    release_id: []const u8,
     is_pending: bool,
     is_released: bool,
     is_reverted: bool,
@@ -54,6 +51,8 @@ pub fn Detail(props: struct {
     error_message: []const u8 = "",
     conflicts: []const Conflict = &.{},
 }) {
+    <PageHeader title={props.name} />
+
     <Stack gap=.lg>
         <Flex justify=.between items=.center>
             <Flex gap=.md items=.center>
@@ -75,29 +74,37 @@ pub fn Detail(props: struct {
             </Flex>
             <Flex gap=.sm items=.center>
                 {if (props.is_pending and props.conflicts.len == 0) (
-                    <form method="POST" action={props.publish_url} style="display:inline">
+                    <form method="POST" action="/admin/action" style="display:inline">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="releases.publish" />
+                        <input type="hidden" name="release_id" value={props.release_id} />
                         <Button button_type=.submit hierarchy=.primary label="Publish Release"
                             onclick="return confirm('Publish this release? All staged entries will go live.')" />
                     </form>
                 )}
                 {if (props.is_released) (
-                    <form method="POST" action={props.revert_url} style="display:inline">
+                    <form method="POST" action="/admin/action" style="display:inline">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="releases.revert" />
+                        <input type="hidden" name="release_id" value={props.release_id} />
                         <Button button_type=.submit hierarchy=.destructive label="Revert Release"
                             onclick="return confirm('Revert this release? Entries will be restored to their previous state.')" />
                     </form>
                 )}
                 {if (props.is_reverted) (
-                    <form method="POST" action={props.re_release_url} style="display:inline">
+                    <form method="POST" action="/admin/action" style="display:inline">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="releases.re_release" />
+                        <input type="hidden" name="release_id" value={props.release_id} />
                         <Button button_type=.submit hierarchy=.primary label="Re-release"
                             onclick="return confirm('Re-release? Entries will be published again.')" />
                     </form>
                 )}
                 {if (props.can_archive) (
-                    <form method="POST" action={props.archive_url} style="display:inline">
+                    <form method="POST" action="/admin/action" style="display:inline">
                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                        <input type="hidden" name="action" value="releases.archive" />
+                        <input type="hidden" name="release_id" value={props.release_id} />
                         <Button button_type=.submit hierarchy=.secondary label="Archive"
                             onclick="return confirm('Archive this release?')" />
                     </form>
@@ -113,8 +120,10 @@ pub fn Detail(props: struct {
             <Stack gap=.md>
                 <Heading level=.h3>Conflicts Detected</Heading>
                 <Text color=.muted>Some fields have been modified since they were staged in this release. You can skip conflicting fields or publish anyway with the release values.</Text>
-                <form method="POST" action={props.publish_url}>
+                <form method="POST" action="/admin/action">
                     <input type="hidden" name="_csrf" value={props.csrf_token} />
+                    <input type="hidden" name="action" value="releases.publish" />
+                    <input type="hidden" name="release_id" value={props.release_id} />
                     <input type="hidden" name="force" value="1" />
                     <Table>
                         <TableHeader>
@@ -177,8 +186,11 @@ pub fn Detail(props: struct {
                             </TableCell>
                             {if (props.is_pending) (
                                 <TableCell class="w-10">
-                                    <form method="POST" action={item.remove_url} style="display:inline">
+                                    <form method="POST" action="/admin/action" style="display:inline">
                                         <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                        <input type="hidden" name="action" value="releases.remove_item" />
+                                        <input type="hidden" name="release_id" value={props.release_id} />
+                                        <input type="hidden" name="entry_id" value={item.entry_id} />
                                         <Button button_type=.submit hierarchy=.destructive size=.sm label="Remove" />
                                     </form>
                                 </TableCell>

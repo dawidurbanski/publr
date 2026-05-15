@@ -1,41 +1,129 @@
-// Admin layout template - topbar nav with conditional section sidebar
-
+const std = @import("std");
 const ui = @import("publr_ui");
+
+const ContentTypeNav = struct {
+    href: []const u8,
+    label: []const u8,
+};
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
-const IconSize = ui.icon.Size;
+const Flex = ui.flex.Flex;
+const Stack = ui.stack.Stack;
+const Avatar = ui.avatar.Avatar;
+const AvatarImage = ui.avatar.AvatarImage;
 const ToastRegion = ui.toast.ToastRegion;
 const TooltipProvider = ui.tooltip.TooltipProvider;
-const Button = ui.button.Button;
 const DropdownMenu = ui.dropdown.DropdownMenu;
 const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
 const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
 const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
 const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
-const Stack = ui.stack.Stack;
-const Flex = ui.flex.Flex;
-const Heading = ui.heading.Heading;
-const Text = ui.text.Text;
-const Separator = ui.separator.Separator;
-const SidebarContainer = ui.sidebar.SidebarContainer;
-const SidebarContent = ui.sidebar.SidebarContent;
-const SidebarGroup = ui.sidebar.SidebarGroup;
-const SidebarGroupLabel = ui.sidebar.SidebarGroupLabel;
-const SidebarGroupContent = ui.sidebar.SidebarGroupContent;
+const InputGroup = ui.input_group.InputGroup;
+const InputGroupInput = ui.input_group.InputGroupInput;
+const InputGroupAddon = ui.input_group.InputGroupAddon;
+
+fn SidebarItem(props: struct {
+    href: []const u8 = "",
+    icon: IconName,
+    label: []const u8,
+    current: []const u8 = "",
+    match: []const u8 = "",
+    badge: []const u8 = "",
+    submenu: []const u8 = "",
+}) void {
+    // Match exact id, or treat the match prop as a prefix when followed by '.'
+    // (so match="content" matches pg.id="content.post", "content.page", etc).
+    const is_active = props.match.len > 0 and (
+        std.mem.eql(u8, props.current, props.match) or
+        (std.mem.startsWith(u8, props.current, props.match) and
+            props.current.len > props.match.len and
+            props.current[props.match.len] == '.')
+    );
+    const link_class = if (is_active)
+        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
+    else
+        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
+
+    <li>
+        <a href={props.href} class={link_class} aria-current={if (is_active) "page" else null}>
+            <Icon name={props.icon} size={14} class="shrink-0" />
+            <span class="flex-1 truncate">{props.label}</span>
+            {if (props.submenu.len > 0) (
+                <Icon name=.chevron_right size={14} class="shrink-0 text-muted-foreground" />
+            ) else if (props.badge.len > 0) (
+                <span class="ml-auto font-mono text-xs text-muted-foreground">{props.badge}</span>
+            )}
+        </a>
+    </li>
+}
+
+fn SubLink(props: struct {
+    href: []const u8,
+    label: []const u8,
+    icon: IconName,
+    current: []const u8 = "",
+    match: []const u8 = "",
+    external: bool = false,
+}) void {
+    const is_active = props.match.len > 0 and std.mem.eql(u8, props.current, props.match);
+    const cls = if (is_active)
+        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
+    else
+        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
+    <li>
+        <a href={props.href}
+           class={cls}
+           aria-current={if (is_active) "page" else null}
+           target={if (props.external) "_blank" else null}
+           rel={if (props.external) "noopener noreferrer" else null}>
+            <Icon name={props.icon} size={14} class="shrink-0" />
+            <span class="flex-1 truncate">{props.label}</span>
+            {if (props.external) (
+                <Icon name=.share_04 size={12} class="shrink-0 text-muted-foreground/60" />
+            )}
+        </a>
+    </li>
+}
+
+fn SubSectionHeading(props: struct { label: []const u8 }) void {
+    <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2">
+        {props.label}
+    </div>
+}
+
+fn SubFolder(props: struct {
+    label: []const u8,
+    count: usize = 0,
+    children: []const u8 = "",
+}) void {
+    <li>
+        <div class="sidebar-folder-static">
+            <div class="flex items-center gap-2.5 py-1.5 px-2 text-sm font-medium select-none">
+                <Icon name=.folder size={14} class="shrink-0" />
+                <span class="flex-1 truncate">{props.label}</span>
+                <span class="ml-auto font-mono text-xs text-muted-foreground">{props.count}</span>
+            </div>
+            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0 mt-0.5 pl-2">
+                {@raw props.children}
+            </ul>
+        </div>
+    </li>
+}
 
 pub fn Layout(props: struct {
     title: []const u8,
     content: []const u8,
-    page_title_actions: []const u8,
-    topbar_nav_html: []const u8,
-    section_sidebar_html: []const u8,
     csrf_token: []const u8,
     user_gravatar_url: []const u8,
-    subtitle: []const u8 = "",
+    user_email: []const u8 = "",
+    user_name: []const u8 = "",
+    current_section: []const u8 = "",
     bottom_bar: []const u8 = "",
+    topbar_nav_html: []const u8 = "",
+    content_types: []const ContentTypeNav = &.{},
 }) {
     <!DOCTYPE html>
-    <html>
+    <html class="dark h-full">
         <head>
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -44,85 +132,167 @@ pub fn Layout(props: struct {
             <link rel="stylesheet" href="/static/tokens.css" />
             <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
+            <style>{@raw ".theme-toggle-sun{display:none}.dark .theme-toggle-sun{display:block}.dark .theme-toggle-moon{display:none}"}</style>
+            <style>{@raw ":root{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(181,207,210,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(197,204,184,0.35) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(224,207,163,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(221,208,171,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(200,196,168,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(168,191,194,0.4) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(184,176,138,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(200,192,160,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(213,207,192,0.35) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(237,220,184,0.35) 0%, transparent 65%),#f6f4f1;}.dark{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(40,65,68,0.5) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(50,55,42,0.4) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(80,65,35,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(70,58,30,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(55,52,38,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(35,55,58,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(50,46,28,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(45,42,30,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(48,44,35,0.4) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(90,72,35,0.4) 0%, transparent 65%),#141310;}body.admin{background:var(--admin-shell-bg)}"}</style>
+            <script>
+                {@raw "(function(){var t=localStorage.getItem('publr-theme');if(t==='light')document.documentElement.classList.remove('dark');else if(t==='dark')document.documentElement.classList.add('dark');})();"}
+            </script>
         </head>
-        <body class="admin">
+        <body class="h-full text-foreground admin">
             <div id="recompile-bar" class="recompile-bar" style="display:none;">
                 <span id="recompile-bar-text"></span>
                 <a id="recompile-bar-action" href="#" style="display:none;"></a>
             </div>
-
-            <header class="border-b border-border bg-muted/40">
-                <Flex justify=.between items=.center gap=.lg>
-                    <div class="px-4 py-3">
-                        <a href="/admin" class="text-foreground no-underline hover:no-underline" aria-label="Publr">
-                            <svg fill="none" viewBox="0 0 42 48" xmlns="http://www.w3.org/2000/svg" width="28" height="32" aria-hidden="true">
-                                <path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="currentColor" fill-rule="evenodd" />
-                            </svg>
-                        </a>
-                    </div>
-                    <Flex gap=.sm items=.center>
-                        <Button hierarchy=.tertiary size=.sm label="" icon=.settings href="/admin/settings" />
-                        <DropdownMenu>
-                            <DropdownMenuTrigger>
-                                <button class="avatar-trigger" aria-label="User menu">
-                                    <img src={props.user_gravatar_url} alt="" class="avatar-img" />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent>
-                                <DropdownMenuItem href="/admin/users/profile">Profile</DropdownMenuItem>
-                                <DropdownMenuItem href="/admin/settings">Settings</DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <form method="POST" action="/admin/logout">
-                                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                    <DropdownMenuItem>Logout</DropdownMenuItem>
-                                </form>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                        <div class="w-1"></div>
-                    </Flex>
-                </Flex>
-                <nav class="topbar-nav">
-                    {@raw props.topbar_nav_html}
-                </nav>
-            </header>
+            <span class="hidden pl-96" aria-hidden="true"></span>
 
             <TooltipProvider>
-                <div class="flex flex-row items-stretch flex-1 min-h-0">
-                    {if (props.section_sidebar_html.len > 0) (
-                        <SidebarContainer>
-                            <SidebarContent>
-                                <SidebarGroup>
-                                    <SidebarGroupLabel>
-                                        <Icon name={IconName.folder} size={IconSize.sm} />
-                                        Content types
-                                    </SidebarGroupLabel>
-                                    <SidebarGroupContent>
-                                        {@raw props.section_sidebar_html}
-                                    </SidebarGroupContent>
-                                </SidebarGroup>
-                            </SidebarContent>
-                        </SidebarContainer>
-                    )}
-                    <main class="flex-1 min-w-0 overflow-y-auto">
-                        <Stack gap=.lg padding=.xl>
-                            <Flex justify=.between items=.end>
-                                <Stack gap=.xs>
-                                    <Heading level=.h1 size=.lg>{props.title}</Heading>
-                                    {@raw props.subtitle}
-                                </Stack>
-                                {@raw props.page_title_actions}
-                            </Flex>
-                            {@raw props.content}
-                        </Stack>
-                    </main>
-                </div>
-            </TooltipProvider>
+                <aside data-publr-component="admin-sidebar"
+                       class="fixed inset-y-0 left-0 z-50 flex w-70 flex-col bg-transparent text-foreground">
+                    <Flex items=.center class="gap-2.5 pt-5 pb-3 px-3.5">
+                        <a href="/admin" aria-label="Publr"
+                           class="flex items-center gap-2.5 text-foreground no-underline hover:no-underline">
+                            <span class="inline-flex items-center justify-center w-5 h-5 bg-foreground text-background text-xs font-bold leading-none shrink-0">P</span>
+                            <span class="text-sm font-semibold tracking-tight">publr</span>
+                        </a>
+                        <span class="ml-auto font-mono text-xs text-muted-foreground">v0.4</span>
+                    </Flex>
 
-            {if (props.bottom_bar.len > 0) (
-                <div class="border-t border-border px-4 py-2">
-                    {@raw props.bottom_bar}
+                    <div class="pt-2.5 pb-3 px-1.5">
+                        <InputGroup>
+                            <InputGroupInput
+                                name="search"
+                                placeholder="Search…"
+                                has_start_addon={true}
+                                class="bg-muted py-1.5 pl-7 pr-2.5 text-xs focus-visible:ring-1"
+                            />
+                            <InputGroupAddon class="pl-2.5">
+                                <Icon name=.search size={13} class="text-muted-foreground/50" />
+                            </InputGroupAddon>
+                        </InputGroup>
+                    </div>
+
+                    <nav class="flex-1 overflow-y-auto px-1.5" data-publr-sidebar-nav>
+                        <div data-publr-sidebar-panel="main" class={if (std.mem.eql(u8, props.current_section, "content") or std.mem.startsWith(u8, props.current_section, "content.")) "hidden" else ""}>
+                            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
+                                <SidebarItem href="/admin" icon=.home label="Dashboard" current={props.current_section} match="dashboard" />
+                                <SidebarItem href="/admin/content" icon=.bookmark label="Content" current={props.current_section} match="content" submenu="content" />
+                                <SidebarItem href="/admin/releases" icon=.copy label="Releases" current={props.current_section} match="releases" />
+                                <SidebarItem href="/admin/content-types" icon=.package label="Content Types" current={props.current_section} match="content_types" />
+                                <SidebarItem href="/admin/media" icon=.image label="Media" current={props.current_section} match="media" />
+                            </ul>
+
+                            <div class="h-3.5"></div>
+                            <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2">System</div>
+                            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
+                                <SidebarItem href="/admin/settings" icon=.settings label="Settings" current={props.current_section} match="settings" />
+                            </ul>
+
+                            <div class="h-3.5"></div>
+                            <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2">Plugins</div>
+                            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
+                                <SidebarItem href="/admin/settings" icon=.settings label="App Demo" current={props.current_section} match="app-demo" />
+                            </ul>
+                        </div>
+
+                        <div data-publr-sidebar-panel="content" class={if (std.mem.eql(u8, props.current_section, "content") or std.mem.startsWith(u8, props.current_section, "content.")) "" else "hidden"}>
+                            <a href="/admin" class="flex items-center gap-2.5 py-1.5 px-2 w-full text-left bg-transparent border-0 rounded-sm text-sm font-semibold text-foreground hover:bg-gray-500/10 cursor-pointer no-underline">
+                                <Icon name=.chevron_left size={14} class="shrink-0" />
+                                <span class="flex-1 truncate">Content</span>
+                            </a>
+
+                            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0 mt-1">
+                                <SubLink href="/admin/content" icon=.menu_03 label="All content" current={props.current_section} match="content" />
+                                <SubLink href="#" icon=.clock_rewind label="Recent" />
+                                <SubLink href="#" icon=.clock_check label="Scheduled" />
+                                <SubLink href="/admin/releases" icon=.calendar_check label="Releases" external={true} />
+                            </ul>
+
+                            <hr class="my-3 border-gray-500/30" />
+
+                            <SubSectionHeading label="My views" />
+
+                            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
+                                <SubLink href="#" icon=.bookmark label="Created by me" />
+                                <SubLink href="#" icon=.bookmark label="Updated by me" />
+                            </ul>
+
+                            <hr class="my-3 border-gray-500/30" />
+
+                            <SubSectionHeading label="Views" />
+
+                            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
+                                <SubLink href="#" icon=.menu_03 label="All" />
+                                <SubFolder label="Status" count={4}>
+                                    <SubLink href="#" icon=.bookmark label="Published" />
+                                    <SubLink href="#" icon=.bookmark label="Changed" />
+                                    <SubLink href="#" icon=.bookmark label="Draft" />
+                                    <SubLink href="#" icon=.bookmark label="Archived" />
+                                </SubFolder>
+                                <SubFolder label="Content type" count={props.content_types.len}>
+                                    {for (props.content_types) |ct| (
+                                        <SubLink href={ct.href} icon=.bookmark label={ct.label} />
+                                    )}
+                                </SubFolder>
+                            </ul>
+                        </div>
+                    </nav>
+
+                    <Flex items=.center class="mt-auto gap-2.5 p-2.5">
+                        <Avatar>
+                            <AvatarImage src={props.user_gravatar_url} alt="" class="" />
+                        </Avatar>
+                        <Stack gap=.none class="min-w-0 flex-1">
+                            {if (props.user_name.len > 0) (
+                                <span class="text-xs font-medium text-foreground truncate">{props.user_name}</span>
+                                <span class="text-xs text-muted-foreground truncate">{props.user_email}</span>
+                            ) else (
+                                <span class="text-xs font-medium text-foreground truncate">{props.user_email}</span>
+                            )}
+                        </Stack>
+                        <form method="POST" action="/admin/logout" class="shrink-0 inline-flex">
+                            <input type="hidden" name="_csrf" value={props.csrf_token} />
+                            <button type="submit"
+                                    class="inline-flex items-center justify-center bg-transparent border-0 p-0 text-muted-foreground opacity-60 hover:opacity-100 cursor-pointer"
+                                    aria-label="Logout">
+                                <Icon name=.logout size={13} />
+                            </button>
+                        </form>
+                    </Flex>
+                </aside>
+
+                <div class="pl-70 pr-1.5 pt-1.5 pb-1.5 h-screen">
+                  <div class="h-full flex flex-col bg-background border border-border rounded-xl shadow-xs overflow-hidden">
+                    <header class="sticky top-0 z-40 h-12 shrink-0 flex items-center gap-3 border-b border-border px-6">
+                        <span class="flex-1 min-w-0 text-xs text-muted-foreground truncate">{props.title}</span>
+                        <Flex items=.center class="gap-1.5 text-xs text-muted-foreground">
+                            <span class="w-1.5 h-1.5 rounded-full bg-success inline-block"></span>
+                            <span>Saved</span>
+                        </Flex>
+                        <button
+                            type="button"
+                            id="theme-toggle"
+                            aria-label="Toggle theme"
+                            class="ml-1.5 inline-flex items-center justify-center bg-transparent border-0 p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                        >
+                            <Icon name={IconName.sun} size={14} class="theme-toggle-sun" />
+                            <Icon name={IconName.moon} size={14} class="theme-toggle-moon" />
+                        </button>
+                    </header>
+
+                    <main class="flex-1 overflow-auto">
+                        <div class="flex flex-col gap-3 p-7 max-w-7xl mx-auto">
+                            {@raw props.content}
+                        </div>
+                    </main>
+                  </div>
                 </div>
-            )}
+
+                {if (props.bottom_bar.len > 0) (
+                    <div class="border-t border-border px-4 py-2">
+                        {@raw props.bottom_bar}
+                    </div>
+                )}
+            </TooltipProvider>
 
             <ToastRegion />
             <script type="module" src="/static/publr-core.js"></script>
@@ -133,6 +303,9 @@ pub fn Layout(props: struct {
             <script type="module" src="/static/interact/index.js"></script>
             <script src="/static/admin.js"></script>
             <script src="/static/media-selection.js"></script>
+            <script>
+                {@raw "document.getElementById('theme-toggle').addEventListener('click',function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('publr-theme',d?'dark':'light');});"}
+            </script>
         </body>
     </html>
 }

@@ -1,6 +1,17 @@
-// Content list template — generic content type list view
+// Content list template — Contentful-style entry browser.
+//
+// Layout:
+//   1. PageHeader: title + "View" dropdown + "+ Add entry" button
+//   2. Pill search bar: [Content type: <chip>] [search input] [Filter button]
+//   3. Suggested filter chips row: "+ Created by me", "+ Tags is one of", …
+//   4. Sort by dropdown
+//   5. BulkActions bar (hidden until a row is selected)
+//   6. Table with: select | Name | Content Type | Updated | Last updated by | Status | actions
+
+const std = @import("std");
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
 const IconSize = ui.icon.Size;
@@ -14,6 +25,13 @@ const TableBody = ui.table.TableBody;
 const TableRow = ui.table.TableRow;
 const TableHead = ui.table.TableHead;
 const TableCell = ui.table.TableCell;
+const BulkActions = ui.bulk_actions.BulkActions;
+const BulkActionsItem = ui.bulk_actions.BulkActionsItem;
+const BulkActionsSeparator = ui.bulk_actions.BulkActionsSeparator;
+const BulkActionsClear = ui.bulk_actions.BulkActionsClear;
+const Avatar = ui.avatar.Avatar;
+const AvatarImage = ui.avatar.AvatarImage;
+const AvatarFallback = ui.avatar.AvatarFallback;
 const DropdownMenu = ui.dropdown.DropdownMenu;
 const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
 const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
@@ -41,67 +59,182 @@ const PageUrl = struct {
     is_ellipsis: bool = false,
 };
 
-const AuthorOption = struct {
-    value: []const u8,
+/// Suggested filter chip — clicking adds the filter to the active set
+/// (interactivity to be wired in a follow-up).
+pub const SuggestedFilter = struct {
     label: []const u8,
-    selected: bool,
+    /// URL with the filter query param baked in. Empty = noop for now.
+    href: []const u8 = "#",
 };
 
 pub const Entry = struct {
     id: []const u8,
-    title: []const u8,
-    authors_html: []const u8,
+    name: []const u8,
+    content_type_label: []const u8,
+    /// Lucide icon name string (e.g. "bookmark") — comes from the schema's
+    /// `icon` config; we render it as a generic icon to keep the template
+    /// neutral about which icon system the schema uses.
+    content_type_icon: []const u8,
+    updated_relative: []const u8,
+    author_name: []const u8,
+    author_avatar_url: []const u8,
     status: []const u8,
-    date: []const u8,
     edit_url: []const u8,
 };
 
+/// Top-of-page action menu (visual placeholder — "View" surfaces saved view
+/// presets in Contentful; here it's a stub the user can fill out later).
+fn HeaderActions(props: struct {
+    new_url: []const u8,
+    new_label: []const u8,
+}) void {
+    <Flex items=.center gap=.sm>
+        <DropdownMenu>
+            <DropdownMenuTrigger>
+                <Button hierarchy=.secondary size=.sm icon=.bookmark label="View" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+                <DropdownMenuItem>Default view</DropdownMenuItem>
+                <DropdownMenuItem>Save current as new view</DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+        <Button hierarchy=.primary size=.sm icon=.plus label={props.new_label} href={props.new_url} />
+    </Flex>
+}
+
+/// Pill-shaped search/filter row. `Content type` is either a locked chip
+/// (when viewing /admin/content/:type) or an `Any` dropdown (when viewing
+/// /admin/content as the "All content" overview).
+fn FilterBar(props: struct {
+    is_type_locked: bool,
+    locked_type_label: []const u8,
+    search_query: []const u8,
+    search_action: []const u8,
+}) void {
+    <Flex
+        items=.center
+        gap=.sm
+        class="px-3 py-2 bg-card border border-border rounded-full shadow-xs"
+    >
+        <span class="text-xs font-medium text-muted-foreground px-2 py-1 bg-muted rounded-full select-none">
+            Content type
+        </span>
+        {if (props.is_type_locked) (
+            <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 bg-primary/10 text-primary rounded-full">
+                {props.locked_type_label}
+            </span>
+        ) else (
+            <DropdownMenu>
+                <DropdownMenuTrigger>
+                    <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 bg-primary text-primary-foreground rounded-full cursor-pointer">
+                        Any
+                        <Icon name=.chevron_down size={12} />
+                    </span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    <DropdownMenuItem>Any</DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        )}
+        <form method="get" action={props.search_action} class="flex-1">
+            <input
+                type="search"
+                name="q"
+                value={props.search_query}
+                placeholder="Type to search for entries"
+                class="w-full bg-transparent border-0 outline-none text-sm placeholder:text-muted-foreground"
+            />
+        </form>
+        <Button hierarchy=.tertiary size=.sm icon=.menu_03 label="Filter" />
+    </Flex>
+}
+
 pub fn List(props: struct {
+    // Page chrome
+    page_title: []const u8,
+    new_url: []const u8,
+    new_label: []const u8 = "Add entry",
+
+    // Filter bar
+    is_type_locked: bool = true,
+    locked_type_label: []const u8 = "",
+    search_query: []const u8 = "",
+    search_action: []const u8 = "",
+    suggested_filters: []const SuggestedFilter = &.{},
+
+    // Table data
     has_entries: bool,
     entries: []const Entry,
     total_count: []const u8,
+
+    // Pagination
     total_pages: u32,
     prev_page_url: []const u8,
     next_page_url: []const u8,
     page_urls: []const PageUrl,
-    new_url: []const u8,
-    type_name: []const u8,
-    available_authors: []const AuthorOption,
-    active_author_filter: []const u8,
-    base_path: []const u8,
 }) {
-    {if (props.available_authors.len > 0) (
-        <Flex gap=.md items=.center>
-            <form method="get" action={props.base_path}>
-                <select name="author" class="form-control form-control-sm" onchange="this.form.submit()" aria-label="Filter by author">
-                    <option value="">All authors</option>
-                    {for (props.available_authors) |author| (
-                        <option value={author.value} selected={author.selected}>{author.label}</option>
-                    )}
-                </select>
-            </form>
-            {if (props.active_author_filter.len > 0) (
-                <Button hierarchy=.tertiary size=.sm label="Clear filter" icon=.x_close href={props.base_path} />
+    <PageHeader title={props.page_title}>
+        <HeaderActions new_url={props.new_url} new_label={props.new_label} />
+    </PageHeader>
+
+    <FilterBar
+        is_type_locked={props.is_type_locked}
+        locked_type_label={props.locked_type_label}
+        search_query={props.search_query}
+        search_action={props.search_action}
+    />
+
+    {if (props.suggested_filters.len > 0) (
+        <Flex items=.center gap=.xs class="flex-wrap py-2">
+            {for (props.suggested_filters) |sf| (
+                <a
+                    href={sf.href}
+                    class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-solid hover:bg-muted/40 no-underline"
+                >
+                    + {sf.label}
+                </a>
             )}
         </Flex>
     )}
+
+    <Flex items=.center justify=.between class="py-2">
+        <DropdownMenu>
+            <DropdownMenuTrigger>
+                <Button hierarchy=.tertiary size=.sm icon=.menu_03 label="Sort by" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+                <DropdownMenuItem>Updated (newest first)</DropdownMenuItem>
+                <DropdownMenuItem>Updated (oldest first)</DropdownMenuItem>
+                <DropdownMenuItem>Name (A → Z)</DropdownMenuItem>
+                <DropdownMenuItem>Name (Z → A)</DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+        <Text size=.sm color=.muted>{props.total_count} items</Text>
+    </Flex>
+
     {if (props.has_entries) (
-        <div>
-            <Table>
+        <div data-publr-component="content-list">
+            <BulkActions count={0} visible={false} class="content-bulk-actions">
+                <BulkActionsItem icon=.copy label="Duplicate" />
+                <BulkActionsItem icon=.calendar_check label="Add to release" />
+                <BulkActionsSeparator />
+                <BulkActionsItem icon=.trash label="Delete" variant=.destructive />
+                <BulkActionsClear />
+            </BulkActions>
+            <Table class="bg-card border border-border rounded-lg overflow-hidden">
                 <TableHeader>
                     <TableRow>
                         <TableHead class="w-10">
                             <Checkbox name="select-all" />
                         </TableHead>
-                        <TableHead class="w-10"></TableHead>
-                        <TableHead>
-                            Title
-                            <Icon name={IconName.chevron_up} size={IconSize.sm} />
-                        </TableHead>
-                        <TableHead>Author</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Content Type</TableHead>
+                        <TableHead>Updated</TableHead>
+                        <TableHead>Last updated by</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead class="w-10"></TableHead>
+                        <TableHead class="w-10">
+                            <Icon name=.settings size={14} class="text-muted-foreground" />
+                        </TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -110,32 +243,47 @@ pub fn List(props: struct {
                             <TableCell class="w-10">
                                 <Checkbox name="select-entry" value={entry.id} />
                             </TableCell>
-                            <TableCell class="w-10">
-                                <Icon name={IconName.file} />
+                            <TableCell>
+                                <a href={entry.edit_url} class="font-medium no-underline hover:underline">{entry.name}</a>
                             </TableCell>
                             <TableCell>
-                                <a href={entry.edit_url} class="font-medium">{entry.title}</a>
+                                <Flex items=.center gap=.xs>
+                                    <Icon name=.file size={14} class="shrink-0 text-muted-foreground" />
+                                    <Text as=.span size=.sm>{entry.content_type_label}</Text>
+                                </Flex>
                             </TableCell>
                             <TableCell>
-                                {@raw entry.authors_html}
+                                <Text as=.span size=.sm color=.muted>{entry.updated_relative}</Text>
                             </TableCell>
                             <TableCell>
-                                {if (@import("std").mem.eql(u8, entry.status, "published")) (
-                                    <Badge label="published" variant={BadgeVariant.success} size={BadgeSize.sm} />
-                                ) else if (@import("std").mem.eql(u8, entry.status, "changed")) (
-                                    <Badge label="changed" variant={BadgeVariant.warning} size={BadgeSize.sm} />
+                                <Flex items=.center gap=.xs>
+                                    <Avatar size=.sm>
+                                        {if (entry.author_avatar_url.len > 0) (
+                                            <AvatarImage src={entry.author_avatar_url} alt="" />
+                                        ) else (
+                                            <AvatarFallback>?</AvatarFallback>
+                                        )}
+                                    </Avatar>
+                                    <Text as=.span size=.sm>{entry.author_name}</Text>
+                                </Flex>
+                            </TableCell>
+                            <TableCell>
+                                {if (std.mem.eql(u8, entry.status, "published")) (
+                                    <Badge label="Published" variant={BadgeVariant.success} size={BadgeSize.sm} />
+                                ) else if (std.mem.eql(u8, entry.status, "changed")) (
+                                    <Badge label="Changed" variant={BadgeVariant.warning} size={BadgeSize.sm} />
                                 ) else (
-                                    <Badge label="draft" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
+                                    <Badge label="Draft" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
                                 )}
                             </TableCell>
-                            <TableCell>{entry.date}</TableCell>
                             <TableCell class="w-10">
                                 <DropdownMenu>
                                     <DropdownMenuTrigger>
-                                        <Button hierarchy=.tertiary size=.sm label="" icon=.more />
+                                        <Button hierarchy=.tertiary size=.sm label="" icon=.more aria_label="Row actions" />
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent>
                                         <DropdownMenuItem href={entry.edit_url}>Edit</DropdownMenuItem>
+                                        <DropdownMenuItem>Duplicate</DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem variant=.destructive>Delete</DropdownMenuItem>
                                     </DropdownMenuContent>
@@ -145,9 +293,8 @@ pub fn List(props: struct {
                     )}
                 </TableBody>
             </Table>
-            <Flex justify=.between items=.center>
-                <Text size=.sm color=.muted>{props.total_count} items</Text>
-                {if (props.total_pages > 1) (
+            {if (props.total_pages > 1) (
+                <Flex justify=.end class="py-3">
                     <Pagination>
                         <PaginationContent>
                             <PaginationItem>
@@ -165,15 +312,15 @@ pub fn List(props: struct {
                             </PaginationItem>
                         </PaginationContent>
                     </Pagination>
-                )}
-            </Flex>
+                </Flex>
+            )}
         </div>
     ) else (
         <Empty>
             <EmptyTitle>No entries yet</EmptyTitle>
             <EmptyDescription>Create your first entry to get started.</EmptyDescription>
             <EmptyContent>
-                <Button hierarchy=.primary label="Create first entry" href={props.new_url} />
+                <Button hierarchy=.primary label={props.new_label} href={props.new_url} />
             </EmptyContent>
         </Empty>
     )}
