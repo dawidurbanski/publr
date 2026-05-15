@@ -3,7 +3,8 @@
 //! Schema-driven CRUD for ANY registered content type, with full versioning,
 //! publishing, autosave, releases, and multi-user editing support.
 //!
-//! Adding a schema to `schemas.content_types` automatically creates:
+//! Registering a content type (via `schema_registry.register` — through
+//! `publr starter add`, a plugin, or admin UI) automatically creates:
 //! - A sidebar nav item with the content type's display name
 //! - Full CRUD routes at /admin/content/{type_id}
 //! - Schema-driven form rendering and parsing
@@ -31,17 +32,20 @@ const Context = @import("middleware").Context;
 const tpl = @import("tpl");
 const csrf = @import("csrf");
 const cms = @import("cms");
-const schemas = @import("schemas");
+const schema_registry = @import("schema_registry");
 const views = @import("views");
 const registry = @import("registry");
 const auth_middleware = @import("auth_middleware");
 const pagination = @import("pagination");
 const pu = @import("plugin_utils");
 const field_mod = @import("field");
+const content_type_mod = @import("content_type");
 const gravatar = @import("gravatar");
 
 const Allocator = std.mem.Allocator;
 const Db = @import("db").Db;
+const ContentTypeDef = content_type_mod.ContentTypeDef;
+const FieldDef = field_mod.FieldDef;
 const redirect = pu.redirect;
 const writeJsonEscaped = pu.writeJsonEscaped;
 
@@ -73,123 +77,120 @@ const presence = if (@import("builtin").target.os.tag != .wasi) @import("presenc
 };
 
 // =============================================================================
-// Per-Content-Type Page Generation
+// Generic Content Page
 // =============================================================================
+//
+// One admin page registers all content routes. The `:type` URL param is
+// resolved via `schema_registry.findById` and the per-CT impls
+// (`listFor`, `editFor`, …) take `*const ContentTypeDef` directly.
+//
+// POST routes live here as path-keyed `/:type/.../verb` endpoints.
 
-/// Generate comptime-specialized setup function and handlers for a content type.
-fn ContentHandlers(comptime CT: type) type {
-    return struct {
-        const base_url = "/admin/content/" ++ CT.type_id;
+pub const page = admin.registerPage(.{
+    .id = "content",
+    .title = "Content",
+    .path = "/content",
+    .icon = .bookmark,
+    .position = 15,
+    .section = "content",
+    .setup = setup,
+});
 
-        fn getPage() admin.Page {
-            for (content_pages) |pg| {
-                if (std.mem.eql(u8, pg.id, "content." ++ CT.type_id)) return pg;
-            }
-            unreachable;
-        }
-
-        pub fn setup(app: *admin.PageApp) void {
-            app.render(handleList);
-            app.get("/new", handleNew);
-            app.get("/:id", handleEdit);
-            app.get("/:id/versions/:vid", handleVersionPreview);
-            app.get("/:id/versions/:vid/compare", handleVersionCompare);
-            app.get("/:id/versions/:vid/flow", handleVersionFlow);
-            app.post(handleCreate);
-            app.postAt("/autosave", handleAutosaveCreate);
-            app.postAt("/:id", handleUpdate);
-            app.postAt("/:id/autosave", handleAutosaveUpdate);
-            app.postAt("/:id/delete", handleDelete);
-            app.postAt("/:id/publish", handlePublish);
-            app.postAt("/:id/unpublish", handleUnpublish);
-            app.postAt("/:id/discard", handleDiscard);
-            app.postAt("/:id/versions/:vid/restore", handleRestore);
-        }
-
-        fn handleList(ctx: *Context) !void {
-            const pg = comptime getPage();
-            return listFor(CT, pg, ctx);
-        }
-
-        fn handleNew(ctx: *Context) !void {
-            return newFor(CT, ctx);
-        }
-
-        fn handleEdit(ctx: *Context) !void {
-            const pg = comptime getPage();
-            return editFor(CT, pg, ctx);
-        }
-
-        fn handleCreate(ctx: *Context) !void {
-            return createFor(CT, ctx);
-        }
-
-        fn handleUpdate(ctx: *Context) !void {
-            return updateFor(CT, ctx);
-        }
-
-        fn handleDelete(ctx: *Context) !void {
-            return deleteFor(CT, ctx);
-        }
-
-        fn handlePublish(ctx: *Context) !void {
-            return publishFor(CT, ctx);
-        }
-
-        fn handleUnpublish(ctx: *Context) !void {
-            return unpublishFor(CT, ctx);
-        }
-
-        fn handleDiscard(ctx: *Context) !void {
-            return discardFor(CT, ctx);
-        }
-
-        fn handleAutosaveCreate(ctx: *Context) !void {
-            return autosaveCreateFor(CT, ctx);
-        }
-
-        fn handleAutosaveUpdate(ctx: *Context) !void {
-            return autosaveUpdateFor(CT, ctx);
-        }
-
-        fn handleVersionPreview(ctx: *Context) !void {
-            return versionPreviewRedirectFor(CT, ctx);
-        }
-
-        fn handleVersionCompare(ctx: *Context) !void {
-            const pg = comptime getPage();
-            return versionCompareFor(CT, pg, ctx);
-        }
-
-        fn handleVersionFlow(ctx: *Context) !void {
-            const pg = comptime getPage();
-            return versionFlowFor(CT, pg, ctx);
-        }
-
-        fn handleRestore(ctx: *Context) !void {
-            return restoreFor(CT, ctx);
-        }
-    };
+fn setup(app: *admin.PageApp) void {
+    // GET routes only — the 8 POST verbs (create/update/delete/publish/
+    // unpublish/autosave/discard/restore) live in content_actions.zig and
+    // are dispatched through /admin/action with hidden `action=content.<verb>`,
+    // `type=<handle>`, `entry_id=<id>` fields.
+    app.get("/", handleAll);
+    app.get("/:type", handleList);
+    app.get("/:type/new", handleNew);
+    app.get("/:type/:id", handleEdit);
+    app.get("/:type/:id/versions/:vid", handleVersionPreview);
+    app.get("/:type/:id/versions/:vid/compare", handleVersionCompare);
+    app.get("/:type/:id/versions/:vid/flow", handleVersionFlow);
 }
 
-/// One admin page per content type.
-pub const content_pages: [schemas.content_types.len]admin.Page = blk: {
-    var pages: [schemas.content_types.len]admin.Page = undefined;
-    var i: usize = 0;
-    for (schemas.content_types) |CT| {
-        pages[i] = admin.registerPage(.{
-            .id = "content." ++ CT.type_id,
-            .title = CT.display_name,
-            .path = "/content/" ++ CT.type_id,
-            .icon = .bookmark,
-            .position = 15 + @as(u16, @intCast(i)),
-            .section = "content",
-            .setup = ContentHandlers(CT).setup,
-        });
-        i += 1;
+fn handleAll(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        ctx.html("Database not initialized");
+        return;
+    };
+
+    const defs = schema_registry.all();
+    if (defs.len == 0) {
+        const content = tpl.render(views.admin.content.all.AllContent, .{.{
+            .has_types = false,
+            .types = &[_]views.admin.content.all.TypeCard{},
+        }});
+        ctx.html(admin.renderWithLayout(page.id, "All Content", ctx, content, ""));
+        return;
     }
-    break :blk pages;
-};
+
+    var cards = ctx.allocator.alloc(views.admin.content.all.TypeCard, defs.len) catch {
+        ctx.html("Error allocating memory");
+        return;
+    };
+    for (defs, 0..) |def, i| {
+        const count = cms.query.countEntries(db, def.type_id, .{}) catch 0;
+        const count_label = std.fmt.allocPrint(ctx.allocator, "{d} entries", .{count}) catch "0 entries";
+        const list_url = std.fmt.allocPrint(ctx.allocator, "/admin/content/{s}", .{def.type_id}) catch "/admin/content";
+        cards[i] = .{
+            .type_id = def.type_id,
+            .display_name = def.display_name,
+            .display_name_plural = def.display_name_plural,
+            .icon = def.icon orelse "bookmark",
+            .list_url = list_url,
+            .entry_count_label = count_label,
+        };
+    }
+
+    const content = tpl.render(views.admin.content.all.AllContent, .{.{
+        .has_types = true,
+        .types = cards,
+    }});
+    ctx.html(admin.renderWithLayout(page.id, "All Content", ctx, content, ""));
+}
+
+fn handleList(ctx: *Context) !void {
+    const type_id = ctx.params.get("type") orelse return notFound(ctx);
+    const def = schema_registry.findById(type_id) orelse return notFound(ctx);
+    return listFor(def, ctx);
+}
+
+fn handleNew(ctx: *Context) !void {
+    const type_id = ctx.params.get("type") orelse return notFound(ctx);
+    const def = schema_registry.findById(type_id) orelse return notFound(ctx);
+    return newFor(def, ctx);
+}
+
+fn handleEdit(ctx: *Context) !void {
+    const type_id = ctx.params.get("type") orelse return notFound(ctx);
+    const def = schema_registry.findById(type_id) orelse return notFound(ctx);
+    return editFor(def, ctx);
+}
+
+fn handleVersionPreview(ctx: *Context) !void {
+    const type_id = ctx.params.get("type") orelse return notFound(ctx);
+    const def = schema_registry.findById(type_id) orelse return notFound(ctx);
+    return versionPreviewRedirectFor(def, ctx);
+}
+
+fn handleVersionCompare(ctx: *Context) !void {
+    const type_id = ctx.params.get("type") orelse return notFound(ctx);
+    const def = schema_registry.findById(type_id) orelse return notFound(ctx);
+    return versionCompareFor(def, ctx);
+}
+
+fn handleVersionFlow(ctx: *Context) !void {
+    const type_id = ctx.params.get("type") orelse return notFound(ctx);
+    const def = schema_registry.findById(type_id) orelse return notFound(ctx);
+    return versionFlowFor(def, ctx);
+}
+
+/// Build the admin base URL for a given content type.
+fn baseUrlFor(allocator: Allocator, def: *const ContentTypeDef) []const u8 {
+    return std.fmt.allocPrint(allocator, "/admin/content/{s}", .{def.type_id}) catch "/admin/content";
+}
 
 // =============================================================================
 // CRUD Handlers
@@ -211,59 +212,55 @@ const AuthorOption = struct {
     selected: bool,
 };
 
-const ViewEntry = struct {
-    id: []const u8,
-    title: []const u8,
-    authors_html: []const u8,
-    status: []const u8,
-    date: []const u8,
-    edit_url: []const u8,
-};
+const ViewEntry = views.admin.content.list.Entry;
 
-fn listFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
+fn listFor(def: *const ContentTypeDef, ctx: *Context) !void {
     const db = if (auth_middleware.auth) |a| a.db else {
         ctx.html("Database not initialized");
         return;
     };
 
-    const base_path = "/admin/content/" ++ CT.type_id;
+    const base_path = baseUrlFor(ctx.allocator, def);
+    const new_url = std.fmt.allocPrint(ctx.allocator, "{s}/new", .{base_path}) catch base_path;
+    const new_label = std.fmt.allocPrint(ctx.allocator, "Add {s}", .{def.display_name}) catch def.display_name;
+    const icon_str: []const u8 = def.icon orelse "bookmark";
 
     // Author filter (treat empty string as no filter)
     const author_filter: ?[]const u8 = if (pu.queryParam(ctx.query, "author")) |af| (if (af.len > 0) af else null) else null;
     const filtered_entry_ids: ?[]const []const u8 = if (author_filter) |af| blk: {
-        const ids = getEntryIdsByAuthor(ctx.allocator, db, af, CT.type_id);
+        const ids = getEntryIdsByAuthor(ctx.allocator, db, af, def.type_id);
         break :blk if (ids.len > 0) ids else null;
     } else null;
 
     const total_count: u32 = if (author_filter != null) blk: {
         if (filtered_entry_ids) |ids| break :blk @intCast(ids.len) else break :blk 0;
-    } else cms.countEntries(CT, db, .{}) catch 0;
+    } else cms.query.countEntries(db, def.type_id, .{}) catch 0;
     const pag = pagination.Paginator.init(ctx.query, total_count, 20);
 
-    const entries = cms.listEntries(CT, ctx.allocator, db, .{
+    const entries = cms.query.listEntries(ctx.allocator, db, def.type_id, .{
         .limit = pag.items_per_page,
         .offset = pag.offset(),
-        .order_by = "created_at",
+        .order_by = "updated_at",
         .order_dir = .desc,
         .entry_ids = filtered_entry_ids,
     }) catch {
-        const empty_pag = pagination.Paginator.init(null, 0, 20);
-        const empty_urls = empty_pag.buildTruncatedPageUrls(ctx.allocator, base_path);
         const content = tpl.render(views.admin.content.list.List, .{.{
+            .page_title = def.display_name,
+            .new_url = new_url,
+            .new_label = new_label,
+            .is_type_locked = true,
+            .locked_type_label = def.display_name,
+            .search_query = "",
+            .search_action = base_path,
             .has_entries = false,
             .entries = &[_]ViewEntry{},
             .total_count = "0",
             .total_pages = @as(u32, 1),
             .prev_page_url = "",
             .next_page_url = "",
-            .page_urls = empty_urls.items,
-            .new_url = base_path ++ "/new",
-            .type_name = CT.display_name,
-            .available_authors = &[_]AuthorOption{},
-            .active_author_filter = "",
-            .base_path = base_path,
+            .page_urls = &[_]views.admin.content.list.PageUrl{},
         }});
-        ctx.html(registry.renderPage(pg, ctx, content));
+        ctx.html(admin.renderWithLayout(page.id, def.display_name, ctx, content, ""));
         return;
     };
 
@@ -284,12 +281,24 @@ fn listFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
 
     for (entries, 0..) |entry, i| {
         const authors = findAuthorsForEntry(all_authors, entry.id);
+        // Most recent author = last in the slice (resolveEntryAuthors orders
+        // by created_at ASC).
+        const last_author: ?AuthorInfo = if (authors.len > 0) authors[authors.len - 1] else null;
+        const author_label: []const u8 = if (last_author) |a| a.label() else "Unknown";
+        const avatar_url: []const u8 = if (last_author) |a|
+            gravatar.url(a.email, 24).slice()
+        else
+            "";
+
         view_entries[i] = .{
             .id = entry.id,
-            .title = if (entry.title.len > 0) entry.title else "(untitled)",
-            .authors_html = renderAuthorCell(ctx.allocator, authors),
+            .name = if (entry.title.len > 0) entry.title else "(untitled)",
+            .content_type_label = def.display_name,
+            .content_type_icon = icon_str,
+            .updated_relative = cms.formatRelativeTime(ctx.allocator, entry.updated_at) catch "Unknown",
+            .author_name = author_label,
+            .author_avatar_url = avatar_url,
             .status = entry.status,
-            .date = formatDate(entry.created_at, ctx.allocator) catch "Unknown",
             .edit_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_path, entry.id }) catch base_path,
         };
     }
@@ -302,85 +311,100 @@ fn listFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
     const page_urls = pag.buildTruncatedPageUrls(ctx.allocator, base_url);
     const total_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{total_count}) catch "0";
 
-    // Get available authors for filter dropdown
-    const raw_authors = getAvailableAuthors(ctx.allocator, db, CT.type_id);
-    const author_options: []const AuthorOption = blk: {
-        if (raw_authors.len == 0) break :blk &[_]AuthorOption{};
-        const opts = ctx.allocator.alloc(AuthorOption, raw_authors.len) catch break :blk &[_]AuthorOption{};
-        for (raw_authors, 0..) |a, i| {
-            opts[i] = .{
-                .value = a.id,
-                .label = a.label(),
-                .selected = if (author_filter) |af| std.mem.eql(u8, a.id, af) else false,
+    // Suggested filter chips — visual placeholders. Each chip's `href` will
+    // wire up an actual filter query param once the filter system grows past
+    // the existing single-value `author` filter.
+    const SF = views.admin.content.list.SuggestedFilter;
+    const suggested = [_]SF{
+        .{ .label = "Created by me" },
+        .{ .label = "Tags is one of" },
+        .{ .label = "Taxonomy" },
+        .{ .label = "Status is" },
+        .{ .label = "Locale" },
+    };
+
+    const search_query = pu.queryParam(ctx.query, "q") orelse "";
+
+    // Convert `pagination.PageUrl` slice into the template's local `PageUrl`
+    // type. Fields are structurally identical; the mapping is needed because
+    // ZSX's defaults-merge path field-copies through the prop type.
+    const TplPageUrl = views.admin.content.list.PageUrl;
+    const tpl_page_urls = blk: {
+        const buf = ctx.allocator.alloc(TplPageUrl, page_urls.items.len) catch break :blk &[_]TplPageUrl{};
+        for (page_urls.items, 0..) |pu_item, i| {
+            buf[i] = .{
+                .page_num = pu_item.page_num,
+                .url = pu_item.url,
+                .is_current = pu_item.is_current,
+                .is_ellipsis = pu_item.is_ellipsis,
             };
         }
-        break :blk opts;
+        break :blk @as([]const TplPageUrl, buf);
     };
 
     const content = tpl.render(views.admin.content.list.List, .{.{
+        .page_title = def.display_name,
+        .new_url = new_url,
+        .new_label = new_label,
+        .is_type_locked = true,
+        .locked_type_label = def.display_name,
+        .search_query = search_query,
+        .search_action = base_path,
+        .suggested_filters = &suggested,
         .has_entries = view_entries.len > 0,
         .entries = view_entries,
         .total_count = total_count_str,
         .total_pages = pag.total_pages,
         .prev_page_url = page_urls.prev_url,
         .next_page_url = page_urls.next_url,
-        .page_urls = page_urls.items,
-        .new_url = base_path ++ "/new",
-        .type_name = CT.display_name,
-        .available_authors = author_options,
-        .active_author_filter = author_filter orelse "",
-        .base_path = base_path,
+        .page_urls = tpl_page_urls,
     }});
 
-    const add_btn = std.fmt.allocPrint(
-        ctx.allocator,
-        \\<a href="{s}/new" class="btn btn-primary">Add new</a>
-    ,
-        .{base_path},
-    ) catch "";
-
-    ctx.html(registry.renderPageFull(pg, ctx, content, "", "", add_btn));
+    ctx.html(admin.renderWithLayout(page.id, def.display_name, ctx, content, ""));
 }
 
-fn newFor(comptime CT: type, ctx: *Context) !void {
+pub fn newFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
-    const base_url = "/admin/content/" ++ CT.type_id;
-    const data = defaultData(CT);
+    const data_json = defaultDataJson(ctx.allocator, def) catch "{}";
+    defer if (data_json.len > 0 and !std.mem.eql(u8, data_json, "{}")) ctx.allocator.free(data_json);
     const author_id = auth_middleware.getUserId(ctx);
 
-    const entry = cms.saveEntry(CT, ctx.allocator, db, null, data, .{
+    var entry = cms.saveEntry(ctx.allocator, db, def.type_id, null, data_json, .{
         .author_id = author_id,
     }) catch {
         redirect(ctx, base_url);
         return;
     };
+    defer entry.deinit(ctx.allocator);
 
     const edit_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry.id }) catch base_url;
     redirect(ctx, edit_url);
 }
 
-fn editFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
+fn editFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
-    const base_url = "/admin/content/" ++ CT.type_id;
     const entry_id = ctx.param("id") orelse {
         redirect(ctx, base_url);
         return;
     };
 
-    const entry = cms.getEntry(CT, ctx.allocator, db, entry_id) catch {
+    var entry = cms.query.getEntry(ctx.allocator, db, def.type_id, entry_id) catch {
         redirect(ctx, base_url);
         return;
     } orelse {
         return notFound(ctx);
     };
+    defer entry.deinit(ctx.allocator);
 
     const csrf_token = csrf.ensureToken(ctx);
     const action_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry.id }) catch base_url;
@@ -398,7 +422,7 @@ fn editFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
     const fields_in_releases_json = buildFieldsInReleasesJson(ctx.allocator, release_field_info) catch "[]";
 
     // Render main editor fields (position = .main)
-    const form_html = renderFieldsHtml(CT, ctx.allocator, &entry.data, csrf_token, action_url, .main, .{
+    const form_html = renderFieldsHtml(def, ctx.allocator, &entry.data, csrf_token, action_url, .main, .{
         .entry_id = entry.id,
         .status = entry.status,
         .published_data = published_data,
@@ -440,7 +464,7 @@ fn editFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
     }});
 
     // Render sidebar
-    const sidebar_html = renderSidebarHtml(CT, ctx.allocator, &entry.data, csrf_token, delete_url, entry.status, .{
+    const sidebar_html = renderSidebarHtml(def, ctx.allocator, &entry.data, csrf_token, delete_url, entry.status, .{
         .entry_id = entry.id,
         .history_html = history_html,
         .release_html = release_html,
@@ -448,40 +472,42 @@ fn editFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
     });
 
     const display_title = if (entry.title.len > 0) entry.title else "Untitled";
-    ctx.html(registry.renderEditPage(pg, ctx, display_title, form_html, .{
+    ctx.html(registry.renderEditPage(page, ctx, display_title, form_html, .{
         .back_url = base_url,
-        .back_label = CT.display_name,
+        .back_label = def.display_name,
         .sidebar = sidebar_html,
     }));
 }
 
-fn createFor(comptime CT: type, ctx: *Context) !void {
+pub fn createFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
-    const base_url = "/admin/content/" ++ CT.type_id;
-    const data = parseFormData(CT, ctx);
+    const data_json = parseFormDataJson(ctx.allocator, def, ctx, null) catch "{}";
+    defer if (data_json.len > 2) ctx.allocator.free(data_json);
     const author_id = auth_middleware.getUserId(ctx);
 
-    _ = cms.saveEntry(CT, ctx.allocator, db, null, data, .{
+    var saved = cms.saveEntry(ctx.allocator, db, def.type_id, null, data_json, .{
         .author_id = author_id,
     }) catch {
         redirect(ctx, base_url);
         return;
     };
+    saved.deinit(ctx.allocator);
 
     redirect(ctx, base_url);
 }
 
-fn updateFor(comptime CT: type, ctx: *Context) !void {
+pub fn updateFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
-    const base_url = "/admin/content/" ++ CT.type_id;
     const entry_id = ctx.param("id") orelse {
         redirect(ctx, base_url);
         return;
@@ -493,13 +519,14 @@ fn updateFor(comptime CT: type, ctx: *Context) !void {
     const author_id = auth_middleware.getUserId(ctx);
 
     // Fetch existing entry
-    const entry = cms.getEntry(CT, ctx.allocator, db, entry_id) catch {
+    var entry = cms.query.getEntry(ctx.allocator, db, def.type_id, entry_id) catch {
         redirect(ctx, base_url);
         return;
     } orelse {
         redirect(ctx, base_url);
         return;
     };
+    defer entry.deinit(ctx.allocator);
 
     // Get field ownership for hard lock validation
     const owners = getFieldOwnership(ctx.allocator, db, entry_id) catch null;
@@ -507,17 +534,19 @@ fn updateFor(comptime CT: type, ctx: *Context) !void {
     // Parse form with ownership validation
     var rejected: std.ArrayListUnmanaged(RejectedField) = .{};
     var newly_acquired: std.ArrayListUnmanaged([]const u8) = .{};
-    const data = parseFormDataWithValidation(CT, ctx, &entry.data, author_id, entry_id, owners, &rejected, &newly_acquired);
+    const data_json = parseFormDataWithValidation(ctx.allocator, def, ctx, &entry.data, author_id, entry_id, owners, &rejected, &newly_acquired) catch "{}";
+    defer if (data_json.len > 2) ctx.allocator.free(data_json);
 
     const status = ctx.formValue("status") orelse entry.status;
 
-    _ = cms.saveEntry(CT, ctx.allocator, db, entry_id, data, .{
+    var saved = cms.saveEntry(ctx.allocator, db, def.type_id, entry_id, data_json, .{
         .author_id = author_id,
         .status = status,
     }) catch {
         redirect(ctx, base_url);
         return;
     };
+    saved.deinit(ctx.allocator);
 
     // Broadcast lock_acquired for newly acquired fields
     if (newly_acquired.items.len > 0) {
@@ -568,33 +597,34 @@ fn updateFor(comptime CT: type, ctx: *Context) !void {
     redirect(ctx, edit_url);
 }
 
-fn deleteFor(comptime CT: type, ctx: *Context) !void {
+pub fn deleteFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
     const entry_id = ctx.param("id") orelse {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
     cms.deleteEntry(db, entry_id) catch {};
 
-    redirect(ctx, "/admin/content/" ++ CT.type_id);
+    redirect(ctx, base_url);
 }
 
 // =============================================================================
 // Publish / Unpublish / Discard
 // =============================================================================
 
-fn publishFor(comptime CT: type, ctx: *Context) !void {
+pub fn publishFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
-    const base_url = "/admin/content/" ++ CT.type_id;
     const entry_id = ctx.param("id") orelse {
         redirect(ctx, base_url);
         return;
@@ -611,13 +641,13 @@ fn publishFor(comptime CT: type, ctx: *Context) !void {
     redirect(ctx, base_url);
 }
 
-fn unpublishFor(comptime CT: type, ctx: *Context) !void {
+pub fn unpublishFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
-        redirect(ctx, "/admin/content/" ++ CT.type_id);
+        redirect(ctx, base_url);
         return;
     };
 
-    const base_url = "/admin/content/" ++ CT.type_id;
     const entry_id = ctx.param("id") orelse {
         redirect(ctx, base_url);
         return;
@@ -628,8 +658,8 @@ fn unpublishFor(comptime CT: type, ctx: *Context) !void {
     redirect(ctx, base_url);
 }
 
-fn discardFor(comptime CT: type, ctx: *Context) !void {
-    const base_url = "/admin/content/" ++ CT.type_id;
+pub fn discardFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
         redirect(ctx, base_url);
         return;
@@ -642,7 +672,7 @@ fn discardFor(comptime CT: type, ctx: *Context) !void {
 
     cms.discardToPublished(db, entry_id) catch {};
 
-    const url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
+    const url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry_id }) catch base_url;
     redirect(ctx, url);
 }
 
@@ -650,17 +680,18 @@ fn discardFor(comptime CT: type, ctx: *Context) !void {
 // Autosave
 // =============================================================================
 
-fn autosaveCreateFor(comptime CT: type, ctx: *Context) !void {
+pub fn autosaveCreateFor(def: *const ContentTypeDef, ctx: *Context) !void {
     const db = if (auth_middleware.auth) |a| a.db else {
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.response.setBody("{\"error\":\"not authenticated\"}");
         return;
     };
 
-    const data = parseFormData(CT, ctx);
+    const data_json = parseFormDataJson(ctx.allocator, def, ctx, null) catch "{}";
+    defer if (data_json.len > 2) ctx.allocator.free(data_json);
     const author_id = auth_middleware.getUserId(ctx);
 
-    const entry = cms.saveEntry(CT, ctx.allocator, db, null, data, .{
+    var entry = cms.saveEntry(ctx.allocator, db, def.type_id, null, data_json, .{
         .author_id = author_id,
         .status = "draft",
     }) catch {
@@ -668,6 +699,7 @@ fn autosaveCreateFor(comptime CT: type, ctx: *Context) !void {
         ctx.response.setBody("{\"error\":\"save failed\"}");
         return;
     };
+    defer entry.deinit(ctx.allocator);
 
     const json = std.fmt.allocPrint(ctx.allocator, "{{\"entry_id\":\"{s}\",\"status\":\"draft\",\"saved\":true}}", .{entry.id}) catch {
         ctx.response.setHeader("Content-Type", "application/json");
@@ -679,7 +711,7 @@ fn autosaveCreateFor(comptime CT: type, ctx: *Context) !void {
     ctx.response.setBody(json);
 }
 
-fn autosaveUpdateFor(comptime CT: type, ctx: *Context) !void {
+pub fn autosaveUpdateFor(def: *const ContentTypeDef, ctx: *Context) !void {
     const db = if (auth_middleware.auth) |a| a.db else {
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.response.setBody("{\"error\":\"not authenticated\"}");
@@ -692,7 +724,7 @@ fn autosaveUpdateFor(comptime CT: type, ctx: *Context) !void {
         return;
     };
 
-    const entry = cms.getEntry(CT, ctx.allocator, db, entry_id) catch {
+    var entry = cms.query.getEntry(ctx.allocator, db, def.type_id, entry_id) catch {
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.response.setBody("{\"error\":\"entry not found\"}");
         return;
@@ -701,6 +733,7 @@ fn autosaveUpdateFor(comptime CT: type, ctx: *Context) !void {
         ctx.response.setBody("{\"error\":\"entry not found\"}");
         return;
     };
+    defer entry.deinit(ctx.allocator);
 
     const author_id = auth_middleware.getUserId(ctx);
 
@@ -710,12 +743,13 @@ fn autosaveUpdateFor(comptime CT: type, ctx: *Context) !void {
     // Parse with ownership validation
     var rejected: std.ArrayListUnmanaged(RejectedField) = .{};
     var newly_acquired: std.ArrayListUnmanaged([]const u8) = .{};
-    const data = parseFormDataWithValidation(CT, ctx, &entry.data, author_id, entry_id, owners, &rejected, &newly_acquired);
+    const data_json = parseFormDataWithValidation(ctx.allocator, def, ctx, &entry.data, author_id, entry_id, owners, &rejected, &newly_acquired) catch "{}";
+    defer if (data_json.len > 2) ctx.allocator.free(data_json);
 
     // Status: drafts stay draft; published/changed become "changed"
     const status: []const u8 = if (entry.isDraft()) "draft" else "changed";
 
-    _ = cms.saveEntry(CT, ctx.allocator, db, entry_id, data, .{
+    var saved = cms.saveEntry(ctx.allocator, db, def.type_id, entry_id, data_json, .{
         .author_id = author_id,
         .autosave = true,
         .status = status,
@@ -724,6 +758,7 @@ fn autosaveUpdateFor(comptime CT: type, ctx: *Context) !void {
         ctx.response.setBody("{\"error\":\"save failed\"}");
         return;
     };
+    saved.deinit(ctx.allocator);
 
     // Broadcast lock_acquired for newly acquired fields
     if (newly_acquired.items.len > 0) {
@@ -765,8 +800,8 @@ fn autosaveUpdateFor(comptime CT: type, ctx: *Context) !void {
 // Version Preview & Restore
 // =============================================================================
 
-fn versionPreviewRedirectFor(comptime CT: type, ctx: *Context) !void {
-    const base_url = "/admin/content/" ++ CT.type_id;
+fn versionPreviewRedirectFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const entry_id = ctx.param("id") orelse {
         redirect(ctx, base_url);
         return;
@@ -775,12 +810,12 @@ fn versionPreviewRedirectFor(comptime CT: type, ctx: *Context) !void {
         redirect(ctx, base_url);
         return;
     };
-    const compare_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}/versions/{s}/compare", .{ entry_id, version_id }) catch base_url;
+    const compare_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}/versions/{s}/compare", .{ base_url, entry_id, version_id }) catch base_url;
     redirect(ctx, compare_url);
 }
 
-fn versionCompareFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
-    const base_url = "/admin/content/" ++ CT.type_id;
+fn versionCompareFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
         redirect(ctx, base_url);
         return;
@@ -791,7 +826,7 @@ fn versionCompareFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
         return;
     };
 
-    const entry_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
+    const entry_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry_id }) catch base_url;
 
     const version_id = ctx.param("vid") orelse {
         redirect(ctx, entry_url);
@@ -808,12 +843,12 @@ fn versionCompareFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
         return;
     };
     if (version.is_current) {
-        const flow_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}/versions/{s}/flow", .{ entry_id, version_id }) catch entry_url;
+        const flow_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}/versions/{s}/flow", .{ base_url, entry_id, version_id }) catch entry_url;
         redirect(ctx, flow_url);
         return;
     }
 
-    const back_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
+    const back_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry_id }) catch base_url;
 
     // Get entry title
     const entry_title = blk: {
@@ -847,17 +882,23 @@ fn versionCompareFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
 
     const time_str = cms.formatRelativeTime(ctx.allocator, version.created_at) catch "Unknown";
     const author_str = version.authorLabel();
-    const restore_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}/versions/{s}/restore", .{ entry_id, version_id }) catch "";
-
     // Render comparison
     var buf: std.ArrayList(u8) = .{};
     const w = buf.writer(ctx.allocator);
 
-    try w.writeAll("<form method=\"POST\" action=\"");
-    try w.writeAll(restore_url);
-    try w.writeAll("\" class=\"version-compare\">");
+    try w.writeAll("<form method=\"POST\" action=\"/admin/action\" class=\"version-compare\">");
     try w.writeAll("<input type=\"hidden\" name=\"_csrf\" value=\"");
     try w.writeAll(csrf_token);
+    try w.writeAll("\"/>");
+    try w.writeAll("<input type=\"hidden\" name=\"action\" value=\"content.restore\"/>");
+    try w.writeAll("<input type=\"hidden\" name=\"type\" value=\"");
+    try w.writeAll(def.type_id);
+    try w.writeAll("\"/>");
+    try w.writeAll("<input type=\"hidden\" name=\"entry_id\" value=\"");
+    try w.writeAll(entry_id);
+    try w.writeAll("\"/>");
+    try w.writeAll("<input type=\"hidden\" name=\"version_id\" value=\"");
+    try w.writeAll(version_id);
     try w.writeAll("\"/>");
     try w.writeAll("<input type=\"hidden\" name=\"_partial\" value=\"1\"/>");
 
@@ -1020,15 +1061,15 @@ fn versionCompareFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) 
         break :blk sb.toOwnedSlice(ctx.allocator) catch "";
     };
 
-    ctx.html(registry.renderEditPage(pg, ctx, entry_title, preview_content, .{
+    ctx.html(registry.renderEditPage(page, ctx, entry_title, preview_content, .{
         .back_url = back_url,
         .back_label = "Back",
         .sidebar = sidebar_html,
     }));
 }
 
-fn versionFlowFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !void {
-    const base_url = "/admin/content/" ++ CT.type_id;
+fn versionFlowFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
         redirect(ctx, base_url);
         return;
@@ -1039,7 +1080,7 @@ fn versionFlowFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !vo
         return;
     };
 
-    const entry_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
+    const entry_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry_id }) catch base_url;
 
     const version_id = ctx.param("vid") orelse {
         redirect(ctx, entry_url);
@@ -1054,8 +1095,8 @@ fn versionFlowFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !vo
         return;
     };
 
-    const back_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
-    const compare_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}/versions/{s}/compare", .{ entry_id, version_id }) catch back_url;
+    const back_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry_id }) catch base_url;
+    const compare_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}/versions/{s}/compare", .{ base_url, entry_id, version_id }) catch back_url;
 
     const entry_title = blk: {
         var t_stmt = try db.prepare("SELECT title FROM content_entries WHERE id = ?1");
@@ -1129,15 +1170,15 @@ fn versionFlowFor(comptime CT: type, comptime pg: admin.Page, ctx: *Context) !vo
         break :blk sb.toOwnedSlice(ctx.allocator) catch "";
     };
 
-    ctx.html(registry.renderEditPage(pg, ctx, entry_title, flow_content, .{
+    ctx.html(registry.renderEditPage(page, ctx, entry_title, flow_content, .{
         .back_url = back_url,
         .back_label = "Back",
         .sidebar = sidebar_html,
     }));
 }
 
-fn restoreFor(comptime CT: type, ctx: *Context) !void {
-    const base_url = "/admin/content/" ++ CT.type_id;
+pub fn restoreFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
         redirect(ctx, base_url);
         return;
@@ -1155,7 +1196,7 @@ fn restoreFor(comptime CT: type, ctx: *Context) !void {
 
     const author_id = auth_middleware.getUserId(ctx);
 
-    const edit_url = std.fmt.allocPrint(ctx.allocator, base_url ++ "/{s}", .{entry_id}) catch base_url;
+    const edit_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ base_url, entry_id }) catch base_url;
 
     // Check if partial restore
     const is_partial = ctx.formValue("_partial") != null;
@@ -1293,24 +1334,24 @@ fn htmlAttrEscape(allocator: Allocator, input: []const u8) []const u8 {
 
 /// Render fields HTML for a given position (main editor or sidebar).
 fn renderFieldsHtml(
-    comptime CT: type,
+    def: *const ContentTypeDef,
     allocator: Allocator,
-    data: *const CT.Data,
+    data: *const cms.query.FieldMap,
     csrf_token: []const u8,
     action_url: []const u8,
-    comptime position: field_mod.Position,
+    position: field_mod.Position,
     opts: FormOptions,
 ) []const u8 {
     var buf: std.ArrayListUnmanaged(u8) = .{};
     const w = buf.writer(allocator);
 
     if (position == .main) {
+        _ = action_url;
         w.print(
-            \\<form method="POST" action="{s}" id="entry-form" class="form"
+            \\<form method="POST" action="/admin/action" id="entry-form" class="form"
             \\ data-base-url="/admin/content/{s}"
-        , .{ action_url, CT.type_id }) catch return "";
+        , .{def.type_id}) catch return "";
 
-        // Data attributes for JS (autosave, publish, multi-user)
         if (opts.entry_id.len > 0) {
             w.print(
                 \\ data-entry-id="{s}"
@@ -1321,7 +1362,6 @@ fn renderFieldsHtml(
                 \\ data-entry-status="{s}"
             , .{opts.status}) catch {};
         }
-        // published-state: actual JSON for field-level change detection
         if (opts.published_data) |pd| {
             const escaped = htmlAttrEscape(allocator, pd);
             w.print(
@@ -1329,7 +1369,6 @@ fn renderFieldsHtml(
             , .{escaped}) catch {};
         }
 
-        // fields-in-releases and field-editors as form data attributes
         const fir_escaped = htmlAttrEscape(allocator, opts.fields_in_releases);
         const fe_escaped = htmlAttrEscape(allocator, opts.field_editors);
         w.print(
@@ -1348,14 +1387,16 @@ fn renderFieldsHtml(
 
         w.print(
             \\  <input type="hidden" name="_csrf" value="{s}" />
+            \\  <input type="hidden" name="action" value="content.update" />
+            \\  <input type="hidden" name="type" value="{s}" />
+            \\  <input type="hidden" name="entry_id" value="{s}" />
             \\  <input type="hidden" name="fields" id="publish-fields" value="" />
-        , .{csrf_token}) catch return "";
+        , .{ csrf_token, def.type_id, opts.entry_id }) catch return "";
     }
 
-    inline for (CT.schema) |fd| {
+    for (def.fields) |fd| {
         if (fd.position == position) {
-            const val = @field(data.*, fd.name);
-            const value = fieldToString(@TypeOf(val), allocator, val);
+            const value = fieldMapValueToString(allocator, data.*, fd.name);
             fd.render(w.any(), .{
                 .name = fd.name,
                 .display_name = fd.display_name,
@@ -1373,6 +1414,25 @@ fn renderFieldsHtml(
     return buf.toOwnedSlice(allocator) catch "";
 }
 
+/// Extract a string representation of a FieldMap value for form rendering.
+fn fieldMapValueToString(allocator: Allocator, map: cms.query.FieldMap, name: []const u8) ?[]const u8 {
+    const v = map.get(name) orelse return null;
+    return switch (v) {
+        .text => |s| s,
+        .int => |n| std.fmt.allocPrint(allocator, "{d}", .{n}) catch null,
+        .real => |n| std.fmt.allocPrint(allocator, "{d}", .{n}) catch null,
+        .bool_ => |b| if (b) "true" else "false",
+        .datetime => |t| std.fmt.allocPrint(allocator, "{d}", .{t}) catch null,
+        .json => |j| blk: {
+            var list: std.ArrayList(u8) = .{};
+            errdefer list.deinit(allocator);
+            list.writer(allocator).print("{f}", .{std.json.fmt(j, .{})}) catch break :blk null;
+            break :blk list.toOwnedSlice(allocator) catch null;
+        },
+        .null_ => null,
+    };
+}
+
 const SidebarOptions = struct {
     entry_id: []const u8 = "",
     history_html: []const u8 = "",
@@ -1382,9 +1442,9 @@ const SidebarOptions = struct {
 
 /// Render the sidebar HTML with all sections.
 fn renderSidebarHtml(
-    comptime CT: type,
+    def: *const ContentTypeDef,
     allocator: Allocator,
-    data: *const CT.Data,
+    data: *const cms.query.FieldMap,
     csrf_token: []const u8,
     delete_url: []const u8,
     status: []const u8,
@@ -1437,10 +1497,11 @@ fn renderSidebarHtml(
     ) catch {};
 
     // --- Side-positioned fields ---
-    comptime var has_side_fields = false;
-    inline for (CT.schema) |fd| {
+    var has_side_fields = false;
+    for (def.fields) |fd| {
         if (fd.position == .side) {
             has_side_fields = true;
+            break;
         }
     }
 
@@ -1450,10 +1511,9 @@ fn renderSidebarHtml(
             \\  <h3 class="edit-sidebar-title">Details</h3>
         ) catch {};
 
-        inline for (CT.schema) |fd| {
+        for (def.fields) |fd| {
             if (fd.position == .side) {
-                const val = @field(data.*, fd.name);
-                const value = fieldToString(@TypeOf(val), allocator, val);
+                const value = fieldMapValueToString(allocator, data.*, fd.name);
                 var field_buf: std.ArrayListUnmanaged(u8) = .{};
                 const fw = field_buf.writer(allocator);
                 fd.render(fw.any(), .{
@@ -1478,15 +1538,19 @@ fn renderSidebarHtml(
     }
 
     // --- Delete button ---
-    if (delete_url.len > 0) {
+    _ = delete_url;
+    if (opts.entry_id.len > 0) {
         w.print(
             \\<div class="edit-sidebar-section edit-sidebar-danger">
-            \\  <form method="POST" action="{s}" onsubmit="return confirm('Delete this {s} permanently?')">
+            \\  <form method="POST" action="/admin/action" onsubmit="return confirm('Delete this {s} permanently?')">
             \\    <input type="hidden" name="_csrf" value="{s}" />
+            \\    <input type="hidden" name="action" value="content.delete" />
+            \\    <input type="hidden" name="type" value="{s}" />
+            \\    <input type="hidden" name="entry_id" value="{s}" />
             \\    <button type="submit" class="btn btn-danger btn-sm btn-full">Delete</button>
             \\  </form>
             \\</div>
-        , .{ delete_url, CT.display_name, csrf_token }) catch {};
+        , .{ def.display_name, csrf_token, def.type_id, opts.entry_id }) catch {};
     }
 
     return buf.toOwnedSlice(allocator) catch "";
@@ -1496,294 +1560,248 @@ fn renderSidebarHtml(
 // Schema-Driven Form Parsing
 // =============================================================================
 
-fn parseFormData(comptime CT: type, ctx: *Context) CT.Data {
-    var data: CT.Data = undefined;
+/// Build a JSON string from form values, iterating the descriptor's fields.
+/// Handles scalar fields, group fields (dot-notation keys), and repeater
+/// fields (indexed-prefix keys). Array fields default to empty when no
+/// existing value is present.
+fn parseFormDataJson(
+    allocator: Allocator,
+    def: *const ContentTypeDef,
+    ctx: *Context,
+    existing: ?cms.query.FieldMap,
+) ![]u8 {
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
 
-    inline for (CT.schema) |fd| {
-        if (comptime std.mem.eql(u8, fd.field_type_id, "repeater")) {
-            // Repeater field: parse indexed form values (items.0.label, items.1.label, ...)
-            @field(data, fd.name) = parseRepeaterFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
+    try w.writeByte('{');
+    var first = true;
+    for (def.fields) |fd| {
+        if (!first) try w.writeByte(',');
+        first = false;
+        try w.writeByte('"');
+        try writeJsonEscaped(w, fd.name);
+        try w.writeAll("\":");
+
+        if (std.mem.eql(u8, fd.field_type_id, "repeater")) {
+            try writeRepeaterJson(w, allocator, fd.sub_fields, fd.name, ctx);
         } else if (fd.sub_fields.len > 0) {
-            // Group field: build nested struct from dot-notation form values
-            @field(data, fd.name) = parseGroupFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
-        } else if (fd.zig_type == []const []const u8) {
-            // Array fields (taxonomy, ref-many) can't be submitted via HTML forms.
-            // Default to empty for new entries.
-            @field(data, fd.name) = &.{};
+            try writeGroupJson(w, allocator, fd.sub_fields, fd.name, ctx);
+        } else if (fd.multi) {
+            if (existing) |em| {
+                try writeFieldMapValueJson(w, em.get(fd.name));
+            } else {
+                try w.writeAll("[]");
+            }
         } else {
             const raw = ctx.formValue(fd.name) orelse "";
-            @field(data, fd.name) = formToZig(fd.zig_type, raw);
+            try writeFieldJson(w, fd.field_type_id, raw);
         }
     }
+    try w.writeByte('}');
 
-    return data;
+    return buf.toOwnedSlice(allocator);
 }
 
-/// Build a Group's nested struct from dot-notation form values.
-/// Handles nested Groups and Repeaters recursively via comptime sub_fields.
-fn parseGroupFormData(
-    comptime T: type,
-    comptime sub_fields: []const field_mod.FieldDef,
-    comptime prefix: []const u8,
-    ctx: *Context,
-) T {
-    var result: T = undefined;
-    inline for (sub_fields) |sf| {
-        const key = prefix ++ "." ++ sf.name;
-        const FieldType = @TypeOf(@field(result, sf.name));
-        if (comptime std.mem.eql(u8, sf.field_type_id, "repeater")) {
-            // Nested repeater: parse indexed form values
-            @field(result, sf.name) = parseRepeaterFormData(sf.zig_type, sf.sub_fields, key, ctx);
-        } else if (sf.sub_fields.len > 0) {
-            // Nested group: recurse
-            @field(result, sf.name) = parseGroupFormData(sf.zig_type, sf.sub_fields, key, ctx);
-        } else if (FieldType == []const []const u8 or FieldType == ?[]const []const u8) {
-            // Array types can't be submitted via forms
-            @field(result, sf.name) = if (FieldType == ?[]const []const u8) null else &.{};
-        } else {
-            const raw = ctx.formValue(key) orelse "";
-            @field(result, sf.name) = formToZig(FieldType, raw);
-        }
-    }
-    return result;
-}
-
-/// Parse a Repeater's items from indexed form values (comptime prefix).
-/// Reads prefix._count for item count, then iterates prefix.0.field, prefix.1.field, ...
-fn parseRepeaterFormData(
-    comptime SliceT: type,
-    comptime sub_fields: []const field_mod.FieldDef,
-    comptime prefix: []const u8,
-    ctx: *Context,
-) SliceT {
-    const ElemT = @typeInfo(SliceT).pointer.child;
-    const alloc = ctx.allocator;
-
-    // Read item count from hidden _count field
-    const count_str = ctx.formValue(prefix ++ "._count") orelse "0";
-    const count = std.fmt.parseInt(usize, count_str, 10) catch 0;
-    if (count == 0) return &.{};
-
-    var items = alloc.alloc(ElemT, count) catch return &.{};
-    for (0..count) |idx| {
-        // Build runtime prefix for this item: "items.0"
-        const item_prefix = std.fmt.allocPrint(alloc, "{s}.{d}", .{ prefix, idx }) catch continue;
-        items[idx] = parseItemFormData(ElemT, sub_fields, alloc, item_prefix, ctx);
-    }
-    return items;
-}
-
-/// Parse a single Repeater item's sub-fields using a runtime prefix.
-/// Used for items within Repeater where the index is runtime.
-/// Also handles nested Groups and Repeaters within items.
-fn parseItemFormData(
-    comptime T: type,
-    comptime sub_fields: []const field_mod.FieldDef,
+fn writeGroupJson(
+    w: anytype,
     allocator: Allocator,
+    sub_fields: []const FieldDef,
     prefix: []const u8,
     ctx: *Context,
-) T {
-    var result: T = undefined;
-    inline for (sub_fields) |sf| {
-        const key = std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, sf.name }) catch sf.name;
-        const FieldType = @TypeOf(@field(result, sf.name));
+) anyerror!void {
+    try w.writeByte('{');
+    var first = true;
+    for (sub_fields) |sf| {
+        if (!first) try w.writeByte(',');
+        first = false;
+        const key = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, sf.name });
+        defer allocator.free(key);
 
-        if (comptime std.mem.eql(u8, sf.field_type_id, "repeater")) {
-            // Nested Repeater with runtime prefix
-            @field(result, sf.name) = parseRepeaterFormDataRuntime(
-                @typeInfo(sf.zig_type).pointer.child,
-                sf.sub_fields,
-                allocator,
-                key,
-                ctx,
-            );
+        try w.writeByte('"');
+        try writeJsonEscaped(w, sf.name);
+        try w.writeAll("\":");
+
+        if (std.mem.eql(u8, sf.field_type_id, "repeater")) {
+            try writeRepeaterJson(w, allocator, sf.sub_fields, key, ctx);
         } else if (sf.sub_fields.len > 0) {
-            // Nested Group with runtime prefix
-            @field(result, sf.name) = parseItemFormData(sf.zig_type, sf.sub_fields, allocator, key, ctx);
-        } else if (FieldType == []const []const u8 or FieldType == ?[]const []const u8) {
-            @field(result, sf.name) = if (FieldType == ?[]const []const u8) null else &.{};
+            try writeGroupJson(w, allocator, sf.sub_fields, key, ctx);
+        } else if (sf.multi) {
+            try w.writeAll("[]");
         } else {
             const raw = ctx.formValue(key) orelse "";
-            @field(result, sf.name) = formToZig(FieldType, raw);
+            try writeFieldJson(w, sf.field_type_id, raw);
         }
     }
-    return result;
+    try w.writeByte('}');
 }
 
-/// Parse a nested Repeater's items using a runtime prefix.
-/// Used when a Repeater is nested inside another Repeater (runtime parent index).
-fn parseRepeaterFormDataRuntime(
-    comptime ElemT: type,
-    comptime sub_fields: []const field_mod.FieldDef,
+fn writeRepeaterJson(
+    w: anytype,
     allocator: Allocator,
+    sub_fields: []const FieldDef,
     prefix: []const u8,
     ctx: *Context,
-) []const ElemT {
-    const count_key = std.fmt.allocPrint(allocator, "{s}._count", .{prefix}) catch return &.{};
+) anyerror!void {
+    const count_key = try std.fmt.allocPrint(allocator, "{s}._count", .{prefix});
+    defer allocator.free(count_key);
     const count_str = ctx.formValue(count_key) orelse "0";
     const count = std.fmt.parseInt(usize, count_str, 10) catch 0;
-    if (count == 0) return &.{};
 
-    var items = allocator.alloc(ElemT, count) catch return &.{};
-    for (0..count) |idx| {
-        const item_prefix = std.fmt.allocPrint(allocator, "{s}.{d}", .{ prefix, idx }) catch continue;
-        items[idx] = parseItemFormData(ElemT, sub_fields, allocator, item_prefix, ctx);
+    try w.writeByte('[');
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        if (i > 0) try w.writeByte(',');
+        const item_prefix = try std.fmt.allocPrint(allocator, "{s}.{d}", .{ prefix, i });
+        defer allocator.free(item_prefix);
+        try writeGroupJson(w, allocator, sub_fields, item_prefix, ctx);
     }
-    return items;
+    try w.writeByte(']');
 }
 
-/// Parse form data with field ownership validation.
-/// Returns existing value for fields owned by other users.
+/// Serialize a single form value to JSON, coercing by `field_type_id`.
+fn writeFieldJson(w: anytype, field_type_id: []const u8, raw: []const u8) !void {
+    if (std.mem.eql(u8, field_type_id, "boolean")) {
+        const is_truthy = std.mem.eql(u8, raw, "true") or std.mem.eql(u8, raw, "1") or std.mem.eql(u8, raw, "on");
+        try w.writeAll(if (is_truthy) "true" else "false");
+        return;
+    }
+    if (std.mem.eql(u8, field_type_id, "integer")) {
+        if (raw.len == 0) {
+            try w.writeAll("null");
+        } else if (std.fmt.parseInt(i64, raw, 10)) |_| {
+            try w.writeAll(raw);
+        } else |_| {
+            try w.writeAll("null");
+        }
+        return;
+    }
+    if (std.mem.eql(u8, field_type_id, "number") or std.mem.eql(u8, field_type_id, "real")) {
+        if (raw.len == 0) {
+            try w.writeAll("null");
+        } else if (std.fmt.parseFloat(f64, raw)) |_| {
+            try w.writeAll(raw);
+        } else |_| {
+            try w.writeAll("null");
+        }
+        return;
+    }
+    try w.writeByte('"');
+    try writeJsonEscaped(w, raw);
+    try w.writeByte('"');
+}
+
+fn writeFieldMapValueJson(w: anytype, val: ?cms.query.FieldValue) !void {
+    const v = val orelse {
+        try w.writeAll("null");
+        return;
+    };
+    switch (v) {
+        .text => |s| {
+            try w.writeByte('"');
+            try writeJsonEscaped(w, s);
+            try w.writeByte('"');
+        },
+        .int => |n| try w.print("{d}", .{n}),
+        .real => |n| try w.print("{d}", .{n}),
+        .bool_ => |b| try w.writeAll(if (b) "true" else "false"),
+        .datetime => |t| try w.print("{d}", .{t}),
+        .json => |j| try w.print("{f}", .{std.json.fmt(j, .{})}),
+        .null_ => try w.writeAll("null"),
+    }
+}
+
+/// Parse form data with field ownership validation. Builds a JSON string
+/// using new form values, falling back to the existing entry's value when
+/// a field is locked by another user. Tracks rejected and newly-acquired
+/// fields for collaboration UI.
 fn parseFormDataWithValidation(
-    comptime CT: type,
+    allocator: Allocator,
+    def: *const ContentTypeDef,
     ctx: *Context,
-    existing: *const CT.Data,
+    existing: *const cms.query.FieldMap,
     author_id: ?[]const u8,
     entry_id: []const u8,
     owners: ?std.StringHashMapUnmanaged(cms.FieldComparison),
     rejected: *std.ArrayListUnmanaged(RejectedField),
     newly_acquired: *std.ArrayListUnmanaged([]const u8),
-) CT.Data {
-    var data: CT.Data = undefined;
+) ![]u8 {
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
 
-    inline for (CT.schema) |fd| {
-        if (comptime std.mem.eql(u8, fd.field_type_id, "repeater")) {
-            // Repeater field: ownership tracked at the repeater level.
-            const rejected_repeater = blk: {
-                if (owners) |own| {
-                    if (own.get(fd.name)) |field_info| {
-                        if (author_id) |aid| {
-                            if (field_info.changed_by_id) |owner_id| {
-                                if (!std.mem.eql(u8, owner_id, aid)) {
-                                    rejected.append(ctx.allocator, .{
-                                        .field = fd.name,
-                                        .owner_name = field_info.changed_by orelse "another user",
-                                    }) catch {};
-                                    break :blk true;
-                                }
-                            }
-                        }
-                    }
-                }
-                break :blk false;
-            };
-            if (rejected_repeater) {
-                @field(data, fd.name) = @field(existing.*, fd.name);
+    try w.writeByte('{');
+    var first = true;
+    for (def.fields) |fd| {
+        if (!first) try w.writeByte(',');
+        first = false;
+        try w.writeByte('"');
+        try writeJsonEscaped(w, fd.name);
+        try w.writeAll("\":");
+
+        // Owner check
+        const field_rejected = checkFieldOwnership(fd.name, author_id, owners, rejected, allocator);
+
+        if (std.mem.eql(u8, fd.field_type_id, "repeater")) {
+            if (field_rejected) {
+                try writeFieldMapValueJson(w, existing.get(fd.name));
             } else {
-                @field(data, fd.name) = parseRepeaterFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
-                // Track as newly acquired if value changed and field is unowned
-                if (owners == null or !owners.?.contains(fd.name)) {
-                    const existing_str = fieldToString(@TypeOf(@field(existing.*, fd.name)), ctx.allocator, @field(existing.*, fd.name)) orelse "";
-                    const new_str = fieldToString(@TypeOf(@field(data, fd.name)), ctx.allocator, @field(data, fd.name)) orelse "";
-                    if (!std.mem.eql(u8, existing_str, new_str)) {
-                        newly_acquired.append(ctx.allocator, fd.name) catch {};
-                    }
-                }
+                try writeRepeaterJson(w, allocator, fd.sub_fields, fd.name, ctx);
+                trackIfChanged(fd.name, owners, newly_acquired, allocator);
             }
         } else if (fd.sub_fields.len > 0) {
-            // Group field: ownership tracked at the group level.
-            const rejected_group = blk: {
-                if (owners) |own| {
-                    if (own.get(fd.name)) |field_info| {
-                        if (author_id) |aid| {
-                            if (field_info.changed_by_id) |owner_id| {
-                                if (!std.mem.eql(u8, owner_id, aid)) {
-                                    rejected.append(ctx.allocator, .{
-                                        .field = fd.name,
-                                        .owner_name = field_info.changed_by orelse "another user",
-                                    }) catch {};
-                                    break :blk true;
-                                }
-                            }
-                        }
-                    }
-                }
-                break :blk false;
-            };
-            if (rejected_group) {
-                @field(data, fd.name) = @field(existing.*, fd.name);
+            if (field_rejected) {
+                try writeFieldMapValueJson(w, existing.get(fd.name));
             } else {
-                @field(data, fd.name) = parseGroupFormData(fd.zig_type, fd.sub_fields, fd.name, ctx);
-                if (owners == null or !owners.?.contains(fd.name)) {
-                    const existing_str = fieldToString(@TypeOf(@field(existing.*, fd.name)), ctx.allocator, @field(existing.*, fd.name)) orelse "";
-                    const new_str = fieldToString(@TypeOf(@field(data, fd.name)), ctx.allocator, @field(data, fd.name)) orelse "";
-                    if (!std.mem.eql(u8, existing_str, new_str)) {
-                        newly_acquired.append(ctx.allocator, fd.name) catch {};
-                    }
-                }
+                try writeGroupJson(w, allocator, fd.sub_fields, fd.name, ctx);
+                trackIfChanged(fd.name, owners, newly_acquired, allocator);
             }
-        } else if (fd.zig_type == []const []const u8) {
-            // Array fields (taxonomy, ref-many) can't round-trip through HTML forms.
-            // Preserve existing value.
-            @field(data, fd.name) = @field(existing.*, fd.name);
+        } else if (fd.multi) {
+            try writeFieldMapValueJson(w, existing.get(fd.name));
         } else {
-            const existing_val = @field(existing.*, fd.name);
-            const existing_str = fieldToString(@TypeOf(existing_val), ctx.allocator, existing_val) orelse "";
+            const existing_value = existing.get(fd.name);
+            const existing_str: []const u8 = if (existing_value) |v| switch (v) {
+                .text => |s| s,
+                else => "",
+            } else "";
             const validated = validateField(ctx, existing_str, fd.name, fd.name, author_id, entry_id, owners, rejected, newly_acquired);
-            @field(data, fd.name) = formToZig(fd.zig_type, validated);
+            try writeFieldJson(w, fd.field_type_id, validated);
         }
     }
+    try w.writeByte('}');
 
-    return data;
+    return buf.toOwnedSlice(allocator);
 }
 
-fn formToZig(comptime T: type, raw: []const u8) T {
-    if (T == []const u8) {
-        return raw;
-    } else if (T == ?[]const u8) {
-        return if (raw.len == 0) null else raw;
-    } else if (T == bool) {
-        return std.mem.eql(u8, raw, "true") or std.mem.eql(u8, raw, "1") or std.mem.eql(u8, raw, "on");
-    } else if (T == ?i64) {
-        return if (raw.len == 0) null else std.fmt.parseInt(i64, raw, 10) catch null;
-    } else if (T == ?f64) {
-        return if (raw.len == 0) null else std.fmt.parseFloat(f64, raw) catch null;
-    } else if (T == []const []const u8) {
-        // Array types can't be submitted via HTML forms — return empty
-        return &.{};
-    } else if (@typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice) {
-        // Repeater (slice of structs) — return empty slice
-        return &.{};
-    } else {
-        return if (@typeInfo(T) == .optional) null else undefined;
-    }
+fn checkFieldOwnership(
+    name: []const u8,
+    author_id: ?[]const u8,
+    owners: ?std.StringHashMapUnmanaged(cms.FieldComparison),
+    rejected: *std.ArrayListUnmanaged(RejectedField),
+    allocator: Allocator,
+) bool {
+    if (owners == null) return false;
+    const own = owners.?;
+    const field_info = own.get(name) orelse return false;
+    const owner_id = field_info.changed_by_id orelse return false;
+    const aid = author_id orelse return false;
+    if (std.mem.eql(u8, owner_id, aid)) return false;
+    rejected.append(allocator, .{
+        .field = name,
+        .owner_name = field_info.changed_by orelse "another user",
+    }) catch {};
+    return true;
 }
 
-fn fieldToString(comptime T: type, allocator: Allocator, val: T) ?[]const u8 {
-    if (T == []const u8) {
-        return if (val.len > 0) val else null;
-    } else if (T == ?[]const u8) {
-        return val;
-    } else if (T == bool) {
-        return if (val) "true" else "false";
-    } else if (T == ?i64) {
-        return if (val) |v|
-            std.fmt.allocPrint(allocator, "{d}", .{v}) catch null
-        else
-            null;
-    } else if (T == ?f64) {
-        return if (val) |v|
-            std.fmt.allocPrint(allocator, "{d}", .{v}) catch null
-        else
-            null;
-    } else if (@typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice and T != []const u8 and T != []const []const u8) {
-        // Repeater: serialize slice of structs to JSON array
-        var buf: std.ArrayListUnmanaged(u8) = .{};
-        buf.writer(allocator).print("{f}", .{std.json.fmt(val, .{})}) catch return null;
-        return buf.toOwnedSlice(allocator) catch null;
-    } else if (@typeInfo(T) == .@"struct") {
-        // Group: serialize struct to JSON
-        var buf: std.ArrayListUnmanaged(u8) = .{};
-        buf.writer(allocator).print("{f}", .{std.json.fmt(val, .{})}) catch return null;
-        return buf.toOwnedSlice(allocator) catch null;
-    } else if (@typeInfo(T) == .optional) {
-        // Generic optional: unwrap and recurse (handles ?Struct, ?bool, etc.)
-        if (val) |v| {
-            return fieldToString(@typeInfo(T).optional.child, allocator, v);
-        }
-        return null;
-    } else {
-        return null;
+fn trackIfChanged(
+    name: []const u8,
+    owners: ?std.StringHashMapUnmanaged(cms.FieldComparison),
+    newly_acquired: *std.ArrayListUnmanaged([]const u8),
+    allocator: Allocator,
+) void {
+    const is_unowned = owners == null or !owners.?.contains(name);
+    if (is_unowned) {
+        newly_acquired.append(allocator, name) catch {};
     }
 }
 
@@ -1821,22 +1839,66 @@ fn injectFormAttr(allocator: Allocator, html: []const u8, form_id: []const u8) [
     return buf.toOwnedSlice(allocator) catch html;
 }
 
-fn defaultData(comptime CT: type) CT.Data {
-    var data: CT.Data = undefined;
-    inline for (CT.schema) |fd| {
-        @field(data, fd.name) = formToZig(fd.zig_type, "");
+fn defaultDataJson(allocator: Allocator, def: *const ContentTypeDef) ![]u8 {
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeByte('{');
+    var first = true;
+    for (def.fields) |fd| {
+        if (!first) try w.writeByte(',');
+        first = false;
+        try w.writeByte('"');
+        try writeJsonEscaped(w, fd.name);
+        try w.writeAll("\":");
+
+        if (std.mem.eql(u8, fd.field_type_id, "repeater") or fd.multi) {
+            try w.writeAll("[]");
+        } else if (fd.sub_fields.len > 0) {
+            try w.writeAll("{}");
+        } else if (std.mem.eql(u8, fd.field_type_id, "boolean")) {
+            try w.writeAll("false");
+        } else if (std.mem.eql(u8, fd.field_type_id, "integer") or
+            std.mem.eql(u8, fd.field_type_id, "number") or
+            std.mem.eql(u8, fd.field_type_id, "real"))
+        {
+            try w.writeAll("null");
+        } else {
+            try w.writeAll("\"\"");
+        }
     }
-    return data;
+    try w.writeByte('}');
+
+    return buf.toOwnedSlice(allocator);
 }
 
 fn formatDate(timestamp: i64, allocator: Allocator) ![]const u8 {
     return std.fmt.allocPrint(allocator, "{d}", .{timestamp});
 }
 
-fn notFound(ctx: *Context) void {
+/// Render the same styled 404 as `error.notFoundHandler` — inlined here so
+/// the plugin doesn't need to reach back across module boundaries to import
+/// `src/error.zig`. Wraps the content in the base layout for full requests
+/// and returns just the content for X-Partial requests, matching the
+/// behavior in `error.zig`.
+fn notFound(ctx: *Context) anyerror!void {
     ctx.response.setStatus("404 Not Found");
-    ctx.response.setContentType("text/html");
-    ctx.response.setBody("Content type not found");
+    const content = tpl.render(views.@"error".error_404.Error404, .{.{
+        .status_code = "404",
+        .title = "Page Not Found",
+        .message = "The page you're looking for doesn't exist or has been moved.",
+    }});
+    if (ctx.isPartial()) {
+        ctx.html(content);
+    } else {
+        ctx.html(tpl.render(views.base.Base, .{.{
+            .title = "Error - Publr",
+            .content = content,
+            .css = &[_][]const u8{},
+            .js = &[_][]const u8{},
+        }}));
+    }
 }
 
 // =============================================================================

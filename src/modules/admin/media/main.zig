@@ -41,24 +41,27 @@ fn setup(app: *admin.PageApp) void {
     app.get("/:id", crud.handleEdit);
     app.get("/picker/list", api.handlePickerList);
     app.get("/picker/thumb/:id", api.handlePickerThumb);
-    app.post(crud.handleUpload);
+
+    // POST verbs migrated to the action dispatcher (see content_actions.zig
+    // pattern). `media_id` / `folder_id` etc. live as form fields now.
+    app.action("media.upload", crud.handleUpload);
     if (!is_wasm) {
-        app.postAt("/sync", api.handleSync);
-        app.postAt("/scan", api.handleScan);
+        app.action("media.sync", api.handleSync);
+        app.action("media.scan", api.handleScan);
     }
-    app.postAt("/folders", folders.handleCreateFolder);
-    app.postAt("/folders/delete", folders.handleDeleteFolder);
-    app.postAt("/folders/rename", folders.handleRenameFolder);
-    app.postAt("/folders/move", folders.handleMoveFolder);
-    app.postAt("/tags", tags.handleCreateTag);
-    app.postAt("/tags/delete", tags.handleDeleteTag);
-    app.postAt("/bulk/delete", bulk.handleBulkDelete);
-    app.postAt("/bulk/add-tag", bulk.handleBulkAddTag);
-    app.postAt("/bulk/remove-tag", bulk.handleBulkRemoveTag);
-    app.postAt("/bulk/move-folder", bulk.handleBulkMoveFolder);
-    app.postAt("/:id", crud.handleUpdate);
-    app.postAt("/:id/delete", crud.handleDelete);
-    app.postAt("/:id/toggle-visibility", crud.handleToggleVisibility);
+    app.action("media.folder_create", folders.handleCreateFolder);
+    app.action("media.folder_delete", folders.handleDeleteFolder);
+    app.action("media.folder_rename", folders.handleRenameFolder);
+    app.action("media.folder_move", folders.handleMoveFolder);
+    app.action("media.tag_create", tags.handleCreateTag);
+    app.action("media.tag_delete", tags.handleDeleteTag);
+    app.action("media.bulk_delete", bulk.handleBulkDelete);
+    app.action("media.bulk_add_tag", bulk.handleBulkAddTag);
+    app.action("media.bulk_remove_tag", bulk.handleBulkRemoveTag);
+    app.action("media.bulk_move_folder", bulk.handleBulkMoveFolder);
+    app.action("media.update", crud.handleUpdate);
+    app.action("media.delete", crud.handleDelete);
+    app.action("media.toggle_visibility", crud.handleToggleVisibility);
 
     // Wire up focal point DB fallback for image cropping
     media_handler.setFocalPointLookup(lookupFocalPoint);

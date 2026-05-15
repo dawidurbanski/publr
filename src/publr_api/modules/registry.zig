@@ -2,13 +2,17 @@
 //!
 //! Provides page rendering (bound API) and page lookups (static).
 //!
+//! Views are responsible for their own header chrome (use the PageHeader
+//! component). The framework provides the surrounding shell — sidebar, topbar,
+//! and an optional sticky bottom bar.
+//!
 //! Bound API example:
 //! ```zig
 //! const publr = @import("publr_api");
 //!
 //! fn handle(ctx: *publr.Context) !void {
-//!     const content = publr.template.renderStatic(views.admin.my_page.MyPage);
-//!     ctx.html(publr.registry(ctx).renderPage(page, content));
+//!     const content = publr.template.render(views.admin.my_page.MyPage, .{...});
+//!     ctx.html(publr.registry(ctx).render(page, content));
 //! }
 //! ```
 
@@ -28,19 +32,15 @@ pub const RegistryApi = struct {
     // Page Rendering (bound — needs request context for CSRF, auth, nav)
     // =========================================================================
 
-    /// Render an admin page with automatic nav, CSRF, and layout.
-    pub fn renderPage(self: @This(), comptime pg: admin.Page, content: []const u8) []const u8 {
-        return registry.renderPage(pg, self.ctx, content);
+    /// Render content inside the admin shell. The view owns its own header
+    /// (use the PageHeader component).
+    pub fn render(self: @This(), comptime pg: admin.Page, content: []const u8) []const u8 {
+        return admin.renderWithLayout(pg.id, pg.title, self.ctx, content, "");
     }
 
-    /// Render with subtitle.
-    pub fn renderPageWith(self: @This(), comptime pg: admin.Page, content: []const u8, subtitle: []const u8) []const u8 {
-        return registry.renderPageWith(pg, self.ctx, content, subtitle);
-    }
-
-    /// Render with subtitle, bottom bar, and page title actions.
-    pub fn renderPageFull(self: @This(), comptime pg: admin.Page, content: []const u8, subtitle: []const u8, bottom_bar: []const u8, page_title_actions: []const u8) []const u8 {
-        return registry.renderPageFull(pg, self.ctx, content, subtitle, bottom_bar, page_title_actions);
+    /// Render content with a sticky bottom bar (e.g. multi-select toolbars).
+    pub fn renderWithBottomBar(self: @This(), comptime pg: admin.Page, content: []const u8, bottom_bar: []const u8) []const u8 {
+        return admin.renderWithLayout(pg.id, pg.title, self.ctx, content, bottom_bar);
     }
 
     /// Render an edit page layout with back navigation and optional sidebar.

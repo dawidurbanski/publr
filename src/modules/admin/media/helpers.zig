@@ -396,8 +396,9 @@ pub fn urlEncode(allocator: std.mem.Allocator, buf: *std.ArrayList(u8), input: [
     }
 }
 
-/// Find a tag by name or create it
-pub fn findOrCreateTag(allocator: std.mem.Allocator, db: *db_mod.Db, name: []const u8) ![]const u8 {
+/// Find a tag by name or create it. `author_id` records who created the
+/// tag when one is created; null falls back to system-authored.
+pub fn findOrCreateTag(allocator: std.mem.Allocator, db: *db_mod.Db, name: []const u8, author_id: ?[]const u8) ![]const u8 {
     // Check if tag exists
     var stmt = try db.prepare(
         "SELECT id FROM terms WHERE taxonomy_id = ?1 AND name = ?2 LIMIT 1",
@@ -411,7 +412,7 @@ pub fn findOrCreateTag(allocator: std.mem.Allocator, db: *db_mod.Db, name: []con
     }
 
     // Create new tag
-    const term = try media.createTerm(allocator, db, media.tax_media_tags, name, null);
+    const term = try media.createTerm(allocator, db, media.tax_media_tags, name, null, author_id);
     return term.id;
 }
 

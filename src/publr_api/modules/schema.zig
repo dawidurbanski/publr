@@ -1,24 +1,23 @@
 //! Schema System Plugin API
 //!
-//! Re-exports field builders, schema registry, and content type metadata.
-//! All functions are comptime — no bound API needed.
+//! Re-exports field builders + the runtime content-type registry.
 //!
 //! Example:
 //! ```zig
 //! const publr = @import("publr_api");
 //!
-//! // Inspect registered content types
-//! inline for (publr.schema.content_types, 0..) |CT, i| {
-//!     // CT.type_id, CT.display_name, CT.schema, etc.
+//! // Iterate every registered content type at runtime.
+//! for (publr.schema.all()) |def| {
+//!     // def.type_id, def.display_name, def.fields, …
 //! }
 //!
-//! // Query registry at runtime
-//! const info = publr.schema.getTypeInfo("post");
+//! // Look up a content type by id.
+//! const def = publr.schema.findById("post") orelse return;
 //! ```
 
 const field = @import("field");
 const schema_registry = @import("schema_registry");
-const schemas = @import("schemas");
+const content_type = @import("content_type");
 
 // =========================================================================
 // Field Builders (comptime — for defining content type schemas)
@@ -55,33 +54,30 @@ pub const TranslatableMode = field.TranslatableMode;
 // Registry Types
 // =========================================================================
 
-pub const ContentTypeEntry = schema_registry.ContentTypeEntry;
-pub const FieldInfo = schema_registry.FieldInfo;
-pub const TypeInfo = schema_registry.TypeInfo;
+/// Pure-data content type descriptor for the runtime registry.
+pub const ContentTypeDef = content_type.ContentTypeDef;
+
+/// Build a ContentTypeDef from a struct literal.
+pub const contentType = content_type.contentType;
+
+/// Compile-in content type slice — populated by build-time auto-discovery.
+pub const compiled_in_types = schema_registry.compiled_in_types;
 
 // =========================================================================
-// Registry Functions (NOT: getIds, getCoreIds, getBySource, getAllTaxonomyIds)
+// Registry Functions
 // =========================================================================
 
-/// Find a content type by ID at comptime.
+/// Runtime registry lookup — returns the pure-data `ContentTypeDef`.
 pub const findById = schema_registry.findById;
-
-/// Find a content type by ID at runtime.
-pub const findByIdRuntime = schema_registry.findByIdRuntime;
-
-/// Get type info (fields, metadata) for a content type ID.
-pub const getTypeInfo = schema_registry.getTypeInfo;
+pub const findByHandle = schema_registry.findByHandle;
 
 /// Check if a content type ID is reserved (core types).
 pub const isReserved = schema_registry.isReserved;
 
 // =========================================================================
-// Schema Data (comptime tuples from schemas module)
+// Schema Data
 // =========================================================================
 
-/// All registered content type definitions (comptime tuple).
-/// Use with `inline for` to iterate at comptime.
-pub const content_types = schemas.content_types;
-
-/// All registered type info (runtime-queryable slice).
-pub const registered_types = schema_registry.registered_types;
+/// Iterate every registered content type at runtime. Yields compile-in,
+/// WASM-loaded, and DB-defined descriptors uniformly.
+pub const all = schema_registry.all;

@@ -2,28 +2,21 @@ const std = @import("std");
 const admin_api = @import("admin_api");
 const Router = @import("router").Router;
 const modules = @import("modules");
+const plugin_registry = @import("plugin_registry");
 
-const plugin_dashboard = @import("plugin_dashboard");
-const plugin_content = @import("plugin_content");
-const plugin_media = @import("plugin_media");
-const plugin_users = @import("plugin_users");
-const plugin_settings = @import("plugin_settings");
-const plugin_components = @import("plugin_components");
-const plugin_design_system = @import("plugin_design_system");
-const plugin_releases = @import("plugin_releases");
-
-/// All registered admin pages.
-const all_pages = [_]admin_api.Page{
-    plugin_dashboard.page,
-    plugin_dashboard.page_v2,
-} ++ plugin_content.content_pages ++ [_]admin_api.Page{
-    plugin_releases.page,
-    plugin_media.page,
-    plugin_users.page_profile,
-    plugin_users.page,
-    plugin_settings.page,
-    plugin_components.page,
-    plugin_design_system.page,
+/// All registered admin pages, aggregated from auto-discovered plugins.
+/// Each plugin may export `pub const page` (single) or `pub const pages` (array).
+const all_pages = blk: {
+    var result: []const admin_api.Page = &.{};
+    for (plugin_registry.plugins) |p| {
+        if (@hasDecl(p.mod, "page")) {
+            result = result ++ &[_]admin_api.Page{p.mod.page};
+        }
+        if (@hasDecl(p.mod, "pages")) {
+            result = result ++ p.mod.pages;
+        }
+    }
+    break :blk result;
 };
 
 pub const module: modules.Module = .{
@@ -43,7 +36,7 @@ fn registerPluginRoutes(router: *Router, allocator: std.mem.Allocator) void {
     };
 
     inline for (all_pages) |page| {
-        const base_path = admin_api.resolvePagePath(page, &all_pages);
+        const base_path = admin_api.resolvePagePath(page, all_pages);
         var app = admin_api.PageApp{
             .base_path = base_path,
             .page = page,

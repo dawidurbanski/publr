@@ -11,10 +11,9 @@ const Auth = @import("auth").Auth;
 const csrf = @import("csrf");
 const auth_middleware = @import("auth_middleware");
 const views = @import("views");
-const registry = @import("registry");
 
 /// Users page - only used as parent for profile, hidden from nav
-pub const page = admin.registerPage(.{
+const page = admin.registerPage(.{
     .id = "users",
     .title = "Users",
     .path = "/users",
@@ -24,7 +23,7 @@ pub const page = admin.registerPage(.{
 });
 
 /// User profile page
-pub const page_profile = admin.registerPage(.{
+const page_profile = admin.registerPage(.{
     .id = "users.profile",
     .title = "Profile",
     .path = "/profile",
@@ -33,13 +32,15 @@ pub const page_profile = admin.registerPage(.{
     .setup = setupProfile,
 });
 
+pub const pages = [_]admin.Page{ page, page_profile };
+
 fn setup(_: *admin.PageApp) void {
     // No routes on the parent - user management is in Settings now
 }
 
 fn setupProfile(app: *admin.PageApp) void {
     app.render(handleProfile);
-    app.post(handleProfileUpdate);
+    app.action("users.profile_update", handleProfileUpdate);
 }
 
 // =============================================================================
@@ -80,7 +81,7 @@ fn handleProfile(ctx: *Context) !void {
         .csrf_token = csrf_token,
     }});
 
-    ctx.html(registry.renderPage(page_profile, ctx, content));
+    ctx.html(admin.renderWithLayout(page_profile.id, page_profile.title, ctx, content, ""));
 }
 
 fn handleProfileUpdate(ctx: *Context) !void {

@@ -10,7 +10,6 @@ const tpl = @import("tpl");
 const csrf = @import("csrf");
 const cms = @import("cms");
 const views = @import("views");
-const registry = @import("registry");
 const auth_middleware = @import("auth_middleware");
 
 /// Releases list page (shows in content sidebar)
@@ -27,13 +26,14 @@ pub const page = admin.registerPage(.{
 fn setup(app: *admin.PageApp) void {
     app.render(handleList);
     app.get("/new", handleNew);
-    app.post(handleCreate);
     app.get("/:id", handleDetail);
-    app.postAt("/:id/publish", handlePublish);
-    app.postAt("/:id/revert", handleRevert);
-    app.postAt("/:id/re-release", handleReRelease);
-    app.postAt("/:id/archive", handleArchive);
-    app.postAt("/:id/remove/:eid", handleRemoveItem);
+
+    app.action("releases.create", handleCreate);
+    app.action("releases.publish", handlePublish);
+    app.action("releases.revert", handleRevert);
+    app.action("releases.re_release", handleReRelease);
+    app.action("releases.archive", handleArchive);
+    app.action("releases.remove_item", handleRemoveItem);
 }
 
 // =============================================================================
@@ -86,8 +86,7 @@ fn handleList(ctx: *Context) !void {
         .csrf_token = csrf_token,
     }});
 
-    const create_btn = "<a href=\"/admin/releases/new\" class=\"btn btn-primary btn-sm\">New Release</a>";
-    ctx.html(registry.renderPageFull(page, ctx, content, "", "", create_btn));
+    ctx.html(admin.renderWithLayout(page.id, page.title, ctx, content, ""));
 }
 
 fn handleNew(ctx: *Context) !void {
@@ -96,26 +95,11 @@ fn handleNew(ctx: *Context) !void {
         return;
     };
 
-    const csrf_token = csrf.ensureToken(ctx);
+    const content = tpl.render(views.admin.releases.new.New, .{views.admin.releases.new.Props{
+        .csrf_token = csrf.ensureToken(ctx),
+    }});
 
-    const content = std.fmt.allocPrint(ctx.allocator,
-        \\<form method="POST" action="/admin/releases" class="form" style="max-width: 480px">
-        \\  <input type="hidden" name="_csrf" value="{s}" />
-        \\  <div class="form-group">
-        \\    <label for="name">Release Name</label>
-        \\    <input type="text" id="name" name="name" class="form-control" required="" placeholder="e.g. Sprint 42, Holiday Update" />
-        \\  </div>
-        \\  <div class="form-group">
-        \\    <button type="submit" class="btn btn-primary">Create Release</button>
-        \\    <a href="/admin/releases" class="btn">Cancel</a>
-        \\  </div>
-        \\</form>
-    , .{csrf_token}) catch {
-        redirect(ctx, "/admin/releases");
-        return;
-    };
-
-    ctx.html(registry.renderPageWith(page, ctx, content, "New Release"));
+    ctx.html(admin.renderWithLayout(page.id, page.title, ctx, content, ""));
 }
 
 fn handleCreate(ctx: *Context) !void {
@@ -161,7 +145,7 @@ fn handlePublish(ctx: *Context) !void {
         return;
     };
 
-    const release_id = ctx.param("id") orelse {
+    const release_id = ctx.formValue("release_id") orelse {
         redirect(ctx, "/admin/releases");
         return;
     };
@@ -223,7 +207,6 @@ fn renderDetailPage(ctx: *Context, db: anytype, release_id: []const u8, conflict
             .entry_title = item.entry_title,
             .entry_status = item.entry_status,
             .edit_url = std.fmt.allocPrint(ctx.allocator, "/admin/content/{s}/{s}", .{ item.content_type_id, item.entry_id }) catch "#",
-            .remove_url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}/remove/{s}", .{ release_id, item.entry_id }) catch "#",
         };
     }
 
@@ -253,10 +236,7 @@ fn renderDetailPage(ctx: *Context, db: anytype, release_id: []const u8, conflict
         .date = cms.formatRelativeTime(ctx.allocator, detail.created_at) catch "Unknown",
         .items = view_items,
         .csrf_token = csrf_token,
-        .publish_url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}/publish", .{release_id}) catch "#",
-        .revert_url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}/revert", .{release_id}) catch "#",
-        .re_release_url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}/re-release", .{release_id}) catch "#",
-        .archive_url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}/archive", .{release_id}) catch "#",
+        .release_id = release_id,
         .is_pending = is_pending,
         .is_released = is_released,
         .is_reverted = is_reverted,
@@ -265,7 +245,7 @@ fn renderDetailPage(ctx: *Context, db: anytype, release_id: []const u8, conflict
         .conflicts = conflict_views,
     }});
 
-    ctx.html(registry.renderPageWith(page, ctx, content, detail.name));
+    ctx.html(admin.renderWithLayout(page.id, page.title, ctx, content, ""));
 }
 
 fn handleRevert(ctx: *Context) !void {
@@ -274,7 +254,7 @@ fn handleRevert(ctx: *Context) !void {
         return;
     };
 
-    const release_id = ctx.param("id") orelse {
+    const release_id = ctx.formValue("release_id") orelse {
         redirect(ctx, "/admin/releases");
         return;
     };
@@ -295,7 +275,7 @@ fn handleReRelease(ctx: *Context) !void {
         return;
     };
 
-    const release_id = ctx.param("id") orelse {
+    const release_id = ctx.formValue("release_id") orelse {
         redirect(ctx, "/admin/releases");
         return;
     };
@@ -316,7 +296,7 @@ fn handleArchive(ctx: *Context) !void {
         return;
     };
 
-    const release_id = ctx.param("id") orelse {
+    const release_id = ctx.formValue("release_id") orelse {
         redirect(ctx, "/admin/releases");
         return;
     };
@@ -334,12 +314,12 @@ fn handleRemoveItem(ctx: *Context) !void {
         return;
     };
 
-    const release_id = ctx.param("id") orelse {
+    const release_id = ctx.formValue("release_id") orelse {
         redirect(ctx, "/admin/releases");
         return;
     };
 
-    const entry_id = ctx.param("eid") orelse {
+    const entry_id = ctx.formValue("entry_id") orelse {
         const url = std.fmt.allocPrint(ctx.allocator, "/admin/releases/{s}", .{release_id}) catch "/admin/releases";
         redirect(ctx, url);
         return;

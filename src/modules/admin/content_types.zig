@@ -1,12 +1,11 @@
-//! Content Types plugin — inspect compiled content model metadata.
+//! Content Types plugin — inspect registered content types from the
+//! runtime registry. Reads compile-in + WASM + DB-defined descriptors
+//! through the same `schema_registry.all()` accessor.
 
 const std = @import("std");
 const admin = @import("admin_api");
-const Context = @import("middleware").Context;
-const tpl = @import("tpl");
 const views = @import("views");
-const registry = @import("registry");
-const schemas = @import("schemas");
+const schema_registry = @import("schema_registry");
 
 pub const page = admin.registerPage(.{
     .id = "content_types",
@@ -15,12 +14,9 @@ pub const page = admin.registerPage(.{
     .icon = .package,
     .position = 22,
     .section = "content_types",
-    .setup = setup,
+    .view = views.admin.content_types.ContentTypes,
+    .loader = load,
 });
-
-fn setup(app: *admin.PageApp) void {
-    app.render(handleList);
-}
 
 fn joinLocales(allocator: std.mem.Allocator, locales: []const []const u8) ![]const u8 {
     if (locales.len == 0) return allocator.dupe(u8, "en (default)");
@@ -37,50 +33,41 @@ fn joinLocales(allocator: std.mem.Allocator, locales: []const []const u8) ![]con
     return buf.toOwnedSlice(allocator);
 }
 
-fn handleList(ctx: *Context) !void {
-    const Row = struct {
-        id: []const u8,
-        name: []const u8,
-        name_plural: []const u8,
-        icon: []const u8,
-        localized: []const u8,
-        locales: []const u8,
-        workflow: []const u8,
-        internal: bool,
-        taxonomy: bool,
-        fields_count: []const u8,
-        synced_count: []const u8,
-        fallback_count: []const u8,
-        permissions_count: []const u8,
-    };
+fn countByTranslatableMode(fields: []const @import("field").FieldDef, mode: @import("field").TranslatableMode) usize {
+    var n: usize = 0;
+    for (fields) |f| {
+        if (f.translatable_mode == mode) n += 1;
+    }
+    return n;
+}
 
-    var rows = ctx.allocator.alloc(Row, schemas.content_types.len) catch {
-        ctx.html(registry.renderPage(page, ctx, "Failed to allocate content type rows"));
-        return;
-    };
+fn load(ctx: *admin.Context) !views.admin.content_types.Props {
+    const types = schema_registry.all();
+    const rows = try ctx.allocator.alloc(views.admin.content_types.TypeRow, types.len);
 
-    inline for (schemas.content_types, 0..) |CT, i| {
+    for (types, 0..) |def, i| {
+        const synced = countByTranslatableMode(def.fields, .synced);
+        const fallback = countByTranslatableMode(def.fields, .with_fallback);
         rows[i] = .{
-            .id = CT.type_id,
-            .name = CT.display_name,
-            .name_plural = CT.display_name_plural,
-            .icon = CT.icon,
-            .localized = if (CT.localized) "localized" else "single-locale",
-            .locales = joinLocales(ctx.allocator, CT.available_locales) catch "en (default)",
-            .workflow = CT.workflow orelse "default_publish",
-            .internal = CT.internal,
-            .taxonomy = CT.is_taxonomy,
-            .fields_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{CT.schema.len}) catch "0",
-            .synced_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{CT.getSyncedFields().len}) catch "0",
-            .fallback_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{CT.getFallbackFields().len}) catch "0",
-            .permissions_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{CT.field_permissions.len}) catch "0",
+            .id = def.type_id,
+            .name = def.display_name,
+            .name_plural = def.display_name_plural,
+            .icon = def.icon orelse "bookmark",
+            .localized = if (def.localized) "localized" else "single-locale",
+            .locales = joinLocales(ctx.allocator, def.locales) catch "en (default)",
+            .workflow = def.workflow orelse "default_publish",
+            .internal = def.internal,
+            .taxonomy = def.taxonomy != null,
+            .fields_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{def.fields.len}) catch "0",
+            .synced_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{synced}) catch "0",
+            .fallback_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{fallback}) catch "0",
+            .permissions_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{def.field_permissions.len}) catch "0",
         };
     }
 
-    const content = tpl.render(views.admin.content_types.ContentTypes, .{.{
+    return .{
         .has_types = rows.len > 0,
-        .total_count = std.fmt.allocPrint(ctx.allocator, "{d}", .{rows.len}) catch "0",
+        .total_count = try std.fmt.allocPrint(ctx.allocator, "{d}", .{rows.len}),
         .rows = rows,
-    }});
-    ctx.html(registry.renderPage(page, ctx, content));
+    };
 }

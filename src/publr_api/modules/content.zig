@@ -7,7 +7,7 @@
 //! ```zig
 //! const publr = @import("publr_api");
 //!
-//! const entry = try publr.content.saveEntry(schemas.Post, allocator, db, id, data, .{});
+//! const entry = try publr.content.saveEntry(allocator, db, "post", id, data_json, .{});
 //! try publr.content.deleteEntry(db, entry_id);
 //! ```
 
@@ -17,7 +17,7 @@ const cms = @import("cms");
 // Types
 // =========================================================================
 
-pub const Entry = cms.Entry;
+pub const Entry = cms.query.Entry;
 pub const Status = cms.Status;
 pub const SaveOptions = cms.SaveOptions;
 pub const EntryLifecycleError = cms.EntryLifecycleError;

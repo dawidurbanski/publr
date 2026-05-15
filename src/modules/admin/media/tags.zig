@@ -23,7 +23,8 @@ pub fn handleCreateTag(ctx: *Context) !void {
         return;
     }
 
-    _ = media.createTerm(ctx.allocator, db, media.tax_media_tags, name, null) catch |err| {
+    const author_id = auth_middleware.getUserId(ctx);
+    _ = media.createTerm(ctx.allocator, db, media.tax_media_tags, name, null, author_id) catch |err| {
         std.debug.print("Error creating tag: {}\n", .{err});
     };
 

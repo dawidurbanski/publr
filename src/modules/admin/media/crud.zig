@@ -7,7 +7,7 @@ const csrf = @import("csrf");
 const media = @import("media");
 const storage = @import("storage");
 const auth_middleware = @import("auth_middleware");
-const registry = @import("registry");
+const admin = @import("admin_api");
 const db_mod = @import("db");
 const views = @import("views");
 const multipart = @import("multipart");
@@ -127,7 +127,7 @@ pub fn handleEdit(ctx: *Context) !void {
         .current_folder_id = current_folder_id,
     }});
 
-    ctx.html(registry.renderPage(page_reg, ctx, content));
+    ctx.html(admin.renderWithLayout(page_reg.id, page_reg.title, ctx, content, ""));
 }
 
 pub fn handleUpload(ctx: *Context) !void {
@@ -191,13 +191,17 @@ pub fn handleUpload(ctx: *Context) !void {
     h.redirect(ctx, "/admin/media");
 }
 
+// Note: POST handlers below are wired through the action dispatcher
+// (`media.update`, `media.delete`, `media.toggle_visibility`) — they read
+// `media_id` from the form body instead of `:id` path params.
+
 pub fn handleUpdate(ctx: *Context) !void {
     const db = if (auth_middleware.auth) |a| a.db else {
         h.redirect(ctx, "/admin/media");
         return;
     };
 
-    const media_id = ctx.param("id") orelse {
+    const media_id = ctx.formValue("media_id") orelse {
         h.redirect(ctx, "/admin/media");
         return;
     };
@@ -261,7 +265,7 @@ pub fn handleUpdate(ctx: *Context) !void {
                 if (tag_name.len == 0) continue;
 
                 // Find existing tag or create new one
-                const tag_id = h.findOrCreateTag(ctx.allocator, db, tag_name) catch continue;
+                const tag_id = h.findOrCreateTag(ctx.allocator, db, tag_name, auth_middleware.getUserId(ctx)) catch continue;
                 all_term_ids.append(ctx.allocator, tag_id) catch {};
             }
         }
@@ -281,7 +285,7 @@ pub fn handleDelete(ctx: *Context) !void {
         return;
     };
 
-    const media_id = ctx.param("id") orelse {
+    const media_id = ctx.formValue("media_id") orelse {
         h.redirect(ctx, "/admin/media");
         return;
     };
@@ -299,7 +303,7 @@ pub fn handleToggleVisibility(ctx: *Context) !void {
         return;
     };
 
-    const media_id = ctx.param("id") orelse {
+    const media_id = ctx.formValue("media_id") orelse {
         h.redirect(ctx, "/admin/media");
         return;
     };

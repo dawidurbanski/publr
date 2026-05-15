@@ -1,33 +1,95 @@
 //! Admin Page Registration API
 //!
-//! Provides a WordPress-like API for registering admin pages and their routes.
-//! Pages define navigation items; setup functions register all routes for that page.
+//! Single entry point for registering admin pages. Three modes:
 //!
-//! Example:
+//! **Declarative + data:** view + loader. Framework wires up routing, calls
+//! loader, renders view with the props.
+//!
+//! ```zig
+//! pub const page = admin.registerPage(.{
+//!     .id = "dashboard",
+//!     .title = "Dashboard",
+//!     .path = "/",
+//!     .icon = .home,
+//!     .view = views.admin.dashboard.Dashboard,
+//!     .loader = load,
+//! });
+//! fn load(ctx: *admin.Context) !views.admin.dashboard.Props { ... }
+//! ```
+//!
+//! **Declarative static:** view only. For pages with no dynamic data.
+//!
+//! ```zig
+//! pub const page = admin.registerPage(.{
+//!     .id = "about",
+//!     .title = "About",
+//!     .path = "/about",
+//!     .view = views.admin.about.About,
+//! });
+//! ```
+//!
+//! **Manual:** Provide a setup function for cases that don't fit the declarative
+//! shape (multiple routes per page, POST handlers, etc).
+//!
 //! ```zig
 //! pub const page = admin.registerPage(.{
 //!     .id = "posts",
 //!     .title = "Posts",
-//!     .path = "/posts",        // becomes /admin/posts
-//!     .icon = .edit,
-//!     .position = 20,
+//!     .path = "/posts",
 //!     .setup = setup,
 //! });
 //!
 //! fn setup(app: *admin.PageApp) void {
-//!     app.render(renderList);           // GET /admin/posts
-//!     app.get("/:id", renderEdit);      // GET /admin/posts/:id
-//!     app.post("/:id", handleUpdate);   // POST /admin/posts/:id
-//!     app.postAt("/:id/delete", handleDelete);
+//!     app.render(renderList);
+//!     app.get("/:id", renderEdit);
+//!     app.post("/:id", handleUpdate);
 //! }
 //! ```
 
 const std = @import("std");
 const mw = @import("middleware");
 const publr_ui = @import("publr_ui");
+const tpl = @import("tpl");
+const views = @import("views");
+const csrf = @import("csrf");
+const auth_middleware = @import("auth_middleware");
+const gravatar = @import("gravatar");
+const registry = @import("registry");
+const actions = @import("actions");
+const content_type = @import("content_type");
+const schemas = @import("schemas");
+const schema_registry = @import("schema_registry");
 
 /// Handler function type - matches the router's handler signature
 pub const Handler = mw.Handler;
+
+/// Action handler — re-exported from the action dispatcher module.
+pub const ActionHandler = actions.ActionHandler;
+
+/// Re-export of `content_type.ContentType` under the spec-mandated name.
+/// Use either form when declaring a schema:
+///
+/// ```zig
+/// pub const Post = admin.registerContentType("post", .{
+///     .name = "Blog Post",
+///     .handle = "posts",
+///     .http_hooks = .{ .on_publish = postPublishHook },
+/// }, &.{ … });
+/// ```
+///
+/// Note: schemas in `src/schemas/*.zig` currently import `content_type`
+/// directly to avoid the `schemas → admin_api → registry → schemas` cycle.
+/// External plugins (which don't get imported by `registry`) are free to
+/// import `admin_api` and use this alias.
+pub const registerContentType = content_type.ContentType;
+
+/// Value-returning content type factory. Returns a pure-data
+/// `ContentTypeDef` for the runtime registry. Companion to the
+/// type-returning `registerContentType` above.
+pub const contentType = content_type.contentType;
+pub const ContentTypeDef = content_type.ContentTypeDef;
+pub const HttpHooks = content_type.HttpHooks;
+pub const ContentActionHookFn = content_type.ContentActionHookFn;
 
 /// Context type - the middleware Context
 pub const Context = mw.Context;
@@ -122,6 +184,16 @@ pub const PageApp = struct {
         self.registrar.register_post(self.registrar.ctx, full_path, handler);
     }
 
+    /// Register a named action handler. Action names are flat strings
+    /// (convention: `<plugin>.<verb>`); two plugins can register the same name
+    /// (last write wins, with a warning). The page id is not used — actions
+    /// are decoupled from page paths so plugins without pages can still
+    /// register them.
+    pub fn action(self: *PageApp, name: []const u8, handler: ActionHandler) void {
+        _ = self;
+        actions.register(name, handler);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -179,24 +251,102 @@ pub const PageApp = struct {
     }
 };
 
-/// Register an admin page with comptime validation
-pub fn registerPage(comptime opts: Page) Page {
-    // Validate ID
-    if (opts.id.len == 0) {
-        @compileError("Page id cannot be empty");
-    }
+/// Render a view's output inside the admin shell (sidebar, topbar, scroll area).
+/// The view is responsible for its own header (via PageHeader); the layout only
+/// provides the surrounding chrome.
+pub fn renderWithLayout(
+    comptime page_id: []const u8,
+    page_title: []const u8,
+    ctx: *mw.Context,
+    content: []const u8,
+    bottom_bar: []const u8,
+) []const u8 {
+    const csrf_token = csrf.ensureToken(ctx);
+    const topbar_nav_html = tpl.render(views.components.topbar_nav.TopbarNav, .{.{ .items = comptime registry.topbarNavItems(page_id) }});
+    const user_email = auth_middleware.getUserEmail(ctx) orelse "";
+    const user_name = auth_middleware.getUserDisplayName(ctx) orelse "";
+    const gravatar_url = gravatar.url(user_email, 40);
 
-    // Validate path
-    if (opts.path.len == 0) {
-        @compileError("Page path cannot be empty");
-    }
+    // Build the sidebar's "Content type" entries from the runtime registry.
+    // Reads from `schema_registry.all()` so DB-defined and WASM-loaded
+    // types show up alongside compile-in ones.
+    const Nav = views.admin.layout.ContentTypeNav;
+    const registered = schema_registry.all();
+    const nav_items: []const Nav = blk: {
+        const buf = ctx.allocator.alloc(Nav, registered.len) catch break :blk &[_]Nav{};
+        for (registered, 0..) |def, i| {
+            buf[i] = .{
+                .href = std.fmt.allocPrint(ctx.allocator, "/admin/content/{s}", .{def.type_id}) catch "/admin/content",
+                .label = def.display_name,
+            };
+        }
+        break :blk buf;
+    };
 
-    // Path should be relative (not start with /admin)
+    return tpl.render(views.admin.layout.Layout, .{.{
+        .title = page_title,
+        .content = content,
+        .topbar_nav_html = topbar_nav_html,
+        .csrf_token = csrf_token,
+        .user_gravatar_url = gravatar_url.slice(),
+        .user_email = user_email,
+        .user_name = user_name,
+        .current_section = page_id,
+        .bottom_bar = bottom_bar,
+        .content_types = nav_items,
+    }});
+}
+
+/// Register an admin page. Handles two modes:
+///   - Declarative: pass `.view + .loader` — framework generates setup.
+///   - Manual: pass `.setup` — caller registers their own routes.
+///
+/// Required: .id, .title, .path. One of (.view + .loader) or .setup.
+/// Optional: .icon, .position, .parent, .section.
+pub fn registerPage(comptime opts: anytype) Page {
+    const T = @TypeOf(opts);
+
+    if (!@hasField(T, "id")) @compileError("registerPage: .id required");
+    if (!@hasField(T, "title")) @compileError("registerPage: .title required");
+    if (!@hasField(T, "path")) @compileError("registerPage: .path required");
+    if (opts.id.len == 0) @compileError("Page id cannot be empty");
+    if (opts.path.len == 0) @compileError("Page path cannot be empty");
     if (std.mem.startsWith(u8, opts.path, "/admin")) {
         @compileError("Page path should be relative (e.g., '/posts' not '/admin/posts')");
     }
 
-    return opts;
+    const setup_fn = blk: {
+        if (@hasField(T, "view")) {
+            const Setup = struct {
+                fn run(app: *PageApp) void {
+                    app.render(handle);
+                }
+                fn handle(ctx: *mw.Context) !void {
+                    const content = if (comptime @hasField(T, "loader")) inner: {
+                        const props = try opts.loader(ctx);
+                        break :inner tpl.render(opts.view, .{props});
+                    } else tpl.renderStatic(opts.view);
+                    ctx.html(renderWithLayout(opts.id, opts.title, ctx, content, ""));
+                }
+            };
+            break :blk Setup.run;
+        } else if (@hasField(T, "setup")) {
+            break :blk opts.setup;
+        } else {
+            @compileError("registerPage: must have either .view (with optional .loader) OR .setup");
+        }
+    };
+
+    return Page{
+        .id = opts.id,
+        .title = opts.title,
+        .path = opts.path,
+        .icon = if (@hasField(T, "icon")) opts.icon else .home,
+        .position = if (@hasField(T, "position")) opts.position else 100,
+        .parent = if (@hasField(T, "parent")) opts.parent else null,
+        .section = if (@hasField(T, "section")) opts.section else null,
+        .setup = setup_fn,
+    };
 }
 
 /// Resolve the full path for a page, considering its parent hierarchy

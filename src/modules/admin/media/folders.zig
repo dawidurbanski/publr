@@ -25,7 +25,8 @@ pub fn handleCreateFolder(ctx: *Context) !void {
 
     const parent_id = if (ctx.formValue("parent_id")) |pid| if (pid.len > 0) pid else null else null;
 
-    _ = media.createTerm(ctx.allocator, db, media.tax_media_folders, name, parent_id) catch |err| {
+    const author_id = auth_middleware.getUserId(ctx);
+    _ = media.createTerm(ctx.allocator, db, media.tax_media_folders, name, parent_id, author_id) catch |err| {
         std.debug.print("Error creating folder: {}\n", .{err});
     };
 
@@ -65,7 +66,8 @@ pub fn handleRenameFolder(ctx: *Context) !void {
         return;
     };
 
-    media.renameTerm(db, term_id, new_name) catch |err| {
+    const editor_id = auth_middleware.getUserId(ctx);
+    media.renameTerm(db, term_id, new_name, editor_id) catch |err| {
         std.debug.print("Error renaming folder: {}\n", .{err});
     };
 
@@ -113,7 +115,8 @@ pub fn handleMoveFolder(ctx: *Context) !void {
         }
     }
 
-    media.moveTermParent(db, term_id, parent_id) catch |err| {
+    const editor_id = auth_middleware.getUserId(ctx);
+    media.moveTermParent(db, term_id, parent_id, editor_id) catch |err| {
         std.debug.print("Error moving folder: {}\n", .{err});
     };
 

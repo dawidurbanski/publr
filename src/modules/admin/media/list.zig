@@ -7,7 +7,6 @@ const tpl = @import("tpl");
 const csrf = @import("csrf");
 const media = @import("media");
 const auth_middleware = @import("auth_middleware");
-const registry = @import("registry");
 const views = @import("views");
 const pagination = @import("pagination");
 
@@ -356,10 +355,7 @@ pub fn handleList(ctx: *Context) !void {
         .items_per_page = pag.items_per_page,
         .filtered_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{filtered_count}) catch "0",
         .items_per_page_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{items_per_page}) catch "25",
-    }});
-
-    const subtitle = tpl.render(views.admin.media.list.Breadcrumbs, .{.{
-        .items = breadcrumbs,
+        .breadcrumbs = breadcrumbs,
     }});
 
     const bottom_bar = tpl.render(views.admin.media.list.BottomBar, .{.{
@@ -371,14 +367,7 @@ pub fn handleList(ctx: *Context) !void {
         .csrf_token = csrf.ensureToken(ctx),
     }});
 
-    const page_title_actions = tpl.render(views.admin.media.list.MediaControls, .{.{
-        .filtered_count = filtered_count,
-        .view_mode = view_mode,
-        .view_grid_url = h.buildMediaUrl(ctx.allocator, "grid", folder_filter, active_tag_ids, show_unreviewed, search_term, year_filter, month_filter),
-        .view_list_url = h.buildMediaUrl(ctx.allocator, "list", folder_filter, active_tag_ids, show_unreviewed, search_term, year_filter, month_filter),
-    }});
-
-    ctx.html(registry.renderPageFull(page_reg, ctx, content, subtitle, bottom_bar, page_title_actions));
+    ctx.html(admin.renderWithLayout(page_reg.id, page_reg.title, ctx, content, bottom_bar));
 }
 
 test "admin media list: unauthenticated branch" {
