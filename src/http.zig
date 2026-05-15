@@ -12,9 +12,14 @@ const tpl = @import("tpl");
 const dev = @import("dev.zig");
 const recompile = @import("recompile.zig");
 const core_init = @import("core_init");
+const schema_registry = @import("schema_registry");
+const schema_db_types = @import("schema_db_types");
+const schemas = @import("schemas");
 const Auth = @import("auth").Auth;
 const auth_middleware = @import("auth_middleware");
 const csrf = @import("csrf");
+const actions = @import("actions");
+const content_actions = @import("content_actions");
 const admin_api = @import("admin_api");
 const media_handler = @import("media_handler");
 const websocket = @import("websocket");
@@ -22,15 +27,15 @@ const presence = @import("presence");
 const collaboration_config = @import("collaboration_config.zig");
 const modules_api = @import("modules");
 const admin_module = @import("module_admin");
-const rest_auth = @import("rest_auth");
-const rest_content = @import("rest_content");
-const rest_version = @import("rest_version");
-const rest_release = @import("rest_release");
-const rest_media = @import("rest_media");
-const rest_taxonomy = @import("rest_taxonomy");
-const rest_user = @import("rest_user");
-const rest_schema = @import("rest_schema");
-const rest_info = @import("rest_info");
+const rest_auth = @import("rest/auth.zig");
+const rest_content = @import("rest/content.zig");
+const rest_version = @import("rest/version.zig");
+const rest_release = @import("rest/release.zig");
+const rest_media = @import("rest/media.zig");
+const rest_taxonomy = @import("rest/taxonomy.zig");
+const rest_user = @import("rest/user.zig");
+const rest_schema = @import("rest/schema.zig");
+const rest_info = @import("rest/info.zig");
 const site_handlers = @import("http_handlers/site.zig");
 const setup_auth_handlers = @import("http_handlers/setup_auth.zig");
 const static_handlers = @import("http_handlers/static_files.zig");
@@ -88,6 +93,26 @@ pub fn serve(
         return err;
     };
 
+    // Initialize the runtime content type registry. `compiled_in_types`
+    // already concatenates core schemas + plugin-discovered descriptors;
+    // DB-defined types are loaded from the `content_types` table next.
+    schema_registry.init(allocator);
+    for (schema_registry.compiled_in_types) |def| {
+        schema_registry.register(def) catch |err| {
+            std.debug.print("Failed to register compile-in content type '{s}': {}\n", .{ def.type_id, err });
+        };
+    }
+    if (schema_db_types.loadAll(allocator, &db)) |db_defs| {
+        for (db_defs) |def| {
+            schema_registry.register(def) catch |err| {
+                std.debug.print("Failed to register DB-defined content type '{s}': {}\n", .{ def.type_id, err });
+            };
+        }
+        allocator.free(db_defs);
+    } else |err| {
+        std.debug.print("Failed to load DB-defined content types: {}\n", .{err});
+    }
+
     // Initialize auth
     var auth = Auth.init(allocator, &db);
 
@@ -139,6 +164,14 @@ pub fn serve(
     try router.post("/admin/system/config", recompile.handleConfigUpdate);
     try router.get("/admin/system/health", recompile.handleHealth);
     try router.get("/admin/ws", ws_handlers.handleWebSocket);
+
+    // Action dispatcher — plugins register named actions via app.action(),
+    // forms POST to /admin/action with a hidden `action=plugin.verb` field.
+    actions.init(allocator, .{ .not_found = error_pages.notFoundHandler });
+    try router.post("/admin/action", actions.dispatch);
+    // Default `content.<verb>` action handlers (registered before plugin
+    // setup so per-CT plugins can override with `app.action` if needed).
+    content_actions.registerDefaults();
 
     // REST API routes
     try rest_auth.registerRoutes(&router);
@@ -295,8 +328,12 @@ fn ssgRegenHook(db: *@import("db").Db, alloc: std.mem.Allocator, entry_id: []con
     };
 
     if (slug) |s| {
-        // Convert DB type_id to handle for manifest matching
-        const handle = if (content_type_id) |ct| @import("schemas").handleFromTypeId(ct) else null;
+        // Convert DB type_id to handle for manifest matching by looking up
+        // the descriptor in the runtime registry.
+        const handle = if (content_type_id) |ct|
+            if (schema_registry.findById(ct)) |def| def.handle else null
+        else
+            null;
         if (ssg.regenerateEntry(a, db, output_dir, s, handle)) |n| {
             std.debug.print("[ssg] Regenerated {d} pages for '{s}'\n", .{ n, s });
         }

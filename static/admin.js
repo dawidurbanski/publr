@@ -1,6 +1,7 @@
 // Publr Admin — Component Handlers
 // Admin-specific wiring. Depends on interact modules (core, toggle, portal, focus-trap, dismiss).
 // Component handlers are registered here; tasks 03-06 add the implementations.
+
 (function() {
     'use strict';
 
@@ -61,6 +62,7 @@
                 }
                 var fd = new FormData();
                 fd.append('_csrf', csrf);
+                fd.append('action', 'media.upload');
                 fd.append('folder_id', folderId || '');
                 fd.append('file', files[i]);
 
@@ -70,7 +72,7 @@
                     var ct = response.headers.get('Content-Type');
                     response.arrayBuffer().then(function(buf) {
                         var bodyBytes = new Uint8Array(buf);
-                        window.cms.requestBinary('POST', '/admin/media', bodyBytes, ct).then(function() {
+                        window.cms.requestBinary('POST', '/admin/action', bodyBytes, ct).then(function() {
                             done++;
                             var overallPct = (done / total) * 100;
                             progressBar.style.setProperty('--progress', overallPct + '%');
@@ -84,7 +86,7 @@
                 }
 
                 var xhr = new XMLHttpRequest();
-                xhr.open('POST', '/admin/media', true);
+                xhr.open('POST', '/admin/action', true);
 
                 xhr.upload.addEventListener('progress', function(e) {
                     if (e.lengthComputable) {
@@ -260,7 +262,7 @@
 
         var form = document.createElement('form');
         form.method = 'POST';
-        form.action = '/admin/media/folders';
+        form.action = '/admin/action';
         form.className = 'media-folder-inline-form';
 
         var csrf = document.createElement('input');
@@ -268,6 +270,12 @@
         csrf.name = '_csrf';
         csrf.value = csrfValue;
         form.appendChild(csrf);
+
+        var actionField = document.createElement('input');
+        actionField.type = 'hidden';
+        actionField.name = 'action';
+        actionField.value = 'media.folder_create';
+        form.appendChild(actionField);
 
         if (parentId) {
             var pid = document.createElement('input');
@@ -356,14 +364,16 @@
         } else if (action === 'rename-folder') {
             var row = btn.closest('.media-folder-row') ||
                 document.querySelector('.media-folder-row[data-folder-id="' + btn.dataset.folderId + '"]');
-            if (row) showInlineForm(row, '/admin/media/folders/rename', [
+            if (row) showInlineForm(row, '/admin/action', [
+                { type: 'hidden', name: 'action', value: 'media.folder_rename' },
                 { type: 'hidden', name: 'term_id', value: btn.dataset.folderId },
                 { type: 'text', name: 'folder_name', value: btn.dataset.folderName, placeholder: 'Folder name...' }
             ]);
         } else if (action === 'move-folder') {
             var row = btn.closest('.media-folder-row') ||
                 document.querySelector('.media-folder-row[data-folder-id="' + btn.dataset.folderId + '"]');
-            if (row) showInlineForm(row, '/admin/media/folders/move', [
+            if (row) showInlineForm(row, '/admin/action', [
+                { type: 'hidden', name: 'action', value: 'media.folder_move' },
                 { type: 'hidden', name: 'term_id', value: btn.dataset.folderId },
                 { type: 'select', name: 'parent_id', options: buildFolderOptions(btn.dataset.folderId) }
             ]);
@@ -667,10 +677,15 @@
         isSaving = true;
         showStatus('saving');
 
-        fetch(baseUrl + '/' + entryId + '/autosave', {
+        // Autosave goes through the action dispatcher. The form's hidden
+        // `action` is `content.update`; override to `content.autosave` for
+        // this request only.
+        var autosaveData = new FormData(form);
+        autosaveData.set('action', 'content.autosave');
+        fetch('/admin/action', {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: new URLSearchParams(new FormData(form))
+            body: new URLSearchParams(autosaveData)
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -955,19 +970,28 @@
         updateButtons();
     });
 
-    // Discard changes button
+    // Discard changes button — posts through the action dispatcher with
+    // action=content.discard. Pulls the content type id from the form's
+    // hidden `type` field (the same one used for content.update).
     if (discardBtn && entryId) {
         discardBtn.addEventListener('click', function() {
             if (!confirm('Discard all changes and revert to the published version?')) return;
             var csrfField = form.querySelector('input[name="_csrf"]');
+            var typeField = form.querySelector('input[name="type"]');
             var discardForm = document.createElement('form');
             discardForm.method = 'POST';
-            discardForm.action = baseUrl + '/' + entryId + '/discard';
-            var csrf = document.createElement('input');
-            csrf.type = 'hidden';
-            csrf.name = '_csrf';
-            csrf.value = csrfField ? csrfField.value : '';
-            discardForm.appendChild(csrf);
+            discardForm.action = '/admin/action';
+            function add(name, value) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                input.value = value;
+                discardForm.appendChild(input);
+            }
+            add('_csrf', csrfField ? csrfField.value : '');
+            add('action', 'content.discard');
+            add('type', typeField ? typeField.value : '');
+            add('entry_id', entryId);
             document.body.appendChild(discardForm);
             discardForm.submit();
         });
@@ -1222,6 +1246,76 @@
             btn.textContent = 'Restarting\u2026';
             poll(configText, startTime);
         });
+    });
+})();
+
+// ── Content list bulk-actions wiring ─────────────────────
+//
+// For each [data-publr-component="content-list"] container on the page:
+// - Toggle the BulkActions bar visibility based on row-checkbox selection
+// - Keep its count text in sync
+// - Master checkbox cycles checked <-> indeterminate <-> unchecked
+// - Clear button resets selection
+(function() {
+    document.querySelectorAll('[data-publr-component="content-list"]').forEach(function(list) {
+        var bulkBar = list.querySelector('[data-publr-component="bulk-actions"]');
+        if (!bulkBar) return;
+
+        var countEl = bulkBar.querySelector('[data-publr-part="count"]');
+        var clearBtn = bulkBar.querySelector('[data-publr-part="clear"]');
+        var selectAll = list.querySelector('input[name="select-all"]');
+        var rowBoxes = list.querySelectorAll('input[name="select-entry"]');
+
+        function update() {
+            var selected = 0;
+            rowBoxes.forEach(function(cb) { if (cb.checked) selected++; });
+
+            if (countEl && countEl.firstChild) {
+                countEl.firstChild.nodeValue = selected + ' ';
+            }
+
+            if (selected > 0) {
+                bulkBar.classList.remove('hidden');
+                bulkBar.classList.add('flex');
+                bulkBar.setAttribute('data-publr-state', 'visible');
+            } else {
+                bulkBar.classList.add('hidden');
+                bulkBar.classList.remove('flex');
+                bulkBar.setAttribute('data-publr-state', 'hidden');
+            }
+
+            if (selectAll) {
+                if (selected === 0) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                } else if (selected === rowBoxes.length) {
+                    selectAll.checked = true;
+                    selectAll.indeterminate = false;
+                } else {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = true;
+                }
+            }
+        }
+
+        rowBoxes.forEach(function(cb) { cb.addEventListener('change', update); });
+
+        if (selectAll) {
+            selectAll.addEventListener('change', function() {
+                var checked = selectAll.checked;
+                rowBoxes.forEach(function(cb) { cb.checked = checked; });
+                update();
+            });
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function() {
+                rowBoxes.forEach(function(cb) { cb.checked = false; });
+                update();
+            });
+        }
+
+        update();
     });
 })();
 

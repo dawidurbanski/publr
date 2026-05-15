@@ -54,8 +54,10 @@ fn validateCsrf(ctx: *Context) bool {
 }
 
 /// Extract a form field value from a multipart/form-data body.
-/// Only used as fallback when URL-encoded parsing fails.
-fn multipartFormValue(ctx: *Context, name: []const u8) ?[]const u8 {
+/// Exposed so the action dispatcher can resolve `action` for multipart
+/// submissions (file uploads). Only handles non-file fields — skips parts
+/// with `filename=` in the disposition.
+pub fn multipartFormValue(ctx: *Context, name: []const u8) ?[]const u8 {
     const content_type = ctx.getRequestHeader("Content-Type") orelse return null;
     const boundary_marker = "boundary=";
     const boundary_idx = std.mem.indexOf(u8, content_type, boundary_marker) orelse return null;
