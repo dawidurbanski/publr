@@ -2,8 +2,8 @@ const std = @import("std");
 const Router = @import("router").Router;
 const Context = @import("middleware").Context;
 const auth_mod = @import("auth");
-const json = @import("rest_json");
-const rest_auth = @import("rest_auth");
+const json = @import("json.zig");
+const rest_auth = @import("auth.zig");
 
 pub fn registerRoutes(router: *Router) !void {
     try router.get("/api/users", handleListUsers);

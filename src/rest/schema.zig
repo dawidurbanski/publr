@@ -2,8 +2,8 @@ const std = @import("std");
 const Router = @import("router").Router;
 const Context = @import("middleware").Context;
 const registry = @import("schema_registry");
-const json = @import("rest_json");
-const rest_auth = @import("rest_auth");
+const json = @import("json.zig");
+const rest_auth = @import("auth.zig");
 
 pub fn registerRoutes(router: *Router) !void {
     try router.get("/api/schema", handleListSchema);
@@ -13,7 +13,7 @@ pub fn registerRoutes(router: *Router) !void {
 fn handleListSchema(ctx: *Context) !void {
     var session = rest_auth.requireUser(ctx) catch return json.errorEnvelope(ctx, "401 Unauthorized", "unauthorized", "Unauthorized");
     defer session.deinit();
-    try json.ok(ctx, registry.registered_types);
+    try json.ok(ctx, registry.all());
 }
 
 fn handleGetSchema(ctx: *Context) !void {
@@ -21,8 +21,8 @@ fn handleGetSchema(ctx: *Context) !void {
     defer session.deinit();
     const type_id = ctx.param("type") orelse return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Missing type id");
 
-    const info = registry.getTypeInfo(type_id) orelse return json.errorEnvelope(ctx, "404 Not Found", "not_found", "Schema not found");
-    try json.ok(ctx, info);
+    const def = registry.findById(type_id) orelse return json.errorEnvelope(ctx, "404 Not Found", "not_found", "Schema not found");
+    try json.ok(ctx, def);
 }
 
 test "rest schema: registerRoutes" {

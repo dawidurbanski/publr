@@ -3,8 +3,8 @@ const Router = @import("router").Router;
 const Context = @import("middleware").Context;
 const cms = @import("cms");
 const core_time = @import("core_time");
-const json = @import("rest_json");
-const rest_auth = @import("rest_auth");
+const json = @import("json.zig");
+const rest_auth = @import("auth.zig");
 
 pub fn registerRoutes(router: *Router) !void {
     try router.get("/api/releases", handleList);

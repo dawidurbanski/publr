@@ -3,8 +3,8 @@ const Router = @import("router").Router;
 const Context = @import("middleware").Context;
 const registry = @import("schema_registry");
 const Db = @import("db").Db;
-const json = @import("rest_json");
-const rest_auth = @import("rest_auth");
+const json = @import("json.zig");
+const rest_auth = @import("auth.zig");
 
 pub fn registerRoutes(router: *Router) !void {
     try router.get("/api/info", handleInfo);
@@ -19,10 +19,10 @@ fn handleInfo(ctx: *Context) !void {
 
     var counts: std.ArrayList(struct { type_id: []const u8, count: i64 }) = .{};
     defer counts.deinit(ctx.allocator);
-    for (registry.registered_types) |info| {
-        const count = countType(session.auth.db, info.id) catch 0;
+    for (registry.all()) |def| {
+        const count = countType(session.auth.db, def.type_id) catch 0;
         try counts.append(ctx.allocator, .{
-            .type_id = info.id,
+            .type_id = def.type_id,
             .count = count,
         });
     }

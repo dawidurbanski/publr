@@ -4,7 +4,7 @@ const Context = @import("middleware").Context;
 const auth_middleware = @import("auth_middleware");
 const auth_mod = @import("auth");
 const Db = @import("db").Db;
-const json = @import("rest_json");
+const json = @import("json.zig");
 
 pub const SessionUser = struct {
     auth: *auth_mod.Auth,

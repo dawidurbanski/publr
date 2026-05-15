@@ -3,8 +3,9 @@ const Router = @import("router").Router;
 const Context = @import("middleware").Context;
 const cms = @import("cms");
 const schemas = @import("schemas");
-const json = @import("rest_json");
-const rest_auth = @import("rest_auth");
+const schema_registry = @import("schema_registry");
+const json = @import("json.zig");
+const rest_auth = @import("auth.zig");
 
 pub fn registerRoutes(router: *Router) !void {
     try router.get("/api/content/:type", handleList);
@@ -39,27 +40,25 @@ fn handleList(ctx: *Context) !void {
     else
         cms.OrderDir.desc;
 
-    inline for (schemas.content_types) |CT| {
-        if (std.mem.eql(u8, type_id, CT.type_id)) {
-            const db = session.auth.db;
-            const items = cms.listEntries(CT, ctx.allocator, db, .{
-                .status = status,
-                .limit = limit,
-                .offset = offset,
-                .order_by = order_by,
-                .order_dir = order_dir,
-            }) catch return json.errorEnvelope(ctx, "500 Internal Server Error", "list_failed", "Failed to list entries");
-            const total = cms.countEntries(CT, db, .{ .status = status }) catch 0;
-
-            return json.paged(ctx, items, .{
-                .total = total,
-                .limit = limit,
-                .offset = offset,
-            });
-        }
+    if (schema_registry.findById(type_id) == null) {
+        return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
     }
 
-    return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
+    const db = session.auth.db;
+    const items = cms.query.listEntries(ctx.allocator, db, type_id, .{
+        .status = status,
+        .limit = limit,
+        .offset = offset,
+        .order_by = order_by,
+        .order_dir = order_dir,
+    }) catch return json.errorEnvelope(ctx, "500 Internal Server Error", "list_failed", "Failed to list entries");
+    const total = cms.query.countEntries(db, type_id, .{ .status = status }) catch 0;
+
+    return json.paged(ctx, items, .{
+        .total = total,
+        .limit = limit,
+        .offset = offset,
+    });
 }
 
 fn handleGet(ctx: *Context) !void {
@@ -69,15 +68,13 @@ fn handleGet(ctx: *Context) !void {
     const type_id = ctx.param("type") orelse return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Missing type");
     const entry_id = ctx.param("id") orelse return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Missing id");
 
-    inline for (schemas.content_types) |CT| {
-        if (std.mem.eql(u8, type_id, CT.type_id)) {
-            const item = cms.getEntry(CT, ctx.allocator, session.auth.db, entry_id) catch null;
-            if (item == null) return json.errorEnvelope(ctx, "404 Not Found", "not_found", "Entry not found");
-            return json.ok(ctx, item.?);
-        }
+    if (schema_registry.findById(type_id) == null) {
+        return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
     }
 
-    return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
+    const item = cms.query.getEntry(ctx.allocator, session.auth.db, type_id, entry_id) catch null;
+    if (item == null) return json.errorEnvelope(ctx, "404 Not Found", "not_found", "Entry not found");
+    return json.ok(ctx, item.?);
 }
 
 fn handleCreate(ctx: *Context) !void {
@@ -85,28 +82,35 @@ fn handleCreate(ctx: *Context) !void {
     defer session.deinit();
     const type_id = ctx.param("type") orelse return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Missing type");
 
+    if (schema_registry.findById(type_id) == null) {
+        return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
+    }
+
     const parsed = json.parseJsonBody(ctx) catch return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Invalid JSON body");
     defer parsed.deinit();
 
-    inline for (schemas.content_types) |CT| {
-        if (std.mem.eql(u8, type_id, CT.type_id)) {
-            const fields = getFieldsObject(parsed.value) orelse return json.errorEnvelope(ctx, "422 Unprocessable Entity", "validation_error", "Missing fields object");
-            var parsed_data = parseCreateData(CT, ctx.allocator, fields) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "validation_error", "Invalid fields");
-            defer parsed_data.deinit();
-            const status = if (parsed.value == .object and parsed.value.object.get("status") != null and parsed.value.object.get("status").? == .string) parsed.value.object.get("status").?.string else "draft";
-            const locale = if (parsed.value == .object and parsed.value.object.get("locale") != null and parsed.value.object.get("locale").? == .string) parsed.value.object.get("locale").?.string else null;
+    const fields = getFieldsObject(parsed.value) orelse return json.errorEnvelope(ctx, "422 Unprocessable Entity", "validation_error", "Missing fields object");
+    const data_json = stringifyJsonValue(ctx.allocator, fields) catch return json.errorEnvelope(ctx, "500 Internal Server Error", "save_failed", "Failed to serialize fields");
+    defer ctx.allocator.free(data_json);
 
-            const entry = cms.saveEntry(CT, ctx.allocator, session.auth.db, null, parsed_data.value, .{
-                .author_id = session.user.id,
-                .status = status,
-                .locale = locale,
-            }) catch return json.errorEnvelope(ctx, "500 Internal Server Error", "save_failed", "Failed to save entry");
+    const status = if (parsed.value == .object and parsed.value.object.get("status") != null and parsed.value.object.get("status").? == .string) parsed.value.object.get("status").?.string else "draft";
+    const locale = if (parsed.value == .object and parsed.value.object.get("locale") != null and parsed.value.object.get("locale").? == .string) parsed.value.object.get("locale").?.string else null;
 
-            return json.created(ctx, entry);
-        }
-    }
+    var entry = cms.saveEntry(ctx.allocator, session.auth.db, type_id, null, data_json, .{
+        .author_id = session.user.id,
+        .status = status,
+        .locale = locale,
+    }) catch return json.errorEnvelope(ctx, "500 Internal Server Error", "save_failed", "Failed to save entry");
+    defer entry.deinit(ctx.allocator);
 
-    return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
+    return json.created(ctx, entry);
+}
+
+fn stringifyJsonValue(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    errdefer buf.deinit(allocator);
+    try buf.writer(allocator).print("{f}", .{std.json.fmt(value, .{})});
+    return buf.toOwnedSlice(allocator);
 }
 
 fn handleUpdate(ctx: *Context) !void {
@@ -115,26 +119,78 @@ fn handleUpdate(ctx: *Context) !void {
     const type_id = ctx.param("type") orelse return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Missing type");
     const entry_id = ctx.param("id") orelse return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Missing id");
 
+    if (schema_registry.findById(type_id) == null) {
+        return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
+    }
+
     const parsed = json.parseJsonBody(ctx) catch return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "Invalid JSON body");
     defer parsed.deinit();
 
-    inline for (schemas.content_types) |CT| {
-        if (std.mem.eql(u8, type_id, CT.type_id)) {
-            const existing = (cms.getEntry(CT, ctx.allocator, session.auth.db, entry_id) catch null) orelse
-                return json.errorEnvelope(ctx, "404 Not Found", "not_found", "Entry not found");
+    // Merge: pull the existing entry's data JSON, overlay the patch fields,
+    // re-serialize, and let saveEntry handle the rest. Avoids
+    // needing per-CT applyPatch.
+    var existing = (cms.query.getEntry(ctx.allocator, session.auth.db, type_id, entry_id) catch null) orelse
+        return json.errorEnvelope(ctx, "404 Not Found", "not_found", "Entry not found");
+    defer existing.deinit(ctx.allocator);
 
-            const fields = getFieldsObject(parsed.value) orelse return json.errorEnvelope(ctx, "422 Unprocessable Entity", "validation_error", "Missing fields object");
-            const merged = applyPatch(CT, existing.data, fields) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "validation_error", "Invalid fields");
+    const patch = getFieldsObject(parsed.value) orelse return json.errorEnvelope(ctx, "422 Unprocessable Entity", "validation_error", "Missing fields object");
 
-            const updated = cms.saveEntry(CT, ctx.allocator, session.auth.db, entry_id, merged, .{
-                .author_id = session.user.id,
-            }) catch return json.errorEnvelope(ctx, "500 Internal Server Error", "save_failed", "Failed to update entry");
+    const merged_json = mergeFieldsJson(ctx.allocator, existing.data, patch) catch
+        return json.errorEnvelope(ctx, "500 Internal Server Error", "save_failed", "Failed to merge fields");
+    defer ctx.allocator.free(merged_json);
 
-            return json.ok(ctx, updated);
+    var updated = cms.saveEntry(ctx.allocator, session.auth.db, type_id, entry_id, merged_json, .{
+        .author_id = session.user.id,
+    }) catch return json.errorEnvelope(ctx, "500 Internal Server Error", "save_failed", "Failed to update entry");
+    defer updated.deinit(ctx.allocator);
+
+    return json.ok(ctx, updated);
+}
+
+/// Overlay `patch` (a JSON object) on top of `existing` (a FieldMap from
+/// the current entry) and return the merged JSON as an owned string.
+fn mergeFieldsJson(
+    allocator: std.mem.Allocator,
+    existing: cms.query.FieldMap,
+    patch: std.json.Value,
+) ![]u8 {
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    try w.writeByte('{');
+    var first = true;
+
+    // First, fields from the patch (these win on conflict).
+    if (patch == .object) {
+        var pit = patch.object.iterator();
+        while (pit.next()) |kv| {
+            if (!first) try w.writeByte(',');
+            first = false;
+            try w.print("\"{s}\":{f}", .{ kv.key_ptr.*, std.json.fmt(kv.value_ptr.*, .{}) });
         }
     }
 
-    return json.errorEnvelope(ctx, "404 Not Found", "unknown_type", "Unknown content type");
+    // Then any existing fields the patch didn't touch.
+    var it = existing.inner.iterator();
+    while (it.next()) |kv| {
+        if (patch == .object and patch.object.contains(kv.key_ptr.*)) continue;
+        if (!first) try w.writeByte(',');
+        first = false;
+        const name = kv.key_ptr.*;
+        switch (kv.value_ptr.*) {
+            .text => |s| try w.print("\"{s}\":{f}", .{ name, std.json.fmt(s, .{}) }),
+            .int => |n| try w.print("\"{s}\":{d}", .{ name, n }),
+            .real => |n| try w.print("\"{s}\":{d}", .{ name, n }),
+            .bool_ => |b| try w.print("\"{s}\":{s}", .{ name, if (b) "true" else "false" }),
+            .datetime => |t| try w.print("\"{s}\":{d}", .{ name, t }),
+            .json => |v| try w.print("\"{s}\":{f}", .{ name, std.json.fmt(v, .{}) }),
+            .null_ => try w.print("\"{s}\":null", .{name}),
+        }
+    }
+
+    try w.writeByte('}');
+    return buf.toOwnedSlice(allocator);
 }
 
 fn handleDelete(ctx: *Context) !void {
@@ -216,59 +272,6 @@ fn getFieldsObject(value: std.json.Value) ?std.json.Value {
         }
     }
     return value;
-}
-
-fn parseCreateData(comptime CT: type, allocator: std.mem.Allocator, fields: std.json.Value) !std.json.Parsed(CT.Data) {
-    return CT.parseDataFromValue(allocator, fields);
-}
-
-fn applyPatch(comptime CT: type, base: CT.Data, fields: std.json.Value) !CT.Data {
-    if (fields != .object) return error.InvalidPatch;
-    var out = base;
-
-    var iter = fields.object.iterator();
-    while (iter.next()) |kv| {
-        var matched = false;
-        inline for (std.meta.fields(CT.Data)) |df| {
-            if (std.mem.eql(u8, kv.key_ptr.*, df.name)) {
-                matched = true;
-                @field(out, df.name) = try convertJsonValue(df.type, kv.value_ptr.*);
-            }
-        }
-        if (!matched) return error.UnknownField;
-    }
-    return out;
-}
-
-fn convertJsonValue(comptime T: type, value: std.json.Value) !T {
-    if (T == []const u8) {
-        if (value == .string) return value.string;
-        return error.InvalidType;
-    }
-    if (T == ?[]const u8) {
-        if (value == .null) return null;
-        if (value == .string) return value.string;
-        return error.InvalidType;
-    }
-    if (T == bool) {
-        if (value == .bool) return value.bool;
-        return error.InvalidType;
-    }
-    if (T == ?bool) {
-        if (value == .null) return null;
-        if (value == .bool) return value.bool;
-        return error.InvalidType;
-    }
-    if (T == i64) {
-        if (value == .integer) return @intCast(value.integer);
-        return error.InvalidType;
-    }
-    if (T == ?i64) {
-        if (value == .null) return null;
-        if (value == .integer) return @intCast(value.integer);
-        return error.InvalidType;
-    }
-    return error.UnsupportedType;
 }
 
 fn extractFieldsArrayJson(allocator: std.mem.Allocator, value: std.json.Value) ?[]const u8 {

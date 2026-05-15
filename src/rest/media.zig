@@ -7,8 +7,8 @@ const media_query = @import("media_query");
 const mime = @import("mime");
 const storage = @import("storage");
 const multipart = @import("multipart");
-const json = @import("rest_json");
-const rest_auth = @import("rest_auth");
+const json = @import("json.zig");
+const rest_auth = @import("auth.zig");
 
 const is_wasm = builtin.target.cpu.arch == .wasm32;
 

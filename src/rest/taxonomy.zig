@@ -2,8 +2,8 @@ const std = @import("std");
 const Router = @import("router").Router;
 const Context = @import("middleware").Context;
 const taxonomy = @import("taxonomy");
-const json = @import("rest_json");
-const rest_auth = @import("rest_auth");
+const json = @import("json.zig");
+const rest_auth = @import("auth.zig");
 
 pub fn registerRoutes(router: *Router) !void {
     try router.get("/api/taxonomies/:tax/terms", handleListTerms);
@@ -39,7 +39,7 @@ fn handleCreateTerm(ctx: *Context) !void {
         return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "parent_id must be string or null");
     } else null;
 
-    const term = taxonomy.createTerm(ctx.allocator, session.auth.db, taxonomy_id, name_value.string, parent_id) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "create_failed", "Failed to create term");
+    const term = taxonomy.createTerm(ctx.allocator, session.auth.db, taxonomy_id, name_value.string, parent_id, session.user.id) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "create_failed", "Failed to create term");
     defer freeTerm(ctx.allocator, term);
 
     try json.created(ctx, term);
@@ -56,7 +56,7 @@ fn handleUpdateTerm(ctx: *Context) !void {
 
     if (parsed.value.object.get("name")) |name_value| {
         if (name_value != .string) return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "name must be string");
-        taxonomy.renameTerm(session.auth.db, term_id, name_value.string) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "update_failed", "Failed to rename term");
+        taxonomy.renameTerm(session.auth.db, term_id, name_value.string, session.user.id) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "update_failed", "Failed to rename term");
     }
 
     if (parsed.value.object.get("parent_id")) |parent_value| {
@@ -67,7 +67,7 @@ fn handleUpdateTerm(ctx: *Context) !void {
         else
             return json.errorEnvelope(ctx, "400 Bad Request", "bad_request", "parent_id must be string or null");
 
-        taxonomy.moveTermParent(session.auth.db, term_id, parent_id) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "update_failed", "Failed to move term");
+        taxonomy.moveTermParent(session.auth.db, term_id, parent_id, session.user.id) catch return json.errorEnvelope(ctx, "422 Unprocessable Entity", "update_failed", "Failed to move term");
     }
 
     try json.ok(ctx, .{ .updated = true, .id = term_id });
