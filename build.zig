@@ -1,4 +1,15 @@
 const std = @import("std");
+const helpers = @import("build/helpers.zig");
+const plugins_mod = @import("build/plugins.zig");
+const content_types_mod = @import("build/content_types.zig");
+const wasm_build = @import("build/wasm.zig");
+const db_init_build = @import("build/db_init.zig");
+const theme_build = @import("build/theme.zig");
+const vendors = @import("build/vendors.zig");
+
+const addImports = helpers.addImports;
+const sanitizeImportName = helpers.sanitizeImportName;
+const getMimeForBuild = helpers.getMimeForBuild;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -41,121 +52,25 @@ pub fn build(b: *std.Build) void {
     else
         null;
 
-    // ZSX amalgamation — single vendor/zsx.zig for all build tools + runtime
-    const zsx = b.createModule(.{
-        .root_source_file = b.path("vendor/zsx.zig"),
-    });
-
-    // Thin entry points for build tools (generated at build time)
-    const zsx_entries = b.addWriteFiles();
-    const transpile_entry = zsx_entries.add("zsx_transpile_main.zig",
-        \\const z = @import("zsx");
-        \\pub fn main() !void { return z.transpile.main(); }
-        \\
-    );
-    const format_entry = zsx_entries.add("zsx_format_main.zig",
-        \\const z = @import("zsx");
-        \\pub fn main() !void { return z.format.main(); }
-        \\
-    );
-
-    // Build ZSX transpiler
-    const zsx_transpiler = b.addExecutable(.{
-        .name = "zsx_transpile",
-        .root_module = b.createModule(.{
-            .root_source_file = transpile_entry,
-            .target = b.graph.host,
-            .imports = &.{.{ .name = "zsx", .module = zsx }},
-        }),
-    });
-
-    // Run ZSX transpiler for views (cacheable: declared inputs + output directory)
-    const transpile_zsx_cmd = b.addRunArtifact(zsx_transpiler);
-    transpile_zsx_cmd.addDirectoryArg(b.path("src/views"));
-    const gen_views = transpile_zsx_cmd.addOutputDirectoryArg("views");
-
-    // Register .zsx files for content-based cache checking
-    {
-        var views_dir = b.build_root.handle.openDir("src/views", .{ .iterate = true }) catch
-            @panic("cannot open src/views");
-        defer views_dir.close();
-        var walker = views_dir.walk(b.allocator) catch @panic("cannot walk src/views");
-        defer walker.deinit();
-        while (walker.next() catch @panic("walk error")) |entry| {
-            if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, ".zsx")) {
-                transpile_zsx_cmd.addFileInput(b.path(b.pathJoin(&.{ "src/views", entry.path })));
-            }
-        }
-    }
-
-    // Build ZSX formatter
-    const zsx_formatter = b.addExecutable(.{
-        .name = "zsx_format",
-        .root_module = b.createModule(.{
-            .root_source_file = format_entry,
-            .target = b.graph.host,
-            .imports = &.{.{ .name = "zsx", .module = zsx }},
-        }),
-    });
-
-    // Format step (zig build fmt)
-    const fmt_step = b.step("fmt", "Format ZSX files");
-    const fmt_cmd = b.addRunArtifact(zsx_formatter);
-    fmt_cmd.setCwd(b.path("."));
-    fmt_cmd.addArgs(&.{"src/views"});
-    fmt_step.dependOn(&fmt_cmd.step);
-
     // =========================================================================
-    // Theme Pipeline: .publr → .zsx → .zig
+    // Theme + ZSX pipeline (build/theme.zig)
     // =========================================================================
-
-    // publr_template module (shared between preprocess tool and tests)
-    const publr_template_module = b.createModule(.{
-        .root_source_file = b.path("src/tools/publr_template.zig"),
-        .imports = &.{.{ .name = "zsx", .module = zsx }},
+    const theme_pipe = theme_build.wire(b, .{
+        .project_dir = project_dir,
+        .theme_path = theme_path,
+        .target = target,
+        .optimize = optimize,
+        .minify_css = minify_css,
     });
-
-    // Build .publr preprocessor
-    const publr_preprocess = b.addExecutable(.{
-        .name = "publr_preprocess",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tools/publr_preprocess.zig"),
-            .target = b.graph.host,
-            .imports = &.{.{ .name = "publr_template", .module = publr_template_module }},
-        }),
-    });
-
-    // Resolve theme directory (--project-dir for external builds, local otherwise)
-    const theme_dir: std.Build.LazyPath = if (project_dir) |pd|
-        .{ .cwd_relative = b.pathJoin(&.{ pd, theme_path }) }
-    else
-        b.path(theme_path);
-
-    // Step 1: Preprocess .publr → synthetic .zsx
-    const preprocess_cmd = b.addRunArtifact(publr_preprocess);
-    preprocess_cmd.addDirectoryArg(theme_dir);
-    const theme_zsx = preprocess_cmd.addOutputDirectoryArg("theme_zsx");
-
-    // Register .publr files for cache invalidation
-    {
-        const local_theme_dir = if (project_dir) |_| null else b.build_root.handle.openDir(theme_path, .{ .iterate = true }) catch null;
-        if (local_theme_dir) |*dir| {
-            var d = dir.*;
-            defer d.close();
-            var walker = d.walk(b.allocator) catch @panic("cannot walk theme dir");
-            defer walker.deinit();
-            while (walker.next() catch @panic("walk error")) |entry| {
-                if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, ".publr")) {
-                    preprocess_cmd.addFileInput(b.path(b.pathJoin(&.{ theme_path, entry.path })));
-                }
-            }
-        }
-    }
-
-    // Step 2: ZSX transpile synthetic .zsx → .zig
-    const transpile_theme_cmd = b.addRunArtifact(zsx_transpiler);
-    transpile_theme_cmd.addDirectoryArg(theme_zsx);
-    const gen_theme = transpile_theme_cmd.addOutputDirectoryArg("theme");
+    const zsx = theme_pipe.zsx;
+    const publr_template_module = theme_pipe.publr_template_module;
+    const transpile_zsx_cmd = theme_pipe.transpile_zsx_cmd;
+    const transpile_theme_cmd = theme_pipe.transpile_theme_cmd;
+    const gen_views = theme_pipe.gen_views;
+    const gen_theme = theme_pipe.gen_theme;
+    const jit_css_output = theme_pipe.jit_css_output;
+    const theme_jit_css_output = theme_pipe.theme_jit_css_output;
+    const build_opts = theme_pipe.build_opts;
 
     const exe = b.addExecutable(.{
         .name = "publr",
@@ -165,143 +80,15 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-
-    // Main exe depends on transpile steps (init_db dependency added later)
     exe.step.dependOn(&transpile_zsx_cmd.step);
     exe.step.dependOn(&transpile_theme_cmd.step);
-
-    // ── JIT CSS compiler ────────────────────────────────────────────────────
-    // Runs after ZSX transpile. Reads the class manifest (css_classes.txt)
-    // produced by the ZSX/.publr transpilers and emits utility CSS to stdout,
-    // captured and embedded as a static asset at /static/publr.css.
-    //
-    // Class collection is the transpilers' job; this build no longer scans
-    // Zig sources for class-shaped literals (see
-    // `memory/project_jit_input_scope.md`).
-    const jit_compiler = b.addExecutable(.{
-        .name = "jit",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("vendor/jit/main.zig"),
-            .target = b.graph.host,
-            .imports = &.{.{ .name = "zsx", .module = zsx }},
-        }),
-    });
-
-    const jit_cmd = b.addRunArtifact(jit_compiler);
-    jit_cmd.setCwd(b.path("."));
-    // Layer the design-system semantic palette so JIT auto-generates
-    // `bg-card`, `text-foreground`, `border-border`, etc. utilities that
-    // the publr_ui components emit. ds-tokens.zon chains each `--color-{name}`
-    // to the unprefixed `var(--{name})` defined in tokens.css, preserving
-    // the existing `:root` / `.dark` cascade for runtime light/dark
-    // switching. Vendored from design-system/src/styles/ds-tokens.zon.
-    jit_cmd.addPrefixedFileArg("--theme=", b.path("vendor/jit/ds-tokens.zon"));
-    // Debug builds: keep CSS readable for devtools. Release builds: rely on
-    // the JIT CLI's default (minified). `-Dminify=true|false` overrides this.
-    // Same gate applied to theme_jit_cmd. The resolved value is also baked
-    // into the binary (build_options module) so the --watch rebuild loop in
-    // main.zig can propagate the flag — without that, the next rebuild
-    // triggered by a source change drops -Dminify=true and emits unminified
-    // CSS.
-    const should_minify = minify_css orelse (optimize != .Debug);
-    if (!should_minify) jit_cmd.addArg("--no-minify");
-
-    // Comptime build options surfaced to main.zig (used by the --watch
-    // rebuild command builder).
-    const build_opts = b.addOptions();
-    build_opts.addOption(bool, "minify_css", should_minify);
-    // First manifest: classes from CMS's own admin .zsx templates.
-    jit_cmd.addFileArg(gen_views.path(b, "css_classes.txt"));
-    // Second manifest: classes baked into publr_ui.zig — invisible to the
-    // local transpiler because the components arrived pre-amalgamated.
-    // Without this, classes like `bg-card`, `text-card-foreground`,
-    // `text-popover-foreground`, etc. emitted by Card/Heading/Text wouldn't
-    // get utility rules generated. Re-vendor with `vendor-design-system.sh`
-    // after design-system .zsx changes.
-    jit_cmd.addFileArg(b.path("vendor/publr_ui.classes.txt"));
-    jit_cmd.has_side_effects = true;
-    jit_cmd.step.dependOn(&transpile_zsx_cmd.step);
-    const jit_css_output = jit_cmd.captureStdOut();
-
-    // Theme JIT: same compiler, fed by the theme's class manifest produced by
-    // the .publr → ZSX → transpile chain. Output is served at /theme.css.
-    // We use `--prepend` so the public stylesheet ships with preflight inline,
-    // matching the standalone-resource convention (no separate /preflight.css).
-    //
-    // If the theme directory contains `theme.zon`, pass it via `--theme=` so
-    // the theme can override / extend the JIT's default-theme tokens at the
-    // consumer's BUILD time (the JIT's runtime). Per
-    // `memory/project_jit_theme_comptime.md`: the JIT is theme-agnostic; the
-    // override is merged with `jit.extendThemeRuntime` and the resulting CSS
-    // is fully baked into this build's output. No theme.zon = use the
-    // embedded default-theme.zon.
-    const theme_zon_rel = b.pathJoin(&.{ theme_path, "theme.zon" });
-    const has_theme_zon = blk: {
-        if (project_dir != null) break :blk false; // external builds skip — keep the path simple
-        b.build_root.handle.access(theme_zon_rel, .{}) catch break :blk false;
-        break :blk true;
-    };
-
-    const theme_jit_cmd = b.addRunArtifact(jit_compiler);
-    theme_jit_cmd.setCwd(b.path("."));
-    // Layer the DS semantic palette first so theme.zon brand overrides win
-    // when both define the same `color-{name}`. Public themes that use
-    // `bg-card`/`text-foreground` etc. through publr_ui get them for free.
-    theme_jit_cmd.addPrefixedFileArg("--theme=", b.path("vendor/jit/ds-tokens.zon"));
-    if (!should_minify) theme_jit_cmd.addArg("--no-minify");
-    if (has_theme_zon) {
-        // Use the explicit-flag form so the manifest stays as the trailing
-        // positional. addPrefixedFileArg attaches the file dependency so
-        // theme.zon edits trigger a rebuild.
-        theme_jit_cmd.addPrefixedFileArg("--theme=", b.path(theme_zon_rel));
-    }
-    theme_jit_cmd.addArg("--prepend");
-    theme_jit_cmd.addFileArg(b.path("vendor/jit/preflight.css"));
-    theme_jit_cmd.addFileArg(gen_theme.path(b, "css_classes.txt"));
-    theme_jit_cmd.has_side_effects = true;
-    theme_jit_cmd.step.dependOn(&transpile_theme_cmd.step);
-    const theme_jit_css_output = theme_jit_cmd.captureStdOut();
 
     // Note: preBuild/postBuild hooks from publr.zon run during `publr build` CLI,
     // not during `zig build`. This avoids hard failures when tools aren't installed.
 
-    // Vendor static library — SQLite, stb_image, libwebp compiled once and cached.
-    // Only recompiled when vendor sources change, not when Zig code changes.
-    const vendor_lib = b.addLibrary(.{
-        .name = "publr_vendors",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    vendor_lib.linkLibC();
-    vendor_lib.addIncludePath(b.path("vendor"));
-    vendor_lib.addCSourceFile(.{
-        .file = b.path("vendor/sqlite3.c"),
-        .flags = &.{
-            "-DSQLITE_DQS=0",
-            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
-            "-DSQLITE_USE_ALLOCA=1",
-            "-DSQLITE_THREADSAFE=1",
-            "-DSQLITE_TEMP_STORE=2",
-            "-DSQLITE_ENABLE_FTS5",
-            "-DSQLITE_ENABLE_JSON1",
-        },
-    });
-    // stb_image_resize2 does intentional misaligned uint64 stores in stbir__pack_coefficients,
-    // which triggers UBSan in debug builds. Disable alignment sanitizer for this file.
-    vendor_lib.addCSourceFile(.{
-        .file = b.path("vendor/stb_impl.c"),
-        .flags = &.{"-fno-sanitize=alignment"},
-    });
-    // libwebp split amalgamation: same file compiled 124 times with different PART values
-    for (0..124) |part| {
-        var buf: [32]u8 = undefined;
-        const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        vendor_lib.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{ flag, "-U__SSE2__", "-U__SSE4_1__", "-U__AVX2__" } });
-    }
-
-    // Link vendor lib + libc into exe
+    // Vendor static library — SQLite, stb_image, libwebp compiled once and
+    // cached, recompiled only when vendor sources change.
+    const vendor_lib = vendors.library(b, target, optimize, .{});
     exe.linkLibC();
     exe.addIncludePath(b.path("vendor")); // for @cImport headers
     exe.linkLibrary(vendor_lib);
@@ -325,151 +112,41 @@ pub fn build(b: *std.Build) void {
         }));
     }
 
-    // Embed static assets
-    exe.root_module.addAnonymousImport("static_admin_css", .{
-        .root_source_file = b.path("static/admin.css"),
-    });
-    exe.root_module.addAnonymousImport("static_logo_svg", .{
-        .root_source_file = b.path("static/logo.svg"),
-    });
-    // JIT-emitted utility CSS (replaces the old Tailwind output from publr_ui.css)
-    exe.root_module.addAnonymousImport("static_jit_css", .{
-        .root_source_file = jit_css_output,
-    });
-    // Preflight (resets, --tw-* defaults, keyframes) — vendored alongside the
-    // JIT engine so that publr.css is preflight + utilities concatenated.
-    exe.root_module.addAnonymousImport("static_preflight_css", .{
-        .root_source_file = b.path("vendor/jit/preflight.css"),
-    });
-    // DS token definitions (:root, .dark) — vendored from design-system/src/styles/input.css
-    exe.root_module.addAnonymousImport("static_tokens_css", .{
-        .root_source_file = b.path("vendor/tokens.css"),
-    });
-    exe.root_module.addAnonymousImport("static_admin_js", .{
-        .root_source_file = b.path("static/admin.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_core_js", .{
-        .root_source_file = b.path("static/interact/core.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_toggle_js", .{
-        .root_source_file = b.path("static/interact/toggle.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_portal_js", .{
-        .root_source_file = b.path("static/interact/portal.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_focus_trap_js", .{
-        .root_source_file = b.path("static/interact/focus-trap.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_dismiss_js", .{
-        .root_source_file = b.path("static/interact/dismiss.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_components_js", .{
-        .root_source_file = b.path("static/interact/components.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_index_js", .{
-        .root_source_file = b.path("static/interact/index.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_repeater_js", .{
-        .root_source_file = b.path("static/interact/repeater.js"),
-    });
-    exe.root_module.addAnonymousImport("static_media_selection_js", .{
-        .root_source_file = b.path("static/media-selection.js"),
-    });
-    exe.root_module.addAnonymousImport("static_interact_websocket_js", .{
-        .root_source_file = b.path("static/interact/websocket.js"),
-    });
+    // Embed static assets. Each tuple is (import-name, file-path) — files
+    // are read at build time and surfaced to the runtime via @embedFile.
+    const static_files = .{
+        .{ "static_admin_css", "static/admin.css" },
+        .{ "static_logo_svg", "static/logo.svg" },
+        .{ "static_preflight_css", "vendor/jit/preflight.css" },
+        .{ "static_tokens_css", "vendor/tokens.css" },
+        .{ "static_admin_js", "static/admin.js" },
+        .{ "static_interact_core_js", "static/interact/core.js" },
+        .{ "static_interact_toggle_js", "static/interact/toggle.js" },
+        .{ "static_interact_portal_js", "static/interact/portal.js" },
+        .{ "static_interact_focus_trap_js", "static/interact/focus-trap.js" },
+        .{ "static_interact_dismiss_js", "static/interact/dismiss.js" },
+        .{ "static_interact_components_js", "static/interact/components.js" },
+        .{ "static_interact_index_js", "static/interact/index.js" },
+        .{ "static_interact_repeater_js", "static/interact/repeater.js" },
+        .{ "static_media_selection_js", "static/media-selection.js" },
+        .{ "static_interact_websocket_js", "static/interact/websocket.js" },
+    };
+    inline for (static_files) |sf| {
+        exe.root_module.addAnonymousImport(sf[0], .{ .root_source_file = b.path(sf[1]) });
+    }
+    // JIT-emitted CSS isn't on disk — generated by the JIT compiler.
+    exe.root_module.addAnonymousImport("static_jit_css", .{ .root_source_file = jit_css_output });
     exe.root_module.addAnonymousImport("static_interact_presence_js", .{
         .root_source_file = b.path("static/interact/presence.js"),
     });
     // =========================================================================
     // Theme Static Assets — scan, embed, and generate lookup module
     // =========================================================================
-    const theme_static_module = blk: {
-        const theme_static_path = theme_static_rel;
-        var gen_src: std.ArrayListUnmanaged(u8) = .{};
-        const w = gen_src.writer(b.allocator);
-
-        w.writeAll(
-            \\pub const File = struct {
-            \\    path: []const u8,
-            \\    data: []const u8,
-            \\    content_type: []const u8,
-            \\    disk_path: []const u8,
-            \\};
-            \\
-            \\pub const files = [_]File{
-            \\
-        ) catch @panic("OOM");
-
-        // Collect theme static files. `theme.css` is reserved for the JIT
-        // pipeline — any disk copy is treated as a placeholder and ignored
-        // here so the synthetic JIT-generated entry below wins.
-        var file_count: usize = 0;
-        const local_static_dir = if (project_dir) |_| null else b.build_root.handle.openDir(theme_static_path, .{ .iterate = true }) catch null;
-        if (local_static_dir) |*sd| {
-            var d = sd.*;
-            defer d.close();
-            var walker = d.walk(b.allocator) catch @panic("cannot walk theme static");
-            defer walker.deinit();
-            while (walker.next() catch @panic("walk error")) |entry| {
-                if (entry.kind != .file) continue;
-                const rel = entry.path;
-                if (std.mem.eql(u8, rel, "theme.css")) continue;
-                const import_name = sanitizeImportName(b.allocator, rel);
-                const mime = getMimeForBuild(rel);
-                const disk = b.pathJoin(&.{ theme_static_path, rel });
-
-                w.print(
-                    \\    .{{ .path = "{s}", .data = @embedFile("{s}"), .content_type = "{s}", .disk_path = "{s}" }},
-                    \\
-                , .{ rel, import_name, mime, disk }) catch @panic("OOM");
-
-                file_count += 1;
-            }
-        }
-
-        // Synthetic entry: JIT-emitted theme.css, served at /theme.css.
-        // disk_path is empty — there is no disk file to reload from in dev.
-        w.writeAll(
-            \\    .{ .path = "theme.css", .data = @embedFile("static_theme_jit_css"), .content_type = "text/css", .disk_path = "" },
-            \\
-        ) catch @panic("OOM");
-
-        w.writeAll(
-            \\};
-            \\
-        ) catch @panic("OOM");
-
-        const gen_files = b.addWriteFiles();
-        const theme_static_src = gen_files.add("theme_static.zig", gen_src.items);
-
-        const mod = b.createModule(.{
-            .root_source_file = theme_static_src,
-        });
-
-        // Add anonymous imports for each embedded file (second pass)
-        if (project_dir == null) {
-            var sd2 = b.build_root.handle.openDir(theme_static_path, .{ .iterate = true }) catch @panic("cannot open theme static dir");
-            defer sd2.close();
-            var walker2 = sd2.walk(b.allocator) catch @panic("cannot walk theme static");
-            defer walker2.deinit();
-            while (walker2.next() catch @panic("walk error")) |entry2| {
-                if (entry2.kind != .file) continue;
-                if (std.mem.eql(u8, entry2.path, "theme.css")) continue;
-                const import_name2 = sanitizeImportName(b.allocator, entry2.path);
-                mod.addAnonymousImport(import_name2, .{
-                    .root_source_file = b.path(b.pathJoin(&.{ theme_static_path, entry2.path })),
-                });
-            }
-        }
-
-        // JIT-emitted theme.css from the .publr/ZSX class manifest.
-        mod.addAnonymousImport("static_theme_jit_css", .{
-            .root_source_file = theme_jit_css_output,
-        });
-
-        break :blk mod;
-    };
+    const theme_static_module = theme_build.staticAssetsModule(b, .{
+        .theme_static_rel = theme_static_rel,
+        .project_dir = project_dir,
+        .theme_jit_css_output = theme_jit_css_output,
+    });
     exe.root_module.addImport("theme_static", theme_static_module);
 
     // Design system amalgamation — components, CSS, JS as string constants
@@ -509,8 +186,11 @@ pub fn build(b: *std.Build) void {
 
     // Run route generator: pages/ dir → routes.zig
     const gen_routes_cmd = b.addRunArtifact(publr_gen_routes);
-    // Input: the pages/ subdirectory within the preprocessed theme .zsx output
-    // (we use the .zsx directory because it has the same file structure as pages/)
+    // Input: the theme directory (--project-dir for external builds, local otherwise)
+    const theme_dir: std.Build.LazyPath = if (project_dir) |pd|
+        .{ .cwd_relative = b.pathJoin(&.{ pd, theme_path }) }
+    else
+        b.path(theme_path);
     gen_routes_cmd.addDirectoryArg(theme_dir);
     const gen_routes_dir = gen_routes_cmd.addOutputDirectoryArg("theme_routes");
 
@@ -538,394 +218,116 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("theme_routes", theme_routes);
 
     // =========================================================================
-    // Schema Modules
+    // Module Registry — declares core, schema, and shared modules compactly.
+    // External modules (publr_config, publr_ui) are registered so others can
+    // reference them by name. finalize() at the end resolves cross-deps.
     // =========================================================================
-    const field_module = b.createModule(.{
-        .root_source_file = b.path("src/core/schema/field.zig"),
-    });
-    const content_type_module = b.createModule(.{
-        .root_source_file = b.path("src/core/schema/content_type.zig"),
-        .imports = &.{.{ .name = "field", .module = field_module }},
-    });
+    var reg = helpers.ModuleRegistry.init(b);
+    reg.register("publr_config", publr_config_module);
+    reg.register("publr_ui", publr_ui);
 
-    // Core content type schemas
-    const schema_post_module = b.createModule(.{
-        .root_source_file = b.path("src/schemas/post.zig"),
-        .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "content_type", .module = content_type_module },
-        },
-    });
-    const schema_page_module = b.createModule(.{
-        .root_source_file = b.path("src/schemas/page.zig"),
-        .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "content_type", .module = content_type_module },
-        },
-    });
-    const schema_media_module = b.createModule(.{
-        .root_source_file = b.path("src/schemas/media.zig"),
-        .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "content_type", .module = content_type_module },
-        },
-    });
-
-    // Aggregated core schemas module
-    const schemas_module = b.createModule(.{
-        .root_source_file = b.path("src/schemas/mod.zig"),
-        .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "content_type", .module = content_type_module },
-            .{ .name = "schema_post", .module = schema_post_module },
-            .{ .name = "schema_page", .module = schema_page_module },
-            .{ .name = "schema_media", .module = schema_media_module },
-        },
-    });
-
-    // Schema registry (merges all layers)
-    const schema_registry_module = b.createModule(.{
-        .root_source_file = b.path("src/core/schema/registry.zig"),
-        .imports = &.{
-            .{ .name = "field", .module = field_module },
-            .{ .name = "content_type", .module = content_type_module },
-            .{ .name = "schemas", .module = schemas_module },
-        },
-    });
-
-    // Seed module (comptime INSERT generation, no db dependency)
-    const seed_module = b.createModule(.{
-        .root_source_file = b.path("src/core/schema/seed.zig"),
-        .imports = &.{
-            .{ .name = "schema_registry", .module = schema_registry_module },
+    // Schemas
+    const field_module = reg.leaf("field", "src/core/schema/field.zig");
+    _ = reg.simple("content_type", "src/core/schema/content_type.zig", &.{ "field", "middleware" });
+    _ = reg.simple("field_types", "src/core/schema/field_types.zig", &.{"field"});
+    _ = reg.simple("schema_db_types", "src/core/schema/db_types.zig", &.{ "db", "field", "content_type" });
+    // schema_media is the only per-schema module — reused by db_init, main exe,
+    // WASM build, and admin plugins. post.zig and page.zig are relative-imported
+    // by src/schemas/mod.zig, so they compile as part of schemas_module.
+    const schema_media_module = reg.simple("schema_media", "src/schemas/media.zig", &.{ "field", "content_type" });
+    const schemas_module = reg.simple("schemas", "src/schemas/mod.zig", &.{ "field", "content_type", "schema_media" });
+    // Compile-in content type discovery. Today scans the conventional plugin
+    // dirs for `pub const content_types: []const ContentTypeDef` — empty
+    // slice when nothing exposes one. Wired into `schema_registry` so the
+    // runtime accessors can iterate `compiled_in_types`.
+    const content_types_discovery = content_types_mod.discover(
+        b,
+        &.{ "src/modules/admin", "plugins" },
+        &.{
+            .{ .name = "content_type", .module = reg.get("content_type") },
             .{ .name = "field", .module = field_module },
         },
-    });
+    );
+    reg.register("compiled_in_content_types", content_types_discovery.module);
+    const schema_registry_module = reg.simple("schema_registry", "src/core/schema/registry.zig", &.{ "field", "content_type", "schemas", "compiled_in_content_types" });
+    const seed_module = reg.simple("seed", "src/core/schema/seed.zig", &.{ "schema_registry", "field", "db", "sync" });
 
-    // Note: schema_sync_module needs db_module, which is defined below.
-    // We'll add the import after db_module is created.
+    // Shared leaves (no deps)
+    _ = reg.leaf("url", "src/url.zig");
+    const mime_module = reg.leaf("mime", "src/mime.zig");
+    const multipart_module = reg.leaf("multipart", "src/multipart.zig");
 
-    // Shared URL encoding/decoding
-    const url_module = b.createModule(.{
-        .root_source_file = b.path("src/url.zig"),
-    });
-
-    // Shared MIME type detection
-    const mime_module = b.createModule(.{
-        .root_source_file = b.path("src/mime.zig"),
-    });
-
-    // Shared multipart form data parsing
-    const multipart_module = b.createModule(.{
-        .root_source_file = b.path("src/multipart.zig"),
-    });
-
-    // =========================================================================
-    // Core Modules (shared between main exe and plugins)
-    // =========================================================================
-    const middleware_module = b.createModule(.{
-        .root_source_file = b.path("src/middleware.zig"),
-        .imports = &.{.{ .name = "url", .module = url_module }},
-    });
-
-    // Shared plugin utilities (redirect, query params, formatSize, etc.)
-    const plugin_utils_module = b.createModule(.{
-        .root_source_file = b.path("src/plugin_utils.zig"),
-        .imports = &.{.{ .name = "middleware", .module = middleware_module }},
-    });
-    // Shared pagination (page calculation, offset, URL generation)
-    const pagination_module = b.createModule(.{
-        .root_source_file = b.path("src/pagination.zig"),
-        .imports = &.{.{ .name = "plugin_utils", .module = plugin_utils_module }},
-    });
-    const router_module = b.createModule(.{
-        .root_source_file = b.path("src/router.zig"),
-        .imports = &.{.{ .name = "middleware", .module = middleware_module }},
-    });
-    const db_module = b.createModule(.{
-        .root_source_file = b.path("src/core/db.zig"),
-    });
+    // Core modules
+    const middleware_module = reg.simple("middleware", "src/middleware.zig", &.{"url"});
+    const plugin_utils_module = reg.simple("plugin_utils", "src/plugin_utils.zig", &.{"middleware"});
+    const pagination_module = reg.simple("pagination", "src/pagination.zig", &.{"plugin_utils"});
+    const router_module = reg.simple("router", "src/router.zig", &.{"middleware"});
+    const db_module = reg.leaf("db", "src/core/db.zig");
     db_module.addIncludePath(b.path("vendor"));
-
-    const publish_hooks_module = b.createModule(.{
-        .root_source_file = b.path("src/publish_hooks.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-        },
-    });
-
-    const modules_api_module = b.createModule(.{
-        .root_source_file = b.path("src/modules/mod.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "db", .module = db_module },
-            .{ .name = "publr_config", .module = publr_config_module },
-        },
-    });
-
-    // Shared ID generation
-    const id_gen_module = b.createModule(.{
-        .root_source_file = b.path("src/core/id_gen.zig"),
-    });
-
-    // Schema DDL (needs db_module)
-    const schema_sync_module = b.createModule(.{
-        .root_source_file = b.path("src/core/schema/sync.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-        },
-    });
-
-    const core_init_module = b.createModule(.{
-        .root_source_file = b.path("src/core/init.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "schema_sync", .module = schema_sync_module },
-            .{ .name = "seed", .module = seed_module },
-        },
-    });
-
-    // Add test-only imports to seed_module (db and sync defined above)
-    seed_module.addImport("db", db_module);
-    seed_module.addImport("sync", schema_sync_module);
+    _ = reg.simple("publish_hooks", "src/publish_hooks.zig", &.{"db"});
+    const modules_api_module = reg.simple("modules", "src/modules/mod.zig", &.{ "router", "db", "publr_config" });
+    _ = reg.leaf("id_gen", "src/core/id_gen.zig");
+    const schema_sync_module = reg.simple("schema_sync", "src/core/schema/sync.zig", &.{"db"});
+    // schema_sync is also imported as "sync" by seed_module.
+    reg.register("sync", schema_sync_module);
+    const core_init_module = reg.simple("core_init", "src/core/init.zig", &.{ "db", "schema_sync", "seed", "schema_registry", "schemas" });
 
     // =========================================================================
     // Database Initialization Tool (comptime schema generation)
     // =========================================================================
-    const init_db = b.addExecutable(.{
-        .name = "init_db",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tools/init_db.zig"),
-            .target = b.graph.host,
-        }),
-    });
-    init_db.linkLibC();
-    init_db.addCSourceFile(.{
-        .file = b.path("vendor/sqlite3.c"),
-        .flags = &.{
-            "-DSQLITE_DQS=0",
-            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
-            "-DSQLITE_USE_ALLOCA=1",
-            "-DSQLITE_THREADSAFE=1",
-            "-DSQLITE_TEMP_STORE=2",
-            "-DSQLITE_ENABLE_FTS5",
-            "-DSQLITE_ENABLE_JSON1",
-        },
-    });
-    init_db.addIncludePath(b.path("vendor"));
-
-    // Add schema modules to init_db
-    init_db.root_module.addImport("schema_registry", schema_registry_module);
-    init_db.root_module.addImport("field", field_module);
-    init_db.root_module.addImport("seed", seed_module);
-
-    // Run init_db as build step
-    const init_db_cmd = b.addRunArtifact(init_db);
-    init_db_cmd.addArg(if (project_dir) |pd|
-        b.pathJoin(&.{ pd, "data/publr.db" })
-    else
-        "data/publr.db");
-
-    // Main exe depends on database init
-    // Skipped in watch mode (DB already initialized) and external builds
-    // (DB exists in project directory, managed by the running CMS)
-    if (!watch_mode and config_path == null) {
-        exe.step.dependOn(&init_db_cmd.step);
-    }
-
-    // Time utility (avoids 128-bit math on WASI for non-LLVM backend)
-    const time_util_module = b.createModule(.{
-        .root_source_file = b.path("src/time_util.zig"),
+    db_init_build.wire(b, .{
+        .schema_registry = schema_registry_module,
+        .field = field_module,
+        .seed = seed_module,
+        .exe = exe,
+        .project_dir = project_dir,
+        .config_path = config_path,
+        .watch_mode = watch_mode,
     });
 
-    // Shared ISO-8601 timestamp parser (used by CLI/REST adapters)
-    const core_time_module = b.createModule(.{
-        .root_source_file = b.path("src/core/time.zig"),
-    });
-
-    // Version history management
-    const version_module = b.createModule(.{
-        .root_source_file = b.path("src/core/version.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "time_util", .module = time_util_module },
-            .{ .name = "field", .module = field_module },
-            .{ .name = "schema_registry", .module = schema_registry_module },
-            .{ .name = "id_gen", .module = id_gen_module },
-        },
-    });
-
-    // Release management
-    const release_module = b.createModule(.{
-        .root_source_file = b.path("src/core/release.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "id_gen", .module = id_gen_module },
-            .{ .name = "time_util", .module = time_util_module },
-            .{ .name = "version", .module = version_module },
-        },
-    });
-
-    // Entry query builder
-    const query_module = b.createModule(.{
-        .root_source_file = b.path("src/core/query.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-        },
-    });
-
-    // CMS facade
-    const cms_module = b.createModule(.{
-        .root_source_file = b.path("src/core/content.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "id_gen", .module = id_gen_module },
-            .{ .name = "query", .module = query_module },
-            .{ .name = "version", .module = version_module },
-            .{ .name = "release", .module = release_module },
-            .{ .name = "core_init", .module = core_init_module },
-            .{ .name = "schemas", .module = schemas_module },
-            .{ .name = "publish_hooks", .module = publish_hooks_module },
-        },
-    });
-    // Storage backend
-    const storage_module = b.createModule(.{
-        .root_source_file = b.path("src/core/storage.zig"),
-        .imports = &.{
-            .{ .name = "time_util", .module = time_util_module },
-        },
-    });
-    // SVG sanitizer
-    const svg_sanitize_module = b.createModule(.{
-        .root_source_file = b.path("src/svg_sanitize.zig"),
-    });
-    // Taxonomy management (folders/tags)
-    const taxonomy_module = b.createModule(.{
-        .root_source_file = b.path("src/core/taxonomy.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "id_gen", .module = id_gen_module },
-        },
-    });
-    // Template context for .publr theme templates
-    const template_context_module = b.createModule(.{
-        .root_source_file = b.path("src/core/template_context.zig"),
-        .imports = &.{
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "schemas", .module = schemas_module },
-            .{ .name = "taxonomy", .module = taxonomy_module },
-            .{ .name = "db", .module = db_module },
-            .{ .name = "publr_config", .module = publr_config_module },
-            .{ .name = "middleware", .module = middleware_module },
-        },
-    });
-
-    // Media CRUD API
-    const media_module = b.createModule(.{
-        .root_source_file = b.path("src/core/media.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "schema_media", .module = schema_media_module },
-            .{ .name = "storage", .module = storage_module },
-            .{ .name = "svg_sanitize", .module = svg_sanitize_module },
-            .{ .name = "id_gen", .module = id_gen_module },
-            .{ .name = "taxonomy", .module = taxonomy_module },
-        },
-    });
-    // Media query/count functions
-    const media_query_module = b.createModule(.{
-        .root_source_file = b.path("src/core/media_query.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "media", .module = media_module },
-            .{ .name = "taxonomy", .module = taxonomy_module },
-        },
-    });
-    // Add media_query to media (circular: media re-exports media_query)
-    media_module.addImport("media_query", media_query_module);
-    // Media filesystem sync
-    const media_sync_module = b.createModule(.{
-        .root_source_file = b.path("src/core/media_sync.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "media", .module = media_module },
-            .{ .name = "storage", .module = storage_module },
-            .{ .name = "svg_sanitize", .module = svg_sanitize_module },
-            .{ .name = "mime", .module = mime_module },
-        },
-    });
+    const time_util_module = reg.leaf("time_util", "src/time_util.zig");
+    const core_time_module = reg.leaf("core_time", "src/core/time.zig");
+    _ = reg.simple("version", "src/core/version.zig", &.{ "db", "time_util", "field", "schema_registry", "id_gen" });
+    _ = reg.simple("release", "src/core/release.zig", &.{ "db", "id_gen", "time_util", "version" });
+    _ = reg.simple("query", "src/core/query.zig", &.{ "db", "entry", "schema_registry", "content_type" });
+    _ = reg.leaf("entry", "src/core/entry.zig");
+    _ = reg.simple("entry_storage", "src/core/entry_storage.zig", &.{ "db", "field", "content_type", "entry" });
+    const cms_module = reg.simple("cms", "src/core/content.zig", &.{ "db", "id_gen", "query", "version", "release", "core_init", "schemas", "publish_hooks", "entry_storage", "schema_registry", "content_type", "field" });
+    const storage_module = reg.simple("storage", "src/core/storage.zig", &.{"time_util"});
+    _ = reg.leaf("svg_sanitize", "src/svg_sanitize.zig");
+    const taxonomy_module = reg.simple("taxonomy", "src/core/taxonomy.zig", &.{ "db", "id_gen" });
+    const template_context_module = reg.simple("template_context", "src/core/template_context.zig", &.{ "cms", "schema_registry", "taxonomy", "db", "publr_config", "middleware" });
+    const media_module = reg.simple("media", "src/core/media.zig", &.{ "db", "cms", "schema_media", "storage", "svg_sanitize", "id_gen", "taxonomy", "media_query" });
+    _ = reg.simple("media_query", "src/core/media_query.zig", &.{ "db", "cms", "media", "taxonomy" });
+    const media_sync_module = reg.simple("media_sync", "src/core/media_sync.zig", &.{ "db", "media", "storage", "svg_sanitize", "mime" });
     media_sync_module.addIncludePath(b.path("vendor"));
-
-    const tpl_module = b.createModule(.{
-        .root_source_file = b.path("src/tpl.zig"),
-    });
-    const auth_module = b.createModule(.{
-        .root_source_file = b.path("src/core/auth.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "time_util", .module = time_util_module },
-        },
-    });
-    const auth_middleware_module = b.createModule(.{
-        .root_source_file = b.path("src/auth_middleware.zig"),
-        .imports = &.{
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "auth", .module = auth_module },
-            .{ .name = "db", .module = db_module },
-        },
-    });
-    const csrf_module = b.createModule(.{
-        .root_source_file = b.path("src/csrf.zig"),
-        .imports = &.{
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-        },
-    });
-    const admin_api_module = b.createModule(.{
-        .root_source_file = b.path("src/admin_api.zig"),
-        .imports = &.{
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "publr_ui", .module = publr_ui },
-        },
-    });
-    // Image processing (stb + libwebp wrappers)
-    const image_module = b.createModule(.{
-        .root_source_file = b.path("src/image.zig"),
-    });
+    const tpl_module = reg.leaf("tpl", "src/tpl.zig");
+    const auth_module = reg.simple("auth", "src/core/auth.zig", &.{ "db", "time_util" });
+    const auth_middleware_module = reg.simple("auth_middleware", "src/auth_middleware.zig", &.{ "middleware", "auth", "db" });
+    const csrf_module = reg.simple("csrf", "src/csrf.zig", &.{ "middleware", "auth_middleware" });
+    _ = reg.simple("actions", "src/actions.zig", &.{ "middleware", "csrf" });
+    const admin_api_module = reg.simple("admin_api", "src/admin_api.zig", &.{ "middleware", "publr_ui", "actions", "content_type", "schemas", "schema_registry" });
+    const image_module = reg.leaf("image", "src/image.zig");
     image_module.addIncludePath(b.path("vendor"));
-    // Media serve handler
-    const media_handler_module = b.createModule(.{
-        .root_source_file = b.path("src/media_handler.zig"),
-        .imports = &.{
-            .{ .name = "storage", .module = storage_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "image", .module = image_module },
-            .{ .name = "url", .module = url_module },
-            .{ .name = "mime", .module = mime_module },
-        },
-    });
-    const gravatar_module = b.createModule(.{
-        .root_source_file = b.path("src/gravatar.zig"),
-    });
-    const websocket_module = b.createModule(.{
-        .root_source_file = b.path("src/websocket.zig"),
-    });
-    const presence_module = b.createModule(.{
-        .root_source_file = b.path("src/core/presence.zig"),
-        .imports = &.{
-            .{ .name = "websocket", .module = websocket_module },
-            .{ .name = "gravatar", .module = gravatar_module },
-        },
-    });
+    const media_handler_module = reg.simple("media_handler", "src/media_handler.zig", &.{ "storage", "auth_middleware", "middleware", "image", "url", "mime" });
+    const gravatar_module = reg.leaf("gravatar", "src/gravatar.zig");
+    const websocket_module = reg.leaf("websocket", "src/websocket.zig");
+    const presence_module = reg.simple("presence", "src/core/presence.zig", &.{ "websocket", "gravatar" });
+
+    // Resolve the named dep graph — wires every reg.simple(...) module.
+    reg.finalize();
 
     views.addImport("publr_ui", publr_ui);
 
     // =========================================================================
-    // CLI Modules
+    // CLI dispatcher
     // =========================================================================
+    // src/cli/main.zig pulls in every cli/*.zig peer via relative imports, so
+    // we only declare the dispatcher as a module. Its imports list is the
+    // union of shared modules any cli/*.zig file reaches for.
+    //
+    // Test helpers live in src/tests/ — outside src/cli/, so Zig refuses
+    // relative @import across the boundary. They stay as named modules.
     const cli_test_helpers_module = b.createModule(.{
         .root_source_file = b.path("src/tests/cli_helpers.zig"),
     });
@@ -936,367 +338,67 @@ pub fn build(b: *std.Build) void {
             .{ .name = "auth", .module = auth_module },
         },
     });
-    const cli_format_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/format.zig"),
-    });
-    const cli_common_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/common.zig"),
+    const cli_main_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/main.zig"),
         .imports = &.{
             .{ .name = "core_init", .module = core_init_module },
             .{ .name = "core_time", .module = core_time_module },
             .{ .name = "db", .module = db_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-        },
-    });
-    const cli_content_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/content.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
             .{ .name = "cms", .module = cms_module },
             .{ .name = "schemas", .module = schemas_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_version_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/version.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_release_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/release.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_media_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/media.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "content_type", .module = reg.get("content_type") },
+            .{ .name = "field", .module = field_module },
+            .{ .name = "auth", .module = auth_module },
             .{ .name = "media", .module = media_module },
             .{ .name = "media_sync", .module = media_sync_module },
             .{ .name = "mime", .module = mime_module },
             .{ .name = "storage", .module = storage_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_taxonomy_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/taxonomy.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
             .{ .name = "taxonomy", .module = taxonomy_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_user_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/user.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "auth", .module = auth_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_schema_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/schema.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "schema_registry", .module = schema_registry_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_db_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/db.zig"),
-        .imports = &.{
-            .{ .name = "core_init", .module = core_init_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_info_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/info.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "schema_registry", .module = schema_registry_module },
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_format", .module = cli_format_module },
-            .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
-        },
-    });
-    const cli_main_module = b.createModule(.{
-        .root_source_file = b.path("src/cli/main.zig"),
-        .imports = &.{
-            .{ .name = "cli_common", .module = cli_common_module },
-            .{ .name = "cli_content", .module = cli_content_module },
-            .{ .name = "cli_version", .module = cli_version_module },
-            .{ .name = "cli_release", .module = cli_release_module },
-            .{ .name = "cli_media", .module = cli_media_module },
-            .{ .name = "cli_taxonomy", .module = cli_taxonomy_module },
-            .{ .name = "cli_user", .module = cli_user_module },
-            .{ .name = "cli_schema", .module = cli_schema_module },
-            .{ .name = "cli_db", .module = cli_db_module },
-            .{ .name = "cli_info", .module = cli_info_module },
             .{ .name = "cli_test_helpers", .module = cli_test_helpers_module },
         },
     });
 
-    // =========================================================================
-    // REST Modules
-    // =========================================================================
-    const rest_json_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/json.zig"),
-        .imports = &.{
-            .{ .name = "middleware", .module = middleware_module },
-        },
-    });
-    const rest_auth_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/auth.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "auth", .module = auth_module },
-            .{ .name = "db", .module = db_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
-    const rest_content_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/content.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "schemas", .module = schemas_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-            .{ .name = "publish_hooks", .module = publish_hooks_module },
-        },
-    });
-    const rest_version_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/version.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
-    const rest_release_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/release.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "core_time", .module = core_time_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
-    const rest_media_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/media.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "media", .module = media_module },
-            .{ .name = "media_query", .module = media_query_module },
-            .{ .name = "mime", .module = mime_module },
-            .{ .name = "storage", .module = storage_module },
-            .{ .name = "multipart", .module = multipart_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
-    const rest_taxonomy_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/taxonomy.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "taxonomy", .module = taxonomy_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
-    const rest_user_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/user.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "auth", .module = auth_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
-    const rest_schema_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/schema.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "schema_registry", .module = schema_registry_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
-    const rest_info_module = b.createModule(.{
-        .root_source_file = b.path("src/rest/info.zig"),
-        .imports = &.{
-            .{ .name = "router", .module = router_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "schema_registry", .module = schema_registry_module },
-            .{ .name = "db", .module = db_module },
-            .{ .name = "rest_json", .module = rest_json_module },
-            .{ .name = "rest_auth", .module = rest_auth_module },
-            .{ .name = "rest_test_helpers", .module = rest_test_helpers_module },
-        },
-    });
+    // REST endpoints (src/rest/*.zig) are relative-imported by src/http.zig,
+    // which is itself relative-imported by src/main.zig. The union of shared
+    // modules they need is attached to the main exe further below.
 
     // =========================================================================
     // Plugin Modules
     // =========================================================================
-    const plugin_dashboard = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/dashboard.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "db", .module = db_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "gravatar", .module = gravatar_module },
-            .{ .name = "media", .module = media_module },
-            .{ .name = "views", .module = views },
-        },
-    });
-    const plugin_users = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/users.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "auth", .module = auth_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "views", .module = views },
-        },
-    });
-    const plugin_settings = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/settings.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "auth", .module = auth_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "views", .module = views },
-        },
-    });
-    const plugin_components = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/components.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "views", .module = views },
-        },
-    });
-    const plugin_design_system = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/design_system.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "views", .module = views },
-        },
-    });
-    const plugin_content_types = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/content_types.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "views", .module = views },
-            .{ .name = "schemas", .module = schemas_module },
-        },
-    });
-    const plugin_media = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/media/main.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "media", .module = media_module },
-            .{ .name = "media_sync", .module = media_sync_module },
-            .{ .name = "storage", .module = storage_module },
-            .{ .name = "schema_media", .module = schema_media_module },
-            .{ .name = "media_handler", .module = media_handler_module },
-            .{ .name = "db", .module = db_module },
-            .{ .name = "views", .module = views },
-            .{ .name = "multipart", .module = multipart_module },
-        },
-    });
-
-    const plugin_content = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/content.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "db", .module = db_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "schemas", .module = schemas_module },
-            .{ .name = "views", .module = views },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "field", .module = field_module },
-            .{ .name = "gravatar", .module = gravatar_module },
-            .{ .name = "time_util", .module = time_util_module },
-            .{ .name = "presence", .module = presence_module },
-            .{ .name = "websocket", .module = websocket_module },
-        },
-    });
-    const plugin_releases = b.createModule(.{
-        .root_source_file = b.path("src/modules/admin/releases.zig"),
-        .imports = &.{
-            .{ .name = "admin_api", .module = admin_api_module },
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "tpl", .module = tpl_module },
-            .{ .name = "csrf", .module = csrf_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "cms", .module = cms_module },
-            .{ .name = "views", .module = views },
-        },
-    });
+    // Plugins are auto-discovered from src/modules/admin/ (built-in) and
+    // plugins/ (project plugins, sibling to themes/). See loadPlugins() at
+    // the bottom of this file. Drop a new file/dir into either location and
+    // it auto-registers — no edits here.
+    const plugin_imports = [_]std.Build.Module.Import{
+        .{ .name = "admin_api", .module = admin_api_module },
+        .{ .name = "middleware", .module = middleware_module },
+        .{ .name = "tpl", .module = tpl_module },
+        .{ .name = "db", .module = db_module },
+        .{ .name = "csrf", .module = csrf_module },
+        .{ .name = "auth", .module = auth_module },
+        .{ .name = "auth_middleware", .module = auth_middleware_module },
+        .{ .name = "views", .module = views },
+        .{ .name = "schemas", .module = schemas_module },
+        .{ .name = "cms", .module = cms_module },
+        .{ .name = "field", .module = field_module },
+        .{ .name = "content_type", .module = reg.get("content_type") },
+        .{ .name = "gravatar", .module = gravatar_module },
+        .{ .name = "time_util", .module = time_util_module },
+        .{ .name = "presence", .module = presence_module },
+        .{ .name = "websocket", .module = websocket_module },
+        .{ .name = "media", .module = media_module },
+        .{ .name = "media_sync", .module = media_sync_module },
+        .{ .name = "media_handler", .module = media_handler_module },
+        .{ .name = "storage", .module = storage_module },
+        .{ .name = "schema_media", .module = schema_media_module },
+        .{ .name = "multipart", .module = multipart_module },
+        .{ .name = "plugin_utils", .module = plugin_utils_module },
+        .{ .name = "pagination", .module = pagination_module },
+        .{ .name = "publr_config", .module = publr_config_module },
+        .{ .name = "schema_registry", .module = schema_registry_module },
+    };
+    const plugins = plugins_mod.load(b, &.{ "src/modules/admin", "plugins" }, &plugin_imports);
 
     const module_admin_module = b.createModule(.{
         .root_source_file = b.path("src/modules/admin/mod.zig"),
@@ -1304,19 +406,12 @@ pub fn build(b: *std.Build) void {
             .{ .name = "admin_api", .module = admin_api_module },
             .{ .name = "router", .module = router_module },
             .{ .name = "modules", .module = modules_api_module },
-            .{ .name = "plugin_dashboard", .module = plugin_dashboard },
-            .{ .name = "plugin_content", .module = plugin_content },
-            .{ .name = "plugin_media", .module = plugin_media },
-            .{ .name = "plugin_users", .module = plugin_users },
-            .{ .name = "plugin_settings", .module = plugin_settings },
-            .{ .name = "plugin_components", .module = plugin_components },
-            .{ .name = "plugin_design_system", .module = plugin_design_system },
-            .{ .name = "plugin_releases", .module = plugin_releases },
+            .{ .name = "plugin_registry", .module = plugins.manifest_module },
         },
     });
 
     // =========================================================================
-    // Registry Module (imports all plugins)
+    // Registry Module (consumes the auto-discovered plugin manifest)
     // =========================================================================
     const registry_module = b.createModule(.{
         .root_source_file = b.path("src/registry.zig"),
@@ -1330,101 +425,89 @@ pub fn build(b: *std.Build) void {
             .{ .name = "gravatar", .module = gravatar_module },
             .{ .name = "views", .module = views },
             .{ .name = "schemas", .module = schemas_module },
-            .{ .name = "plugin_dashboard", .module = plugin_dashboard },
-            .{ .name = "plugin_content", .module = plugin_content },
-            .{ .name = "plugin_media", .module = plugin_media },
-            .{ .name = "plugin_users", .module = plugin_users },
-            .{ .name = "plugin_settings", .module = plugin_settings },
-            .{ .name = "plugin_components", .module = plugin_components },
-            .{ .name = "plugin_design_system", .module = plugin_design_system },
-            .{ .name = "plugin_content_types", .module = plugin_content_types },
-            .{ .name = "plugin_releases", .module = plugin_releases },
+            .{ .name = "plugin_registry", .module = plugins.manifest_module },
         },
     });
 
-    // Add registry to plugins (must be done after registry_module is created)
-    plugin_dashboard.addImport("registry", registry_module);
-    plugin_content.addImport("registry", registry_module);
-    plugin_media.addImport("registry", registry_module);
-    plugin_users.addImport("registry", registry_module);
-    plugin_settings.addImport("registry", registry_module);
-    plugin_settings.addImport("publr_config", publr_config_module);
-    plugin_components.addImport("registry", registry_module);
-    plugin_design_system.addImport("registry", registry_module);
-    plugin_content_types.addImport("registry", registry_module);
-    plugin_releases.addImport("registry", registry_module);
+    // admin_api needs the rendering deps + registry for declarative registerPage.
+    // Added post-hoc because registry imports admin_api (resolved at compile time).
+    admin_api_module.addImport("tpl", tpl_module);
+    admin_api_module.addImport("views", views);
+    admin_api_module.addImport("csrf", csrf_module);
+    admin_api_module.addImport("auth_middleware", auth_middleware_module);
+    admin_api_module.addImport("gravatar", gravatar_module);
+    admin_api_module.addImport("registry", registry_module);
 
-    // Add shared plugin utilities
-    plugin_content.addImport("plugin_utils", plugin_utils_module);
-    plugin_media.addImport("plugin_utils", plugin_utils_module);
-    plugin_releases.addImport("plugin_utils", plugin_utils_module);
-    plugin_settings.addImport("plugin_utils", plugin_utils_module);
-    plugin_users.addImport("plugin_utils", plugin_utils_module);
+    // Forward-referenced imports for each discovered plugin:
+    //   - registry: created above; plugins call into it for layout helpers.
+    //   - views: each plugin module is exposed to views/ so view components
+    //     can import any plugin's exports (e.g. settings_tabs.zsx reads
+    //     plugin_settings.tabs).
+    for (plugins.plugins) |p| {
+        p.module.addImport("registry", registry_module);
+        views.addImport(b.fmt("plugin_{s}", .{p.name}), p.module);
+    }
 
-    // Add shared pagination
-    plugin_content.addImport("pagination", pagination_module);
-    plugin_media.addImport("pagination", pagination_module);
+    // Register a few externally-built modules so the exe wiring can pull
+    // them via the registry (theme, module_admin, etc. are created above).
+    reg.register("views", views);
+    reg.register("theme", theme);
+    reg.register("template_context", template_context_module);
+    reg.register("module_admin", module_admin_module);
+    reg.register("cli_main", cli_main_module);
+    reg.register("rest_test_helpers", rest_test_helpers_module);
 
-    // Add views namespace and core imports to main executable
-    exe.root_module.addImport("views", views);
-    exe.root_module.addImport("theme", theme);
-    exe.root_module.addImport("template_context", template_context_module);
-    exe.root_module.addImport("publish_hooks", publish_hooks_module);
-    exe.root_module.addImport("admin_api", admin_api_module);
-    exe.root_module.addImport("publr_ui", publr_ui);
-    exe.root_module.addImport("modules", modules_api_module);
-    exe.root_module.addImport("module_admin", module_admin_module);
-    exe.root_module.addImport("cli_main", cli_main_module);
-    exe.root_module.addImport("rest_json", rest_json_module);
-    exe.root_module.addImport("rest_auth", rest_auth_module);
-    exe.root_module.addImport("rest_content", rest_content_module);
-    exe.root_module.addImport("rest_version", rest_version_module);
-    exe.root_module.addImport("rest_release", rest_release_module);
-    exe.root_module.addImport("rest_media", rest_media_module);
-    exe.root_module.addImport("rest_taxonomy", rest_taxonomy_module);
-    exe.root_module.addImport("rest_user", rest_user_module);
-    exe.root_module.addImport("rest_schema", rest_schema_module);
-    exe.root_module.addImport("rest_info", rest_info_module);
+    // content_actions wires the eight `content.<verb>` action handlers into
+    // the dispatcher. It imports plugin_content (the auto-discovered content
+    // plugin module) to call its per-CT `*For` impls. Built after plugins
+    // are loaded so that import is available.
+    const content_actions_module = b.createModule(.{
+        .root_source_file = b.path("src/content_actions.zig"),
+        .imports = &.{
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "actions", .module = reg.get("actions") },
+            .{ .name = "schema_registry", .module = schema_registry_module },
+            .{ .name = "content_type", .module = reg.get("content_type") },
+            .{ .name = "tpl", .module = tpl_module },
+            .{ .name = "views", .module = views },
+        },
+    });
+    for (plugins.plugins) |p| {
+        if (std.mem.eql(u8, p.name, "content")) {
+            content_actions_module.addImport("plugin_content", p.module);
+        }
+    }
+    reg.register("content_actions", content_actions_module);
 
-    // Add core modules to main exe
-    exe.root_module.addImport("middleware", middleware_module);
-    exe.root_module.addImport("router", router_module);
-    exe.root_module.addImport("tpl", tpl_module);
-    exe.root_module.addImport("db", db_module);
-    exe.root_module.addImport("csrf", csrf_module);
-    exe.root_module.addImport("auth", auth_module);
-    exe.root_module.addImport("auth_middleware", auth_middleware_module);
-    exe.root_module.addImport("url", url_module);
-
-    // Add schema modules to main exe
-    exe.root_module.addImport("field", field_module);
-    exe.root_module.addImport("content_type", content_type_module);
-    exe.root_module.addImport("schemas", schemas_module);
-    exe.root_module.addImport("schema_registry", schema_registry_module);
-    exe.root_module.addImport("schema_sync", schema_sync_module);
-    exe.root_module.addImport("seed", seed_module);
-    exe.root_module.addImport("core_init", core_init_module);
-    exe.root_module.addImport("schema_media", schema_media_module);
-    exe.root_module.addImport("cms", cms_module);
-    exe.root_module.addImport("storage", storage_module);
-    exe.root_module.addImport("svg_sanitize", svg_sanitize_module);
-    exe.root_module.addImport("media", media_module);
-    exe.root_module.addImport("media_sync", media_sync_module);
-    exe.root_module.addImport("media_handler", media_handler_module);
-    exe.root_module.addImport("image", image_module);
-    exe.root_module.addImport("websocket", websocket_module);
-    exe.root_module.addImport("presence", presence_module);
+    // Shared imports common to native exe + WASM (passed to wasm_build later).
+    const shared_imports = reg.importsFor(&.{
+        "views",      "admin_api",    "auth",            "auth_middleware", "cms",
+        "csrf",       "db",           "image",           "media",           "media_handler",
+        "middleware", "schema_media", "seed",            "storage",         "svg_sanitize",
+        "tpl",        "actions",      "content_actions", "schema_registry", "schema_db_types",
+        "schemas",
+    });
+    reg.attachAll(exe.root_module, &.{
+        "views",             "admin_api",       "auth",             "auth_middleware", "cms",
+        "csrf",              "db",              "image",            "media",           "media_handler",
+        "middleware",        "schema_media",    "seed",             "storage",         "svg_sanitize",
+        "tpl",               "theme",           "template_context", "publish_hooks",   "publr_ui",
+        "modules",           "module_admin",    "cli_main",         "actions",         "content_actions",
+        // src/rest/*.zig is relative-imported by src/http.zig — these are the
+        // modules the REST tree reaches for that aren't already shared.
+        "core_time",         "media_query",     "mime",             "multipart",       "taxonomy",
+        "rest_test_helpers", "router",          "url",              "field",           "content_type",
+        "schemas",           "schema_registry", "schema_sync",      "core_init",       "media_sync",
+        "websocket",         "presence",        "schema_db_types",
+    });
 
     // Add plugin modules to main exe
-    exe.root_module.addImport("plugin_dashboard", plugin_dashboard);
-    exe.root_module.addImport("plugin_content", plugin_content);
-    exe.root_module.addImport("plugin_media", plugin_media);
-    exe.root_module.addImport("plugin_users", plugin_users);
-    exe.root_module.addImport("plugin_settings", plugin_settings);
-    exe.root_module.addImport("plugin_components", plugin_components);
-    exe.root_module.addImport("plugin_design_system", plugin_design_system);
-    exe.root_module.addImport("plugin_content_types", plugin_content_types);
-    exe.root_module.addImport("plugin_releases", plugin_releases);
+    // Plugin modules are exposed to the exe so non-plugin code (e.g. websocket
+    // handlers) can directly import a specific plugin's helpers. Most code
+    // should reach plugins via plugin_registry; this is the escape hatch.
+    for (plugins.plugins) |p| {
+        exe.root_module.addImport(b.fmt("plugin_{s}", .{p.name}), p.module);
+    }
 
     b.installArtifact(exe);
 
@@ -1450,61 +533,20 @@ pub fn build(b: *std.Build) void {
     // Tests depend on transpile step
     exe_tests.step.dependOn(&transpile_zsx_cmd.step);
 
-    exe_tests.linkLibC();
-    exe_tests.addCSourceFile(.{
-        .file = b.path("vendor/sqlite3.c"),
-        .flags = &.{
-            "-DSQLITE_DQS=0",
-            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
-            "-DSQLITE_USE_ALLOCA=1",
-            "-DSQLITE_THREADSAFE=1",
-            "-DSQLITE_TEMP_STORE=2",
-            "-DSQLITE_ENABLE_FTS5",
-            "-DSQLITE_ENABLE_JSON1",
-        },
+    // Test exe links the vendor C sources directly (rather than via the
+    // shared lib) so test-only compile flags can diverge if needed later.
+    vendors.addAll(b, exe_tests, .{});
+
+    reg.register("registry", registry_module);
+    reg.attachAll(exe_tests.root_module, &.{
+        "views",             "modules",      "module_admin",    "cli_main",
+        "core_time",         "media_query",  "mime",            "taxonomy",
+        "rest_test_helpers", "registry",     "admin_api",       "schema_media",
+        "core_init",         "auth",         "storage",         "svg_sanitize",
+        "media",             "media_sync",   "media_handler",   "image",
+        "multipart",         "actions",      "cms",             "entry_storage",
+        "field",             "content_type", "schema_registry", "field_types",
     });
-    exe_tests.addIncludePath(b.path("vendor"));
-
-    // Add STB image processing
-    exe_tests.addCSourceFile(.{
-        .file = b.path("vendor/stb_impl.c"),
-        .flags = &.{"-fno-sanitize=alignment"},
-    });
-
-    // Add libwebp (same split amalgamation as main exe)
-    for (0..124) |part| {
-        var buf: [32]u8 = undefined;
-        const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        exe_tests.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{ flag, "-U__SSE2__", "-U__SSE4_1__", "-U__AVX2__" } });
-    }
-
-    // Add imports to test executable
-    exe_tests.root_module.addImport("views", views);
-    exe_tests.root_module.addImport("modules", modules_api_module);
-    exe_tests.root_module.addImport("module_admin", module_admin_module);
-    exe_tests.root_module.addImport("cli_main", cli_main_module);
-    exe_tests.root_module.addImport("rest_json", rest_json_module);
-    exe_tests.root_module.addImport("rest_auth", rest_auth_module);
-    exe_tests.root_module.addImport("rest_content", rest_content_module);
-    exe_tests.root_module.addImport("rest_version", rest_version_module);
-    exe_tests.root_module.addImport("rest_release", rest_release_module);
-    exe_tests.root_module.addImport("rest_media", rest_media_module);
-    exe_tests.root_module.addImport("rest_taxonomy", rest_taxonomy_module);
-    exe_tests.root_module.addImport("rest_user", rest_user_module);
-    exe_tests.root_module.addImport("rest_schema", rest_schema_module);
-    exe_tests.root_module.addImport("rest_info", rest_info_module);
-    exe_tests.root_module.addImport("registry", registry_module);
-    exe_tests.root_module.addImport("admin_api", admin_api_module);
-    exe_tests.root_module.addImport("schema_media", schema_media_module);
-    exe_tests.root_module.addImport("core_init", core_init_module);
-    exe_tests.root_module.addImport("auth", auth_module);
-    exe_tests.root_module.addImport("storage", storage_module);
-    exe_tests.root_module.addImport("svg_sanitize", svg_sanitize_module);
-    exe_tests.root_module.addImport("media", media_module);
-    exe_tests.root_module.addImport("media_sync", media_sync_module);
-    exe_tests.root_module.addImport("media_handler", media_handler_module);
-    exe_tests.root_module.addImport("image", image_module);
-    exe_tests.root_module.addImport("multipart", multipart_module);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.step.dependOn(b.getInstallStep());
@@ -1556,6 +598,30 @@ pub fn build(b: *std.Build) void {
     });
     const run_publr_routes_tests = b.addRunArtifact(publr_routes_tests);
 
+    // Storage / schema test aggregator. The Zig 0.15 test runner only walks
+    // the test root's import graph for test discovery, so we use a
+    // dedicated wrapper in src/tests/ that pulls in entry_storage via a
+    // named import. Modules are wired by name so SQL paths and the
+    // SQLite vendor lib resolve correctly.
+    const storage_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/storage_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "entry_storage", .module = reg.get("entry_storage") },
+                .{ .name = "db", .module = reg.get("db") },
+                .{ .name = "field", .module = reg.get("field") },
+                .{ .name = "content_type", .module = reg.get("content_type") },
+                .{ .name = "taxonomy", .module = reg.get("taxonomy") },
+                .{ .name = "query", .module = reg.get("query") },
+                .{ .name = "entry", .module = reg.get("entry") },
+            },
+        }),
+    });
+    vendors.addAll(b, storage_tests, .{});
+    const run_storage_tests = b.addRunArtifact(storage_tests);
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_core_tests.step);
@@ -1564,6 +630,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publr_template_tests.step);
     test_step.dependOn(&run_publr_preprocess_tests.step);
     test_step.dependOn(&run_publr_routes_tests.step);
+    test_step.dependOn(&run_storage_tests.step);
 
     // Verify step: runs all tests + WASM build.
     const verify_step = b.step("verify", "Run tests and verify WASM build");
@@ -1572,145 +639,25 @@ pub fn build(b: *std.Build) void {
     // =========================================================================
     // Browser WASM Build (full CMS with embedded SQLite)
     // =========================================================================
-    const browser_step = b.step("browser", "Build browser WASM module");
-
-    const wasm_target = b.resolveTargetQuery(.{
-        .cpu_arch = .wasm32,
-        .os_tag = .wasi,
+    const wasm_result = wasm_build.build(b, .{
+        .shared_imports = shared_imports,
+        .views = views,
+        .db = db_module,
+        .storage = storage_module,
+        .middleware = middleware_module,
+        .auth_middleware = auth_middleware_module,
+        .media = media_module,
+        .media_handler = media_handler_module,
+        .image = image_module,
+        .admin_api = admin_api_module,
+        .registry = registry_module,
+        .plugins = plugins.plugins,
+        .setup_bg_dark = setup_bg_dark,
+        .transpile_step = &transpile_zsx_cmd.step,
+        .jit_css_output = jit_css_output,
     });
-
-    const browser_wasm = b.addExecutable(.{
-        .name = "cms",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/wasm_main.zig"),
-            .target = wasm_target,
-            .optimize = .ReleaseSmall,
-        }),
-    });
-
-    // WASM-specific settings
-    browser_wasm.rdynamic = true;
-
-    // Vendor static library for WASM (separate from native — different SQLite flags)
-    const vendor_lib_wasm = b.addLibrary(.{
-        .name = "publr_vendors",
-        .root_module = b.createModule(.{
-            .target = wasm_target,
-            .optimize = .ReleaseSmall,
-        }),
-    });
-    vendor_lib_wasm.linkLibC();
-    vendor_lib_wasm.addIncludePath(b.path("vendor"));
-    vendor_lib_wasm.addCSourceFile(.{
-        .file = b.path("vendor/sqlite3.c"),
-        .flags = &.{
-            "-DSQLITE_DQS=0",
-            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
-            "-DSQLITE_USE_ALLOCA=1",
-            "-DSQLITE_THREADSAFE=0", // Single-threaded for WASM
-            "-DSQLITE_TEMP_STORE=2",
-            "-DSQLITE_ENABLE_FTS5",
-            "-DSQLITE_ENABLE_JSON1",
-            "-DSQLITE_OMIT_LOAD_EXTENSION",
-        },
-    });
-    vendor_lib_wasm.addCSourceFile(.{
-        .file = b.path("vendor/stb_impl.c"),
-        .flags = &.{"-fno-sanitize=alignment"},
-    });
-    for (0..124) |part| {
-        var buf: [32]u8 = undefined;
-        const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
-        vendor_lib_wasm.addCSourceFile(.{ .file = b.path("vendor/libwebp.c"), .flags = &.{ flag, "-U__SSE2__", "-U__SSE4_1__", "-U__AVX2__" } });
-    }
-
-    // Link vendor lib + libc into WASM build
-    browser_wasm.linkLibC();
-    browser_wasm.addIncludePath(b.path("vendor")); // for @cImport headers
-    browser_wasm.linkLibrary(vendor_lib_wasm);
-
-    // Add views namespace (same as native)
-    browser_wasm.root_module.addImport("views", views);
-
-    // WASM storage module (SQLite blob backend)
-    const wasm_storage_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm_storage.zig"),
-        .imports = &.{
-            .{ .name = "db", .module = db_module },
-            .{ .name = "storage", .module = storage_module },
-        },
-    });
-
-    // WASM media handler module (serves media from SQLite blobs)
-    const wasm_media_handler_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm_media_handler.zig"),
-        .imports = &.{
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "wasm_storage", .module = wasm_storage_module },
-            .{ .name = "auth_middleware", .module = auth_middleware_module },
-            .{ .name = "media_handler", .module = media_handler_module },
-            .{ .name = "image", .module = image_module },
-            .{ .name = "storage", .module = storage_module },
-        },
-    });
-
-    // WASM router module
-    const wasm_router_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm_router.zig"),
-        .imports = &.{
-            .{ .name = "middleware", .module = middleware_module },
-            .{ .name = "admin_api", .module = admin_api_module },
-        },
-    });
-
-    // Add core modules to WASM build
-    browser_wasm.root_module.addImport("db", db_module);
-    browser_wasm.root_module.addImport("tpl", tpl_module);
-    browser_wasm.root_module.addImport("auth", auth_module);
-    browser_wasm.root_module.addImport("middleware", middleware_module);
-    browser_wasm.root_module.addImport("admin_api", admin_api_module);
-    browser_wasm.root_module.addImport("registry", registry_module);
-    browser_wasm.root_module.addImport("wasm_router", wasm_router_module);
-    browser_wasm.root_module.addImport("auth_middleware", auth_middleware_module);
-    browser_wasm.root_module.addImport("csrf", csrf_module);
-
-    // Media/storage modules for WASM
-    browser_wasm.root_module.addImport("storage", storage_module);
-    browser_wasm.root_module.addImport("svg_sanitize", svg_sanitize_module);
-    browser_wasm.root_module.addImport("cms", cms_module);
-    browser_wasm.root_module.addImport("media", media_module);
-    browser_wasm.root_module.addImport("image", image_module);
-    browser_wasm.root_module.addImport("schema_media", schema_media_module);
-    browser_wasm.root_module.addImport("media_handler", media_handler_module);
-    browser_wasm.root_module.addImport("wasm_storage", wasm_storage_module);
-    browser_wasm.root_module.addImport("wasm_media_handler", wasm_media_handler_module);
-    browser_wasm.root_module.addImport("seed", seed_module);
-
-    // Comptime config module (generated from build options)
-    const wasm_config_files = b.addWriteFiles();
-    const wasm_config_source = wasm_config_files.add("config.zig", std.fmt.allocPrint(
-        b.allocator,
-        "pub const setup_bg_dark: bool = {};",
-        .{setup_bg_dark},
-    ) catch unreachable);
-    const wasm_config_module = b.createModule(.{ .root_source_file = wasm_config_source });
-    browser_wasm.root_module.addImport("config", wasm_config_module);
-
-    // Add wasm_storage to modules that conditionally import it
-    media_module.addImport("wasm_storage", wasm_storage_module);
-    plugin_media.addImport("wasm_storage", wasm_storage_module);
-
-    // Browser build depends on transpile step
-    browser_wasm.step.dependOn(&transpile_zsx_cmd.step);
-
-    // Install to browser/ directory
-    const browser_install = b.addInstallArtifact(browser_wasm, .{
-        .dest_dir = .{ .override = .{ .custom = "browser" } },
-    });
-    browser_step.dependOn(&browser_install.step);
-
-    // Wire verify step to also check WASM build
-    verify_step.dependOn(&browser_install.step);
+    _ = wasm_result.browser_step; // top-level `zig build browser` step
+    verify_step.dependOn(wasm_result.install_step);
 
     // =========================================================================
     // Browser Bundle (source + .o files + manifest for browser compilation)
@@ -1734,47 +681,4 @@ pub fn build(b: *std.Build) void {
     run_bundle.step.dependOn(&transpile_zsx_cmd.step);
 
     browser_bundle_step.dependOn(&run_bundle.step);
-}
-
-// =============================================================================
-// Build helpers
-// =============================================================================
-
-/// Sanitize a file path into a valid Zig identifier for anonymous imports.
-/// e.g. "fonts/poppins-400.woff2" → "_fonts_poppins_400_woff2"
-fn sanitizeImportName(allocator: std.mem.Allocator, path: []const u8) []const u8 {
-    const buf = allocator.alloc(u8, path.len + 1) catch @panic("OOM");
-    buf[0] = '_';
-    for (path, 0..) |c, i| {
-        buf[i + 1] = if (std.ascii.isAlphanumeric(c)) c else '_';
-    }
-    return buf;
-}
-
-/// Get MIME type from file path for build-time code generation.
-fn getMimeForBuild(path: []const u8) []const u8 {
-    const ext = std.fs.path.extension(path);
-    const map = .{
-        .{ ".css", "text/css" },
-        .{ ".js", "application/javascript" },
-        .{ ".json", "application/json" },
-        .{ ".html", "text/html" },
-        .{ ".svg", "image/svg+xml" },
-        .{ ".png", "image/png" },
-        .{ ".jpg", "image/jpeg" },
-        .{ ".jpeg", "image/jpeg" },
-        .{ ".webp", "image/webp" },
-        .{ ".gif", "image/gif" },
-        .{ ".ico", "image/x-icon" },
-        .{ ".woff", "font/woff" },
-        .{ ".woff2", "font/woff2" },
-        .{ ".ttf", "font/ttf" },
-        .{ ".otf", "font/otf" },
-        .{ ".xml", "application/xml" },
-        .{ ".txt", "text/plain" },
-    };
-    inline for (map) |entry| {
-        if (std.mem.eql(u8, ext, entry[0])) return entry[1];
-    }
-    return "application/octet-stream";
 }
