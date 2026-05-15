@@ -5,17 +5,13 @@
 //!
 //! Example:
 //! ```zig
-//! const schemas = @import("schemas");
 //! const cms = @import("cms");
 //!
-//! // Get a post by slug
-//! const post = try cms.getEntry(schemas.Post, allocator, db, "hello-world");
-//!
-//! // List published posts
-//! const posts = try cms.listEntries(schemas.Post, allocator, db, .{
-//!     .status = "published",
-//!     .limit = 10,
-//! });
+//! // Save an entry — fully runtime-driven via the registry.
+//! const entry = try cms.saveEntry(allocator, db, "post", null,
+//!     \\{"title":"Hello","slug":"hello","body":"World"},
+//!     .{ .status = "draft" });
+//! defer entry.deinit(allocator);
 //! ```
 
 const std = @import("std");
@@ -25,8 +21,18 @@ const id_gen = @import("id_gen");
 const core_init = @import("core_init");
 const schemas = @import("schemas");
 const publish_hooks = @import("publish_hooks");
+const schema_registry = @import("schema_registry");
+const content_type_mod = @import("content_type");
+const field_mod = @import("field");
 
 const Allocator = std.mem.Allocator;
+const ContentTypeDef = content_type_mod.ContentTypeDef;
+const FieldDef = field_mod.FieldDef;
+
+// Entry storage (filterable / searchable projections). Re-exported so
+// callers reach the entry_meta / entries_fts helpers through the same
+// `cms` namespace.
+pub const entry_storage = @import("entry_storage");
 
 // Query API (re-exported)
 pub const query = @import("query");
@@ -136,200 +142,32 @@ pub const SaveOptions = struct {
     locale: ?[]const u8 = null,
 };
 
-/// Save an entry (create or update), creating a version in the history
-pub fn saveEntry(
-    comptime CT: type,
-    allocator: Allocator,
+/// Sync filterable fields to the `content_meta` projection table.
+/// Iterates the descriptor's filterable fields and pulls each value from the
+/// parsed JSON object. Type coercion follows `field.meta_type`.
+fn syncEntryMeta(
     db: *Db,
-    id: ?[]const u8,
-    data: anytype,
-    opts: SaveOptions,
-) !Entry(CT) {
-    const entry_id = id orelse try generateId(allocator);
-    const typed_data: CT.Data = data;
-
-    // Extract title from data if present
-    const title: []const u8 = if (@hasField(@TypeOf(typed_data), "title")) blk: {
-        const title_val = typed_data.title;
-        if (@typeInfo(@TypeOf(title_val)) == .optional) {
-            break :blk title_val orelse "";
-        } else {
-            break :blk title_val;
-        }
-    } else "";
-
-    // Extract slug from data if present (coerce to optional, empty string -> null)
-    const slug: ?[]const u8 = if (@hasField(@TypeOf(typed_data), "slug")) blk: {
-        const s = @as(?[]const u8, typed_data.slug);
-        break :blk if (s) |sv| if (sv.len == 0) @as(?[]const u8, null) else sv else null;
-    } else null;
-
-    // Extract status: opts.status takes precedence, then data.status, then "draft"
-    const status: []const u8 = if (opts.status) |s| s else if (@hasField(@TypeOf(typed_data), "status")) blk: {
-        const status_val = typed_data.status;
-        if (@typeInfo(@TypeOf(status_val)) == .optional) {
-            break :blk status_val orelse "draft";
-        } else {
-            break :blk status_val;
-        }
-    } else "draft";
-
-    // Serialize data to JSON
-    const data_json = try CT.stringifyData(allocator, typed_data);
-    defer allocator.free(data_json);
-
-    const locales = comptime localesFor(CT);
-    const default_locale = comptime defaultLocaleFor(CT);
-    var resolved_locale = default_locale;
-    if (opts.locale) |requested| {
-        for (locales) |loc| {
-            if (std.mem.eql(u8, loc, requested)) {
-                resolved_locale = requested;
-                break;
-            }
-        }
-    }
-
-    const target_entry_id = try makeLocaleEntryId(allocator, entry_id, resolved_locale, default_locale);
-    defer allocator.free(target_entry_id);
-
-    // Get previous version id, data, author (for change detection + author tracking)
-    var has_existing_entry = false;
-    var prev_version_id: ?[]const u8 = null;
-    var prev_data: ?[]const u8 = null;
-    var published_vid: ?[]const u8 = null;
-    var prev_author_id: ?[]const u8 = null;
-    var prev_version_type: ?[]const u8 = null;
-    {
-        var pv_stmt = try db.prepare(
-            \\SELECT ce.current_version_id, cv.data_json, ce.published_version_id, cv.author_id, cv.version_type
-            \\FROM content_entries ce
-            \\LEFT JOIN content_versions cv ON cv.id = ce.current_version_id
-            \\WHERE ce.id = ?1
-        );
-        defer pv_stmt.deinit();
-        try pv_stmt.bindText(1, target_entry_id);
-        if (try pv_stmt.step()) {
-            has_existing_entry = true;
-            if (pv_stmt.columnText(0)) |v| prev_version_id = try allocator.dupe(u8, v);
-            if (pv_stmt.columnText(1)) |d| prev_data = try allocator.dupe(u8, d);
-            if (pv_stmt.columnText(2)) |v| published_vid = try allocator.dupe(u8, v);
-            if (pv_stmt.columnText(3)) |v| prev_author_id = try allocator.dupe(u8, v);
-            if (pv_stmt.columnText(4)) |v| prev_version_type = try allocator.dupe(u8, v);
-        }
-    }
-    defer if (prev_version_id) |v| allocator.free(v);
-    defer if (prev_data) |d| allocator.free(d);
-    defer if (published_vid) |v| allocator.free(v);
-    defer if (prev_author_id) |v| allocator.free(v);
-    defer if (prev_version_type) |v| allocator.free(v);
-    const is_update = has_existing_entry;
-
-    // Skip version creation if data hasn't changed
-    const data_changed = if (prev_data) |pd| !std.mem.eql(u8, pd, data_json) else true;
-
-    // Autosave must create a new version (not update in-place) when current == published,
-    // otherwise the published version's data would be corrupted.
-    const is_published_version = if (prev_version_id) |pv|
-        if (published_vid) |pub_v| std.mem.eql(u8, pv, pub_v) else false
-    else
-        false;
-
-    const version_id = id_gen.generateVersionId();
-
-    // Autosave can update in-place ONLY when:
-    // 1. Current version != published version (preserve published snapshot)
-    // 2. Same author is editing (different author = new version for attribution)
-    const same_author = if (prev_author_id) |pa|
-        if (opts.author_id) |oa| std.mem.eql(u8, pa, oa) else true
-    else
-        true;
-    const prev_is_autosave = if (prev_version_type) |vt| std.mem.eql(u8, vt, "autosave") else false;
-    const can_autosave_inplace = opts.autosave and !is_published_version and same_author and prev_is_autosave;
-    const promote_autosave_on_save = !opts.autosave and is_update and prev_is_autosave;
-    const version_created = (!is_update) or promote_autosave_on_save or (data_changed and !can_autosave_inplace);
-    const current_version_id: []const u8 = if (version_created)
-        &version_id
-    else if (prev_version_id) |pv|
-        pv
-    else
-        &version_id;
-
-    try syncUnifiedLifecycle(CT, allocator, db, .{
-        .entry_id = entry_id,
-        .target_entry_id = target_entry_id,
-        .title = title,
-        .slug = slug,
-        .current_version_id = current_version_id,
-        .prev_version_id = prev_version_id,
-        .version_type = if (!is_update) "created" else if (opts.autosave) "autosave" else "updated",
-        .data_json = data_json,
-        .prev_data_json = prev_data,
-        .status = status,
-        .is_update = is_update,
-        .data_changed = data_changed,
-        .version_created = version_created,
-        .can_autosave_inplace = can_autosave_inplace,
-        .author_id = opts.author_id,
-        .requested_locale = opts.locale,
-    });
-
-    // Enforce version retention limit.
-    try pruneVersions(db, target_entry_id);
-
-    // Sync filterable fields to unified content_meta.
-    try syncEntryMeta(CT, db, target_entry_id, current_version_id, typed_data);
-
-    // Sync taxonomy relationships to unified content_term_assignments.
-    try syncEntryTerms(CT, db, target_entry_id, typed_data);
-
-    if (@hasDecl(CT, "hooks")) {
-        if (CT.hooks.on_save) |hook| {
-            try hook(allocator, .{
-                .entry_id = entry_id,
-                .content_type = CT.type_id,
-                .locale = resolved_locale,
-                .status = status,
-                .author_id = opts.author_id,
-            }, data_json);
-        }
-        if (std.mem.eql(u8, status, "published")) {
-            if (CT.hooks.on_publish) |hook| {
-                try hook(allocator, .{
-                    .entry_id = entry_id,
-                    .content_type = CT.type_id,
-                    .locale = resolved_locale,
-                    .status = status,
-                    .author_id = opts.author_id,
-                }, data_json);
-            }
-        } else if (std.mem.eql(u8, status, "archived")) {
-            if (CT.hooks.on_archive) |hook| {
-                try hook(allocator, .{
-                    .entry_id = entry_id,
-                    .content_type = CT.type_id,
-                    .locale = resolved_locale,
-                    .status = status,
-                    .author_id = opts.author_id,
-                }, data_json);
-            }
-        }
-    }
-
-    // Return the saved entry
-    return try getEntry(CT, allocator, db, entry_id) orelse error.EntryNotFound;
-}
-
-/// Sync filterable fields to unified content_meta table.
-fn syncEntryMeta(comptime CT: type, db: *Db, entry_id: []const u8, version_id: []const u8, data: anytype) !void {
+    allocator: Allocator,
+    def: *const ContentTypeDef,
+    entry_id: []const u8,
+    version_id: []const u8,
+    data_value: std.json.Value,
+) !void {
     var del_stmt = try db.prepare("DELETE FROM content_meta WHERE entry_id = ?1 AND version_id = ?2");
     defer del_stmt.deinit();
     try del_stmt.bindText(1, entry_id);
     try del_stmt.bindText(2, version_id);
     _ = try del_stmt.step();
 
-    const filterable = CT.getFilterableFields();
-    if (filterable.len == 0) return;
+    var has_filterable = false;
+    for (def.fields) |f| {
+        if (f.filterable or f.storage == .data_and_meta) {
+            has_filterable = true;
+            break;
+        }
+    }
+    if (!has_filterable) return;
+    if (data_value != .object) return;
 
     var stmt = try db.prepare(
         \\INSERT INTO content_meta (entry_id, version_id, field_name, value)
@@ -337,57 +175,59 @@ fn syncEntryMeta(comptime CT: type, db: *Db, entry_id: []const u8, version_id: [
     );
     defer stmt.deinit();
 
-    inline for (filterable) |f| {
-        if (@hasField(@TypeOf(data), f.name)) {
-            const value = @field(data, f.name);
+    for (def.fields) |f| {
+        if (!f.filterable and f.storage != .data_and_meta) continue;
+        const val = data_value.object.get(f.name) orelse continue;
 
-            try stmt.bindText(1, entry_id);
-            try stmt.bindText(2, version_id);
-            try stmt.bindText(3, f.name);
+        try stmt.bindText(1, entry_id);
+        try stmt.bindText(2, version_id);
+        try stmt.bindText(3, f.name);
 
-            switch (f.meta_type) {
-                .text => {
-                    if (value) |v| {
-                        try stmt.bindText(4, v);
-                    } else {
-                        try stmt.bindNull(4);
-                    }
-                },
-                .int => {
-                    if (value) |v| {
-                        const buf = try std.fmt.allocPrint(db.allocator, "{d}", .{v});
-                        defer db.allocator.free(buf);
-                        try stmt.bindText(4, buf);
-                    } else {
-                        try stmt.bindNull(4);
-                    }
-                },
-                .real => {
-                    if (value) |v| {
-                        const buf = try std.fmt.allocPrint(db.allocator, "{d}", .{v});
-                        defer db.allocator.free(buf);
-                        try stmt.bindText(4, buf);
-                    } else {
-                        try stmt.bindNull(4);
-                    }
-                },
-            }
-
-            _ = try stmt.step();
-            stmt.reset();
+        switch (val) {
+            .null => try stmt.bindNull(4),
+            .string => |s| try stmt.bindText(4, s),
+            .integer => |i| {
+                const buf = try std.fmt.allocPrint(allocator, "{d}", .{i});
+                defer allocator.free(buf);
+                try stmt.bindText(4, buf);
+            },
+            .float => |fl| {
+                const buf = try std.fmt.allocPrint(allocator, "{d}", .{fl});
+                defer allocator.free(buf);
+                try stmt.bindText(4, buf);
+            },
+            .bool => |b| try stmt.bindText(4, if (b) "true" else "false"),
+            else => try stmt.bindNull(4),
         }
+
+        _ = try stmt.step();
+        stmt.reset();
     }
 }
 
-/// Sync taxonomy fields to unified content_term_assignments table.
-fn syncEntryTerms(comptime CT: type, db: *Db, entry_id: []const u8, data: anytype) !void {
+/// Sync taxonomy fields to `content_term_assignments`. Iterates the
+/// descriptor's taxonomy fields and writes either single-value or array
+/// references depending on the JSON shape.
+fn syncEntryTerms(
+    db: *Db,
+    def: *const ContentTypeDef,
+    entry_id: []const u8,
+    data_value: std.json.Value,
+) !void {
     var del_stmt = try db.prepare("DELETE FROM content_term_assignments WHERE entry_id = ?1");
     defer del_stmt.deinit();
     try del_stmt.bindText(1, entry_id);
     _ = try del_stmt.step();
 
-    const taxonomies = CT.getTaxonomyFields();
-    if (taxonomies.len == 0) return;
+    var has_taxonomy = false;
+    for (def.fields) |f| {
+        if (f.storage == .taxonomy) {
+            has_taxonomy = true;
+            break;
+        }
+    }
+    if (!has_taxonomy) return;
+    if (data_value != .object) return;
 
     var stmt = try db.prepare(
         \\INSERT INTO content_term_assignments (entry_id, taxonomy_id, field_name, term_anchor_id, sort_order)
@@ -395,14 +235,18 @@ fn syncEntryTerms(comptime CT: type, db: *Db, entry_id: []const u8, data: anytyp
     );
     defer stmt.deinit();
 
-    inline for (taxonomies) |f| {
-        if (@hasField(@TypeOf(data), f.name)) {
-            const value = @field(data, f.name);
-            const ValueType = @TypeOf(value);
+    for (def.fields) |f| {
+        if (f.storage != .taxonomy) continue;
+        const taxonomy_id = f.taxonomy_id orelse continue;
+        const val = data_value.object.get(f.name) orelse continue;
 
-            if (ValueType == []const []const u8) {
-                for (value, 0..) |term_id, idx| {
-                    const taxonomy_id = f.taxonomy_id orelse continue;
+        switch (val) {
+            .array => |arr| {
+                for (arr.items, 0..) |item, idx| {
+                    const term_id: []const u8 = switch (item) {
+                        .string => |s| s,
+                        else => continue,
+                    };
                     try stmt.bindText(1, entry_id);
                     try stmt.bindText(2, taxonomy_id);
                     try stmt.bindText(3, f.name);
@@ -411,40 +255,18 @@ fn syncEntryTerms(comptime CT: type, db: *Db, entry_id: []const u8, data: anytyp
                     _ = try stmt.step();
                     stmt.reset();
                 }
-            } else if (@typeInfo(ValueType) == .optional) {
-                const ChildType = @typeInfo(ValueType).optional.child;
-                if (value) |unwrapped| {
-                    const taxonomy_id = f.taxonomy_id orelse continue;
-                    if (ChildType == []const []const u8) {
-                        for (unwrapped, 0..) |term_id, idx| {
-                            try stmt.bindText(1, entry_id);
-                            try stmt.bindText(2, taxonomy_id);
-                            try stmt.bindText(3, f.name);
-                            try stmt.bindText(4, term_id);
-                            try stmt.bindInt(5, @intCast(idx));
-                            _ = try stmt.step();
-                            stmt.reset();
-                        }
-                    } else {
-                        try stmt.bindText(1, entry_id);
-                        try stmt.bindText(2, taxonomy_id);
-                        try stmt.bindText(3, f.name);
-                        try stmt.bindText(4, unwrapped);
-                        try stmt.bindInt(5, 0);
-                        _ = try stmt.step();
-                        stmt.reset();
-                    }
-                }
-            } else if (ValueType == []const u8) {
-                const taxonomy_id = f.taxonomy_id orelse continue;
+            },
+            .string => |s| {
+                if (s.len == 0) continue;
                 try stmt.bindText(1, entry_id);
                 try stmt.bindText(2, taxonomy_id);
                 try stmt.bindText(3, f.name);
-                try stmt.bindText(4, value);
+                try stmt.bindText(4, s);
                 try stmt.bindInt(5, 0);
                 _ = try stmt.step();
                 stmt.reset();
-            }
+            },
+            else => {},
         }
     }
 }
@@ -468,18 +290,14 @@ const UnifiedSyncOpts = struct {
     requested_locale: ?[]const u8,
 };
 
-fn defaultLocaleFor(comptime CT: type) []const u8 {
-    if (@hasDecl(CT, "available_locales") and CT.available_locales.len > 0) {
-        return CT.available_locales[0];
-    }
+fn defaultLocaleForDef(def: *const ContentTypeDef) []const u8 {
+    if (def.locales.len > 0) return def.locales[0];
     return "en";
 }
 
-fn localesFor(comptime CT: type) []const []const u8 {
-    if (@hasDecl(CT, "available_locales") and CT.available_locales.len > 0) {
-        return CT.available_locales;
-    }
-    return &.{"en"};
+fn localesForDef(def: *const ContentTypeDef) []const []const u8 {
+    if (def.locales.len > 0) return def.locales;
+    return &[_][]const u8{"en"};
 }
 
 fn lifecycleTablesAvailable(db: *Db) !bool {
@@ -604,9 +422,20 @@ fn jsonOptionalEqual(allocator: Allocator, lhs: ?std.json.Value, rhs: ?std.json.
     return std.mem.eql(u8, l, r);
 }
 
-fn collectChangedSyncedFields(comptime CT: type, allocator: Allocator, old_json: []const u8, new_json: []const u8) ![][]const u8 {
-    const synced = CT.getSyncedFields();
-    if (synced.len == 0) return allocator.alloc([]const u8, 0);
+fn collectChangedSyncedFields(
+    def: *const ContentTypeDef,
+    allocator: Allocator,
+    old_json: []const u8,
+    new_json: []const u8,
+) ![][]const u8 {
+    var has_synced = false;
+    for (def.fields) |f| {
+        if (f.translatable_mode == .synced) {
+            has_synced = true;
+            break;
+        }
+    }
+    if (!has_synced) return allocator.alloc([]const u8, 0);
 
     var old_parsed_opt = std.json.parseFromSlice(std.json.Value, allocator, old_json, .{}) catch null;
     defer if (old_parsed_opt) |*p| p.deinit();
@@ -625,7 +454,8 @@ fn collectChangedSyncedFields(comptime CT: type, allocator: Allocator, old_json:
     var changed: std.ArrayListUnmanaged([]const u8) = .{};
     errdefer changed.deinit(allocator);
 
-    inline for (synced) |f| {
+    for (def.fields) |f| {
+        if (f.translatable_mode != .synced) continue;
         const old_val = if (old_obj) |obj| obj.get(f.name) else null;
         const new_val = if (new_obj) |obj| obj.get(f.name) else null;
         if (!jsonOptionalEqual(allocator, old_val, new_val)) {
@@ -636,11 +466,11 @@ fn collectChangedSyncedFields(comptime CT: type, allocator: Allocator, old_json:
     return changed.toOwnedSlice(allocator);
 }
 
-fn syncUnifiedLifecycle(comptime CT: type, allocator: Allocator, db: *Db, opts: UnifiedSyncOpts) !void {
+fn syncUnifiedLifecycle(def: *const ContentTypeDef, allocator: Allocator, db: *Db, opts: UnifiedSyncOpts) !void {
     if (!try lifecycleTablesAvailable(db)) return;
 
-    const locales = comptime localesFor(CT);
-    const default_locale = comptime defaultLocaleFor(CT);
+    const locales = localesForDef(def);
+    const default_locale = defaultLocaleForDef(def);
 
     var resolved_locale = default_locale;
     if (opts.requested_locale) |requested| {
@@ -659,7 +489,7 @@ fn syncUnifiedLifecycle(comptime CT: type, allocator: Allocator, db: *Db, opts: 
         );
         defer stmt.deinit();
         try stmt.bindText(1, opts.entry_id);
-        try stmt.bindText(2, CT.type_id);
+        try stmt.bindText(2, def.type_id);
         if (opts.author_id) |aid| try stmt.bindText(3, aid) else try stmt.bindNull(3);
         _ = try stmt.step();
     }
@@ -676,7 +506,7 @@ fn syncUnifiedLifecycle(comptime CT: type, allocator: Allocator, db: *Db, opts: 
         try stmt.bindText(1, locale_entry_id);
         try stmt.bindText(2, opts.entry_id);
         try stmt.bindText(3, locale);
-        try stmt.bindText(4, CT.type_id);
+        try stmt.bindText(4, def.type_id);
         _ = try stmt.step();
     }
 
@@ -736,7 +566,7 @@ fn syncUnifiedLifecycle(comptime CT: type, allocator: Allocator, db: *Db, opts: 
         );
         defer stmt.deinit();
         try stmt.bindText(1, opts.target_entry_id);
-        try stmt.bindText(2, CT.type_id);
+        try stmt.bindText(2, def.type_id);
         if (opts.slug) |s| try stmt.bindText(3, s) else try stmt.bindNull(3);
         try stmt.bindText(4, opts.title);
         try stmt.bindText(5, opts.data_json);
@@ -757,7 +587,7 @@ fn syncUnifiedLifecycle(comptime CT: type, allocator: Allocator, db: *Db, opts: 
     }
 
     if (opts.data_changed and std.mem.eql(u8, resolved_locale, default_locale)) {
-        const changed_synced = try collectChangedSyncedFields(CT, allocator, opts.prev_data_json orelse "{}", opts.data_json);
+        const changed_synced = try collectChangedSyncedFields(def, allocator, opts.prev_data_json orelse "{}", opts.data_json);
         defer {
             for (changed_synced) |field_name| allocator.free(field_name);
             allocator.free(changed_synced);
@@ -813,10 +643,201 @@ fn syncUnifiedLifecycle(comptime CT: type, allocator: Allocator, db: *Db, opts: 
     }
 
     if (!std.mem.eql(u8, opts.status, "published") and !std.mem.eql(u8, opts.status, "archived")) {
-        try ensureFlowState(db, opts.entry_id, CT.workflow orelse "default_publish", opts.author_id, opts.current_version_id);
+        try ensureFlowState(db, opts.entry_id, def.workflow orelse "default_publish", opts.author_id, opts.current_version_id);
     } else {
         try completeFlowStateIfExists(db, opts.entry_id, opts.author_id, if (std.mem.eql(u8, opts.status, "archived")) "archive" else "publish", opts.current_version_id);
     }
+}
+
+/// Save an entry from a runtime `type_id` + JSON-encoded data payload.
+///
+/// Fully descriptor-driven: looks up `*const ContentTypeDef` via
+/// `schema_registry.findById`, then runs the same lifecycle / version /
+/// projection logic that compile-in types get. Works for compile-in,
+/// WASM-loaded, and DB-defined content types.
+pub fn saveEntry(
+    allocator: Allocator,
+    db: *Db,
+    type_id: []const u8,
+    id: ?[]const u8,
+    data_json: []const u8,
+    opts: SaveOptions,
+) !query.Entry {
+    const def = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+
+    var generated_id: ?[]u8 = null;
+    const entry_id: []const u8 = if (id) |i| i else blk: {
+        const gen = try generateId(allocator);
+        generated_id = gen;
+        break :blk gen;
+    };
+    defer if (generated_id) |g| allocator.free(g);
+
+    // Parse data once; reused for title/slug/status extraction and for
+    // the meta + terms projections.
+    var parsed_data = try std.json.parseFromSlice(std.json.Value, allocator, data_json, .{});
+    defer parsed_data.deinit();
+    const data_value = parsed_data.value;
+
+    const title: []const u8 = jsonGetString(data_value, "title") orelse "";
+    const slug: ?[]const u8 = blk: {
+        const s = jsonGetString(data_value, "slug") orelse break :blk null;
+        break :blk if (s.len == 0) null else s;
+    };
+    const status: []const u8 = if (opts.status) |s|
+        s
+    else if (jsonGetString(data_value, "status")) |s|
+        s
+    else
+        "draft";
+
+    const locales = localesForDef(def);
+    const default_locale = defaultLocaleForDef(def);
+    var resolved_locale = default_locale;
+    if (opts.locale) |requested| {
+        for (locales) |loc| {
+            if (std.mem.eql(u8, loc, requested)) {
+                resolved_locale = requested;
+                break;
+            }
+        }
+    }
+
+    const target_entry_id = try makeLocaleEntryId(allocator, entry_id, resolved_locale, default_locale);
+    defer allocator.free(target_entry_id);
+
+    // Previous version metadata for change detection + author tracking.
+    var has_existing_entry = false;
+    var prev_version_id: ?[]const u8 = null;
+    var prev_data: ?[]const u8 = null;
+    var published_vid: ?[]const u8 = null;
+    var prev_author_id: ?[]const u8 = null;
+    var prev_version_type: ?[]const u8 = null;
+    {
+        var pv_stmt = try db.prepare(
+            \\SELECT ce.current_version_id, cv.data_json, ce.published_version_id, cv.author_id, cv.version_type
+            \\FROM content_entries ce
+            \\LEFT JOIN content_versions cv ON cv.id = ce.current_version_id
+            \\WHERE ce.id = ?1
+        );
+        defer pv_stmt.deinit();
+        try pv_stmt.bindText(1, target_entry_id);
+        if (try pv_stmt.step()) {
+            has_existing_entry = true;
+            if (pv_stmt.columnText(0)) |v| prev_version_id = try allocator.dupe(u8, v);
+            if (pv_stmt.columnText(1)) |d| prev_data = try allocator.dupe(u8, d);
+            if (pv_stmt.columnText(2)) |v| published_vid = try allocator.dupe(u8, v);
+            if (pv_stmt.columnText(3)) |v| prev_author_id = try allocator.dupe(u8, v);
+            if (pv_stmt.columnText(4)) |v| prev_version_type = try allocator.dupe(u8, v);
+        }
+    }
+    defer if (prev_version_id) |v| allocator.free(v);
+    defer if (prev_data) |d| allocator.free(d);
+    defer if (published_vid) |v| allocator.free(v);
+    defer if (prev_author_id) |v| allocator.free(v);
+    defer if (prev_version_type) |v| allocator.free(v);
+    const is_update = has_existing_entry;
+
+    const data_changed = if (prev_data) |pd| !std.mem.eql(u8, pd, data_json) else true;
+
+    const is_published_version = if (prev_version_id) |pv|
+        if (published_vid) |pub_v| std.mem.eql(u8, pv, pub_v) else false
+    else
+        false;
+
+    const version_id = id_gen.generateVersionId();
+
+    const same_author = if (prev_author_id) |pa|
+        if (opts.author_id) |oa| std.mem.eql(u8, pa, oa) else true
+    else
+        true;
+    const prev_is_autosave = if (prev_version_type) |vt| std.mem.eql(u8, vt, "autosave") else false;
+    const can_autosave_inplace = opts.autosave and !is_published_version and same_author and prev_is_autosave;
+    const promote_autosave_on_save = !opts.autosave and is_update and prev_is_autosave;
+    const version_created = (!is_update) or promote_autosave_on_save or (data_changed and !can_autosave_inplace);
+    const current_version_id: []const u8 = if (version_created)
+        &version_id
+    else if (prev_version_id) |pv|
+        pv
+    else
+        &version_id;
+
+    try syncUnifiedLifecycle(def, allocator, db, .{
+        .entry_id = entry_id,
+        .target_entry_id = target_entry_id,
+        .title = title,
+        .slug = slug,
+        .current_version_id = current_version_id,
+        .prev_version_id = prev_version_id,
+        .version_type = if (!is_update) "created" else if (opts.autosave) "autosave" else "updated",
+        .data_json = data_json,
+        .prev_data_json = prev_data,
+        .status = status,
+        .is_update = is_update,
+        .data_changed = data_changed,
+        .version_created = version_created,
+        .can_autosave_inplace = can_autosave_inplace,
+        .author_id = opts.author_id,
+        .requested_locale = opts.locale,
+    });
+
+    try pruneVersions(db, target_entry_id);
+
+    try syncEntryMeta(db, allocator, def, target_entry_id, current_version_id, data_value);
+    try syncEntryTerms(db, def, target_entry_id, data_value);
+
+    // Project filterable / searchable fields to the typed entry_meta and
+    // entries_fts tables. Parse data_json into a FieldMap once and feed it
+    // to the storage helpers.
+    var fm = try entry_storage.FieldMap.fromJson(allocator, data_json);
+    defer fm.deinit(allocator);
+    try entry_storage.writeEntryMeta(db, target_entry_id, def, fm);
+    try entry_storage.writeEntryFts(db, target_entry_id, def, fm);
+
+    if (def.hooks.on_save) |hook| {
+        try hook(allocator, .{
+            .entry_id = entry_id,
+            .content_type = def.type_id,
+            .locale = resolved_locale,
+            .status = status,
+            .author_id = opts.author_id,
+        }, data_json);
+    }
+    if (std.mem.eql(u8, status, "published")) {
+        if (def.hooks.on_publish) |hook| {
+            try hook(allocator, .{
+                .entry_id = entry_id,
+                .content_type = def.type_id,
+                .locale = resolved_locale,
+                .status = status,
+                .author_id = opts.author_id,
+            }, data_json);
+        }
+    } else if (std.mem.eql(u8, status, "archived")) {
+        if (def.hooks.on_archive) |hook| {
+            try hook(allocator, .{
+                .entry_id = entry_id,
+                .content_type = def.type_id,
+                .locale = resolved_locale,
+                .status = status,
+                .author_id = opts.author_id,
+            }, data_json);
+        }
+    }
+
+    return (try query.getEntry(allocator, db, type_id, entry_id)) orelse
+        error.EntryNotFound;
+}
+
+/// Extract a string value from a JSON object by key. Returns null when the
+/// key is missing or the value isn't a string.
+fn jsonGetString(value: std.json.Value, key: []const u8) ?[]const u8 {
+    if (value != .object) return null;
+    const v = value.object.get(key) orelse return null;
+    return switch (v) {
+        .string => |s| s,
+        else => null,
+    };
 }
 
 /// Delete an entry
@@ -901,17 +922,39 @@ test "generateVersionId produces valid IDs" {
     try std.testing.expectEqual(@as(usize, 18), id.len);
 }
 
+/// Test-only: register a minimal "post"-shaped content type so the
+/// lifecycle tests have a registered descriptor to work against. Core no
+/// longer ships Post as a compile-in default after task 05.
+fn registerTestPost() !void {
+    const def = content_type_mod.contentType(.{
+        .type_id = "post",
+        .display_name = "Blog Post",
+        .display_name_plural = "Blog Posts",
+        .handle = "posts",
+        .fields = &.{
+            field_mod.String("title", .{ .required = true }),
+            field_mod.Slug("slug", .{ .source = "title", .required = true }),
+            field_mod.Text("body", .{ .required = true }),
+        },
+    });
+    schema_registry.register(def) catch |err| switch (err) {
+        error.DuplicateContentType => {},
+        else => return err,
+    };
+}
+
 test "archiveEntry sets archived flag" {
     var db = try core_init.initDatabase(std.testing.allocator, ":memory:");
     defer db.deinit();
     try core_init.ensureSchema(&db);
     try core_init.seed(&db);
+    try registerTestPost();
+    defer schema_registry.unregister("post");
 
-    const entry = try saveEntry(schemas.Post, std.testing.allocator, &db, null, schemas.Post.Data{
-        .title = "Archive Me",
-        .slug = "archive-me",
-        .body = "Body",
-    }, .{});
+    var entry = try saveEntry(std.testing.allocator, &db, "post", null,
+        \\{"title":"Archive Me","slug":"archive-me","body":"Body"}
+    , .{});
+    defer entry.deinit(std.testing.allocator);
 
     try archiveEntry(&db, entry.id);
     try archiveEntry(&db, entry.id); // idempotent
@@ -938,14 +981,13 @@ test "unpublishEntry clears published version and resets draft status" {
     defer db.deinit();
     try core_init.ensureSchema(&db);
     try core_init.seed(&db);
+    try registerTestPost();
+    defer schema_registry.unregister("post");
 
-    const entry = try saveEntry(schemas.Post, std.testing.allocator, &db, null, schemas.Post.Data{
-        .title = "Publish Me",
-        .slug = "publish-me",
-        .body = "Body",
-    }, .{
-        .status = "published",
-    });
+    var entry = try saveEntry(std.testing.allocator, &db, "post", null,
+        \\{"title":"Publish Me","slug":"publish-me","body":"Body"}
+    , .{ .status = "published" });
+    defer entry.deinit(std.testing.allocator);
 
     try std.testing.expectError(EntryLifecycleError.EntryNotPublished, unpublishEntry(&db, "e_missing_draft"));
     try unpublishEntry(&db, entry.id);
@@ -964,14 +1006,13 @@ test "unpublishEntry on draft entry returns error" {
     defer db.deinit();
     try core_init.ensureSchema(&db);
     try core_init.seed(&db);
+    try registerTestPost();
+    defer schema_registry.unregister("post");
 
-    const entry = try saveEntry(schemas.Post, std.testing.allocator, &db, null, schemas.Post.Data{
-        .title = "Draft",
-        .slug = "draft",
-        .body = "Body",
-    }, .{
-        .status = "draft",
-    });
+    var entry = try saveEntry(std.testing.allocator, &db, "post", null,
+        \\{"title":"Draft","slug":"draft","body":"Body"}
+    , .{ .status = "draft" });
+    defer entry.deinit(std.testing.allocator);
 
     try std.testing.expectError(EntryLifecycleError.EntryNotPublished, unpublishEntry(&db, entry.id));
 }
@@ -981,4 +1022,147 @@ test "content: public API coverage" {
     _ = deleteEntry;
     _ = archiveEntry;
     _ = unpublishEntry;
+}
+
+test "saveEntry: runtime-registered content type round-trips through generic path" {
+    var db = try core_init.initDatabase(std.testing.allocator, ":memory:");
+    defer db.deinit();
+    try core_init.ensureSchema(&db);
+    try core_init.seed(&db);
+
+    // Register a runtime-only content type (not in the compile-in tuple).
+    const runtime_def = content_type_mod.contentType(.{
+        .type_id = "book",
+        .display_name = "Book",
+        .display_name_plural = "Books",
+        .handle = "books",
+        .fields = &.{
+            field_mod.String("title", .{ .required = true }),
+            field_mod.String("isbn", .{ .filterable = true }),
+            field_mod.Text("description", .{}),
+        },
+    });
+    try schema_registry.register(runtime_def);
+    defer schema_registry.unregister("book");
+
+    var entry = try saveEntry(std.testing.allocator, &db, "book", "e_book_1",
+        \\{"title":"The Pragmatic Programmer","isbn":"978-0135957059","description":"A classic."}
+    , .{ .status = "draft" });
+    defer entry.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("e_book_1", entry.id);
+    try std.testing.expectEqualStrings("The Pragmatic Programmer", entry.title);
+    try std.testing.expectEqualStrings("book", entry.content_type);
+
+    var fetched = (try query.getEntry(std.testing.allocator, &db, "book", "e_book_1")) orelse
+        return error.TestUnexpectedNull;
+    defer fetched.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("978-0135957059", fetched.data.getText("isbn").?);
+
+    // Meta projection: ISBN is filterable, so it should land in both
+    // content_meta (legacy text-only EAV) and entry_meta (typed columns).
+    var meta_stmt = try db.prepare(
+        "SELECT value FROM content_meta WHERE entry_id = ?1 AND field_name = 'isbn'",
+    );
+    defer meta_stmt.deinit();
+    try meta_stmt.bindText(1, "e_book_1");
+    try std.testing.expect(try meta_stmt.step());
+    try std.testing.expectEqualStrings("978-0135957059", meta_stmt.columnText(0).?);
+
+    var typed_stmt = try db.prepare(
+        "SELECT text_value FROM entry_meta WHERE entry_id = ?1 AND field_name = 'isbn'",
+    );
+    defer typed_stmt.deinit();
+    try typed_stmt.bindText(1, "e_book_1");
+    try std.testing.expect(try typed_stmt.step());
+    try std.testing.expectEqualStrings("978-0135957059", typed_stmt.columnText(0).?);
+}
+
+test "saveEntry: unknown type returns error" {
+    var db = try core_init.initDatabase(std.testing.allocator, ":memory:");
+    defer db.deinit();
+    try core_init.ensureSchema(&db);
+    try core_init.seed(&db);
+
+    try std.testing.expectError(error.UnknownContentType, saveEntry(
+        std.testing.allocator,
+        &db,
+        "no-such-type",
+        null,
+        "{}",
+        .{},
+    ));
+}
+
+test "listEntries: specialized and generic paths return identical entries" {
+    var db = try core_init.initDatabase(std.testing.allocator, ":memory:");
+    defer db.deinit();
+    try core_init.ensureSchema(&db);
+    try core_init.seed(&db);
+
+    // Define a content type at comptime so we can exercise the specialized
+    // path directly. Whether the dispatcher would auto-route here depends
+    // on whether the type was discovered via `compiled_in_types`; this
+    // test exercises behavior parity regardless.
+    const book_def = comptime content_type_mod.contentType(.{
+        .type_id = "book",
+        .display_name = "Book",
+        .display_name_plural = "Books",
+        .handle = "books",
+        .fields = &.{
+            field_mod.String("title", .{ .required = true }),
+            field_mod.Slug("slug", .{ .source = "title", .required = true }),
+            field_mod.Text("body", .{ .required = true }),
+        },
+    });
+    try schema_registry.register(book_def);
+    defer schema_registry.unregister("book");
+
+    inline for (.{
+        .{ "Alpha", "alpha", "First body" },
+        .{ "Bravo", "bravo", "Second body" },
+        .{ "Charlie", "charlie", "Third body" },
+    }) |row| {
+        const json = try std.fmt.allocPrint(
+            std.testing.allocator,
+            "{{\"title\":\"{s}\",\"slug\":\"{s}\",\"body\":\"{s}\"}}",
+            .{ row[0], row[1], row[2] },
+        );
+        defer std.testing.allocator.free(json);
+        var saved = try saveEntry(std.testing.allocator, &db, "book", null, json, .{});
+        saved.deinit(std.testing.allocator);
+    }
+
+    const specialized = try query.listEntriesSpecialized(std.testing.allocator, &db, book_def, .{
+        .order_by = "created_at",
+        .order_dir = .asc,
+    });
+    defer {
+        for (specialized) |*e| @constCast(e).deinit(std.testing.allocator);
+        std.testing.allocator.free(specialized);
+    }
+
+    const generic = try query.listEntriesGeneric(std.testing.allocator, &db, "book", .{
+        .order_by = "created_at",
+        .order_dir = .asc,
+    });
+    defer {
+        for (generic) |*e| @constCast(e).deinit(std.testing.allocator);
+        std.testing.allocator.free(generic);
+    }
+
+    try std.testing.expectEqual(specialized.len, generic.len);
+    try std.testing.expect(specialized.len == 3);
+
+    for (specialized, generic) |s, g| {
+        try std.testing.expectEqualStrings(s.id, g.id);
+        try std.testing.expectEqualStrings(s.title, g.title);
+        try std.testing.expectEqualStrings(s.status, g.status);
+        try std.testing.expectEqualStrings(s.content_type, g.content_type);
+        // FieldMap shape parity: both paths should yield identical text
+        // values for the promoted fields.
+        try std.testing.expectEqualStrings(s.data.getText("title").?, g.data.getText("title").?);
+        try std.testing.expectEqualStrings(s.data.getText("slug").?, g.data.getText("slug").?);
+        try std.testing.expectEqualStrings(s.data.getText("body").?, g.data.getText("body").?);
+    }
 }

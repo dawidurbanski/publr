@@ -20,6 +20,7 @@
 const std = @import("std");
 const field_mod = @import("field");
 const FieldDef = field_mod.FieldDef;
+const mw = @import("middleware");
 
 /// Schema source layer - for tracking where schemas come from
 pub const SchemaSource = enum {
@@ -60,6 +61,26 @@ pub const Hooks = struct {
     on_merge: ?*const fn (allocator: std.mem.Allocator, ctx: HookContext, data_json: []const u8) anyerror!void = null,
 };
 
+/// HTTP action hook — fires from the admin action dispatcher before the
+/// default behavior. Hook can mutate the request/response: setting a 4xx
+/// status short-circuits the default. Distinct from the data-layer `Hooks`
+/// above (which run from the storage layer with no request context).
+pub const ContentActionHookFn = *const fn (ctx: *mw.Context, type_id: []const u8, entry_id: []const u8) anyerror!void;
+
+/// HTTP-aware hooks corresponding to the eight admin actions wired by
+/// `content_actions.registerDefaults`. Each is optional; null = use default
+/// behavior with no pre-hook.
+pub const HttpHooks = struct {
+    on_create: ?ContentActionHookFn = null,
+    on_update: ?ContentActionHookFn = null,
+    on_delete: ?ContentActionHookFn = null,
+    on_publish: ?ContentActionHookFn = null,
+    on_unpublish: ?ContentActionHookFn = null,
+    on_autosave: ?ContentActionHookFn = null,
+    on_discard: ?ContentActionHookFn = null,
+    on_restore: ?ContentActionHookFn = null,
+};
+
 /// Content type configuration
 pub const Config = struct {
     /// Human-readable name (e.g., "Blog Post", "Author")
@@ -86,9 +107,160 @@ pub const Config = struct {
     admin_list_fields: []const []const u8 = &.{},
     /// Optional field-level permission declarations.
     field_permissions: []const FieldPermission = &.{},
-    /// Optional lifecycle hooks.
+    /// Optional lifecycle hooks (data layer — runs from storage).
     hooks: Hooks = .{},
+    /// Optional HTTP-aware hooks — run from the admin action dispatcher
+    /// before the default behavior for each `content.<verb>` action.
+    http_hooks: HttpHooks = .{},
 };
+
+/// Pure-data content type descriptor.
+///
+/// Same shape regardless of whether the type was registered from a compile-in
+/// plugin, a WASM descriptor, or a DB row. No `type` fields, no comptime-only
+/// state — every value is serializable.
+///
+/// `hooks` and `http_hooks` carry function pointers in native builds; for
+/// runtime-loaded descriptors they stay null and event delivery goes through
+/// the plugin SDK subscriber table instead.
+pub const ContentTypeDef = struct {
+    type_id: []const u8,
+    display_name: []const u8,
+    display_name_plural: []const u8,
+    handle: []const u8,
+    icon: ?[]const u8 = null,
+    localized: bool = false,
+    locales: []const []const u8 = &.{},
+    workflow: ?[]const u8 = null,
+    internal: bool = false,
+    taxonomy: ?TaxonomyConfig = null,
+    fields: []const FieldDef,
+    admin_list_fields: []const []const u8 = &.{},
+    field_permissions: []const FieldPermission = &.{},
+    hooks: Hooks = .{},
+    http_hooks: HttpHooks = .{},
+
+    /// Synthesize a `Data` struct type from `def.fields`. Only callable
+    /// from comptime contexts — used by the data layer's compile-in fast
+    /// path to typed-parse JSON into a struct of known shape.
+    pub fn zigStructForData(comptime def: ContentTypeDef) type {
+        return field_mod.GenerateSubStruct(def.fields);
+    }
+
+    /// Custom JSON serializer that emits only the JSON-safe descriptor
+    /// fields. Skips `hooks` and `http_hooks` (function pointers can't
+    /// be serialized); summarizes `fields` to name/type/required metadata.
+    pub fn jsonStringify(self: ContentTypeDef, jw: anytype) !void {
+        try jw.beginObject();
+        try jw.objectField("type_id");
+        try jw.write(self.type_id);
+        try jw.objectField("display_name");
+        try jw.write(self.display_name);
+        try jw.objectField("display_name_plural");
+        try jw.write(self.display_name_plural);
+        try jw.objectField("handle");
+        try jw.write(self.handle);
+        try jw.objectField("icon");
+        try jw.write(self.icon);
+        try jw.objectField("localized");
+        try jw.write(self.localized);
+        try jw.objectField("locales");
+        try jw.write(self.locales);
+        try jw.objectField("workflow");
+        try jw.write(self.workflow);
+        try jw.objectField("internal");
+        try jw.write(self.internal);
+        try jw.objectField("is_taxonomy");
+        try jw.write(self.taxonomy != null);
+        try jw.objectField("fields");
+        try jw.beginArray();
+        for (self.fields) |f| {
+            try jw.beginObject();
+            try jw.objectField("name");
+            try jw.write(f.name);
+            try jw.objectField("display_name");
+            try jw.write(f.display_name);
+            try jw.objectField("field_type_id");
+            try jw.write(f.field_type_id);
+            try jw.objectField("required");
+            try jw.write(f.required);
+            try jw.objectField("translatable_mode");
+            try jw.write(@tagName(f.translatable_mode));
+            try jw.objectField("position");
+            try jw.write(@tagName(f.position));
+            try jw.objectField("filterable");
+            try jw.write(f.filterable);
+            try jw.objectField("searchable");
+            try jw.write(f.searchable);
+            try jw.objectField("multi");
+            try jw.write(f.multi);
+            try jw.objectField("taxonomy_id");
+            try jw.write(f.taxonomy_id);
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+    }
+};
+
+/// Value-returning content type factory. Replaces the comptime
+/// `ContentType(...)` type-factory for the runtime registry path.
+///
+/// Validates required fields at comptime when `config` is comptime-known
+/// (the usual case for compile-in plugins). The returned `ContentTypeDef` is
+/// pure data: it can be stored in a runtime hashmap, serialized to JSON, or
+/// reconstructed from a DB row. No comptime-generated `Data: type`.
+///
+/// Plugin author usage:
+/// ```zig
+/// pub const book = publr.contentType(.{
+///     .type_id = "book",
+///     .display_name = "Book",
+///     .display_name_plural = "Books",
+///     .handle = "books",
+///     .icon = "book",
+///     .fields = &.{
+///         publr.field.String("title", .{ .required = true }),
+///         publr.field.String("isbn", .{ .filterable = true }),
+///     },
+/// });
+/// ```
+pub fn contentType(comptime config: anytype) ContentTypeDef {
+    const T = @TypeOf(config);
+    const ti = @typeInfo(T);
+    if (ti != .@"struct") {
+        @compileError("publr.contentType requires a struct literal config");
+    }
+
+    if (!@hasField(T, "type_id")) @compileError("publr.contentType requires .type_id");
+    if (!@hasField(T, "display_name")) @compileError("publr.contentType requires .display_name");
+    if (!@hasField(T, "handle")) @compileError("publr.contentType requires .handle");
+    if (!@hasField(T, "fields")) @compileError("publr.contentType requires .fields");
+
+    if (config.type_id.len == 0) @compileError("publr.contentType: type_id cannot be empty");
+    if (config.display_name.len == 0) @compileError("publr.contentType: display_name cannot be empty");
+    if (config.handle.len == 0) @compileError("publr.contentType: handle cannot be empty");
+
+    const plural = if (@hasField(T, "display_name_plural")) config.display_name_plural else defaultPlural(config.display_name);
+
+    return .{
+        .type_id = config.type_id,
+        .display_name = config.display_name,
+        .display_name_plural = plural,
+        .handle = config.handle,
+        .icon = if (@hasField(T, "icon")) config.icon else null,
+        .localized = if (@hasField(T, "localized")) config.localized else false,
+        .locales = if (@hasField(T, "locales")) config.locales else &.{},
+        .workflow = if (@hasField(T, "workflow")) config.workflow else null,
+        .internal = if (@hasField(T, "internal")) config.internal else false,
+        .taxonomy = if (@hasField(T, "taxonomy")) config.taxonomy else null,
+        .fields = config.fields,
+        .admin_list_fields = if (@hasField(T, "admin_list_fields")) config.admin_list_fields else &.{},
+        .field_permissions = if (@hasField(T, "field_permissions")) config.field_permissions else &.{},
+        .hooks = if (@hasField(T, "hooks")) config.hooks else .{},
+        .http_hooks = if (@hasField(T, "http_hooks")) config.http_hooks else .{},
+    };
+}
 
 /// Content type definition with metadata and generated Data struct
 pub fn ContentType(
@@ -165,8 +337,12 @@ pub fn ContentType(
         /// Field-level permission declarations.
         pub const field_permissions = config.field_permissions;
 
-        /// Lifecycle hooks for this content type.
+        /// Lifecycle hooks for this content type (data layer).
         pub const hooks = config.hooks;
+
+        /// HTTP-aware hooks for this content type — invoked by the action
+        /// dispatcher before each `content.<verb>` default behavior.
+        pub const http_hooks = config.http_hooks;
 
         /// Array of field definitions
         pub const schema = fields;
@@ -237,107 +413,27 @@ pub fn ContentType(
 
         /// Get fields that are locale-specific (`independent` or `with_fallback`).
         pub fn getLocaleSpecificFields() []const FieldDef {
-            comptime {
-                var count: usize = 0;
-                for (fields) |f| {
-                    if (f.translatable_mode != .synced) count += 1;
-                }
-
-                var result: [count]FieldDef = undefined;
-                var i: usize = 0;
-                for (fields) |f| {
-                    if (f.translatable_mode != .synced) {
-                        result[i] = f;
-                        i += 1;
-                    }
-                }
-                const final = result;
-                return &final;
-            }
+            return comptime filterFields(fields, .locale_specific);
         }
 
         /// Get fields that are synced across locales (`translatable_mode = .synced`).
         pub fn getSyncedFields() []const FieldDef {
-            comptime {
-                var count: usize = 0;
-                for (fields) |f| {
-                    if (f.translatable_mode == .synced) count += 1;
-                }
-
-                var result: [count]FieldDef = undefined;
-                var i: usize = 0;
-                for (fields) |f| {
-                    if (f.translatable_mode == .synced) {
-                        result[i] = f;
-                        i += 1;
-                    }
-                }
-                const final = result;
-                return &final;
-            }
+            return comptime filterFields(fields, .synced);
         }
 
         /// Get fields using default-locale fallback semantics.
         pub fn getFallbackFields() []const FieldDef {
-            comptime {
-                var count: usize = 0;
-                for (fields) |f| {
-                    if (f.translatable_mode == .with_fallback) count += 1;
-                }
-
-                var result: [count]FieldDef = undefined;
-                var i: usize = 0;
-                for (fields) |f| {
-                    if (f.translatable_mode == .with_fallback) {
-                        result[i] = f;
-                        i += 1;
-                    }
-                }
-                const final = result;
-                return &final;
-            }
+            return comptime filterFields(fields, .fallback);
         }
 
         /// Get all filterable fields (for entry_meta sync)
         pub fn getFilterableFields() []const FieldDef {
-            comptime {
-                var count: usize = 0;
-                for (fields) |f| {
-                    if (f.storage == .data_and_meta) count += 1;
-                }
-
-                var result: [count]FieldDef = undefined;
-                var i: usize = 0;
-                for (fields) |f| {
-                    if (f.storage == .data_and_meta) {
-                        result[i] = f;
-                        i += 1;
-                    }
-                }
-                const final = result;
-                return &final;
-            }
+            return comptime filterFields(fields, .filterable);
         }
 
         /// Get all taxonomy fields (for entry_terms sync)
         pub fn getTaxonomyFields() []const FieldDef {
-            comptime {
-                var count: usize = 0;
-                for (fields) |f| {
-                    if (f.storage == .taxonomy) count += 1;
-                }
-
-                var result: [count]FieldDef = undefined;
-                var i: usize = 0;
-                for (fields) |f| {
-                    if (f.storage == .taxonomy) {
-                        result[i] = f;
-                        i += 1;
-                    }
-                }
-                const final = result;
-                return &final;
-            }
+            return comptime filterFields(fields, .taxonomy);
         }
     };
 }
@@ -347,6 +443,47 @@ fn hasField(comptime fields: []const FieldDef, comptime field_name: []const u8) 
         if (std.mem.eql(u8, f.name, field_name)) return true;
     }
     return false;
+}
+
+/// Selectors for `filterFields`. Each corresponds to one of the per-field
+/// helper accessors on a generated ContentType.
+const FieldFilter = enum {
+    locale_specific,
+    synced,
+    fallback,
+    filterable,
+    taxonomy,
+};
+
+fn fieldMatches(comptime f: FieldDef, comptime which: FieldFilter) bool {
+    return switch (which) {
+        .locale_specific => f.translatable_mode != .synced,
+        .synced => f.translatable_mode == .synced,
+        .fallback => f.translatable_mode == .with_fallback,
+        .filterable => f.storage == .data_and_meta,
+        .taxonomy => f.storage == .taxonomy,
+    };
+}
+
+/// Comptime-only helper used by ContentType accessors. Builds the slice in
+/// static storage so callers can return it from a runtime function via
+/// `return comptime filterFields(...)`.
+fn filterFields(comptime fields: []const FieldDef, comptime which: FieldFilter) []const FieldDef {
+    comptime {
+        var count: usize = 0;
+        for (fields) |f| if (fieldMatches(f, which)) {
+            count += 1;
+        };
+
+        var result: [count]FieldDef = undefined;
+        var i: usize = 0;
+        for (fields) |f| if (fieldMatches(f, which)) {
+            result[i] = f;
+            i += 1;
+        };
+        const final = result;
+        return &final;
+    }
 }
 
 fn defaultPlural(comptime name: []const u8) []const u8 {
@@ -511,7 +648,48 @@ test "getTaxonomyFields returns correct fields" {
     try std.testing.expectEqualStrings("tag", taxonomies[1].name);
 }
 
+test "contentType factory: builds a ContentTypeDef value from a struct literal" {
+    const field = field_mod;
+    const book = contentType(.{
+        .type_id = "book",
+        .display_name = "Book",
+        .display_name_plural = "Books",
+        .handle = "books",
+        .icon = "book",
+        .fields = &.{
+            field.String("title", .{ .required = true, .max_length = 200 }),
+            field.String("isbn", .{ .filterable = true }),
+            field.Text("description", .{ .searchable = true }),
+        },
+    });
+
+    try std.testing.expectEqualStrings("book", book.type_id);
+    try std.testing.expectEqualStrings("Book", book.display_name);
+    try std.testing.expectEqualStrings("Books", book.display_name_plural);
+    try std.testing.expectEqualStrings("books", book.handle);
+    try std.testing.expect(book.fields.len == 3);
+    try std.testing.expectEqualStrings("title", book.fields[0].name);
+    try std.testing.expect(book.fields[1].filterable);
+    // No FieldDef.zig_type anywhere — descriptor is pure data.
+    try std.testing.expect(!@hasField(@TypeOf(book.fields[0]), "zig_type"));
+}
+
+test "contentType factory: display_name_plural defaults via defaultPlural" {
+    const field = field_mod;
+    const note = contentType(.{
+        .type_id = "note",
+        .display_name = "Note",
+        .handle = "notes",
+        .fields = &.{
+            field.String("title", .{ .required = true }),
+        },
+    });
+    try std.testing.expectEqualStrings("Notes", note.display_name_plural);
+}
+
 test "content_type: public API coverage" {
     _ = ContentType;
+    _ = ContentTypeDef;
+    _ = contentType;
     _ = @import("nested_type_validation.test.zig");
 }

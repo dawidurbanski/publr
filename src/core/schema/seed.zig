@@ -20,13 +20,12 @@ fn generateSeedSql() []const u8 {
     comptime {
         var sql: []const u8 = "";
 
-        // Content types
+        // Content types — core defs are always `core` source.
         for (registry.content_types) |ct| {
-            // Keep insert shape backward-compatible with pre-migration databases.
             sql = sql ++
                 "INSERT OR IGNORE INTO content_types (id, slug, name, fields, source) VALUES ('" ++
-                ct.id ++ "', '" ++ ct.id ++ "', '" ++ ct.display_name ++ "', '" ++
-                fieldsJson(ct.fields) ++ "', '" ++ @tagName(ct.source) ++ "');\n";
+                ct.type_id ++ "', '" ++ ct.handle ++ "', '" ++ ct.display_name ++ "', '" ++
+                fieldsJson(ct.fields) ++ "', 'core');\n";
         }
 
         // Taxonomies from content type fields

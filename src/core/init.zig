@@ -2,6 +2,7 @@ const std = @import("std");
 const db_mod = @import("db");
 const schema_sync = @import("schema_sync");
 const seed_mod = @import("seed");
+const schema_registry = @import("schema_registry");
 
 pub const Db = db_mod.Db;
 
@@ -15,9 +16,17 @@ pub fn ensureSchema(db: *Db) !void {
     try schema_sync.ensureSchema(db);
 }
 
-/// Seed core data (content types, taxonomies, defaults).
+/// Seed core data (content types, taxonomies, defaults). Also initializes
+/// the runtime schema registry with all compile-in content type
+/// descriptors so that data-layer functions (`saveEntry`, `getEntry`, …)
+/// can look them up.
 pub fn seed(db: *Db) !void {
     try db.exec(seed_mod.seed_sql);
+
+    schema_registry.init(db.allocator);
+    for (schema_registry.compiled_in_types) |def| {
+        schema_registry.register(def) catch {};
+    }
 }
 
 test "initDatabase opens memory db" {

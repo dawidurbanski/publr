@@ -72,7 +72,11 @@ pub const TranslatableMode = enum {
     with_fallback,
 };
 
-/// Field definition - the unit of schema composition
+/// Field definition - the unit of schema composition.
+///
+/// Pure data — every field is serializable. Zig types for struct generation
+/// (`GenerateSubStruct`) are derived from `field_type_id` + `sub_fields` +
+/// `multi`, not stored on the descriptor.
 pub const FieldDef = struct {
     /// Field identifier (used as JSON key and form input name)
     name: []const u8,
@@ -82,9 +86,6 @@ pub const FieldDef = struct {
 
     /// Field type identifier (e.g., "string", "text", "taxonomy")
     field_type_id: []const u8,
-
-    /// Zig type for this field's data (used in comptime struct generation)
-    zig_type: type,
 
     /// Whether field is required
     required: bool = false,
@@ -98,6 +99,19 @@ pub const FieldDef = struct {
     /// Meta value type (only used when storage = .data_and_meta)
     meta_type: MetaValueType = .text,
 
+    /// Whether this field should be projected to `entry_meta` for filtering /
+    /// sorting. Locked at content-type creation; flipping later requires a
+    /// new content type.
+    filterable: bool = false,
+
+    /// Whether this field's value should be indexed in the `entries_fts`
+    /// FTS5 table. Locked at creation.
+    searchable: bool = false,
+
+    /// True when this field stores a list of values (e.g. multi-reference or
+    /// multi-taxonomy). Replaces the comptime-only `zig_type` distinction.
+    multi: bool = false,
+
     /// Taxonomy ID (only used when storage = .taxonomy)
     taxonomy_id: ?[]const u8 = null,
 
@@ -110,11 +124,49 @@ pub const FieldDef = struct {
     /// Child fields for container types (Group, Repeater). Empty for scalar fields.
     sub_fields: []const FieldDef = &.{},
 
-    /// Validation function - returns error message or null if valid
+    /// Validation function - returns error message or null if valid.
+    /// Lookup-table-based validators (resolved by `field_type_id`) will
+    /// supersede this in a later task; for now it stays on the descriptor.
     validate: *const fn (value: []const u8) ?[]const u8,
 
-    /// Render function - emits field HTML to writer
+    /// Render function - emits field HTML to writer.
+    /// Lookup-table-based renderers (resolved by `field_type_id`) will
+    /// supersede this in a later task; for now it stays on the descriptor.
     render: *const fn (writer: std.io.AnyWriter, ctx: RenderContext) anyerror!void,
+
+    /// JSON serializer that skips the function-pointer fields (validate,
+    /// render) so the descriptor round-trips cleanly through REST / CLI
+    /// JSON output.
+    pub fn jsonStringify(self: FieldDef, jw: anytype) !void {
+        try jw.beginObject();
+        try jw.objectField("name");
+        try jw.write(self.name);
+        try jw.objectField("display_name");
+        try jw.write(self.display_name);
+        try jw.objectField("field_type_id");
+        try jw.write(self.field_type_id);
+        try jw.objectField("required");
+        try jw.write(self.required);
+        try jw.objectField("translatable_mode");
+        try jw.write(@tagName(self.translatable_mode));
+        try jw.objectField("storage");
+        try jw.write(@tagName(self.storage));
+        try jw.objectField("meta_type");
+        try jw.write(@tagName(self.meta_type));
+        try jw.objectField("filterable");
+        try jw.write(self.filterable);
+        try jw.objectField("searchable");
+        try jw.write(self.searchable);
+        try jw.objectField("multi");
+        try jw.write(self.multi);
+        try jw.objectField("taxonomy_id");
+        try jw.write(self.taxonomy_id);
+        try jw.objectField("position");
+        try jw.write(@tagName(self.position));
+        try jw.objectField("source_field");
+        try jw.write(self.source_field);
+        try jw.endObject();
+    }
 };
 
 // =============================================================================
@@ -123,7 +175,7 @@ pub const FieldDef = struct {
 
 /// Convert snake_case to Title Case: "featured_image" -> "Featured Image"
 pub fn humanize(comptime name: []const u8) []const u8 {
-    comptime {
+    return comptime blk: {
         var result: [name.len]u8 = undefined;
         var capitalize_next = true;
 
@@ -140,8 +192,8 @@ pub fn humanize(comptime name: []const u8) []const u8 {
         }
 
         const final = result;
-        return &final;
-    }
+        break :blk &final;
+    };
 }
 
 /// No-op validation - always passes
@@ -163,6 +215,7 @@ pub fn String(comptime name: []const u8, comptime opts: struct {
     min_length: ?usize = null,
     display: ?[]const u8 = null,
     filterable: bool = false,
+    searchable: bool = false,
     position: Position = .main,
 }) FieldDef {
     const S = struct {
@@ -210,10 +263,11 @@ pub fn String(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "string",
-        .zig_type = []const u8,
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .filterable = opts.filterable,
+        .searchable = opts.searchable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -225,6 +279,7 @@ pub fn Text(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     rows: u8 = 5,
     display: ?[]const u8 = null,
+    searchable: bool = false,
     position: Position = .main,
 }) FieldDef {
     const S = struct {
@@ -258,9 +313,9 @@ pub fn Text(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "text",
-        .zig_type = []const u8,
         .required = opts.required,
         .storage = .data_only,
+        .searchable = opts.searchable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -314,7 +369,6 @@ pub fn Slug(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "slug",
-        .zig_type = []const u8,
         .required = opts.required,
         .storage = .data_only,
         .position = opts.position,
@@ -387,10 +441,10 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "reference",
-        .zig_type = if (opts.many) []const []const u8 else []const u8,
         .required = opts.required,
         .translatable_mode = .synced,
         .storage = .data_only,
+        .multi = opts.many,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -456,10 +510,10 @@ pub fn Select(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "select",
-        .zig_type = []const u8,
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .filterable = opts.filterable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -513,7 +567,6 @@ pub fn Boolean(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "boolean",
-        .zig_type = bool,
         .required = false,
         .storage = .data_only,
         .position = opts.position,
@@ -561,10 +614,10 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "datetime",
-        .zig_type = ?i64, // Unix timestamp
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .int,
+        .filterable = opts.filterable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -655,7 +708,6 @@ pub fn Image(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "image",
-        .zig_type = ?[]const u8,
         .required = opts.required,
         .translatable_mode = resolved_mode,
         .storage = .data_only,
@@ -722,10 +774,10 @@ pub fn Integer(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "integer",
-        .zig_type = ?i64,
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .int,
+        .filterable = opts.filterable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -795,10 +847,10 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "number",
-        .zig_type = ?f64,
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .real,
+        .filterable = opts.filterable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -809,6 +861,7 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
 pub fn RichText(comptime name: []const u8, comptime opts: struct {
     required: bool = false,
     display: ?[]const u8 = null,
+    searchable: bool = false,
     position: Position = .main,
 }) FieldDef {
     const S = struct {
@@ -843,9 +896,9 @@ pub fn RichText(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "richtext",
-        .zig_type = []const u8,
         .required = opts.required,
         .storage = .data_only,
+        .searchable = opts.searchable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -902,10 +955,10 @@ pub fn Email(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "email",
-        .zig_type = []const u8,
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .filterable = opts.filterable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -967,10 +1020,10 @@ pub fn Url(comptime name: []const u8, comptime opts: struct {
         .name = name,
         .display_name = opts.display orelse humanize(name),
         .field_type_id = "url",
-        .zig_type = []const u8,
         .required = opts.required,
         .storage = if (opts.filterable) .data_and_meta else .data_only,
         .meta_type = .text,
+        .filterable = opts.filterable,
         .position = opts.position,
         .validate = S.validate,
         .render = S.render,
@@ -1032,9 +1085,9 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
         .name = taxonomy_id,
         .display_name = opts.display orelse humanize(taxonomy_id),
         .field_type_id = "taxonomy",
-        .zig_type = if (opts.many) []const []const u8 else []const u8,
         .required = opts.required,
         .storage = .taxonomy,
+        .multi = opts.many,
         .taxonomy_id = taxonomy_id,
         .position = opts.position,
         .validate = S.validate,
@@ -1046,6 +1099,37 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
 // Container Fields
 // =============================================================================
 
+/// Resolve the Zig type for a field at comptime.
+///
+/// Scalar field types map to fixed Zig types (`string` → `[]const u8`,
+/// `integer` → `?i64`, …). Containers (`group`, `repeater`) recurse on
+/// `sub_fields`. The `multi` flag on `reference` / `taxonomy` selects a
+/// slice-of-slices instead of a single slice.
+pub fn zigTypeFor(comptime f: FieldDef) type {
+    const id = f.field_type_id;
+    if (comptime std.mem.eql(u8, id, "string")) return []const u8;
+    if (comptime std.mem.eql(u8, id, "text")) return []const u8;
+    if (comptime std.mem.eql(u8, id, "slug")) return []const u8;
+    if (comptime std.mem.eql(u8, id, "select")) return []const u8;
+    if (comptime std.mem.eql(u8, id, "richtext")) return []const u8;
+    if (comptime std.mem.eql(u8, id, "email")) return []const u8;
+    if (comptime std.mem.eql(u8, id, "url")) return []const u8;
+    if (comptime std.mem.eql(u8, id, "boolean")) return bool;
+    if (comptime std.mem.eql(u8, id, "integer")) return ?i64;
+    if (comptime std.mem.eql(u8, id, "number")) return ?f64;
+    if (comptime std.mem.eql(u8, id, "datetime")) return ?i64;
+    if (comptime std.mem.eql(u8, id, "image")) return ?[]const u8;
+    if (comptime std.mem.eql(u8, id, "reference")) {
+        return if (f.multi) []const []const u8 else []const u8;
+    }
+    if (comptime std.mem.eql(u8, id, "taxonomy")) {
+        return if (f.multi) []const []const u8 else []const u8;
+    }
+    if (comptime std.mem.eql(u8, id, "group")) return GenerateSubStruct(f.sub_fields);
+    if (comptime std.mem.eql(u8, id, "repeater")) return []const GenerateSubStruct(f.sub_fields);
+    @compileError("Unknown field_type_id: " ++ id);
+}
+
 /// Generate a struct type from field definitions at comptime.
 /// Used by Group to create nested struct types, and by ContentType for the top-level Data struct.
 pub fn GenerateSubStruct(comptime fields: []const FieldDef) type {
@@ -1053,14 +1137,15 @@ pub fn GenerateSubStruct(comptime fields: []const FieldDef) type {
 
     for (fields, 0..) |f, i| {
         const is_repeater = comptime std.mem.eql(u8, f.field_type_id, "repeater");
+        const RawType = zigTypeFor(f);
 
         // Repeater uses raw slice type (not optional) — empty slice is the "absent" state.
         const FieldType = if (f.required or is_repeater)
-            f.zig_type
-        else if (@typeInfo(f.zig_type) == .optional)
-            f.zig_type
+            RawType
+        else if (@typeInfo(RawType) == .optional)
+            RawType
         else
-            ?f.zig_type;
+            ?RawType;
 
         struct_fields[i] = .{
             .name = f.name ++ "",
@@ -1120,8 +1205,6 @@ pub fn Group(comptime name: []const u8, comptime config: struct {
     position: Position = .main,
     translatable_mode: TranslatableMode = .independent,
 }, comptime sub_fields: []const FieldDef) FieldDef {
-    const NestedStruct = GenerateSubStruct(sub_fields);
-
     const S = struct {
         pub fn validate(_: []const u8) ?[]const u8 {
             // Group-level validation is a no-op. Sub-field validation
@@ -1187,7 +1270,6 @@ pub fn Group(comptime name: []const u8, comptime config: struct {
         .name = name,
         .display_name = config.label orelse humanize(name),
         .field_type_id = "group",
-        .zig_type = NestedStruct,
         .required = config.required,
         .position = config.position,
         .translatable_mode = config.translatable_mode,
@@ -1222,8 +1304,6 @@ pub fn Repeater(comptime name: []const u8, comptime config: struct {
     if (child_depth + 1 > config.max_depth) {
         @compileError("Repeater nesting exceeds max_depth of " ++ std.fmt.comptimePrint("{d}", .{config.max_depth}));
     }
-
-    const ItemStruct = GenerateSubStruct(sub_fields);
 
     const S = struct {
         pub fn validate(_: []const u8) ?[]const u8 {
@@ -1367,7 +1447,6 @@ pub fn Repeater(comptime name: []const u8, comptime config: struct {
         .name = name,
         .display_name = config.label orelse humanize(name),
         .field_type_id = "repeater",
-        .zig_type = []const ItemStruct,
         .required = config.required,
         .position = config.position,
         .translatable_mode = config.translatable_mode,
@@ -1537,8 +1616,8 @@ test "Group generates nested struct type" {
     try std.testing.expectEqualStrings("Seo", group.display_name);
     try std.testing.expect(group.sub_fields.len == 2);
 
-    // Verify the nested struct type
-    const info = @typeInfo(group.zig_type);
+    // Verify the nested struct type (derived via zigTypeFor)
+    const info = @typeInfo(zigTypeFor(group));
     try std.testing.expect(info == .@"struct");
     try std.testing.expect(info.@"struct".fields.len == 2);
     try std.testing.expectEqualStrings("meta_title", info.@"struct".fields[0].name);
@@ -1555,7 +1634,7 @@ test "Group JSON round-trip" {
         \\{"meta_title":"Hello","meta_description":"World"}
     ;
 
-    const parsed = try std.json.parseFromSlice(group.zig_type, std.testing.allocator, json, .{});
+    const parsed = try std.json.parseFromSlice(zigTypeFor(group), std.testing.allocator, json, .{});
     defer parsed.deinit();
 
     try std.testing.expectEqualStrings("Hello", parsed.value.meta_title);
@@ -1580,12 +1659,12 @@ test "Nested Group (Group inside Group)" {
         inner,
     });
 
-    const info = @typeInfo(outer.zig_type);
+    const info = @typeInfo(zigTypeFor(outer));
     try std.testing.expect(info == .@"struct");
     try std.testing.expect(info.@"struct".fields.len == 2);
 
     // Inner field type should also be a struct
-    const inner_type_info = @typeInfo(inner.zig_type);
+    const inner_type_info = @typeInfo(zigTypeFor(inner));
     try std.testing.expect(inner_type_info == .@"struct");
     try std.testing.expect(inner_type_info.@"struct".fields.len == 2);
 }
@@ -1693,8 +1772,8 @@ test "Repeater generates slice type" {
     try std.testing.expectEqualStrings("questions", repeater.name);
     try std.testing.expect(repeater.sub_fields.len == 2);
 
-    // zig_type should be a slice
-    const info = @typeInfo(repeater.zig_type);
+    // Derived Zig type should be a slice of the item struct
+    const info = @typeInfo(zigTypeFor(repeater));
     try std.testing.expect(info == .pointer);
     try std.testing.expect(info.pointer.size == .slice);
 

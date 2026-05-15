@@ -7,7 +7,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cms = @import("cms");
-const schemas = @import("schemas");
+const schema_registry = @import("schema_registry");
 const taxonomy = @import("taxonomy");
 const Db = @import("db").Db;
 const publr_config = @import("publr_config");
@@ -117,25 +117,25 @@ pub const TemplateContext = struct {
         return self.ssg_params.get(name);
     }
 
-    /// Get a single published entry by slug.
-    pub fn entry(self: *const TemplateContext, comptime content_type: ContentTypeTag, slug: []const u8) !EntryType(content_type) {
-        const CT = contentTypeFromTag(content_type);
-        if (self.deps) |d| d.recordEntry(CT.handle, slug);
-        return (try cms.getEntry(CT, self.allocator, self.db, slug)) orelse return error.EntryNotFound;
+    /// Get a single published entry by slug or id.
+    pub fn entry(self: *const TemplateContext, type_id: []const u8, slug_or_id: []const u8) !cms.query.Entry {
+        const def = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+        if (self.deps) |d| d.recordEntry(def.handle, slug_or_id);
+        return (try cms.query.getEntry(self.allocator, self.db, type_id, slug_or_id)) orelse return error.EntryNotFound;
     }
 
     /// Get a single entry by ID.
-    pub fn entryById(self: *const TemplateContext, comptime content_type: ContentTypeTag, id: []const u8) !EntryType(content_type) {
-        const CT = contentTypeFromTag(content_type);
-        if (self.deps) |d| d.recordEntry(CT.handle, id);
-        return (try cms.getEntry(CT, self.allocator, self.db, id)) orelse return error.EntryNotFound;
+    pub fn entryById(self: *const TemplateContext, type_id: []const u8, id: []const u8) !cms.query.Entry {
+        const def = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+        if (self.deps) |d| d.recordEntry(def.handle, id);
+        return (try cms.query.getEntry(self.allocator, self.db, type_id, id)) orelse return error.EntryNotFound;
     }
 
     /// List entries with optional filters.
-    pub fn query(self: *const TemplateContext, comptime content_type: ContentTypeTag, opts: QueryOpts) ![]EntryType(content_type) {
-        const CT = contentTypeFromTag(content_type);
-        if (self.deps) |d| d.recordContentType(CT.handle);
-        return cms.listEntries(CT, self.allocator, self.db, .{
+    pub fn query(self: *const TemplateContext, type_id: []const u8, opts: QueryOpts) ![]cms.query.Entry {
+        const def = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+        if (self.deps) |d| d.recordContentType(def.handle);
+        return cms.query.listEntries(self.allocator, self.db, type_id, .{
             .status = opts.status orelse "published",
             .limit = opts.limit,
             .offset = opts.offset,
@@ -145,10 +145,10 @@ pub const TemplateContext = struct {
     }
 
     /// Count entries matching filters.
-    pub fn count(self: *const TemplateContext, comptime content_type: ContentTypeTag, opts: CountOpts) !u32 {
-        const CT = contentTypeFromTag(content_type);
-        if (self.deps) |d| d.recordContentType(CT.handle);
-        return cms.countEntries(CT, self.db, .{
+    pub fn count(self: *const TemplateContext, type_id: []const u8, opts: CountOpts) !u32 {
+        const def = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+        if (self.deps) |d| d.recordContentType(def.handle);
+        return cms.query.countEntries(self.db, type_id, .{
             .status = opts.status orelse "published",
         });
     }
@@ -159,7 +159,7 @@ pub const TemplateContext = struct {
         return taxonomy.listTerms(self.allocator, self.db, taxonomy_id);
     }
 
-    pub const Error = error{EntryNotFound};
+    pub const Error = error{ EntryNotFound, UnknownContentType };
 };
 
 pub const QueryOpts = struct {
@@ -179,20 +179,3 @@ pub const SiteInfo = struct {
     url: []const u8,
     description: []const u8,
 };
-
-pub const ContentTypeTag = enum {
-    post,
-    page,
-};
-
-fn contentTypeFromTag(comptime tag: ContentTypeTag) type {
-    return switch (tag) {
-        .post => schemas.Post,
-        .page => schemas.Page,
-    };
-}
-
-fn EntryType(comptime tag: ContentTypeTag) type {
-    const CT = contentTypeFromTag(tag);
-    return cms.Entry(CT);
-}

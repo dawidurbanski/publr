@@ -1,231 +1,67 @@
 //! Schema Registry
 //!
-//! Merges content types from all three layers:
-//! 1. Core schemas (src/schemas/) - reserved names like post, page
-//! 2. Plugin schemas - auto-prefixed with plugin name (e.g., ecommerce:product)
-//! 3. Instance schemas (schema.zig in project root)
+//! Runtime registry of `ContentTypeDef` values. Compile-in core schemas,
+//! plugin schemas, and DB-defined types all register through the same API.
 //!
-//! Conflict handling:
-//! - Plugin schemas are prefixed: no conflicts possible between plugins
-//! - Instance conflicts with core: compile error
-//! - Instance conflicts with itself: compile error
-//! - No silent overrides
+//! Boot order:
+//!   1. `init(allocator)` — start the runtime registry
+//!   2. `register(def)` for each compile-in entry (core + plugins) and each
+//!      DB-defined / WASM-loaded descriptor
+//!   3. Data-layer functions (`saveEntry`, `getEntry`, …) look types up via
+//!      `findById` — the registry is the single source of truth.
+//!
+//! Public surface: `init`, `deinit`, `register`, `unregister`, `findById`,
+//! `findByHandle`, `all`, `compiled_in_types`, `all_taxonomy_ids`, `isReserved`.
 
 const std = @import("std");
 const field_mod = @import("field");
 const content_type_mod = @import("content_type");
 
 const FieldDef = field_mod.FieldDef;
-const Position = field_mod.Position;
-const TranslatableMode = field_mod.TranslatableMode;
-const SchemaSource = content_type_mod.SchemaSource;
+const ContentTypeDef = content_type_mod.ContentTypeDef;
 
-// Import core schemas
+// Import core schemas — needed for `content_types_for_seed` and reserved-id
+// helpers.
 const core_schemas = @import("schemas");
 
-/// Content type entry in registry
-pub const ContentTypeEntry = struct {
-    /// Content type identifier (e.g., "post", "ecommerce:product")
-    id: []const u8,
-    /// Human-readable name
-    display_name: []const u8,
-    /// Human-readable plural name
-    display_name_plural: []const u8 = "",
-    /// Source layer
-    source: SchemaSource,
-    /// Whether this content type is localized
-    localized: bool = false,
-    /// Available locales for this content type
-    available_locales: []const []const u8 = &.{},
-    /// Workflow identifier (null means default)
-    workflow: ?[]const u8 = null,
-    /// Hidden from content creation menus
-    internal: bool = false,
-    /// Taxonomy marker
-    is_taxonomy: bool = false,
-    /// Icon id used in admin navigation
-    icon: []const u8 = "bookmark",
-    /// Field definitions
-    fields: []const FieldDef,
+/// Compile-in content type descriptors known at build time. Concatenates
+/// the core schemas (`schemas.content_type_defs`) with any plugin
+/// descriptors discovered by `build/content_types.zig`. The data layer's
+/// fast path (`inline for (compiled_in_types)`) specializes hot functions
+/// over this slice.
+pub const compiled_in_types: []const ContentTypeDef = blk: {
+    const discovered = @import("compiled_in_content_types").all;
+    var out: [core_schemas.content_type_defs.len + discovered.len]ContentTypeDef = undefined;
+    var i: usize = 0;
+    for (core_schemas.content_type_defs) |def| {
+        out[i] = def;
+        i += 1;
+    }
+    for (discovered) |def| {
+        out[i] = def;
+        i += 1;
+    }
+    const final = out;
+    break :blk &final;
 };
 
-pub const FieldInfo = struct {
-    name: []const u8,
-    display_name: []const u8,
-    field_type: []const u8,
-    required: bool,
-    translatable_mode: TranslatableMode,
-    position: Position,
-};
+/// Comptime slice of core compile-in content types as `ContentTypeDef` values.
+/// Used by `seed.zig` to generate the `content_types` table seed SQL.
+pub const content_types: []const ContentTypeDef = core_schemas.content_type_defs;
 
-pub const TypeInfo = struct {
-    id: []const u8,
-    display_name: []const u8,
-    display_name_plural: []const u8,
-    icon: []const u8,
-    localized: bool,
-    internal: bool,
-    is_taxonomy: bool,
-    fields: []const FieldInfo,
-};
-
-/// All registered content types
-pub const content_types = buildContentTypeRegistry();
-pub const registered_types: []const TypeInfo = buildTypeInfoRegistry();
-
-/// Build the content type registry at comptime
-fn buildContentTypeRegistry() []const ContentTypeEntry {
-    comptime {
-        var entries: [2]ContentTypeEntry = undefined;
-        var count: usize = 0;
-
-        // Add core schemas
-        entries[count] = .{
-            .id = core_schemas.Post.type_id,
-            .display_name = core_schemas.Post.display_name,
-            .display_name_plural = core_schemas.Post.display_name_plural,
-            .source = .core,
-            .localized = core_schemas.Post.localized,
-            .available_locales = core_schemas.Post.available_locales,
-            .workflow = core_schemas.Post.workflow,
-            .internal = core_schemas.Post.internal,
-            .is_taxonomy = core_schemas.Post.is_taxonomy,
-            .icon = core_schemas.Post.icon,
-            .fields = core_schemas.Post.schema,
-        };
-        count += 1;
-
-        entries[count] = .{
-            .id = core_schemas.Page.type_id,
-            .display_name = core_schemas.Page.display_name,
-            .display_name_plural = core_schemas.Page.display_name_plural,
-            .source = .core,
-            .localized = core_schemas.Page.localized,
-            .available_locales = core_schemas.Page.available_locales,
-            .workflow = core_schemas.Page.workflow,
-            .internal = core_schemas.Page.internal,
-            .is_taxonomy = core_schemas.Page.is_taxonomy,
-            .icon = core_schemas.Page.icon,
-            .fields = core_schemas.Page.schema,
-        };
-        count += 1;
-
-        // TODO: Add plugin schemas (auto-prefixed)
-        // TODO: Add instance schemas (with conflict detection)
-
-        const result = entries[0..count].*;
-        return &result;
-    }
+/// Check if a content type ID is a reserved type-id prefix. Reserved
+/// prefixes are framework-controlled (currently none — the runtime
+/// registry collision check via `register` handles duplicate names).
+pub fn isReserved(_: []const u8) bool {
+    return false;
 }
 
-fn buildTypeInfoRegistry() []const TypeInfo {
-    comptime {
-        var infos: [content_types.len]TypeInfo = undefined;
-        for (content_types, 0..) |ct, i| {
-            var fields: [ct.fields.len]FieldInfo = undefined;
-            for (ct.fields, 0..) |field, fi| {
-                fields[fi] = .{
-                    .name = field.name,
-                    .display_name = field.display_name,
-                    .field_type = field.field_type_id,
-                    .required = field.required,
-                    .translatable_mode = field.translatable_mode,
-                    .position = field.position,
-                };
-            }
-            const finalized_fields = fields;
-            infos[i] = .{
-                .id = ct.id,
-                .display_name = ct.display_name,
-                .display_name_plural = ct.display_name_plural,
-                .icon = ct.icon,
-                .localized = ct.localized,
-                .internal = ct.internal,
-                .is_taxonomy = ct.is_taxonomy,
-                .fields = &finalized_fields,
-            };
-        }
-        const result = infos;
-        return &result;
-    }
-}
-
-/// Find content type by ID
-pub fn findById(comptime id: []const u8) ?ContentTypeEntry {
-    inline for (content_types) |ct| {
-        if (comptime std.mem.eql(u8, ct.id, id)) {
-            return ct;
-        }
-    }
-    return null;
-}
-
-/// Find content type by ID at runtime
-pub fn findByIdRuntime(id: []const u8) ?ContentTypeEntry {
-    for (content_types) |ct| {
-        if (std.mem.eql(u8, ct.id, id)) {
-            return ct;
-        }
-    }
-    return null;
-}
-
-pub fn getTypeInfo(type_id: []const u8) ?TypeInfo {
-    for (registered_types) |info| {
-        if (std.mem.eql(u8, info.id, type_id)) return info;
-    }
-    return null;
-}
-
-/// Get all content type IDs
-pub fn getIds() []const []const u8 {
-    comptime {
-        var ids: [content_types.len][]const u8 = undefined;
-        for (content_types, 0..) |ct, i| {
-            ids[i] = ct.id;
-        }
-        const result = ids;
-        return &result;
-    }
-}
-
-/// Get all core content type IDs (reserved names)
-pub fn getCoreIds() []const []const u8 {
-    return &core_schemas.reserved_ids;
-}
-
-/// Check if an ID is a reserved core content type
-pub fn isReserved(id: []const u8) bool {
-    return core_schemas.isReserved(id);
-}
-
-/// Get content types by source
-pub fn getBySource(comptime source: SchemaSource) []const ContentTypeEntry {
-    comptime {
-        var count: usize = 0;
-        for (content_types) |ct| {
-            if (ct.source == source) count += 1;
-        }
-
-        var result: [count]ContentTypeEntry = undefined;
-        var i: usize = 0;
-        for (content_types) |ct| {
-            if (ct.source == source) {
-                result[i] = ct;
-                i += 1;
-            }
-        }
-        const final = result;
-        return &final;
-    }
-}
-
-/// All taxonomy IDs used across all content types (computed at comptime)
+/// All taxonomy IDs used across compile-in content types (computed at
+/// comptime). Used by `seed.zig` to generate the `taxonomies` table seed SQL.
 pub const all_taxonomy_ids: []const []const u8 = computeTaxonomyIds();
 
 fn computeTaxonomyIds() []const []const u8 {
     comptime {
-        // First pass: count unique taxonomy IDs
         var seen: [64][]const u8 = undefined;
         var seen_count: usize = 0;
 
@@ -254,107 +90,218 @@ fn computeTaxonomyIds() []const []const u8 {
     }
 }
 
-/// Get all taxonomy IDs (legacy function - use all_taxonomy_ids constant)
-pub fn getAllTaxonomyIds() []const []const u8 {
-    return all_taxonomy_ids;
+// =============================================================================
+// Runtime registry (ContentTypeDef-based)
+// =============================================================================
+//
+// Boot order:
+//   1. `init(allocator)`
+//   2. `register(def)` once per `compiled_in_types` entry and each entry from
+//      `schemas.content_type_defs` (the core compile-in tuple)
+//   3. `register(def)` for any DB-defined or WASM-loaded descriptors
+//
+// Data-layer functions (`saveEntry`, `getEntry`, …) look types
+// up via `findById` — the registry is the single source of truth.
+
+var runtime_state: ?RuntimeState = null;
+
+const RuntimeState = struct {
+    allocator: std.mem.Allocator,
+    by_id: std.StringHashMapUnmanaged(*const ContentTypeDef),
+    order: std.ArrayListUnmanaged(*const ContentTypeDef),
+};
+
+pub const RegisterError = error{
+    DuplicateContentType,
+    NotInitialized,
+    OutOfMemory,
+};
+
+/// Initialize the runtime registry. Safe to call multiple times — repeat
+/// calls reset the registry (intended for tests). In production, call once
+/// during boot.
+pub fn init(allocator: std.mem.Allocator) void {
+    if (runtime_state) |*s| {
+        s.by_id.deinit(s.allocator);
+        s.order.deinit(s.allocator);
+    }
+    runtime_state = .{
+        .allocator = allocator,
+        .by_id = .{},
+        .order = .{},
+    };
+}
+
+/// Tear the registry down. Frees the index but not the descriptor values —
+/// those are typically static (compile-in) or owned by the caller (DB-loaded).
+pub fn deinit() void {
+    if (runtime_state) |*s| {
+        s.by_id.deinit(s.allocator);
+        s.order.deinit(s.allocator);
+        runtime_state = null;
+    }
+}
+
+/// Register a content type descriptor. Returns `DuplicateContentType` when
+/// the `type_id` collides with an already-registered entry — registration
+/// is fail-loud, never silent-override.
+pub fn register(def: ContentTypeDef) RegisterError!void {
+    var s = if (runtime_state) |*st| st else return error.NotInitialized;
+    if (s.by_id.contains(def.type_id)) return error.DuplicateContentType;
+
+    const heap_def = s.allocator.create(ContentTypeDef) catch return error.OutOfMemory;
+    heap_def.* = def;
+
+    s.by_id.put(s.allocator, def.type_id, heap_def) catch |e| {
+        s.allocator.destroy(heap_def);
+        return switch (e) {
+            error.OutOfMemory => error.OutOfMemory,
+        };
+    };
+    s.order.append(s.allocator, heap_def) catch |e| {
+        _ = s.by_id.remove(def.type_id);
+        s.allocator.destroy(heap_def);
+        return switch (e) {
+            error.OutOfMemory => error.OutOfMemory,
+        };
+    };
+}
+
+/// Remove a content type. No-op when the id is not registered.
+pub fn unregister(type_id: []const u8) void {
+    var s = if (runtime_state) |*st| st else return;
+    const entry = s.by_id.fetchRemove(type_id) orelse return;
+    var i: usize = 0;
+    while (i < s.order.items.len) : (i += 1) {
+        if (s.order.items[i] == entry.value) {
+            _ = s.order.orderedRemove(i);
+            break;
+        }
+    }
+    s.allocator.destroy(entry.value);
+}
+
+/// Look up a registered content type by `type_id`. Returns null for unknown.
+pub fn findById(type_id: []const u8) ?*const ContentTypeDef {
+    const s = if (runtime_state) |*st| st else return null;
+    return s.by_id.get(type_id);
+}
+
+/// Look up a registered content type by URL handle. Returns null for unknown.
+pub fn findByHandle(handle: []const u8) ?*const ContentTypeDef {
+    const s = if (runtime_state) |*st| st else return null;
+    for (s.order.items) |def| {
+        if (std.mem.eql(u8, def.handle, handle)) return def;
+    }
+    return null;
+}
+
+/// Snapshot of every registered content type in registration order.
+pub fn all() []const *const ContentTypeDef {
+    const s = if (runtime_state) |*st| st else return &.{};
+    return s.order.items;
 }
 
 // =============================================================================
 // Tests
 // =============================================================================
 
-test "content_types includes core schemas" {
-    try std.testing.expect(content_types.len >= 2);
-
-    // Check that core types are present
-    try std.testing.expect(findById("post") != null);
-    try std.testing.expect(findById("page") != null);
+test "content_types is empty when no compile-in starters are bundled" {
+    try std.testing.expectEqual(@as(usize, 0), content_types.len);
 }
 
-test "findById returns correct content type" {
-    const post = findById("post").?;
-    try std.testing.expectEqualStrings("post", post.id);
-    try std.testing.expectEqualStrings("Blog Post", post.display_name);
-    try std.testing.expect(post.source == .core);
-}
-
-test "findById returns null for unknown type" {
-    try std.testing.expect(findById("unknown") == null);
-}
-
-test "getIds returns all content type IDs" {
-    const ids = getIds();
-    try std.testing.expect(ids.len == content_types.len);
-}
-
-test "isReserved returns true for core types" {
-    try std.testing.expect(isReserved("post"));
-    try std.testing.expect(isReserved("page"));
-}
-
-test "isReserved returns false for non-core types" {
+test "isReserved is empty by default" {
+    try std.testing.expect(!isReserved("post"));
+    try std.testing.expect(!isReserved("page"));
     try std.testing.expect(!isReserved("recipe"));
-    try std.testing.expect(!isReserved("product"));
 }
 
-test "getBySource returns only core types" {
-    const core = getBySource(.core);
-    try std.testing.expect(core.len == 2);
-    for (core) |ct| {
-        try std.testing.expect(ct.source == .core);
-    }
-}
-
-test "getAllTaxonomyIds returns unique taxonomy IDs" {
-    const taxonomies = getAllTaxonomyIds();
-    // Post has category and tag
-    try std.testing.expect(taxonomies.len >= 2);
-}
-
-test "registered_types contains all content types" {
-    try std.testing.expectEqual(content_types.len, registered_types.len);
-    try std.testing.expect(getTypeInfo("post") != null);
-    try std.testing.expect(getTypeInfo("page") != null);
-}
-
-test "getTypeInfo returns correct fields for post" {
-    const info = getTypeInfo("post").?;
-    try std.testing.expectEqualStrings("post", info.id);
-    try std.testing.expect(info.fields.len > 0);
-
-    var has_title = false;
-    for (info.fields) |field| {
-        if (std.mem.eql(u8, field.name, "title")) {
-            has_title = true;
-            try std.testing.expect(field.required);
-        }
-    }
-    try std.testing.expect(has_title);
-}
-
-test "getTypeInfo returns null for unknown type" {
-    try std.testing.expect(getTypeInfo("unknown_type") == null);
-}
-
-test "FieldInfo captures required and translatable flags" {
-    const info = getTypeInfo("post").?;
-    for (info.fields) |field| {
-        if (std.mem.eql(u8, field.name, "title")) {
-            try std.testing.expect(field.required);
-        }
-        if (std.mem.eql(u8, field.name, "author")) {
-            try std.testing.expect(field.translatable_mode == .synced);
-        }
-    }
+test "all_taxonomy_ids is empty when no compile-in starters declare taxonomies" {
+    try std.testing.expectEqual(@as(usize, 0), all_taxonomy_ids.len);
 }
 
 test "registry: public API coverage" {
-    _ = findById;
-    _ = findByIdRuntime;
-    _ = getTypeInfo;
-    _ = getIds;
-    _ = getCoreIds;
     _ = isReserved;
-    _ = getBySource;
-    _ = getAllTaxonomyIds;
+    _ = init;
+    _ = deinit;
+    _ = register;
+    _ = unregister;
+    _ = findById;
+    _ = findByHandle;
+    _ = all;
+    _ = compiled_in_types;
+}
+
+// =============================================================================
+// Runtime registry tests
+// =============================================================================
+
+const field_for_tests = field_mod;
+
+fn sampleDef(comptime type_id: []const u8, comptime handle: []const u8) ContentTypeDef {
+    return content_type_mod.contentType(.{
+        .type_id = type_id,
+        .display_name = "Sample",
+        .handle = handle,
+        .fields = &.{
+            field_for_tests.String("title", .{ .required = true }),
+        },
+    });
+}
+
+test "runtime registry: register, findById, findByHandle, all" {
+    init(std.testing.allocator);
+    defer deinit();
+
+    const book = sampleDef("book", "books");
+    const movie = sampleDef("movie", "movies");
+
+    try register(book);
+    try register(movie);
+
+    const found = findById("book") orelse return error.TestUnexpectedNull;
+    try std.testing.expectEqualStrings("book", found.type_id);
+
+    const by_handle = findByHandle("movies") orelse return error.TestUnexpectedNull;
+    try std.testing.expectEqualStrings("movie", by_handle.type_id);
+
+    const snapshot = all();
+    try std.testing.expectEqual(@as(usize, 2), snapshot.len);
+    try std.testing.expectEqualStrings("book", snapshot[0].type_id);
+    try std.testing.expectEqualStrings("movie", snapshot[1].type_id);
+}
+
+test "runtime registry: register rejects duplicate type_id" {
+    init(std.testing.allocator);
+    defer deinit();
+
+    try register(sampleDef("book", "books"));
+    try std.testing.expectError(error.DuplicateContentType, register(sampleDef("book", "books_alt")));
+}
+
+test "runtime registry: findById returns null for unknown id" {
+    init(std.testing.allocator);
+    defer deinit();
+
+    try std.testing.expect(findById("does-not-exist") == null);
+}
+
+test "runtime registry: unregister removes the entry" {
+    init(std.testing.allocator);
+    defer deinit();
+
+    try register(sampleDef("book", "books"));
+    try std.testing.expect(findById("book") != null);
+    unregister("book");
+    try std.testing.expect(findById("book") == null);
+    try std.testing.expectEqual(@as(usize, 0), all().len);
+}
+
+test "runtime registry: register requires init" {
+    deinit();
+    try std.testing.expectError(error.NotInitialized, register(sampleDef("book", "books")));
+}
+
+test "runtime registry: compiled_in_types is an empty slice when no plugin exposes one" {
+    try std.testing.expectEqual(@as(usize, 0), compiled_in_types.len);
 }

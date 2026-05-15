@@ -18,6 +18,15 @@ pub const TermRecord = struct {
     parent_id: ?[]const u8,
     description: []const u8,
     sort_order: i64,
+    /// User who created this term. Null when authored by the system
+    /// (CLI, seed scripts, automated migrations).
+    author_id: ?[]const u8 = null,
+    /// User who last modified this term.
+    last_updated_by: ?[]const u8 = null,
+    /// Unix epoch seconds.
+    created_at: i64 = 0,
+    /// Unix epoch seconds.
+    updated_at: i64 = 0,
 };
 
 /// Taxonomy IDs
@@ -27,21 +36,25 @@ pub const tax_media_tags = "tax_media_tags";
 /// Generate a unique term ID with t_ prefix
 pub const generateTermId = id_gen.generateTermId;
 
-/// Create a term (folder or tag)
+/// Create a term (folder or tag). `author_id` is the user creating the
+/// term; pass `null` for system writes (CLI, seed scripts). Stamps
+/// `author_id`, `last_updated_by`, `created_at`, and `updated_at`.
 pub fn createTerm(
     allocator: Allocator,
     db: *Db,
     taxonomy_id: []const u8,
     name: []const u8,
     parent_id: ?[]const u8,
+    author_id: ?[]const u8,
 ) !TermRecord {
     const id = try generateTermId(allocator);
     const slug = try slugify(allocator, name);
     defer allocator.free(slug);
 
     var stmt = try db.prepare(
-        \\INSERT INTO terms (id, taxonomy_id, slug, name, parent_id, description, sort_order)
-        \\VALUES (?1, ?2, ?3, ?4, ?5, '', 0)
+        \\INSERT INTO terms (id, taxonomy_id, slug, name, parent_id, description, sort_order, author_id, last_updated_by, created_at, updated_at)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, '', 0, ?6, ?6, unixepoch(), unixepoch())
+        \\RETURNING created_at, updated_at
     );
     defer stmt.deinit();
 
@@ -50,8 +63,14 @@ pub fn createTerm(
     try stmt.bindText(3, slug);
     try stmt.bindText(4, name);
     if (parent_id) |pid| try stmt.bindText(5, pid) else try stmt.bindNull(5);
+    if (author_id) |aid| try stmt.bindText(6, aid) else try stmt.bindNull(6);
 
-    _ = try stmt.step();
+    var created_at: i64 = 0;
+    var updated_at: i64 = 0;
+    if (try stmt.step()) {
+        created_at = stmt.columnInt(0);
+        updated_at = stmt.columnInt(1);
+    }
 
     return .{
         .id = id,
@@ -61,6 +80,10 @@ pub fn createTerm(
         .parent_id = if (parent_id) |pid| try allocator.dupe(u8, pid) else null,
         .description = try allocator.dupe(u8, ""),
         .sort_order = 0,
+        .author_id = if (author_id) |aid| try allocator.dupe(u8, aid) else null,
+        .last_updated_by = if (author_id) |aid| try allocator.dupe(u8, aid) else null,
+        .created_at = created_at,
+        .updated_at = updated_at,
     };
 }
 
@@ -71,7 +94,9 @@ pub fn listTerms(
     taxonomy_id: []const u8,
 ) ![]TermRecord {
     var stmt = try db.prepare(
-        "SELECT id, taxonomy_id, slug, name, parent_id, description, sort_order FROM terms WHERE taxonomy_id = ?1 ORDER BY sort_order, name",
+        \\SELECT id, taxonomy_id, slug, name, parent_id, description, sort_order,
+        \\       author_id, last_updated_by, created_at, updated_at
+        \\FROM terms WHERE taxonomy_id = ?1 ORDER BY sort_order, name
     );
     defer stmt.deinit();
 
@@ -89,18 +114,27 @@ pub fn listTerms(
             .parent_id = if (stmt.columnText(4)) |p| try allocator.dupe(u8, p) else null,
             .description = try allocator.dupe(u8, stmt.columnText(5) orelse ""),
             .sort_order = stmt.columnInt(6),
+            .author_id = if (stmt.columnText(7)) |a| try allocator.dupe(u8, a) else null,
+            .last_updated_by = if (stmt.columnText(8)) |u| try allocator.dupe(u8, u) else null,
+            .created_at = stmt.columnInt(9),
+            .updated_at = stmt.columnInt(10),
         });
     }
 
     return items.toOwnedSlice(allocator);
 }
 
-/// Rename a term
-pub fn renameTerm(db: *Db, term_id: []const u8, new_name: []const u8) !void {
-    var stmt = try db.prepare("UPDATE terms SET name = ?2 WHERE id = ?1");
+/// Rename a term. `editor_id` is the user making the change (null for
+/// system writes). Bumps `updated_at` and stamps `last_updated_by`.
+pub fn renameTerm(db: *Db, term_id: []const u8, new_name: []const u8, editor_id: ?[]const u8) !void {
+    var stmt = try db.prepare(
+        \\UPDATE terms SET name = ?2, last_updated_by = ?3, updated_at = unixepoch()
+        \\WHERE id = ?1
+    );
     defer stmt.deinit();
     try stmt.bindText(1, term_id);
     try stmt.bindText(2, new_name);
+    if (editor_id) |eid| try stmt.bindText(3, eid) else try stmt.bindNull(3);
     _ = try stmt.step();
 }
 
@@ -121,12 +155,17 @@ pub fn deleteTerm(db: *Db, term_id: []const u8) !void {
     _ = try stmt.step();
 }
 
-/// Move a term to a new parent (or root if new_parent_id is null)
-pub fn moveTermParent(db: *Db, term_id: []const u8, new_parent_id: ?[]const u8) !void {
-    var stmt = try db.prepare("UPDATE terms SET parent_id = ?2 WHERE id = ?1");
+/// Move a term to a new parent (or root if new_parent_id is null).
+/// `editor_id` is the user making the change.
+pub fn moveTermParent(db: *Db, term_id: []const u8, new_parent_id: ?[]const u8, editor_id: ?[]const u8) !void {
+    var stmt = try db.prepare(
+        \\UPDATE terms SET parent_id = ?2, last_updated_by = ?3, updated_at = unixepoch()
+        \\WHERE id = ?1
+    );
     defer stmt.deinit();
     try stmt.bindText(1, term_id);
     if (new_parent_id) |pid| try stmt.bindText(2, pid) else try stmt.bindNull(2);
+    if (editor_id) |eid| try stmt.bindText(3, eid) else try stmt.bindNull(3);
     _ = try stmt.step();
 }
 
@@ -423,7 +462,7 @@ test "createTerm and listTerms" {
     var db = try initTestDb();
     defer db.deinit();
 
-    const term = try createTerm(std.testing.allocator, &db, tax_media_folders, "Photos", null);
+    const term = try createTerm(std.testing.allocator, &db, tax_media_folders, "Photos", null, null);
     defer std.testing.allocator.free(term.id);
     defer std.testing.allocator.free(term.taxonomy_id);
     defer std.testing.allocator.free(term.slug);
@@ -450,18 +489,76 @@ test "createTerm and listTerms" {
     try std.testing.expectEqualStrings("Photos", terms[0].name);
 }
 
+test "createTerm stamps author_id and timestamps" {
+    var db = try initTestDb();
+    defer db.deinit();
+
+    // Need a users row so the FK on terms.author_id resolves.
+    try db.exec(
+        \\INSERT INTO users (id, email, password_hash) VALUES ('u_test', 'test@example.com', 'hash')
+    );
+
+    const term = try createTerm(std.testing.allocator, &db, tax_media_folders, "Photos", null, "u_test");
+    defer std.testing.allocator.free(term.id);
+    defer std.testing.allocator.free(term.taxonomy_id);
+    defer std.testing.allocator.free(term.slug);
+    defer std.testing.allocator.free(term.name);
+    defer std.testing.allocator.free(term.description);
+    defer if (term.author_id) |a| std.testing.allocator.free(a);
+    defer if (term.last_updated_by) |u| std.testing.allocator.free(u);
+
+    try std.testing.expectEqualStrings("u_test", term.author_id.?);
+    try std.testing.expectEqualStrings("u_test", term.last_updated_by.?);
+    try std.testing.expect(term.created_at > 0);
+    try std.testing.expect(term.updated_at > 0);
+    try std.testing.expectEqual(term.created_at, term.updated_at);
+}
+
+test "renameTerm bumps updated_at and stamps last_updated_by" {
+    var db = try initTestDb();
+    defer db.deinit();
+    try db.exec(
+        \\INSERT INTO users (id, email, password_hash) VALUES ('u_author', 'a@e.com', 'h');
+        \\INSERT INTO users (id, email, password_hash) VALUES ('u_editor', 'e@e.com', 'h');
+    );
+
+    const term = try createTerm(std.testing.allocator, &db, tax_media_tags, "Old", null, "u_author");
+    defer std.testing.allocator.free(term.id);
+    defer std.testing.allocator.free(term.taxonomy_id);
+    defer std.testing.allocator.free(term.slug);
+    defer std.testing.allocator.free(term.name);
+    defer std.testing.allocator.free(term.description);
+    defer if (term.author_id) |a| std.testing.allocator.free(a);
+    defer if (term.last_updated_by) |u| std.testing.allocator.free(u);
+
+    // Force a measurable time gap so updated_at differs from created_at.
+    try db.exec("UPDATE terms SET created_at = created_at - 10, updated_at = updated_at - 10");
+
+    try renameTerm(&db, term.id, "New", "u_editor");
+
+    var stmt = try db.prepare("SELECT name, author_id, last_updated_by, created_at, updated_at FROM terms WHERE id = ?1");
+    defer stmt.deinit();
+    try stmt.bindText(1, term.id);
+    try std.testing.expect(try stmt.step());
+
+    try std.testing.expectEqualStrings("New", stmt.columnText(0).?);
+    try std.testing.expectEqualStrings("u_author", stmt.columnText(1).?);
+    try std.testing.expectEqualStrings("u_editor", stmt.columnText(2).?);
+    try std.testing.expect(stmt.columnInt(4) > stmt.columnInt(3));
+}
+
 test "renameTerm" {
     var db = try initTestDb();
     defer db.deinit();
 
-    const term = try createTerm(std.testing.allocator, &db, tax_media_tags, "Old Name", null);
+    const term = try createTerm(std.testing.allocator, &db, tax_media_tags, "Old Name", null, null);
     defer std.testing.allocator.free(term.id);
     defer std.testing.allocator.free(term.taxonomy_id);
     defer std.testing.allocator.free(term.slug);
     defer std.testing.allocator.free(term.name);
     defer std.testing.allocator.free(term.description);
 
-    try renameTerm(&db, term.id, "New Name");
+    try renameTerm(&db, term.id, "New Name", null);
 
     const terms = try listTerms(std.testing.allocator, &db, tax_media_tags);
     defer {
@@ -483,14 +580,14 @@ test "deleteTerm removes term and unparents children" {
     var db = try initTestDb();
     defer db.deinit();
 
-    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null, null);
     defer std.testing.allocator.free(parent.id);
     defer std.testing.allocator.free(parent.taxonomy_id);
     defer std.testing.allocator.free(parent.slug);
     defer std.testing.allocator.free(parent.name);
     defer std.testing.allocator.free(parent.description);
 
-    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id, null);
     defer std.testing.allocator.free(child.id);
     defer std.testing.allocator.free(child.taxonomy_id);
     defer std.testing.allocator.free(child.slug);
@@ -522,14 +619,14 @@ test "getDescendantFolderIds returns folder and all descendants" {
     var db = try initTestDb();
     defer db.deinit();
 
-    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null, null);
     defer std.testing.allocator.free(parent.id);
     defer std.testing.allocator.free(parent.taxonomy_id);
     defer std.testing.allocator.free(parent.slug);
     defer std.testing.allocator.free(parent.name);
     defer std.testing.allocator.free(parent.description);
 
-    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id, null);
     defer std.testing.allocator.free(child.id);
     defer std.testing.allocator.free(child.taxonomy_id);
     defer std.testing.allocator.free(child.slug);
@@ -537,7 +634,7 @@ test "getDescendantFolderIds returns folder and all descendants" {
     defer std.testing.allocator.free(child.description);
     defer if (child.parent_id) |p| std.testing.allocator.free(p);
 
-    const grandchild = try createTerm(std.testing.allocator, &db, tax_media_folders, "Grandchild", child.id);
+    const grandchild = try createTerm(std.testing.allocator, &db, tax_media_folders, "Grandchild", child.id, null);
     defer std.testing.allocator.free(grandchild.id);
     defer std.testing.allocator.free(grandchild.taxonomy_id);
     defer std.testing.allocator.free(grandchild.slug);

@@ -451,7 +451,7 @@ pub fn syncMediaMeta(db: *Db, media_id: []const u8, data: media_schema.Media.Dat
     _ = try del_stmt.step();
 
     // Insert new meta values for filterable fields
-    const filterable = media_schema.Media.getFilterableFields();
+    const filterable = comptime media_schema.Media.getFilterableFields();
     if (filterable.len == 0) return;
 
     var stmt = try db.prepare(
@@ -905,7 +905,7 @@ test "getMediaTermIds returns assigned terms" {
     defer std.testing.allocator.free(record.storage_key);
     defer std.testing.allocator.free(record.visibility);
 
-    const folder = try createTerm(std.testing.allocator, &db, tax_media_folders, "Folder", null);
+    const folder = try createTerm(std.testing.allocator, &db, tax_media_folders, "Folder", null, null);
     defer std.testing.allocator.free(folder.id);
     defer std.testing.allocator.free(folder.taxonomy_id);
     defer std.testing.allocator.free(folder.slug);
@@ -943,14 +943,14 @@ test "countMediaInFolderRecursive counts across descendants" {
     var db = try initTestDb();
     defer db.deinit();
 
-    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null, null);
     defer std.testing.allocator.free(parent.id);
     defer std.testing.allocator.free(parent.taxonomy_id);
     defer std.testing.allocator.free(parent.slug);
     defer std.testing.allocator.free(parent.name);
     defer std.testing.allocator.free(parent.description);
 
-    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id, null);
     defer std.testing.allocator.free(child.id);
     defer std.testing.allocator.free(child.taxonomy_id);
     defer std.testing.allocator.free(child.slug);
@@ -1004,14 +1004,14 @@ test "listMediaByFolderAndTags with folder descendants and tags" {
     defer db.deinit();
 
     // Create folder hierarchy: parent > child
-    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null);
+    const parent = try createTerm(std.testing.allocator, &db, tax_media_folders, "Parent", null, null);
     defer std.testing.allocator.free(parent.id);
     defer std.testing.allocator.free(parent.taxonomy_id);
     defer std.testing.allocator.free(parent.slug);
     defer std.testing.allocator.free(parent.name);
     defer std.testing.allocator.free(parent.description);
 
-    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id);
+    const child = try createTerm(std.testing.allocator, &db, tax_media_folders, "Child", parent.id, null);
     defer std.testing.allocator.free(child.id);
     defer std.testing.allocator.free(child.taxonomy_id);
     defer std.testing.allocator.free(child.slug);
@@ -1020,7 +1020,7 @@ test "listMediaByFolderAndTags with folder descendants and tags" {
     defer if (child.parent_id) |p| std.testing.allocator.free(p);
 
     // Create a tag
-    const tag = try createTerm(std.testing.allocator, &db, tax_media_tags, "Nature", null);
+    const tag = try createTerm(std.testing.allocator, &db, tax_media_tags, "Nature", null, null);
     defer std.testing.allocator.free(tag.id);
     defer std.testing.allocator.free(tag.taxonomy_id);
     defer std.testing.allocator.free(tag.slug);

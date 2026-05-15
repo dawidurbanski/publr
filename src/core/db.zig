@@ -170,6 +170,12 @@ pub const Statement = struct {
         if (rc != c.SQLITE_OK) return Db.Error.BindFailed;
     }
 
+    /// Bind real (f64) parameter (1-indexed)
+    pub fn bindReal(self: *Statement, index: u32, value: f64) Db.Error!void {
+        const rc = c.sqlite3_bind_double(self.handle, @intCast(index), value);
+        if (rc != c.SQLITE_OK) return Db.Error.BindFailed;
+    }
+
     /// Bind blob parameter (1-indexed)
     pub fn bindBlob(self: *Statement, index: u32, value: []const u8) Db.Error!void {
         const rc = c.sqlite3_bind_blob(
@@ -207,6 +213,11 @@ pub const Statement = struct {
     /// Get integer column value (0-indexed)
     pub fn columnInt(self: *Statement, index: u32) i64 {
         return c.sqlite3_column_int64(self.handle, @intCast(index));
+    }
+
+    /// Get real (f64) column value (0-indexed)
+    pub fn columnReal(self: *Statement, index: u32) f64 {
+        return c.sqlite3_column_double(self.handle, @intCast(index));
     }
 
     /// Get blob column value (0-indexed)

@@ -106,6 +106,35 @@ CREATE TABLE IF NOT EXISTS content_meta (
 );
 CREATE INDEX IF NOT EXISTS idx_content_meta_field_value ON content_meta(field_name, value);
 
+-- Typed-column meta projection for the new runtime registry. One row per
+-- filterable field on a content entry. Reads stay JOIN-free (data lives in
+-- content_entries.data JSON); these rows exist purely to make filter / sort
+-- / range queries hit indexes without CASTs.
+CREATE TABLE IF NOT EXISTS entry_meta (
+    entry_id TEXT NOT NULL REFERENCES content_entries(id) ON DELETE CASCADE,
+    field_name TEXT NOT NULL,
+    text_value TEXT,
+    int_value INTEGER,
+    real_value REAL,
+    datetime_value INTEGER,
+    PRIMARY KEY (entry_id, field_name)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_meta_text ON entry_meta(field_name, text_value);
+CREATE INDEX IF NOT EXISTS idx_entry_meta_int ON entry_meta(field_name, int_value);
+CREATE INDEX IF NOT EXISTS idx_entry_meta_real ON entry_meta(field_name, real_value);
+CREATE INDEX IF NOT EXISTS idx_entry_meta_datetime ON entry_meta(field_name, datetime_value);
+
+-- Full-text search index for fields flagged `.searchable = true`. Generic
+-- shape (entry_id + content_type_id + field_name + value) so runtime-loaded
+-- content types can write rows without table-creation-time column DDL.
+CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+    entry_id UNINDEXED,
+    content_type_id UNINDEXED,
+    field_name UNINDEXED,
+    value,
+    tokenize = 'porter'
+);
+
 CREATE TABLE IF NOT EXISTS content_term_assignments (
     entry_id TEXT NOT NULL,
     taxonomy_id TEXT NOT NULL,
@@ -191,7 +220,10 @@ CREATE TABLE IF NOT EXISTS terms (
     parent_id TEXT REFERENCES terms(id) ON DELETE SET NULL,
     description TEXT DEFAULT '',
     sort_order INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT (unixepoch()),
+    author_id TEXT REFERENCES users(id),
+    last_updated_by TEXT REFERENCES users(id),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
     UNIQUE(taxonomy_id, slug)
 );
 
