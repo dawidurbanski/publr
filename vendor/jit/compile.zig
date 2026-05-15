@@ -404,7 +404,7 @@ test "compile: bg-red-500/50 emits color-mix() in :root + utility" {
     const css = try compile(tst.allocator, test_theme, &.{"bg-red-500/50"}, .{});
     defer tst.allocator.free(css);
     try tst.expect(std.mem.indexOf(u8, css, "--color-red-500") != null);
-    try tst.expect(std.mem.indexOf(u8, css, "color-mix(in srgb, var(--color-red-500) 50%, transparent)") != null);
+    try tst.expect(std.mem.indexOf(u8, css, "color-mix(in oklab, var(--color-red-500) 50%, transparent)") != null);
 }
 
 test "compile: !important emits `!important` after value (trailing form)" {

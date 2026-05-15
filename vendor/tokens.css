@@ -3,8 +3,13 @@
 :root {
   --radius: 0.5rem;
 
-  /* Surfaces */
-  --background: oklch(1 0 0);
+  /* Surfaces — four surfaces pulled apart by hue/lightness:
+   *   background → faint cool off-white (page shell)
+   *   card       → pure white (elevated surfaces pop from page)
+   *   muted      → neutral light gray (subtle fills, table headers)
+   *   accent     → very light Publr-blue tint (hover/active, distinct from muted)
+   */
+  --background: oklch(0.985 0.003 240);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
@@ -16,9 +21,9 @@
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.955 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --accent: oklch(0.945 0.018 250);
   --accent-foreground: oklch(0.205 0 0);
 
   /* Semantic status */
@@ -27,7 +32,7 @@
   --error-foreground: oklch(0.985 0 0);
   --success: oklch(0.56 0.16 145);
   --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.68 0.16 75);
+  --warning: oklch(0.78 0.19 75);
   --warning-foreground: oklch(0.21 0.034 46);
 
   /* Borders & rings */

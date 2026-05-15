@@ -2053,7 +2053,7 @@ fn resolveDivideColor(
         defer allocator.free(opacity);
         break :blk try std.fmt.allocPrint(
             allocator,
-            "color-mix(in srgb, {s} {s}, transparent)",
+            "color-mix(in oklab, {s} {s}, transparent)",
             .{ base, opacity },
         );
     } else base;
@@ -3364,21 +3364,86 @@ fn resolveColorBase(
 }
 
 /// Format an opacity modifier as the percentage string used inside
-/// `color-mix(in srgb, <base> <pct>, transparent)`. Named `/50` becomes `50%`;
-/// arbitrary `/[27%]` or `/(--my-opacity)` is passed through verbatim.
+/// `color-mix(in oklab, <base> <pct>, transparent)`. Named `/50` becomes `50%`;
+/// arbitrary `/[0.4]` is coerced to `40%` (matching upstream Tailwind's
+/// `withAlpha`); arbitrary `/[27%]` or `/(--my-opacity)` is passed through
+/// verbatim.
 fn modifierAsOpacity(
     allocator: std.mem.Allocator,
     m: candidate.Modifier,
 ) ResolveError![]u8 {
     return switch (m) {
         .named => |n| try std.fmt.allocPrint(allocator, "{s}%", .{n}),
-        .arbitrary => |a| try allocator.dupe(u8, a),
+        .arbitrary => |a| {
+            if (numberStringTimes100(allocator, a) catch null) |pct| {
+                defer allocator.free(pct);
+                return try std.fmt.allocPrint(allocator, "{s}%", .{pct});
+            }
+            return try allocator.dupe(u8, a);
+        },
     };
+}
+
+/// If `s` is a plain decimal number (digits + at most one `.`), return its
+/// value multiplied by 100 as a decimal string with no trailing zeros.
+/// Returns null otherwise — used so non-numeric arbitraries like `27%` or
+/// `var(--op)` fall through to verbatim emission.
+///
+/// `"0.4"` → `"40"`, `"0.04"` → `"4"`, `"0.123"` → `"12.3"`, `"1"` → `"100"`,
+/// `".5"` → `"50"`. Implemented as decimal-point shifting so we don't pay
+/// float-precision artifacts (e.g. `0.4 * 100 = 40.000000000000004`).
+fn numberStringTimes100(allocator: std.mem.Allocator, s: []const u8) !?[]u8 {
+    if (s.len == 0) return null;
+    var dot: ?usize = null;
+    var has_digit = false;
+    for (s, 0..) |c, idx| {
+        switch (c) {
+            '0'...'9' => has_digit = true,
+            '.' => {
+                if (dot != null) return null;
+                dot = idx;
+            },
+            else => return null,
+        }
+    }
+    if (!has_digit) return null;
+
+    const int_part = if (dot) |p| s[0..p] else s;
+    const frac_part = if (dot) |p| s[p + 1 ..] else "";
+
+    // Strip leading zeros from int_part, keep one if all-zero.
+    var lead: usize = 0;
+    while (lead < int_part.len and int_part[lead] == '0') lead += 1;
+    const int_clean = if (lead == int_part.len) "0" else int_part[lead..];
+
+    // Concatenate digits, then place new decimal point at int_clean.len + 2.
+    var digits = std.ArrayListUnmanaged(u8){};
+    defer digits.deinit(allocator);
+    try digits.appendSlice(allocator, int_clean);
+    try digits.appendSlice(allocator, frac_part);
+    const new_dot = int_clean.len + 2;
+    while (digits.items.len < new_dot) try digits.append(allocator, '0');
+
+    const int_out = digits.items[0..new_dot];
+    const frac_out = digits.items[new_dot..];
+
+    // Strip leading zeros from int_out (keep one if all-zero).
+    var int_start: usize = 0;
+    while (int_start + 1 < int_out.len and int_out[int_start] == '0') int_start += 1;
+    const int_final = int_out[int_start..];
+
+    // Strip trailing zeros from frac_out.
+    var frac_end: usize = frac_out.len;
+    while (frac_end > 0 and frac_out[frac_end - 1] == '0') frac_end -= 1;
+    const frac_final = frac_out[0..frac_end];
+
+    if (frac_final.len == 0) return try allocator.dupe(u8, int_final);
+    return try std.fmt.allocPrint(allocator, "{s}.{s}", .{ int_final, frac_final });
 }
 
 /// Generic single-property color resolver. Output:
 ///   no modifier:   { property: <base> }
-///   with modifier: { property: color-mix(in srgb, <base> <pct>, transparent) }
+///   with modifier: { property: color-mix(in oklab, <base> <pct>, transparent) }
 fn resolveColorProperty(
     allocator: std.mem.Allocator,
     t: Theme,
@@ -3393,7 +3458,7 @@ fn resolveColorProperty(
         defer allocator.free(base);
         const opacity = try modifierAsOpacity(allocator, m);
         defer allocator.free(opacity);
-        break :blk try std.fmt.allocPrint(allocator, "color-mix(in srgb, {s} {s}, transparent)", .{ base, opacity });
+        break :blk try std.fmt.allocPrint(allocator, "color-mix(in oklab, {s} {s}, transparent)", .{ base, opacity });
     } else base;
 
     const decls = try allocator.alloc(Declaration, 1);
@@ -3553,7 +3618,7 @@ fn resolveGradientStop(
         defer allocator.free(base);
         const opacity = try modifierAsOpacity(allocator, m);
         defer allocator.free(opacity);
-        break :blk try std.fmt.allocPrint(allocator, "color-mix(in srgb, {s} {s}, transparent)", .{ base, opacity });
+        break :blk try std.fmt.allocPrint(allocator, "color-mix(in oklab, {s} {s}, transparent)", .{ base, opacity });
     } else base;
 
     return try emitGradientStopValueOwned(allocator, stop, final);
@@ -3694,7 +3759,7 @@ fn resolveShadowColor(
         defer allocator.free(opacity);
         break :blk try std.fmt.allocPrint(
             allocator,
-            "color-mix(in srgb, {s} {s}, transparent)",
+            "color-mix(in oklab, {s} {s}, transparent)",
             .{ base, opacity },
         );
     } else base;
@@ -4112,7 +4177,7 @@ test "color: text-current/50 → color-mix(currentColor)" {
     defer freeResolvedUtility(tst.allocator, r);
     try tst.expectEqualStrings("color", r.declarations[0].property);
     try tst.expectEqualStrings(
-        "color-mix(in srgb, currentColor 50%, transparent)",
+        "color-mix(in oklab, currentColor 50%, transparent)",
         r.declarations[0].value,
     );
 }
@@ -4604,7 +4669,7 @@ test "shadow-{color}/{opacity}: applies color-mix" {
     const r = (try parseAndResolve(tst.allocator, "shadow-red-500/50")).?;
     defer freeResolvedUtility(tst.allocator, r);
     try tst.expectEqualStrings(
-        "color-mix(in srgb, var(--color-red-500) 50%, transparent)",
+        "color-mix(in oklab, var(--color-red-500) 50%, transparent)",
         r.declarations[0].value,
     );
 }
@@ -4854,9 +4919,52 @@ test "color: bg-{color}/{opacity} → color-mix" {
     defer freeResolvedUtility(tst.allocator, r);
     try tst.expectEqualStrings("background-color", r.declarations[0].property);
     try tst.expectEqualStrings(
-        "color-mix(in srgb, var(--color-red-500) 50%, transparent)",
+        "color-mix(in oklab, var(--color-red-500) 50%, transparent)",
         r.declarations[0].value,
     );
+}
+
+test "color: bg-{color}/[0.4] → numeric arbitrary coerced to %" {
+    const r = (try parseAndResolve(tst.allocator, "bg-red-500/[0.4]")).?;
+    defer freeResolvedUtility(tst.allocator, r);
+    try tst.expectEqualStrings(
+        "color-mix(in oklab, var(--color-red-500) 40%, transparent)",
+        r.declarations[0].value,
+    );
+}
+
+test "color: bg-{color}/[27%] → arbitrary with % preserved verbatim" {
+    const r = (try parseAndResolve(tst.allocator, "bg-red-500/[27%]")).?;
+    defer freeResolvedUtility(tst.allocator, r);
+    try tst.expectEqualStrings(
+        "color-mix(in oklab, var(--color-red-500) 27%, transparent)",
+        r.declarations[0].value,
+    );
+}
+
+test "modifierAsOpacity: numberStringTimes100 edge cases" {
+    const cases = [_]struct { in: []const u8, out: ?[]const u8 }{
+        .{ .in = "0.4", .out = "40" },
+        .{ .in = "0.04", .out = "4" },
+        .{ .in = "0.123", .out = "12.3" },
+        .{ .in = "1", .out = "100" },
+        .{ .in = ".5", .out = "50" },
+        .{ .in = "0", .out = "0" },
+        .{ .in = "27%", .out = null }, // contains '%' → not a plain number
+        .{ .in = "1.2.3", .out = null }, // multiple dots
+        .{ .in = "var(--x)", .out = null },
+        .{ .in = "", .out = null },
+    };
+    for (cases) |c| {
+        const got = try numberStringTimes100(tst.allocator, c.in);
+        defer if (got) |g| tst.allocator.free(g);
+        if (c.out) |expected| {
+            try tst.expect(got != null);
+            try tst.expectEqualStrings(expected, got.?);
+        } else {
+            try tst.expect(got == null);
+        }
+    }
 }
 
 test "color: text-{theme-color}" {
@@ -4871,7 +4979,7 @@ test "color: border-{color}/{opacity}" {
     defer freeResolvedUtility(tst.allocator, r);
     try tst.expectEqualStrings("border-color", r.declarations[0].property);
     try tst.expectEqualStrings(
-        "color-mix(in srgb, var(--color-white) 5%, transparent)",
+        "color-mix(in oklab, var(--color-white) 5%, transparent)",
         r.declarations[0].value,
     );
 }
@@ -4919,7 +5027,7 @@ test "color: arbitrary opacity modifier" {
     const r = (try parseAndResolve(tst.allocator, "bg-red-500/[27%]")).?;
     defer freeResolvedUtility(tst.allocator, r);
     try tst.expectEqualStrings(
-        "color-mix(in srgb, var(--color-red-500) 27%, transparent)",
+        "color-mix(in oklab, var(--color-red-500) 27%, transparent)",
         r.declarations[0].value,
     );
 }
@@ -4952,7 +5060,7 @@ test "gradient: from-{color}/{opacity}" {
     defer freeResolvedUtility(tst.allocator, r);
     try tst.expectEqualStrings("--tw-gradient-from", r.declarations[0].property);
     try tst.expectEqualStrings(
-        "color-mix(in srgb, var(--color-red-500) 50%, transparent)",
+        "color-mix(in oklab, var(--color-red-500) 50%, transparent)",
         r.declarations[0].value,
     );
 }

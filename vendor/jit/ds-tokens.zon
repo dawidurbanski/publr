@@ -60,5 +60,41 @@
         .{ .name = "color-sidebar-accent-foreground", .value = "var(--sidebar-accent-foreground)" },
         .{ .name = "color-sidebar-border", .value = "var(--sidebar-border)" },
         .{ .name = "color-sidebar-ring", .value = "var(--sidebar-ring)" },
+
+        // ── Neutral gray scale (Linear-style: pure neutral, chroma=0) ─
+        // Overrides JIT default-theme gray (which has a slight blue cast).
+        .{ .name = "color-gray-50", .value = "oklch(0.985 0 0)" },
+        .{ .name = "color-gray-100", .value = "oklch(0.97 0 0)" },
+        .{ .name = "color-gray-200", .value = "oklch(0.922 0 0)" },
+        .{ .name = "color-gray-300", .value = "oklch(0.882 0 0)" },
+        .{ .name = "color-gray-400", .value = "oklch(0.708 0 0)" },
+        .{ .name = "color-gray-500", .value = "oklch(0.556 0 0)" },
+        .{ .name = "color-gray-600", .value = "oklch(0.439 0 0)" },
+        .{ .name = "color-gray-700", .value = "oklch(0.371 0 0)" },
+        .{ .name = "color-gray-800", .value = "oklch(0.269 0 0)" },
+        .{ .name = "color-gray-900", .value = "oklch(0.205 0 0)" },
+        .{ .name = "color-gray-950", .value = "oklch(0.145 0 0)" },
+
+        // ── Extra small text sizes — needed for eyebrow/micro/caption-sm
+        // typography variants. JIT default theme only goes down to text-xs
+        // (12px). These extend below for dense admin metadata.
+        .{ .name = "text-3xs", .value = "0.625rem" },
+        .{ .name = "text-3xs--line-height", .value = "calc(0.875 / 0.625)" },
+        .{ .name = "text-2xs", .value = "0.6875rem" },
+        .{ .name = "text-2xs--line-height", .value = "calc(1 / 0.6875)" },
+
+        // ── Brand blue scale (250 hue, aligned to --primary at 500) ───
+        // Overrides JIT default-theme blue (which is brighter / different hue).
+        .{ .name = "color-blue-50", .value = "oklch(0.97 0.02 250)" },
+        .{ .name = "color-blue-100", .value = "oklch(0.93 0.04 250)" },
+        .{ .name = "color-blue-200", .value = "oklch(0.86 0.07 250)" },
+        .{ .name = "color-blue-300", .value = "oklch(0.78 0.10 250)" },
+        .{ .name = "color-blue-400", .value = "oklch(0.66 0.14 250)" },
+        .{ .name = "color-blue-500", .value = "oklch(0.55 0.17 250)" },
+        .{ .name = "color-blue-600", .value = "oklch(0.48 0.18 250)" },
+        .{ .name = "color-blue-700", .value = "oklch(0.40 0.16 250)" },
+        .{ .name = "color-blue-800", .value = "oklch(0.32 0.13 250)" },
+        .{ .name = "color-blue-900", .value = "oklch(0.24 0.10 250)" },
+        .{ .name = "color-blue-950", .value = "oklch(0.18 0.07 250)" },
     },
 }

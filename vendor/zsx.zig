@@ -1557,6 +1557,25 @@ fn isZigKeyword(name: []const u8) bool {
     return false;
 }
 
+/// Heuristic: token starts with lowercase letter or `-`, contains only the
+/// Tailwind char set, and includes at least one `-` or `:`. Used by
+/// `harvestZigStringClasses` to filter prose strings out of the JIT manifest.
+/// Mirrors design-system/src/class_extract.zig:looksLikeUtility.
+fn looksLikeUtilityClass(t: []const u8) bool {
+    if (t.len < 2) return false;
+    const c0 = t[0];
+    if (!(c0 == '-' or (c0 >= 'a' and c0 <= 'z'))) return false;
+    var has_separator = false;
+    for (t) |c| {
+        switch (c) {
+            'a'...'z', 'A'...'Z', '0'...'9', '_', '/', '.', '[', ']', '%', '#', '(', ')', ',', '@', '*', '&', '\'' => {},
+            '-', ':' => has_separator = true,
+            else => return false,
+        }
+    }
+    return has_separator;
+}
+
 /// Generate views.zig namespace module from collected file list
 fn generateViewsModule(allocator: Allocator, output_dir: []const u8, zsx_files: []const []u8) !void {
     var output = std.ArrayListUnmanaged(u8){};
@@ -1997,6 +2016,15 @@ const Parser = struct {
 
         // Parse file content
         try self.parseFile();
+
+        // Harvest classes from Zig string literals in the source. The
+        // JSX-aware extraction only sees `class=` attribute values; classes
+        // composed in Zig consts (e.g. `const item = if (active) "bg-accent/40
+        // text-foreground" else "..."` then `class={item}`) are otherwise
+        // invisible. Heuristic-shape filter keeps prose strings out of the
+        // manifest; the JIT silently skips unknown tokens, so over-collection
+        // here is harmless. Mirrors design-system/src/class_extract.zig.
+        try self.harvestZigStringClasses();
 
         // Post-process: coalesce adjacent `try <writer>.writeAll("...");` lines.
         // Templates with lots of static markup can produce hundreds of these,
@@ -3200,8 +3228,82 @@ const Parser = struct {
         }
     }
 
+    /// Walk the entire source and tokenize every `"..."` Zig string literal,
+    /// adding utility-shaped tokens to `css_classes`. Skips `//` and `/* */`
+    /// comments so prose in doc comments doesn't pollute the manifest.
+    /// Filter mirrors design-system/src/class_extract.zig:looksLikeUtility —
+    /// requires a `-` or `:` and rejects characters outside the Tailwind set,
+    /// which excludes most natural-language strings.
+    fn harvestZigStringClasses(self: *Parser) Error!void {
+        const css_map = self.css_classes orelse return;
+        const src = self.source;
+        var i: usize = 0;
+        while (i < src.len) {
+            // Line comment
+            if (i + 1 < src.len and src[i] == '/' and src[i + 1] == '/') {
+                while (i < src.len and src[i] != '\n') i += 1;
+                continue;
+            }
+            // Block comment
+            if (i + 1 < src.len and src[i] == '/' and src[i + 1] == '*') {
+                i += 2;
+                while (i + 1 < src.len and !(src[i] == '*' and src[i + 1] == '/')) i += 1;
+                if (i + 1 < src.len) i += 2 else i = src.len;
+                continue;
+            }
+            if (src[i] != '"') {
+                i += 1;
+                continue;
+            }
+            // Scan to matching `"` honoring `\` escapes.
+            const start = i + 1;
+            i += 1;
+            while (i < src.len and src[i] != '"') {
+                if (src[i] == '\\' and i + 1 < src.len) i += 2 else i += 1;
+            }
+            if (i >= src.len) break;
+            const value = src[start..i];
+            i += 1;
+            var it = mem.tokenizeAny(u8, value, " \t\n\r");
+            while (it.next()) |raw| {
+                const token = mem.trim(u8, raw, "\"'`{}?;,");
+                if (token.len < 2 or token.len > 256) continue;
+                if (!looksLikeUtilityClass(token)) continue;
+                if (css_map.contains(token)) continue;
+                const duped = self.allocator.dupe(u8, token) catch continue;
+                css_map.put(self.allocator, duped, {}) catch {
+                    self.allocator.free(duped);
+                };
+            }
+        }
+    }
+
     fn collectComponentCssClasses(self: *Parser, name: []const u8, attrs: []const Attr) Error!void {
         const css_map = self.css_classes orelse return;
+
+        // Harvest literal classes from `class=` props on component calls.
+        // The HTML-element path collects these in `emitHtmlTag`; component
+        // calls go through `emitComponentProps`, so without this loop a
+        // class string passed only to a component (e.g. `<Flex class="pt-5">`)
+        // never reaches the JIT manifest.
+        for (attrs) |attr| {
+            if (attr.is_spread) continue;
+            if (!mem.eql(u8, attr.name, "class")) continue;
+            if (!attr.is_expr) {
+                var it = mem.tokenizeAny(u8, attr.value, " \t\n\r");
+                while (it.next()) |token| {
+                    if (!css_map.contains(token)) {
+                        const duped = self.allocator.dupe(u8, token) catch continue;
+                        css_map.put(self.allocator, duped, {}) catch {
+                            self.allocator.free(duped);
+                        };
+                    }
+                }
+            } else if (attr.value.len >= 2 and attr.value[0] == '`' and attr.value[attr.value.len - 1] == '`') {
+                try self.collectBacktickClasses(attr.value[1 .. attr.value.len - 1]);
+            }
+        }
+
         const patterns_map = self.component_class_patterns orelse return;
         const patterns = patterns_map.get(name) orelse return;
 
