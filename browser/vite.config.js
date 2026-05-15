@@ -16,7 +16,10 @@ export default defineConfig({
     server: {
         headers: {
             'Cross-Origin-Opener-Policy': 'same-origin',
-            'Cross-Origin-Embedder-Policy': 'require-corp'
+            // 'credentialless' over 'require-corp' so cross-origin assets without
+            // a CORP header (e.g. gravatar.com avatars) still load, while keeping
+            // cross-origin isolation available for SharedArrayBuffer if needed.
+            'Cross-Origin-Embedder-Policy': 'credentialless'
         }
     },
     plugins: [{

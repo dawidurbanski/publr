@@ -40,6 +40,37 @@
         // Global delegation: catch submit on dynamically created forms too
         document.addEventListener('submit', handleFormSubmit);
 
+        let headSynced = false;
+
+        // On first response from the WASM, copy the layout.zsx-rendered <head>
+        // (inline styles, theme init script, icon, html class) into the live
+        // document so the dev shell mirrors the native render. Skip the
+        // tokens.css / publr.css <link>s — those URLs aren't served over HTTP;
+        // we inject their contents inline via cms.request below.
+        function syncHead(doc) {
+            if (headSynced) return;
+            if (doc.documentElement.className) {
+                document.documentElement.className = doc.documentElement.className;
+            }
+            for (const el of [...doc.head.children]) {
+                if (el.tagName === 'TITLE') continue;
+                if (el.tagName === 'LINK' && el.getAttribute('rel') === 'stylesheet') {
+                    const href = el.getAttribute('href');
+                    if (href === '/static/tokens.css' || href === '/static/publr.css') continue;
+                    if (href && document.head.querySelector('link[href="' + href + '"]')) continue;
+                }
+                if (el.tagName === 'SCRIPT') {
+                    const s = document.createElement('script');
+                    for (const a of el.attributes) s.setAttribute(a.name, a.value);
+                    s.textContent = el.textContent;
+                    document.head.appendChild(s);
+                } else {
+                    document.head.appendChild(el.cloneNode(true));
+                }
+            }
+            headSynced = true;
+        }
+
         async function navigate(path, body = '', method = 'GET') {
             const res = await cms.request(method, path, body);
 
@@ -59,21 +90,27 @@
             const doc = parser.parseFromString(res.body, 'text/html');
             document.title = doc.title || 'Publr';
 
+            syncHead(doc);
+
             // Replace body
             document.body.className = doc.body.className;
             document.body.innerHTML = doc.body.innerHTML;
+
+            // <script> tags inserted via innerHTML don't execute (HTML spec).
+            // Recreate each one so theme-toggle handler, admin.js, module loaders,
+            // etc. actually run after the swap. ES-module srcs are cached by URL
+            // so external scripts won't double-execute.
+            for (const oldScript of document.body.querySelectorAll('script')) {
+                const s = document.createElement('script');
+                for (const a of oldScript.attributes) s.setAttribute(a.name, a.value);
+                s.textContent = oldScript.textContent;
+                oldScript.replaceWith(s);
+            }
 
             // Initialize interactive components
             try {
                 const { init } = await import('../static/interact/index.js');
                 init();
-            } catch (e) {}
-
-            // Load admin.js behaviors
-            try {
-                const adminJs = document.createElement('script');
-                adminJs.src = '/static/admin.js';
-                document.body.appendChild(adminJs);
             } catch (e) {}
 
             // Intercept links
@@ -100,6 +137,20 @@
         // Browser back/forward
         window.addEventListener('popstate', () => navigate(location.pathname));
 
+        // Fetch a CSS asset through the WASM (which has it embedded) and
+        // inject it as a <style> tag before the static admin.css link, so
+        // tokens and JIT-compiled utilities are available before navigate().
+        async function injectCss(path, id) {
+            if (document.getElementById(id)) return;
+            const res = await cms.request('GET', path);
+            if (!res || !res.body) return;
+            const style = document.createElement('style');
+            style.id = id;
+            style.textContent = res.body;
+            const adminLink = document.getElementById('admin-css');
+            document.head.insertBefore(style, adminLink);
+        }
+
         // Init
         (async () => {
             try {
@@ -109,6 +160,11 @@
 
                 // Auto-save periodically
                 setInterval(() => cms.save(), 30000);
+
+                // tokens.css and publr.css live only inside the WASM binary;
+                // pull them out and inject before admin.css so cascade order matches the rendered <head>.
+                await injectCss('/static/tokens.css', 'tokens-css');
+                await injectCss('/static/publr.css', 'publr-css');
 
                 // Navigate to current URL or default
                 const path = location.pathname === '/' ? '/admin' : location.pathname;
