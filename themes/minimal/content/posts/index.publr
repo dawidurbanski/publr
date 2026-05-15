@@ -1,11 +1,11 @@
 ---
-const posts = try ctx.query(.post, .{ .limit = 100 });
+const posts = try ctx.query("post", .{ .limit = 100 });
 ---
 <Base>
   <h1>Posts</h1>
   <ul>
     {for (posts) |post| (
-      <li><a href={`/posts/${post.data.slug}`}>{post.title}</a></li>
+      <li><a href={`/posts/${post.slug orelse ""}`}>{post.title}</a></li>
     )}
   </ul>
 </Base>

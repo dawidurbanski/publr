@@ -1,11 +1,12 @@
 ---
 const slug = ctx.param("slug") orelse "unknown";
-const page = try ctx.entry(.page, slug);
+const page = try ctx.entry("page", slug);
+const body = page.data.getText("body") orelse "";
 ---
 <Base>
   <article>
     <p><a href="/pages">← Back to pages</a></p>
     <h1>{page.title}</h1>
-    <div class="body">{@raw page.data.body}</div>
+    <div class="body">{@raw body}</div>
   </article>
 </Base>
