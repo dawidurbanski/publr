@@ -19,13 +19,22 @@ body.admin {
     min-height: 100vh;
 }
 
-a {
+/* Default link color applies only to unstyled <a> tags. Anything with a class
+ * (DS components, sidebar items, etc.) keeps its own color via Tailwind utilities. */
+a:not([class]) {
     color: var(--primary);
     text-decoration: none;
 }
 
-a:hover {
+a:not([class]):hover {
     text-decoration: underline;
+}
+
+/* Admin sidebar items — paired with inline styles in layout.zsx.
+ * Hover swaps the inactive item to the accent background, mirroring the design. */
+.sidebar-item[data-active="false"]:hover {
+    background: var(--accent) !important;
+    color: var(--foreground) !important;
 }
 
 :focus-visible {
