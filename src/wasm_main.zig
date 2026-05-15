@@ -7,14 +7,21 @@ const auth_mod = @import("auth");
 const tpl = @import("tpl");
 const mw = @import("middleware");
 const admin_api = @import("admin_api");
+const actions = @import("actions");
+const content_actions = @import("content_actions");
 const registry = @import("registry");
 const WasmRouter = @import("wasm_router").WasmRouter;
 const auth_middleware = @import("auth_middleware");
 const csrf = @import("csrf");
 const wasm_storage = @import("wasm_storage");
 const wasm_media_handler = @import("wasm_media_handler");
+const wasm_static_handler = @import("wasm_static_handler");
+const error_pages = @import("error.zig");
 const seed = @import("seed");
 const config = @import("config");
+const schema_registry = @import("schema_registry");
+const schema_db_types = @import("schema_db_types");
+const schemas = @import("schemas");
 
 // Generated ZSX views
 const views = @import("views");
@@ -130,6 +137,18 @@ export fn cms_init() i32 {
     global_auth = auth_mod.Auth.init(allocator, &global_db.?);
     tpl.init(false);
 
+    // Bootstrap the runtime content type registry. `compiled_in_types`
+    // already concatenates core schemas + plugin-discovered descriptors;
+    // DB-defined types are loaded next. See http.zig for the native equivalent.
+    schema_registry.init(allocator);
+    for (schema_registry.compiled_in_types) |def| {
+        schema_registry.register(def) catch {};
+    }
+    if (schema_db_types.loadAll(allocator, &global_db.?)) |db_defs| {
+        for (db_defs) |def| schema_registry.register(def) catch {};
+        allocator.free(db_defs);
+    } else |_| {}
+
     // Initialize auth middleware
     auth_middleware.init(&global_auth.?);
 
@@ -142,12 +161,21 @@ export fn cms_init() i32 {
     // Register media file serving route
     router.get("/media/*", wasm_media_handler.handleMedia);
 
+    // Register /static/* — serves tokens.css and publr.css (preflight + JIT) for the WASM dev shell.
+    router.get("/static/*", wasm_static_handler.handleStatic);
+
     // Register core routes (setup, login, logout)
     router.get("/admin/setup", handleSetupGet);
     router.post("/admin/setup", handleSetupPost);
     router.get("/admin/login", handleLoginGet);
     router.post("/admin/login", handleLoginPost);
     router.post("/admin/logout", handleLogout);
+
+    // Action dispatcher — must be initialized before plugin setup runs so any
+    // app.action(...) calls land in the registry.
+    actions.init(allocator, .{ .not_found = error_pages.notFoundHandler });
+    router.post("/admin/action", actions.dispatch);
+    content_actions.registerDefaults();
 
     // Register plugin routes (same pattern as http.zig:registerPluginRoutes)
     const reg = router.registrar();
@@ -178,6 +206,10 @@ export fn cms_import_db(data_ptr: [*]const u8, data_len: usize) i32 {
 
     global_db = db.Db.init(allocator, ":memory:") catch return -1;
     if (!global_db.?.deserialize(data_ptr[0..data_len])) return -1;
+    // Re-apply schema (all CREATE statements are IF NOT EXISTS) so DBs cached
+    // in OPFS from an older build pick up any new tables — e.g. the releases
+    // tables were missing here, causing listReleases to fail with "no such table".
+    global_db.?.exec(schema_sql) catch return -1;
     global_auth = auth_mod.Auth.init(allocator, &global_db.?);
     tpl.init(false);
     auth_middleware.init(&global_auth.?);
@@ -300,10 +332,15 @@ export fn cms_request(
                 doRedirect("/admin/login");
                 return 0;
             };
-            // Store user info in context state
-            ctx.setState("auth_user_id", @ptrCast(@constCast(user.id.ptr))) catch {};
-            ctx.setState("auth_user_email", @ptrCast(@constCast(user.email.ptr))) catch {};
-            auth_instance.freeUser(&user);
+            defer auth_instance.freeUser(&user);
+            // auth.zig dupes id/email/display_name without a null terminator,
+            // and getUserEmail/etc. in auth_middleware.zig recover length via
+            // null-scan. Copy into ctx.allocator with an explicit sentinel so
+            // the scan stops at the real end of the string (and survives the
+            // freeUser above).
+            storeUserField(&ctx, "auth_user_id", user.id);
+            storeUserField(&ctx, "auth_user_email", user.email);
+            storeUserField(&ctx, "auth_user_display_name", user.display_name);
         } else {
             doRedirect("/admin/login");
             return 0;
@@ -322,7 +359,14 @@ export fn cms_request(
     };
 
     if (!matched) {
-        respondError(404, "Not Found");
+        // Render the same 404 page as the native build (ZSX template via tpl).
+        error_pages.notFoundHandler(&ctx) catch {
+            respondError(404, "Not Found");
+            return 0;
+        };
+        result_status = 404;
+        processResponse(&ctx);
+        tpl.resetArena();
         return 0;
     }
 
@@ -332,6 +376,13 @@ export fn cms_request(
     // Free all template memory now that response is copied
     tpl.resetArena();
     return 0;
+}
+
+fn storeUserField(ctx: *mw.Context, key: []const u8, value: []const u8) void {
+    const buf = ctx.allocator.alloc(u8, value.len + 1) catch return;
+    @memcpy(buf[0..value.len], value);
+    buf[value.len] = 0;
+    ctx.setState(key, @ptrCast(buf.ptr)) catch {};
 }
 
 // =============================================================================

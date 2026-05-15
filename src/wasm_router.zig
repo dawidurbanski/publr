@@ -27,16 +27,24 @@ const Route = struct {
     handler: Handler,
 };
 
-const max_routes = 64;
-
-/// WASM Router — stores routes and dispatches without stream dependency
+/// WASM Router — stores routes and dispatches without stream dependency.
+/// Routes grow dynamically via an ArrayList (same shape as native router);
+/// route registration happens once at startup so we don't worry about
+/// reallocation cost. Silent registration drops would be a worse failure
+/// mode than OOM, so addRoute panics if append fails.
 pub const WasmRouter = struct {
-    routes: [max_routes]Route = undefined,
-    route_count: usize = 0,
+    routes: std.ArrayListUnmanaged(Route) = .{},
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) WasmRouter {
         return .{ .allocator = allocator };
+    }
+
+    pub fn deinit(self: *WasmRouter) void {
+        for (self.routes.items) |route| {
+            self.allocator.free(route.segments);
+        }
+        self.routes.deinit(self.allocator);
     }
 
     /// Register a GET route
@@ -50,15 +58,13 @@ pub const WasmRouter = struct {
     }
 
     fn addRoute(self: *WasmRouter, method: Method, pattern: []const u8, handler: Handler) void {
-        if (self.route_count >= max_routes) return;
         const segments = self.parsePattern(pattern);
-        self.routes[self.route_count] = .{
+        self.routes.append(self.allocator, .{
             .method = method,
             .pattern = pattern,
             .segments = segments,
             .handler = handler,
-        };
-        self.route_count += 1;
+        }) catch @panic("OOM registering WASM route");
     }
 
     fn parsePattern(self: *WasmRouter, pattern: []const u8) []const Segment {
@@ -69,29 +75,23 @@ pub const WasmRouter = struct {
         const path = if (pattern.len > 0 and pattern[0] == '/') pattern[1..] else pattern;
         var iter = std.mem.splitScalar(u8, path, '/');
 
-        var count: usize = 0;
-        var segments_buf: [16]Segment = undefined;
+        var segments: std.ArrayListUnmanaged(Segment) = .{};
+        defer segments.deinit(self.allocator);
 
         while (iter.next()) |part| {
             if (part.len == 0) continue;
-            if (count >= segments_buf.len) break;
 
             if (std.mem.eql(u8, part, "*")) {
-                segments_buf[count] = .wildcard;
-                count += 1;
+                segments.append(self.allocator, .wildcard) catch @panic("OOM parsing route pattern");
                 break;
-            } else if (part.len > 0 and part[0] == ':') {
-                segments_buf[count] = .{ .param = part[1..] };
-                count += 1;
+            } else if (part[0] == ':') {
+                segments.append(self.allocator, .{ .param = part[1..] }) catch @panic("OOM parsing route pattern");
             } else {
-                segments_buf[count] = .{ .literal = part };
-                count += 1;
+                segments.append(self.allocator, .{ .literal = part }) catch @panic("OOM parsing route pattern");
             }
         }
 
-        const result = self.allocator.alloc(Segment, count) catch return &[_]Segment{};
-        @memcpy(result, segments_buf[0..count]);
-        return result;
+        return segments.toOwnedSlice(self.allocator) catch @panic("OOM parsing route pattern");
     }
 
     /// Dispatch a request to matching handler. Returns true if a route matched.
@@ -101,7 +101,7 @@ pub const WasmRouter = struct {
         else
             ctx.path;
 
-        for (self.routes[0..self.route_count]) |route| {
+        for (self.routes.items) |route| {
             if (route.method != ctx.method) continue;
 
             if (matchRoute(route.segments, normalized_path, ctx)) {
