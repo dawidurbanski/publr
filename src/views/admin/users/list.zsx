@@ -1,6 +1,8 @@
 // Users list template
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
+const SettingsTabs = @import("../../components/settings_tabs.zig").SettingsTabs;
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
 const Button = ui.button.Button;
@@ -23,7 +25,7 @@ const Checkbox = ui.checkbox.Checkbox;
 const Flex = ui.flex.Flex;
 const Text = ui.text.Text;
 
-const User = struct {
+pub const User = struct {
     id: []const u8,
     display_name: []const u8,
     email: []const u8,
@@ -31,11 +33,16 @@ const User = struct {
     delete_url: []const u8,
 };
 
-pub fn List(props: struct {
+pub const Props = struct {
     has_users: bool,
     users: []const User,
     csrf_token: []const u8,
-}) {
+};
+
+pub fn List(props: Props) {
+    <PageHeader title="Users" />
+    <SettingsTabs current="settings.users" />
+
     {if (props.has_users) (
         <div>
             <Table>
@@ -80,8 +87,10 @@ pub fn List(props: struct {
                                     <DropdownMenuContent>
                                         <DropdownMenuItem href={user.edit_url}>Edit</DropdownMenuItem>
                                         <DropdownMenuSeparator />
-                                        <form method="POST" action={user.delete_url} style="margin: 0;">
+                                        <form method="POST" action="/admin/action" style="margin: 0;">
                                             <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                            <input type="hidden" name="action" value="settings.user_delete" />
+                                            <input type="hidden" name="user_id" value={user.id} />
                                             <DropdownMenuItem variant=.destructive>Delete</DropdownMenuItem>
                                         </form>
                                     </DropdownMenuContent>

@@ -1,4 +1,5 @@
 const ui = @import("publr_ui");
+const PageHeader = @import("../components/page_header.zig").PageHeader;
 const Badge = ui.badge.Badge;
 const BadgeVariant = ui.badge.Variant;
 const BadgeSize = ui.badge.Size;
@@ -17,7 +18,7 @@ const EmptyTitle = ui.empty.EmptyTitle;
 const Stack = ui.stack.Stack;
 const Text = ui.text.Text;
 
-const TypeRow = struct {
+pub const TypeRow = struct {
     id: []const u8,
     name: []const u8,
     name_plural: []const u8,
@@ -33,11 +34,14 @@ const TypeRow = struct {
     permissions_count: []const u8,
 };
 
-pub fn ContentTypes(props: struct {
+pub const Props = struct {
     has_types: bool,
     total_count: []const u8,
     rows: []const TypeRow,
-}) {
+};
+
+pub fn ContentTypes(props: Props) {
+    <PageHeader title="Content Types" />
     <Card>
         <CardHeader>
             <CardTitle>Content Types <Badge label={props.total_count} variant={BadgeVariant.secondary} size={BadgeSize.sm} /></CardTitle>

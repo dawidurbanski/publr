@@ -1,0 +1,28 @@
+// SettingsTabs — navigation between settings sub-pages.
+// Tabs are auto-derived from admin pages registered with parent="settings".
+
+const std = @import("std");
+const settings = @import("plugin_settings");
+
+fn TabLink(props: struct {
+    label: []const u8,
+    href: []const u8,
+    section_id: []const u8,
+    current: []const u8,
+}) void {
+    const is_active = std.mem.eql(u8, props.current, props.section_id) or (
+        std.mem.startsWith(u8, props.current, props.section_id) and
+        props.current.len > props.section_id.len and
+        props.current[props.section_id.len] == '.'
+    );
+    const cls = if (is_active) "settings-tab active" else "settings-tab";
+    <a href={props.href} class={cls}>{props.label}</a>
+}
+
+pub fn SettingsTabs(props: struct { current: []const u8 }) {
+    <nav class="settings-tabs">
+        {for (settings.tabs) |tab| (
+            <TabLink label={tab.label} href={tab.href} section_id={tab.key} current={props.current} />
+        )}
+    </nav>
+}

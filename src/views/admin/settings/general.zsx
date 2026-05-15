@@ -1,0 +1,16 @@
+// General settings page — first tab of the settings section.
+
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
+const SettingsTabs = @import("../../components/settings_tabs.zig").SettingsTabs;
+
+pub fn General() {
+    <PageHeader title="Settings" />
+    <SettingsTabs current="settings.general" />
+    <div class="form-section">
+        <h2 class="form-section-title">Site Settings</h2>
+        <p class="form-section-desc">Configure your site's basic settings.</p>
+        <div class="empty-state">
+            <p>General settings coming soon.</p>
+        </div>
+    </div>
+}

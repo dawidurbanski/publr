@@ -1,6 +1,8 @@
 // Edit user template
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
+const SettingsTabs = @import("../../components/settings_tabs.zig").SettingsTabs;
 const Button = ui.button.Button;
 const Field = ui.form_field.Field;
 const FieldLabel = ui.form_field.FieldLabel;
@@ -8,26 +10,33 @@ const Input = ui.text_input.Input;
 const Flex = ui.flex.Flex;
 const Text = ui.text.Text;
 
-const User = struct {
+pub const User = struct {
     id: []const u8,
     display_name: []const u8,
     email: []const u8,
 };
 
-pub fn Edit(props: struct {
+pub const Props = struct {
     error_message: []const u8,
     user: User,
     csrf_token: []const u8,
-    action_url: []const u8,
-}) {
+    action_url: []const u8 = "",
+};
+
+pub fn Edit(props: Props) {
+    <PageHeader title="Edit User" />
+    <SettingsTabs current="settings.users.edit" />
+
     {if (props.error_message.len > 0) (
         <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
             <Text size=.sm color=.destructive>{props.error_message}</Text>
         </div>
     )}
 
-    <form method="POST" action={props.action_url} class="form">
+    <form method="POST" action="/admin/action" class="form">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="settings.user_update" />
+        <input type="hidden" name="user_id" value={props.user.id} />
         <Field>
             <FieldLabel>Display Name</FieldLabel>
             <Input

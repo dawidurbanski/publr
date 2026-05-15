@@ -1,6 +1,8 @@
 // Admin system page — recompile button and system status
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../components/page_header.zig").PageHeader;
+const SettingsTabs = @import("../components/settings_tabs.zig").SettingsTabs;
 const Button = ui.button.Button;
 const Field = ui.form_field.Field;
 const FieldLabel = ui.form_field.FieldLabel;
@@ -9,10 +11,15 @@ const Stack = ui.stack.Stack;
 const Heading = ui.heading.Heading;
 const Text = ui.text.Text;
 
-pub fn System(props: struct {
+pub const Props = struct {
     csrf_token: []const u8,
     config_text: []const u8,
-}) {
+};
+
+pub fn System(props: Props) {
+    <PageHeader title="System" />
+    <SettingsTabs current="settings.system" />
+
     <Stack gap=.lg>
         <Heading level=.h2 size=.md>Recompilation</Heading>
         <Text size=.sm color=.muted>Rebuild the CMS binary with your current plugins and configuration.</Text>

@@ -1,0 +1,28 @@
+// PageHeader — title + optional subtitle on the left, action slot on the right.
+// Used by admin pages to render their own header chrome (the layout no longer does this).
+//
+// The children slot is wrapped in a Flex with sensible button-row defaults, so most
+// pages can drop buttons in directly without an explicit Flex wrapper.
+
+const ui = @import("publr_ui");
+const Flex = ui.flex.Flex;
+const Stack = ui.stack.Stack;
+const Heading = ui.heading.Heading;
+
+pub fn PageHeader(props: struct {
+    title: []const u8,
+    subtitle: []const u8 = "",
+    children: []const u8 = "",
+}) {
+    <Flex justify=.between items=.end class="mb-6 gap-4">
+        <Stack gap=.none class="min-w-0">
+            <Heading level=.h1 size=.xl class="m-0">{props.title}</Heading>
+            {if (props.subtitle.len > 0) (
+                <span class="mt-1 text-sm text-muted-foreground">{@raw props.subtitle}</span>
+            )}
+        </Stack>
+        {if (props.children.len > 0) (
+            <Flex items=.center class="shrink-0 gap-2">{@raw props.children}</Flex>
+        )}
+    </Flex>
+}

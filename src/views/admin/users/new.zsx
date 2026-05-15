@@ -1,6 +1,8 @@
 // Add user template
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
+const SettingsTabs = @import("../../components/settings_tabs.zig").SettingsTabs;
 const Button = ui.button.Button;
 const Field = ui.form_field.Field;
 const FieldLabel = ui.form_field.FieldLabel;
@@ -8,18 +10,24 @@ const Input = ui.text_input.Input;
 const Flex = ui.flex.Flex;
 const Text = ui.text.Text;
 
-pub fn New(props: struct {
+pub const Props = struct {
     error_message: []const u8,
     csrf_token: []const u8,
-}) {
+};
+
+pub fn New(props: Props) {
+    <PageHeader title="Add User" />
+    <SettingsTabs current="settings.users.new" />
+
     {if (props.error_message.len > 0) (
         <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
             <Text size=.sm color=.destructive>{props.error_message}</Text>
         </div>
     )}
 
-    <form method="POST" action="/admin/settings/users" class="form">
+    <form method="POST" action="/admin/action" class="form">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="settings.user_create" />
         <Field>
             <FieldLabel>Display Name</FieldLabel>
             <Input

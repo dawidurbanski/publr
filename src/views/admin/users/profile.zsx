@@ -1,6 +1,7 @@
 // Profile template
 
 const ui = @import("publr_ui");
+const PageHeader = @import("../../components/page_header.zig").PageHeader;
 const Button = ui.button.Button;
 const Field = ui.form_field.Field;
 const FieldLabel = ui.form_field.FieldLabel;
@@ -19,14 +20,17 @@ pub fn Profile(props: struct {
     user: User,
     csrf_token: []const u8,
 }) {
+    <PageHeader title="Profile" />
+
     {if (props.error_message.len > 0) (
         <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
             <Text size=.sm color=.destructive>{props.error_message}</Text>
         </div>
     )}
 
-    <form method="POST" action="/admin/users/profile" class="form">
+    <form method="POST" action="/admin/action" class="form">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="users.profile_update" />
         <Field>
             <FieldLabel>Display Name</FieldLabel>
             <Input
