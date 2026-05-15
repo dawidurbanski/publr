@@ -1,8 +1,8 @@
 const std = @import("std");
 const Db = @import("db").Db;
 const registry = @import("schema_registry");
-const common = @import("cli_common");
-const fmt = @import("cli_format");
+const common = @import("common.zig");
+const fmt = @import("format.zig");
 
 pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8) !void {
     const sub = args[0];
@@ -22,13 +22,14 @@ pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, ar
 }
 
 fn listSchemas(allocator: std.mem.Allocator, opts: common.GlobalOptions) !void {
+    const defs = registry.all();
     if (opts.format == .json) {
-        try fmt.printJson(.{ .data = registry.registered_types });
+        try fmt.printJson(.{ .data = defs });
         return;
     }
     if (opts.format == .jsonl) {
-        for (registry.registered_types) |info| {
-            try fmt.printJsonLine(info);
+        for (defs) |def| {
+            try fmt.printJsonLine(def);
         }
         return;
     }
@@ -39,13 +40,13 @@ fn listSchemas(allocator: std.mem.Allocator, opts: common.GlobalOptions) !void {
         for (rows.items) |row| allocator.free(row);
     }
 
-    for (registry.registered_types) |info| {
+    for (defs) |def| {
         const cols = try allocator.alloc([]const u8, 5);
-        cols[0] = info.id;
-        cols[1] = info.display_name;
-        cols[2] = try std.fmt.allocPrint(allocator, "{d}", .{info.fields.len});
-        cols[3] = if (info.localized) "true" else "false";
-        cols[4] = if (info.internal) "true" else "false";
+        cols[0] = def.type_id;
+        cols[1] = def.display_name;
+        cols[2] = try std.fmt.allocPrint(allocator, "{d}", .{def.fields.len});
+        cols[3] = if (def.localized) "true" else "false";
+        cols[4] = if (def.internal) "true" else "false";
         try rows.append(allocator, cols);
     }
     defer {
@@ -61,24 +62,24 @@ fn listSchemas(allocator: std.mem.Allocator, opts: common.GlobalOptions) !void {
 }
 
 fn showSchema(allocator: std.mem.Allocator, opts: common.GlobalOptions, type_id: []const u8) !void {
-    const info = registry.getTypeInfo(type_id) orelse return error.UnknownContentType;
+    const def = registry.findById(type_id) orelse return error.UnknownContentType;
     if (opts.format == .json) {
-        try fmt.printJson(.{ .data = info });
+        try fmt.printJson(.{ .data = def });
         return;
     }
     if (opts.format == .jsonl) {
-        try fmt.printJsonLine(info);
+        try fmt.printJsonLine(def);
         return;
     }
 
     var kv = [_]fmt.KeyValueRow{
-        .{ .key = "id", .value = info.id },
-        .{ .key = "display_name", .value = info.display_name },
-        .{ .key = "display_name_plural", .value = info.display_name_plural },
-        .{ .key = "icon", .value = info.icon },
-        .{ .key = "localized", .value = if (info.localized) "true" else "false" },
-        .{ .key = "internal", .value = if (info.internal) "true" else "false" },
-        .{ .key = "is_taxonomy", .value = if (info.is_taxonomy) "true" else "false" },
+        .{ .key = "id", .value = def.type_id },
+        .{ .key = "display_name", .value = def.display_name },
+        .{ .key = "display_name_plural", .value = def.display_name_plural },
+        .{ .key = "icon", .value = def.icon orelse "bookmark" },
+        .{ .key = "localized", .value = if (def.localized) "true" else "false" },
+        .{ .key = "internal", .value = if (def.internal) "true" else "false" },
+        .{ .key = "is_taxonomy", .value = if (def.taxonomy != null) "true" else "false" },
     };
     try fmt.printKeyValueRows(&kv, opts.quiet, allocator);
     var stdout = std.fs.File.stdout().writer(&.{});
@@ -87,13 +88,13 @@ fn showSchema(allocator: std.mem.Allocator, opts: common.GlobalOptions, type_id:
 }
 
 fn fieldsSchema(allocator: std.mem.Allocator, opts: common.GlobalOptions, type_id: []const u8) !void {
-    const info = registry.getTypeInfo(type_id) orelse return error.UnknownContentType;
+    const def = registry.findById(type_id) orelse return error.UnknownContentType;
     if (opts.format == .json) {
-        try fmt.printJson(.{ .data = info.fields });
+        try fmt.printJson(.{ .data = def.fields });
         return;
     }
     if (opts.format == .jsonl) {
-        for (info.fields) |field| try fmt.printJsonLine(field);
+        for (def.fields) |field| try fmt.printJsonLine(field);
         return;
     }
 
@@ -103,11 +104,11 @@ fn fieldsSchema(allocator: std.mem.Allocator, opts: common.GlobalOptions, type_i
         for (rows.items) |row| allocator.free(row);
     }
 
-    for (info.fields) |field| {
+    for (def.fields) |field| {
         const cols = try allocator.alloc([]const u8, 6);
         cols[0] = field.name;
         cols[1] = field.display_name;
-        cols[2] = field.field_type;
+        cols[2] = field.field_type_id;
         cols[3] = if (field.required) "true" else "false";
         cols[4] = @tagName(field.translatable_mode);
         cols[5] = @tagName(field.position);
@@ -123,10 +124,10 @@ fn fieldsSchema(allocator: std.mem.Allocator, opts: common.GlobalOptions, type_i
 }
 
 fn validateSchema(db: *Db, opts: common.GlobalOptions) !void {
-    for (registry.registered_types) |info| {
+    for (registry.all()) |def| {
         var stmt = try db.prepare("SELECT 1 FROM content_types WHERE id = ?1 LIMIT 1");
         defer stmt.deinit();
-        try stmt.bindText(1, info.id);
+        try stmt.bindText(1, def.type_id);
         if (!try stmt.step()) return error.SchemaMismatch;
     }
 

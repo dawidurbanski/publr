@@ -1,8 +1,8 @@
 const std = @import("std");
 const Db = @import("db").Db;
 const taxonomy = @import("taxonomy");
-const common = @import("cli_common");
-const fmt = @import("cli_format");
+const common = @import("common.zig");
+const fmt = @import("format.zig");
 
 pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8) !void {
     const sub = args[0];
@@ -84,7 +84,8 @@ fn createTerm(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions,
         }
     }
 
-    const term = try taxonomy.createTerm(allocator, db, taxonomy_id, name, parent);
+    // CLI writes have no authenticated user — record term as system-authored.
+    const term = try taxonomy.createTerm(allocator, db, taxonomy_id, name, parent, null);
     defer {
         allocator.free(term.id);
         allocator.free(term.taxonomy_id);
@@ -102,7 +103,7 @@ fn createTerm(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions,
 }
 
 fn renameTerm(db: *Db, opts: common.GlobalOptions, term_id: []const u8, new_name: []const u8) !void {
-    try taxonomy.renameTerm(db, term_id, new_name);
+    try taxonomy.renameTerm(db, term_id, new_name, null);
     if (opts.format == .json or opts.format == .jsonl) {
         try fmt.printJson(.{ .data = .{ .updated = true, .id = term_id } });
     } else if (!opts.quiet) {
@@ -120,7 +121,7 @@ fn moveTerm(db: *Db, opts: common.GlobalOptions, term_id: []const u8, args: []co
             parent = args[i];
         }
     }
-    try taxonomy.moveTermParent(db, term_id, parent);
+    try taxonomy.moveTermParent(db, term_id, parent, null);
 
     if (opts.format == .json or opts.format == .jsonl) {
         try fmt.printJson(.{ .data = .{ .moved = true, .id = term_id, .parent = parent } });

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Db = @import("db").Db;
-const common = @import("cli_common");
-const fmt = @import("cli_format");
+const common = @import("common.zig");
+const fmt = @import("format.zig");
 const registry = @import("schema_registry");
 
 pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions) !void {
@@ -24,10 +24,10 @@ pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions) !v
     if (opts.format == .json or opts.format == .jsonl) {
         var counts: std.ArrayList(struct { type_id: []const u8, count: i64 }) = .{};
         defer counts.deinit(allocator);
-        for (registry.registered_types) |info| {
+        for (registry.all()) |def| {
             try counts.append(allocator, .{
-                .type_id = info.id,
-                .count = try countForType(db, info.id),
+                .type_id = def.type_id,
+                .count = try countForType(db, def.type_id),
             });
         }
 
@@ -47,8 +47,8 @@ pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions) !v
     std.debug.print("Total Media: {d}\n", .{total_media});
     if (!opts.quiet) {
         std.debug.print("Content Types:\n", .{});
-        for (registry.registered_types) |info| {
-            std.debug.print("  - {s}: {d}\n", .{ info.id, try countForType(db, info.id) });
+        for (registry.all()) |def| {
+            std.debug.print("  - {s}: {d}\n", .{ def.type_id, try countForType(db, def.type_id) });
         }
     }
 }

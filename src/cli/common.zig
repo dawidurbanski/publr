@@ -2,7 +2,7 @@ const std = @import("std");
 const core_init = @import("core_init");
 const core_time = @import("core_time");
 const Db = @import("db").Db;
-const fmt = @import("cli_format");
+const fmt = @import("format.zig");
 
 pub const GlobalOptions = struct {
     db_path: []const u8 = "data/publr.db",

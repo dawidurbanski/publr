@@ -1,9 +1,9 @@
 const std = @import("std");
 const Db = @import("db").Db;
 const cms = @import("cms");
-const schemas = @import("schemas");
-const common = @import("cli_common");
-const fmt = @import("cli_format");
+const schema_registry = @import("schema_registry");
+const common = @import("common.zig");
+const fmt = @import("format.zig");
 
 const FieldKV = struct {
     name: []const u8,
@@ -15,71 +15,42 @@ pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, ar
     if (args.len < 2) return error.MissingContentType;
     const type_id = args[1];
 
-    if (std.mem.eql(u8, sub, "list")) return dispatchByType(type_id, .list, allocator, db, opts, args[2..], null);
-    if (std.mem.eql(u8, sub, "create")) return dispatchByType(type_id, .create, allocator, db, opts, args[2..], null);
+    if (std.mem.eql(u8, sub, "list")) return listEntries(type_id, allocator, db, opts, args[2..]);
+    if (std.mem.eql(u8, sub, "create")) return createEntry(type_id, allocator, db, opts, args[2..]);
     if (std.mem.eql(u8, sub, "get")) {
         if (args.len < 3) return error.MissingEntryId;
-        return dispatchByType(type_id, .get, allocator, db, opts, args[3..], args[2]);
+        return getEntry(type_id, allocator, db, opts, args[2], args[3..]);
     }
     if (std.mem.eql(u8, sub, "update")) {
         if (args.len < 3) return error.MissingEntryId;
-        return dispatchByType(type_id, .update, allocator, db, opts, args[3..], args[2]);
+        return updateEntry(type_id, allocator, db, opts, args[2], args[3..]);
     }
     if (std.mem.eql(u8, sub, "delete")) {
         if (args.len < 3) return error.MissingEntryId;
-        return dispatchByType(type_id, .delete, allocator, db, opts, args[3..], args[2]);
+        return deleteEntry(db, opts, args[2], args[3..]);
     }
     if (std.mem.eql(u8, sub, "publish")) {
         if (args.len < 3) return error.MissingEntryId;
-        return dispatchByType(type_id, .publish, allocator, db, opts, args[3..], args[2]);
+        return publishEntry(allocator, db, opts, args[2], args[3..]);
     }
     if (std.mem.eql(u8, sub, "unpublish")) {
         if (args.len < 3) return error.MissingEntryId;
-        return dispatchByType(type_id, .unpublish, allocator, db, opts, args[3..], args[2]);
+        return unpublishEntry(db, opts, args[2]);
     }
     if (std.mem.eql(u8, sub, "discard")) {
         if (args.len < 3) return error.MissingEntryId;
-        return dispatchByType(type_id, .discard, allocator, db, opts, args[3..], args[2]);
+        return discardEntry(db, opts, args[2]);
     }
     if (std.mem.eql(u8, sub, "archive")) {
         if (args.len < 3) return error.MissingEntryId;
-        return dispatchByType(type_id, .archive, allocator, db, opts, args[3..], args[2]);
+        return archiveEntry(db, opts, args[2]);
     }
     return error.UnknownContentCommand;
 }
 
-const Action = enum {
-    list,
-    get,
-    create,
-    update,
-    delete,
-    publish,
-    unpublish,
-    discard,
-    archive,
-};
+fn listEntries(type_id: []const u8, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8) !void {
+    _ = schema_registry.findById(type_id) orelse return error.UnknownContentType;
 
-fn dispatchByType(type_id: []const u8, action: Action, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8, entry_id: ?[]const u8) !void {
-    inline for (schemas.content_types) |CT| {
-        if (std.mem.eql(u8, type_id, CT.type_id)) {
-            return switch (action) {
-                .list => listEntries(CT, allocator, db, opts, args),
-                .get => getEntry(CT, allocator, db, opts, entry_id.?, args),
-                .create => createEntry(CT, allocator, db, opts, args),
-                .update => updateEntry(CT, allocator, db, opts, entry_id.?, args),
-                .delete => deleteEntry(CT, db, opts, entry_id.?, args),
-                .publish => publishEntry(allocator, db, opts, entry_id.?, args),
-                .unpublish => unpublishEntry(db, opts, entry_id.?),
-                .discard => discardEntry(db, opts, entry_id.?),
-                .archive => archiveEntry(db, opts, entry_id.?),
-            };
-        }
-    }
-    return error.UnknownContentType;
-}
-
-fn listEntries(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8) !void {
     var status: ?[]const u8 = null;
     var limit: ?u32 = 20;
     var offset: ?u32 = null;
@@ -126,7 +97,7 @@ fn listEntries(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
         }
     }
 
-    const items = try cms.listEntries(CT, allocator, db, .{
+    const items = try cms.query.listEntries(allocator, db, type_id, .{
         .status = status,
         .limit = limit,
         .offset = offset,
@@ -134,7 +105,10 @@ fn listEntries(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
         .order_dir = order_dir,
         .meta_filters = filters.items,
     });
-    defer allocator.free(items);
+    defer {
+        for (items) |*item| @constCast(item).deinit(allocator);
+        allocator.free(items);
+    }
 
     if (opts.format == .json) {
         try fmt.printJson(.{ .data = items });
@@ -148,12 +122,10 @@ fn listEntries(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
     var rows: std.ArrayList([]const []const u8) = .{};
     defer rows.deinit(allocator);
     defer {
-        for (rows.items) |row| allocator.free(row);
-    }
-    defer {
         for (rows.items) |row| {
             allocator.free(row[3]);
             allocator.free(row[4]);
+            allocator.free(row);
         }
     }
 
@@ -175,7 +147,9 @@ fn listEntries(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
     );
 }
 
-fn getEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, id_or_slug: []const u8, args: []const []const u8) !void {
+fn getEntry(type_id: []const u8, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, id_or_slug: []const u8, args: []const []const u8) !void {
+    _ = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+
     var version_id: ?[]const u8 = null;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -197,17 +171,13 @@ fn getEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: comm
         return;
     }
 
-    const item = try cms.getEntry(CT, allocator, db, id_or_slug) orelse return error.EntryNotFound;
+    var item = (try cms.query.getEntry(allocator, db, type_id, id_or_slug)) orelse return error.EntryNotFound;
+    defer item.deinit(allocator);
 
     if (opts.format == .json or opts.format == .jsonl) {
         try fmt.printJson(.{ .data = item });
         return;
     }
-
-    const data_json = try CT.stringifyData(allocator, item.data);
-    defer allocator.free(data_json);
-    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, data_json, .{});
-    defer parsed.deinit();
 
     var rows: std.ArrayList(fmt.KeyValueRow) = .{};
     defer rows.deinit(allocator);
@@ -215,26 +185,25 @@ fn getEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: comm
     try rows.append(allocator, .{ .key = "status", .value = item.status });
     try rows.append(allocator, .{ .key = "title", .value = item.title });
 
-    if (parsed.value == .object) {
-        var iter = parsed.value.object.iterator();
-        while (iter.next()) |kv| {
-            const value_str = try valueToString(allocator, kv.value_ptr.*);
-            defer allocator.free(value_str);
-            try rows.append(allocator, .{
-                .key = kv.key_ptr.*,
-                .value = try allocator.dupe(u8, value_str),
-            });
-        }
-    }
+    var owned_values: std.ArrayList([]const u8) = .{};
     defer {
-        var idx: usize = 3;
-        while (idx < rows.items.len) : (idx += 1) allocator.free(rows.items[idx].value);
+        for (owned_values.items) |v| allocator.free(v);
+        owned_values.deinit(allocator);
+    }
+
+    var it = item.data.inner.iterator();
+    while (it.next()) |kv| {
+        const value_str = try fieldValueToString(allocator, kv.value_ptr.*);
+        try owned_values.append(allocator, value_str);
+        try rows.append(allocator, .{ .key = kv.key_ptr.*, .value = value_str });
     }
 
     try fmt.printKeyValueRows(rows.items, opts.quiet, allocator);
 }
 
-fn createEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8) !void {
+fn createEntry(type_id: []const u8, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8) !void {
+    const def = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+
     var author: ?[]const u8 = null;
     var locale: ?[]const u8 = null;
     var status: []const u8 = "draft";
@@ -270,18 +239,20 @@ fn createEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
         }
     }
 
-    const data = if (json_path) |path|
-        try parseDataFromJson(CT, allocator, path)
+    const data_json = if (json_path) |path|
+        try readJsonFile(allocator, path)
     else
-        try parseDataFromFields(CT, allocator, fields.items, null);
+        try buildJsonFromFields(allocator, def, fields.items, null);
+    defer allocator.free(data_json);
 
-    try validateRequiredFields(CT, data);
+    try validateRequiredFields(def, data_json);
 
-    const entry = try cms.saveEntry(CT, allocator, db, null, data, .{
+    var entry = try cms.saveEntry(allocator, db, type_id, null, data_json, .{
         .author_id = author,
         .locale = locale,
         .status = status,
     });
+    defer entry.deinit(allocator);
 
     if (opts.format == .json or opts.format == .jsonl) {
         try fmt.printJson(.{ .data = entry });
@@ -290,8 +261,11 @@ fn createEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
     }
 }
 
-fn updateEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, entry_id: []const u8, args: []const []const u8) !void {
-    const existing = try cms.getEntry(CT, allocator, db, entry_id) orelse return error.EntryNotFound;
+fn updateEntry(type_id: []const u8, allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, entry_id: []const u8, args: []const []const u8) !void {
+    const def = schema_registry.findById(type_id) orelse return error.UnknownContentType;
+
+    var existing = (try cms.query.getEntry(allocator, db, type_id, entry_id)) orelse return error.EntryNotFound;
+    defer existing.deinit(allocator);
 
     var author: ?[]const u8 = null;
     var locale: ?[]const u8 = null;
@@ -323,15 +297,17 @@ fn updateEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
         }
     }
 
-    const data = if (json_path) |path|
-        try parseDataFromJson(CT, allocator, path)
+    const data_json = if (json_path) |path|
+        try readJsonFile(allocator, path)
     else
-        try parseDataFromFields(CT, allocator, fields.items, existing.data);
+        try buildJsonFromFields(allocator, def, fields.items, existing.data);
+    defer allocator.free(data_json);
 
-    const updated = try cms.saveEntry(CT, allocator, db, entry_id, data, .{
+    var updated = try cms.saveEntry(allocator, db, type_id, entry_id, data_json, .{
         .author_id = author,
         .locale = locale,
     });
+    defer updated.deinit(allocator);
 
     if (opts.format == .json or opts.format == .jsonl) {
         try fmt.printJson(.{ .data = updated });
@@ -340,8 +316,7 @@ fn updateEntry(comptime CT: type, allocator: std.mem.Allocator, db: *Db, opts: c
     }
 }
 
-fn deleteEntry(comptime CT: type, db: *Db, opts: common.GlobalOptions, entry_id: []const u8, args: []const []const u8) !void {
-    _ = CT;
+fn deleteEntry(db: *Db, opts: common.GlobalOptions, entry_id: []const u8, args: []const []const u8) !void {
     var force = false;
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "--force")) force = true;
@@ -410,84 +385,157 @@ fn archiveEntry(db: *Db, opts: common.GlobalOptions, entry_id: []const u8) !void
     }
 }
 
-fn parseDataFromJson(comptime CT: type, allocator: std.mem.Allocator, path: []const u8) !CT.Data {
-    const json_text = if (std.mem.eql(u8, path, "-")) blk: {
+fn readJsonFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    if (std.mem.eql(u8, path, "-")) {
         const stdin = std.fs.File.stdin();
-        break :blk try stdin.readToEndAlloc(allocator, 16 * 1024 * 1024);
-    } else try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024);
-    defer allocator.free(json_text);
-
-    const parsed = try CT.parseData(allocator, json_text);
-    return parsed.value;
+        return stdin.readToEndAlloc(allocator, 16 * 1024 * 1024);
+    }
+    return std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024);
 }
 
-fn parseDataFromFields(comptime CT: type, allocator: std.mem.Allocator, fields: []const FieldKV, existing: ?CT.Data) !CT.Data {
-    var data = if (existing) |cur|
-        cur
-    else blk: {
-        break :blk std.mem.zeroInit(CT.Data, .{});
-    };
+/// Build a JSON object from CLI --field args. Starts from `existing` (if
+/// any) via a FieldMap snapshot, applies updates, then emits JSON keyed by
+/// field name with values coerced according to each field's `field_type_id`.
+fn buildJsonFromFields(
+    allocator: std.mem.Allocator,
+    def: *const @import("content_type").ContentTypeDef,
+    fields: []const FieldKV,
+    existing: ?cms.query.FieldMap,
+) ![]u8 {
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
 
-    for (fields) |field| {
-        var matched = false;
-        inline for (std.meta.fields(CT.Data)) |df| {
-            if (std.mem.eql(u8, field.name, df.name)) {
-                matched = true;
-                @field(data, df.name) = try convertFieldValue(df.type, allocator, field.value);
+    try w.writeByte('{');
+    var first = true;
+    for (def.fields) |f| {
+        // Look up new value first, fall back to existing.
+        const raw_new: ?[]const u8 = blk: {
+            for (fields) |kv| {
+                if (std.mem.eql(u8, kv.name, f.name)) break :blk kv.value;
+            }
+            break :blk null;
+        };
+
+        if (raw_new == null and existing == null) continue;
+
+        if (!first) try w.writeByte(',');
+        first = false;
+        try w.writeByte('"');
+        try writeJsonEscaped(w, f.name);
+        try w.writeAll("\":");
+
+        if (raw_new) |raw| {
+            try writeFieldJsonValue(w, f.field_type_id, raw);
+        } else if (existing) |em| {
+            try writeFieldMapValue(w, em.get(f.name));
+        }
+    }
+
+    // Also pass through any --field that aren't on the schema (forgiving).
+    for (fields) |kv| {
+        var on_schema = false;
+        for (def.fields) |f| {
+            if (std.mem.eql(u8, f.name, kv.name)) {
+                on_schema = true;
+                break;
             }
         }
-        if (!matched) return error.UnknownField;
+        if (on_schema) continue;
+        if (!first) try w.writeByte(',');
+        first = false;
+        try w.writeByte('"');
+        try writeJsonEscaped(w, kv.name);
+        try w.writeAll("\":\"");
+        try writeJsonEscaped(w, kv.value);
+        try w.writeByte('"');
     }
 
-    return data;
+    try w.writeByte('}');
+    return buf.toOwnedSlice(allocator);
 }
 
-fn convertFieldValue(comptime T: type, allocator: std.mem.Allocator, raw: []const u8) !T {
-    if (T == []const u8) return raw;
-    if (T == ?[]const u8) return if (raw.len == 0) null else raw;
-    if (T == bool) {
-        if (std.mem.eql(u8, raw, "true") or std.mem.eql(u8, raw, "1")) return true;
-        if (std.mem.eql(u8, raw, "false") or std.mem.eql(u8, raw, "0")) return false;
-        return error.InvalidBoolean;
+fn writeFieldJsonValue(w: anytype, field_type_id: []const u8, raw: []const u8) !void {
+    if (std.mem.eql(u8, field_type_id, "boolean")) {
+        if (std.mem.eql(u8, raw, "true") or std.mem.eql(u8, raw, "1")) {
+            try w.writeAll("true");
+        } else if (std.mem.eql(u8, raw, "false") or std.mem.eql(u8, raw, "0") or raw.len == 0) {
+            try w.writeAll("false");
+        } else return error.InvalidBoolean;
+        return;
     }
-    if (T == ?bool) {
-        if (raw.len == 0) return null;
-        if (std.mem.eql(u8, raw, "true") or std.mem.eql(u8, raw, "1")) return true;
-        if (std.mem.eql(u8, raw, "false") or std.mem.eql(u8, raw, "0")) return false;
-        return error.InvalidBoolean;
+    if (std.mem.eql(u8, field_type_id, "integer")) {
+        if (raw.len == 0) {
+            try w.writeAll("null");
+        } else {
+            _ = try std.fmt.parseInt(i64, raw, 10);
+            try w.writeAll(raw);
+        }
+        return;
     }
-    if (T == i64) return try std.fmt.parseInt(i64, raw, 10);
-    if (T == ?i64) return if (raw.len == 0) null else try std.fmt.parseInt(i64, raw, 10);
-    if (T == i32) return try std.fmt.parseInt(i32, raw, 10);
-    if (T == ?i32) return if (raw.len == 0) null else try std.fmt.parseInt(i32, raw, 10);
-    if (T == u32) return try std.fmt.parseInt(u32, raw, 10);
-    if (T == ?u32) return if (raw.len == 0) null else try std.fmt.parseInt(u32, raw, 10);
-    if (T == []const []const u8) {
-        var parts: std.ArrayList([]const u8) = .{};
+    if (std.mem.eql(u8, field_type_id, "number") or std.mem.eql(u8, field_type_id, "real")) {
+        if (raw.len == 0) {
+            try w.writeAll("null");
+        } else {
+            _ = try std.fmt.parseFloat(f64, raw);
+            try w.writeAll(raw);
+        }
+        return;
+    }
+    if (std.mem.eql(u8, field_type_id, "taxonomy") or std.mem.eql(u8, field_type_id, "ref_multi")) {
+        // CSV of IDs
+        try w.writeByte('[');
+        var first = true;
         var it = std.mem.splitScalar(u8, raw, ',');
         while (it.next()) |part| {
             const trimmed = std.mem.trim(u8, part, " ");
             if (trimmed.len == 0) continue;
-            try parts.append(allocator, trimmed);
+            if (!first) try w.writeByte(',');
+            first = false;
+            try w.writeByte('"');
+            try writeJsonEscaped(w, trimmed);
+            try w.writeByte('"');
         }
-        return try parts.toOwnedSlice(allocator);
+        try w.writeByte(']');
+        return;
     }
-    return error.UnsupportedFieldType;
+    // Default: emit as string.
+    try w.writeByte('"');
+    try writeJsonEscaped(w, raw);
+    try w.writeByte('"');
 }
 
-fn validateRequiredFields(comptime CT: type, data: CT.Data) !void {
-    inline for (CT.schema) |field| {
-        if (!field.required) continue;
-        inline for (std.meta.fields(CT.Data)) |df| {
-            if (comptime std.mem.eql(u8, df.name, field.name)) {
-                const value = @field(data, df.name);
-                if (@TypeOf(value) == []const u8 and value.len == 0) {
-                    return error.MissingRequiredField;
-                }
-                if (@TypeOf(value) == ?[]const u8 and value == null) {
-                    return error.MissingRequiredField;
-                }
-            }
+fn writeFieldMapValue(w: anytype, val: ?cms.query.FieldValue) !void {
+    const v = val orelse {
+        try w.writeAll("null");
+        return;
+    };
+    switch (v) {
+        .text => |s| {
+            try w.writeByte('"');
+            try writeJsonEscaped(w, s);
+            try w.writeByte('"');
+        },
+        .int => |n| try w.print("{d}", .{n}),
+        .real => |n| try w.print("{d}", .{n}),
+        .bool_ => |b| try w.writeAll(if (b) "true" else "false"),
+        .datetime => |t| try w.print("{d}", .{t}),
+        .json => |j| try w.print("{f}", .{std.json.fmt(j, .{})}),
+        .null_ => try w.writeAll("null"),
+    }
+}
+
+fn validateRequiredFields(def: *const @import("content_type").ContentTypeDef, data_json: []const u8) !void {
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, data_json, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.MissingRequiredField;
+    for (def.fields) |f| {
+        if (!f.required) continue;
+        const v = parsed.value.object.get(f.name) orelse return error.MissingRequiredField;
+        switch (v) {
+            .string => |s| if (s.len == 0) return error.MissingRequiredField,
+            .null => return error.MissingRequiredField,
+            else => {},
         }
     }
 }
@@ -523,14 +571,19 @@ fn writeJsonEscaped(w: anytype, value: []const u8) !void {
     };
 }
 
-fn valueToString(allocator: std.mem.Allocator, value: std.json.Value) ![]const u8 {
+fn fieldValueToString(allocator: std.mem.Allocator, value: cms.query.FieldValue) ![]const u8 {
     return switch (value) {
-        .string => |s| try allocator.dupe(u8, s),
-        else => blk: {
+        .text => |s| try allocator.dupe(u8, s),
+        .int => |n| try std.fmt.allocPrint(allocator, "{d}", .{n}),
+        .real => |n| try std.fmt.allocPrint(allocator, "{d}", .{n}),
+        .bool_ => |b| try allocator.dupe(u8, if (b) "true" else "false"),
+        .datetime => |t| try std.fmt.allocPrint(allocator, "{d}", .{t}),
+        .null_ => try allocator.dupe(u8, "null"),
+        .json => |j| blk: {
             var list: std.ArrayList(u8) = .{};
             errdefer list.deinit(allocator);
             const writer = list.writer(allocator);
-            try writer.print("{f}", .{std.json.fmt(value, .{})});
+            try writer.print("{f}", .{std.json.fmt(j, .{})});
             break :blk try list.toOwnedSlice(allocator);
         },
     };

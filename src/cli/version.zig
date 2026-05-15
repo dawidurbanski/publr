@@ -1,8 +1,8 @@
 const std = @import("std");
 const Db = @import("db").Db;
 const cms = @import("cms");
-const common = @import("cli_common");
-const fmt = @import("cli_format");
+const common = @import("common.zig");
+const fmt = @import("format.zig");
 
 pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, args: []const []const u8) !void {
     const sub = args[0];

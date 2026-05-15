@@ -1,14 +1,15 @@
 const std = @import("std");
-const common = @import("cli_common");
-const content_cli = @import("cli_content");
-const version_cli = @import("cli_version");
-const release_cli = @import("cli_release");
-const media_cli = @import("cli_media");
-const taxonomy_cli = @import("cli_taxonomy");
-const user_cli = @import("cli_user");
-const schema_cli = @import("cli_schema");
-const db_cli = @import("cli_db");
-const info_cli = @import("cli_info");
+const common = @import("common.zig");
+const content_cli = @import("content.zig");
+const version_cli = @import("version.zig");
+const release_cli = @import("release.zig");
+const media_cli = @import("media.zig");
+const taxonomy_cli = @import("taxonomy.zig");
+const user_cli = @import("user.zig");
+const schema_cli = @import("schema.zig");
+const db_cli = @import("db.zig");
+const info_cli = @import("info.zig");
+const starter_cli = @import("starter.zig");
 
 pub fn run(allocator: std.mem.Allocator, first_command: []const u8, args_it: *std.process.ArgIterator) !void {
     var raw: std.ArrayList([]const u8) = .{};
@@ -76,6 +77,10 @@ pub fn run(allocator: std.mem.Allocator, first_command: []const u8, args_it: *st
     if (std.mem.eql(u8, command, "info")) {
         return info_cli.run(allocator, &db, parsed.opts);
     }
+    if (std.mem.eql(u8, command, "starter")) {
+        if (parsed.args.len < 2) return error.MissingStarterSubcommand;
+        return starter_cli.run(allocator, &db, parsed.opts, parsed.args[1..]);
+    }
 
     return error.UnknownCommand;
 }
@@ -96,6 +101,7 @@ pub fn printUsage() void {
         \\  schema     Schema introspection commands
         \\  db         Database commands (init/seed/export/import)
         \\  info       System overview
+        \\  starter    Install starter content types (post/page)
         \\
         \\Global options:
         \\  --db <path>

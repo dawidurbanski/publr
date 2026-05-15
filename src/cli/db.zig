@@ -1,7 +1,7 @@
 const std = @import("std");
-const common = @import("cli_common");
+const common = @import("common.zig");
 const core_init = @import("core_init");
-const fmt = @import("cli_format");
+const fmt = @import("format.zig");
 
 pub fn run(allocator: std.mem.Allocator, opts: common.GlobalOptions, args: []const []const u8) !void {
     _ = allocator;
