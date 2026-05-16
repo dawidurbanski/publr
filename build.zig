@@ -696,6 +696,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_dev_server = b.addRunArtifact(dev_server_exe);
+    run_dev_server.setCwd(b.path("."));
     if (b.args) |passthrough| run_dev_server.addArgs(passthrough);
     dev_browser_step.dependOn(&run_dev_server.step);
 }

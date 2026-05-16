@@ -91,11 +91,13 @@ fn handleConnection(allocator: std.mem.Allocator, conn: std.net.Server.Connectio
 
 fn serveFile(allocator: std.mem.Allocator, stream: std.net.Stream, path: []const u8) !void {
     const fs_path = resolvePath(path) orelse {
+        std.debug.print("dev_server: 404 (no route for) {s}\n", .{path});
         try writeStatus(stream, "404 Not Found", "text/plain", "Not Found");
         return;
     };
 
-    const file = std.fs.cwd().openFile(fs_path, .{}) catch {
+    const file = std.fs.cwd().openFile(fs_path, .{}) catch |err| {
+        std.debug.print("dev_server: 404 (open '{s}' failed: {s}) for {s}\n", .{ fs_path, @errorName(err), path });
         try writeStatus(stream, "404 Not Found", "text/plain", "Not Found");
         return;
     };
@@ -139,23 +141,24 @@ fn resolvePath(path: []const u8) ?[]const u8 {
     // /cms.wasm comes from the WASM build output.
     if (std.mem.eql(u8, path, "/cms.wasm")) return "zig-out/browser/cms.wasm";
 
-    // Everything else falls back to browser/<path>. The path always has a
-    // leading slash, so we strip it to get a relative path.
-    if (path.len > 1 and path[0] == '/') {
-        // Only serve these explicit files from browser/. Anything else
-        // returns 404 so a stray fetch can't read arbitrary files.
-        const allowed = [_][]const u8{ "/cms-runtime.js", "/cms-worker.js", "/index.html" };
-        for (allowed) |a| {
-            if (std.mem.eql(u8, path, a)) {
-                // browser/cms-runtime.js etc.
-                const tail = path[1..];
-                // Tiny pool of small static buffers via std.fmt.allocPrint —
-                // but we don't have an allocator here. Use a thread-local
-                // single buffer: callers serialize through one connection at
-                // a time, so this is safe enough for a dev tool.
-                return resolveBrowser(tail);
-            }
+    // Explicit browser/ assets the WASM shell needs.
+    const allowed = [_][]const u8{ "/cms-runtime.js", "/cms-worker.js", "/index.html" };
+    for (allowed) |a| {
+        if (std.mem.eql(u8, path, a)) {
+            return resolveBrowser(path[1..]);
         }
+    }
+
+    // Drop favicon noise — browsers fetch it regardless of <link>.
+    if (std.mem.eql(u8, path, "/favicon.ico")) return null;
+
+    // SPA fallback: paths that don't look like static assets (no file
+    // extension) hand back index.html so the WASM app can route them
+    // client-side. Path traversal isn't a concern — we still return a
+    // fixed filename.
+    if (path.len > 1 and path[0] == '/') {
+        const has_ext = std.mem.lastIndexOfScalar(u8, path, '.') != null;
+        if (!has_ext) return "browser/index.html";
     }
     return null;
 }
