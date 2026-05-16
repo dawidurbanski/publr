@@ -19,7 +19,11 @@
 <body>
 
     <script type="module">
-        import { initCMS } from './cms-runtime.js';
+        // Absolute path so the SPA fallback (opening /admin/login directly)
+        // still loads the runtime from the project root rather than from
+        // /admin/cms-runtime.js. cms-runtime.js then resolves
+        // ./cms-worker.js against its own import.meta.url, which is /.
+        import { initCMS } from '/cms-runtime.js';
 
         let cms = null;
 
