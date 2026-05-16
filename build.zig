@@ -683,4 +683,22 @@ pub fn build(b: *std.Build) void {
     run_bundle.step.dependOn(&transpile_zsx_cmd.step);
 
     browser_bundle_step.dependOn(&run_bundle.step);
+
+    // =========================================================================
+    // Browser Dev Server — serves browser/, zig-out/browser/cms.wasm, static/
+    // (replaces the previous Vite setup).
+    // =========================================================================
+    const dev_browser_step = b.step("dev-browser", "Serve the browser WASM CMS preview (replaces `vite dev`)");
+
+    const dev_server_exe = b.addExecutable(.{
+        .name = "dev_server",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/dev_server.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    const run_dev_server = b.addRunArtifact(dev_server_exe);
+    run_dev_server.setCwd(b.path("."));
+    if (b.args) |passthrough| run_dev_server.addArgs(passthrough);
+    dev_browser_step.dependOn(&run_dev_server.step);
 }
