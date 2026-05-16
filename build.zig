@@ -304,7 +304,7 @@ pub fn build(b: *std.Build) void {
     const tpl_module = reg.leaf("tpl", "src/tpl.zig");
     const auth_module = reg.simple("auth", "src/core/auth.zig", &.{ "db", "time_util" });
     const auth_middleware_module = reg.simple("auth_middleware", "src/auth_middleware.zig", &.{ "middleware", "auth", "db" });
-    const csrf_module = reg.simple("csrf", "src/csrf.zig", &.{ "middleware", "auth_middleware" });
+    const csrf_module = reg.simple("csrf", "src/csrf.zig", &.{ "middleware", "auth_middleware", "multipart" });
     _ = reg.simple("actions", "src/actions.zig", &.{ "middleware", "csrf" });
     const admin_api_module = reg.simple("admin_api", "src/admin_api.zig", &.{ "middleware", "publr_ui", "actions", "content_type", "schemas", "schema_registry" });
     const image_module = reg.leaf("image", "src/image.zig");
