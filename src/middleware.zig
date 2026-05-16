@@ -285,7 +285,27 @@ pub const Middleware = *const fn (*Context, NextFn) anyerror!void;
 /// Handler function signature (final handler, no next)
 pub const Handler = *const fn (*Context) anyerror!void;
 
-/// Executes a middleware chain, then calls the handler
+/// Executes a middleware chain, then calls the handler.
+///
+/// IMPORTANT — thread-local closure invariant
+///
+/// This function uses a thread-local pointer (`current_chain`) plus a
+/// `chainNext` function-pointer shim to simulate closures, because Zig
+/// doesn't have them. The pattern works cleanly for top-level dispatch,
+/// but a handler invoked through this chain that itself calls
+/// `executeChain` on the same thread will overwrite the thread-local —
+/// the inner invocation will see (and trample) the outer chain.
+///
+/// If you ever need re-entrant dispatch (a handler inside a chain that
+/// triggers another chain), save `current_chain` to a local at entry and
+/// restore it on exit. The straightforward path is just to not re-enter:
+/// handlers should be terminal. Calling another router's `dispatch` from
+/// within a handler is the way to "re-enter" safely, since the inner
+/// router builds and tears down its own `ChainState`.
+///
+/// Long-term fix: pass the chain explicitly as a parameter through the
+/// closure simulation, eliminating the thread-local entirely. Out of
+/// scope for this file's current consumers.
 pub fn executeChain(
     ctx: *Context,
     global_middleware: []const Middleware,

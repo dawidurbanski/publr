@@ -1,6 +1,7 @@
 const std = @import("std");
 const mw = @import("middleware");
 const auth_middleware = @import("auth_middleware");
+const multipart = @import("multipart");
 
 const Context = mw.Context;
 const NextFn = mw.NextFn;
@@ -55,51 +56,14 @@ fn validateCsrf(ctx: *Context) bool {
 
 /// Extract a form field value from a multipart/form-data body.
 /// Exposed so the action dispatcher can resolve `action` for multipart
-/// submissions (file uploads). Only handles non-file fields — skips parts
-/// with `filename=` in the disposition.
+/// submissions (file uploads). Thin wrapper over `multipart.parseMultipartField`
+/// — kept here for the convenience of taking a `*Context` rather than an
+/// already-extracted body + boundary.
 pub fn multipartFormValue(ctx: *Context, name: []const u8) ?[]const u8 {
     const content_type = ctx.getRequestHeader("Content-Type") orelse return null;
-    const boundary_marker = "boundary=";
-    const boundary_idx = std.mem.indexOf(u8, content_type, boundary_marker) orelse return null;
-    const boundary = content_type[boundary_idx + boundary_marker.len ..];
-    if (boundary.len == 0) return null;
-
+    const boundary = multipart.parseMultipartBoundary(content_type) orelse return null;
     const body_content = ctx.body orelse return null;
-
-    // Build the needle: Content-Disposition: form-data; name="<name>"
-    const needle = std.fmt.allocPrint(ctx.allocator, "name=\"{s}\"", .{name}) catch return null;
-    defer ctx.allocator.free(needle);
-
-    // Build delimiter for boundary
-    const delim = std.fmt.allocPrint(ctx.allocator, "\r\n--{s}", .{boundary}) catch return null;
-    defer ctx.allocator.free(delim);
-
-    // Find the part containing this field name
-    var search_pos: usize = 0;
-    while (std.mem.indexOfPos(u8, body_content, search_pos, needle)) |name_pos| {
-        // Find the blank line after headers (\r\n\r\n)
-        const after_name = body_content[name_pos..];
-        const header_end = std.mem.indexOf(u8, after_name, "\r\n\r\n") orelse {
-            search_pos = name_pos + needle.len;
-            continue;
-        };
-
-        // Check this is NOT a file field (no filename= before the header end)
-        const header_section = after_name[0..header_end];
-        if (std.mem.indexOf(u8, header_section, "filename=") != null) {
-            search_pos = name_pos + needle.len;
-            continue;
-        }
-
-        const value_start = name_pos + header_end + 4;
-        const remaining = body_content[value_start..];
-
-        // Value ends at next boundary
-        const value_end = std.mem.indexOf(u8, remaining, delim) orelse remaining.len;
-        return remaining[0..value_end];
-    }
-
-    return null;
+    return multipart.parseMultipartField(ctx.allocator, body_content, boundary, name);
 }
 
 fn isStateChanging(method: mw.Method) bool {

@@ -36,7 +36,6 @@ const rest_taxonomy = @import("rest/taxonomy.zig");
 const rest_user = @import("rest/user.zig");
 const rest_schema = @import("rest/schema.zig");
 const rest_info = @import("rest/info.zig");
-const site_handlers = @import("http_handlers/site.zig");
 const setup_auth_handlers = @import("http_handlers/setup_auth.zig");
 const static_handlers = @import("http_handlers/static_files.zig");
 const theme_handlers = @import("http_handlers/theme.zig");
@@ -198,7 +197,7 @@ pub fn serve(
 
     // Dev-only test route to trigger 500 error
     if (dev_mode) {
-        try router.get("/error-test", site_handlers.handleErrorTest);
+        try router.get("/error-test", devErrorTest);
     }
 
     // Theme routes (lowest priority — registered after admin, API, and plugin routes)
@@ -375,4 +374,10 @@ fn waitForConnections(timeout_ms: u64) void {
         }
         std.Thread.sleep(10 * std.time.ns_per_ms);
     }
+}
+
+/// Dev-only test route to trigger a 500 error so we can see the error page.
+/// Wired only when `--dev` is passed.
+fn devErrorTest(_: *Context) !void {
+    return error.TestError;
 }
