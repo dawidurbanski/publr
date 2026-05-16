@@ -7,17 +7,13 @@
 const std = @import("std");
 const mw = @import("middleware");
 const admin_api = @import("admin_api");
+const route_match = @import("route_match");
 
 const Context = mw.Context;
 const Handler = mw.Handler;
 const Method = mw.Method;
 
-/// A parsed route segment
-const Segment = union(enum) {
-    literal: []const u8,
-    param: []const u8,
-    wildcard: void,
-};
+const Segment = route_match.Segment;
 
 /// A registered route
 const Route = struct {
@@ -58,40 +54,13 @@ pub const WasmRouter = struct {
     }
 
     fn addRoute(self: *WasmRouter, method: Method, pattern: []const u8, handler: Handler) void {
-        const segments = self.parsePattern(pattern);
+        const segments = route_match.parsePattern(self.allocator, pattern) catch @panic("OOM parsing route pattern");
         self.routes.append(self.allocator, .{
             .method = method,
             .pattern = pattern,
             .segments = segments,
             .handler = handler,
         }) catch @panic("OOM registering WASM route");
-    }
-
-    fn parsePattern(self: *WasmRouter, pattern: []const u8) []const Segment {
-        if (std.mem.eql(u8, pattern, "/")) {
-            return &[_]Segment{};
-        }
-
-        const path = if (pattern.len > 0 and pattern[0] == '/') pattern[1..] else pattern;
-        var iter = std.mem.splitScalar(u8, path, '/');
-
-        var segments: std.ArrayListUnmanaged(Segment) = .{};
-        defer segments.deinit(self.allocator);
-
-        while (iter.next()) |part| {
-            if (part.len == 0) continue;
-
-            if (std.mem.eql(u8, part, "*")) {
-                segments.append(self.allocator, .wildcard) catch @panic("OOM parsing route pattern");
-                break;
-            } else if (part[0] == ':') {
-                segments.append(self.allocator, .{ .param = part[1..] }) catch @panic("OOM parsing route pattern");
-            } else {
-                segments.append(self.allocator, .{ .literal = part }) catch @panic("OOM parsing route pattern");
-            }
-        }
-
-        return segments.toOwnedSlice(self.allocator) catch @panic("OOM parsing route pattern");
     }
 
     /// Dispatch a request to matching handler. Returns true if a route matched.
@@ -104,7 +73,7 @@ pub const WasmRouter = struct {
         for (self.routes.items) |route| {
             if (route.method != ctx.method) continue;
 
-            if (matchRoute(route.segments, normalized_path, ctx)) {
+            if (route_match.matchRoute(route.segments, normalized_path, ctx)) {
                 try route.handler(ctx);
                 return true;
             }
@@ -136,40 +105,3 @@ fn registerPost(ctx: *anyopaque, path: []const u8, handler: Handler) void {
     router.post(path, handler);
 }
 
-fn matchRoute(segments: []const Segment, path: []const u8, ctx: *Context) bool {
-    const clean_path = std.mem.trimRight(u8, path, "\r");
-    if (segments.len == 0) {
-        return std.mem.eql(u8, clean_path, "/");
-    }
-
-    const path_str = if (clean_path.len > 0 and clean_path[0] == '/') clean_path[1..] else clean_path;
-
-    if (path_str.len == 0 and segments.len > 0) {
-        return false;
-    }
-
-    var path_iter = std.mem.splitScalar(u8, path_str, '/');
-    var seg_idx: usize = 0;
-
-    while (seg_idx < segments.len) : (seg_idx += 1) {
-        const segment = segments[seg_idx];
-
-        switch (segment) {
-            .literal => |lit| {
-                const part = path_iter.next() orelse return false;
-                if (!std.mem.eql(u8, part, lit)) return false;
-            },
-            .param => |name| {
-                const part = path_iter.next() orelse return false;
-                ctx.params.put(ctx.allocator, name, part) catch return false;
-            },
-            .wildcard => {
-                const rest = path_iter.rest();
-                ctx.wildcard = if (rest.len > 0) rest else path_iter.next();
-                return true;
-            },
-        }
-    }
-
-    return path_iter.next() == null;
-}

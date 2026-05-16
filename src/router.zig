@@ -24,12 +24,8 @@ const Route = struct {
     middleware: []const Middleware,
 };
 
-/// Segment types in a route pattern
-const Segment = union(enum) {
-    literal: []const u8,
-    param: []const u8,
-    wildcard: void,
-};
+const route_match = @import("route_match");
+const Segment = route_match.Segment;
 
 /// HTTP Router with path matching, method dispatch, and middleware support
 pub const Router = struct {
@@ -106,7 +102,7 @@ pub const Router = struct {
     }
 
     fn addRoute(self: *Router, method: Method, pattern: []const u8, handler: Handler, options: RouteOptions) !void {
-        const segments = try self.parsePattern(pattern);
+        const segments = try route_match.parsePattern(self.allocator, pattern);
         try self.routes.append(self.allocator, .{
             .method = method,
             .pattern = pattern,
@@ -114,35 +110,6 @@ pub const Router = struct {
             .handler = handler,
             .middleware = options.middleware,
         });
-    }
-
-    fn parsePattern(self: *Router, pattern: []const u8) ![]const Segment {
-        var segments: std.ArrayListUnmanaged(Segment) = .{};
-        errdefer segments.deinit(self.allocator);
-
-        // Handle root path
-        if (std.mem.eql(u8, pattern, "/")) {
-            return segments.toOwnedSlice(self.allocator);
-        }
-
-        // Remove leading slash and split
-        const path = if (pattern.len > 0 and pattern[0] == '/') pattern[1..] else pattern;
-        var iter = std.mem.splitScalar(u8, path, '/');
-
-        while (iter.next()) |part| {
-            if (part.len == 0) continue;
-
-            if (std.mem.eql(u8, part, "*")) {
-                try segments.append(self.allocator, .wildcard);
-                break; // Wildcard must be last
-            } else if (part.len > 0 and part[0] == ':') {
-                try segments.append(self.allocator, .{ .param = part[1..] });
-            } else {
-                try segments.append(self.allocator, .{ .literal = part });
-            }
-        }
-
-        return segments.toOwnedSlice(self.allocator);
     }
 
     /// Dispatch a request to the matching handler with middleware chain
@@ -172,7 +139,7 @@ pub const Router = struct {
         for (self.routes.items) |route| {
             if (route.method != method) continue;
 
-            if (self.matchRoute(route.segments, normalized_path, &ctx)) {
+            if (route_match.matchRoute(route.segments, normalized_path, &ctx)) {
                 // Execute middleware chain then handler
                 try mw.executeChain(
                     &ctx,
@@ -206,50 +173,6 @@ pub const Router = struct {
         }
     }
 
-    fn matchRoute(self: *Router, segments: []const Segment, path: []const u8, ctx: *Context) bool {
-        _ = self;
-
-        // Handle root path
-        const clean_path = std.mem.trimRight(u8, path, "\r");
-        if (segments.len == 0) {
-            return std.mem.eql(u8, clean_path, "/");
-        }
-
-        // Remove leading slash and split path
-        const path_str = if (clean_path.len > 0 and clean_path[0] == '/') clean_path[1..] else clean_path;
-
-        // Handle empty path after removing slash
-        if (path_str.len == 0 and segments.len > 0) {
-            return false;
-        }
-
-        var path_iter = std.mem.splitScalar(u8, path_str, '/');
-        var seg_idx: usize = 0;
-
-        while (seg_idx < segments.len) : (seg_idx += 1) {
-            const segment = segments[seg_idx];
-
-            switch (segment) {
-                .literal => |lit| {
-                    const part = path_iter.next() orelse return false;
-                    if (!std.mem.eql(u8, part, lit)) return false;
-                },
-                .param => |name| {
-                    const part = path_iter.next() orelse return false;
-                    ctx.params.put(ctx.allocator, name, part) catch return false;
-                },
-                .wildcard => {
-                    // Capture rest of path
-                    const rest = path_iter.rest();
-                    ctx.wildcard = if (rest.len > 0) rest else path_iter.next();
-                    return true;
-                },
-            }
-        }
-
-        // Ensure no extra path segments
-        return path_iter.next() == null;
-    }
 };
 
 fn sendResponse(stream: std.net.Stream, response: *const Response) !void {
@@ -433,14 +356,14 @@ test "route matching exact paths" {
     // Test root matching
     var ctx1 = Context.init(allocator, .GET, "/");
     defer ctx1.deinit();
-    try std.testing.expect(router.matchRoute(router.routes.items[0].segments, "/", &ctx1));
-    try std.testing.expect(!router.matchRoute(router.routes.items[1].segments, "/", &ctx1));
+    try std.testing.expect(route_match.matchRoute(router.routes.items[0].segments, "/", &ctx1));
+    try std.testing.expect(!route_match.matchRoute(router.routes.items[1].segments, "/", &ctx1));
 
     // Test /admin matching
     var ctx2 = Context.init(allocator, .GET, "/admin");
     defer ctx2.deinit();
-    try std.testing.expect(!router.matchRoute(router.routes.items[0].segments, "/admin", &ctx2));
-    try std.testing.expect(router.matchRoute(router.routes.items[1].segments, "/admin", &ctx2));
+    try std.testing.expect(!route_match.matchRoute(router.routes.items[0].segments, "/admin", &ctx2));
+    try std.testing.expect(route_match.matchRoute(router.routes.items[1].segments, "/admin", &ctx2));
 }
 
 test "route matching with params" {
@@ -455,7 +378,7 @@ test "route matching with params" {
     var ctx = Context.init(allocator, .GET, "/entries/123");
     defer ctx.deinit();
 
-    try std.testing.expect(router.matchRoute(router.routes.items[0].segments, "/entries/123", &ctx));
+    try std.testing.expect(route_match.matchRoute(router.routes.items[0].segments, "/entries/123", &ctx));
     try std.testing.expectEqualStrings("123", ctx.param("id").?);
 }
 
@@ -470,11 +393,11 @@ test "route matching with wildcard" {
 
     var ctx1 = Context.init(allocator, .GET, "/static/admin.css");
     defer ctx1.deinit();
-    try std.testing.expect(router.matchRoute(router.routes.items[0].segments, "/static/admin.css", &ctx1));
+    try std.testing.expect(route_match.matchRoute(router.routes.items[0].segments, "/static/admin.css", &ctx1));
     try std.testing.expectEqualStrings("admin.css", ctx1.wildcard.?);
 
     var ctx2 = Context.init(allocator, .GET, "/static/js/app.js");
     defer ctx2.deinit();
-    try std.testing.expect(router.matchRoute(router.routes.items[0].segments, "/static/js/app.js", &ctx2));
+    try std.testing.expect(route_match.matchRoute(router.routes.items[0].segments, "/static/js/app.js", &ctx2));
     try std.testing.expectEqualStrings("js/app.js", ctx2.wildcard.?);
 }

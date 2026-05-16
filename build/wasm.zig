@@ -20,6 +20,7 @@ pub const Deps = struct {
     image: *std.Build.Module,
     admin_api: *std.Build.Module,
     registry: *std.Build.Module,
+    route_match: *std.Build.Module,
     /// Plugins discovered by build/plugins.zig — wasm_storage is wired into
     /// each post-hoc because plugins may conditionally @import it.
     plugins: []const plugins_mod.Plugin,
@@ -87,6 +88,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
         .imports = &.{
             .{ .name = "middleware", .module = deps.middleware },
             .{ .name = "admin_api", .module = deps.admin_api },
+            .{ .name = "route_match", .module = deps.route_match },
         },
     });
     const wasm_static_handler_module = b.createModule(.{
