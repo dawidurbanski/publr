@@ -261,7 +261,8 @@ pub fn build(b: *std.Build) void {
     const middleware_module = reg.simple("middleware", "src/middleware.zig", &.{"url"});
     const plugin_utils_module = reg.simple("plugin_utils", "src/plugin_utils.zig", &.{"middleware"});
     const pagination_module = reg.simple("pagination", "src/pagination.zig", &.{"plugin_utils"});
-    const router_module = reg.simple("router", "src/router.zig", &.{"middleware"});
+    const route_match_module = reg.simple("route_match", "src/route_match.zig", &.{"middleware"});
+    const router_module = reg.simple("router", "src/router.zig", &.{ "middleware", "route_match" });
     const db_module = reg.leaf("db", "src/core/db.zig");
     db_module.addIncludePath(b.path("vendor"));
     _ = reg.simple("publish_hooks", "src/publish_hooks.zig", &.{"db"});
@@ -651,6 +652,7 @@ pub fn build(b: *std.Build) void {
         .image = image_module,
         .admin_api = admin_api_module,
         .registry = registry_module,
+        .route_match = route_match_module,
         .plugins = plugins.plugins,
         .setup_bg_dark = setup_bg_dark,
         .transpile_step = &transpile_zsx_cmd.step,
