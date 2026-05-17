@@ -16,7 +16,6 @@ threadlocal var arena_instance: std.heap.ArenaAllocator = std.heap.ArenaAllocato
 /// Pass args as a tuple matching the function params (writer is prepended automatically).
 /// Result is valid until resetArena() is called at end of request.
 pub fn render(comptime func: anytype, args: anytype) []const u8 {
-    @setEvalBranchQuota(10000);
     const allocator = arena_instance.allocator();
     var buf: std.ArrayList(u8) = .{};
     const w = buf.writer(allocator);
