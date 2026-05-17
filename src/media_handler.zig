@@ -462,26 +462,6 @@ test "defaultAccessCheck: allows authenticated" {
     try std.testing.expect(defaultAccessCheck("any/key", "user_123"));
 }
 
-test "getMimeType: common image types" {
-    try std.testing.expectEqualStrings("image/jpeg", getMimeType("photo.jpg"));
-    try std.testing.expectEqualStrings("image/jpeg", getMimeType("2026/02/photo-abc.jpeg"));
-    try std.testing.expectEqualStrings("image/png", getMimeType("logo.png"));
-    try std.testing.expectEqualStrings("image/webp", getMimeType("photo.webp"));
-    try std.testing.expectEqualStrings("image/gif", getMimeType("anim.gif"));
-    try std.testing.expectEqualStrings("image/svg+xml", getMimeType("icon.svg"));
-}
-
-test "getMimeType: document and media types" {
-    try std.testing.expectEqualStrings("application/pdf", getMimeType("report.pdf"));
-    try std.testing.expectEqualStrings("video/mp4", getMimeType("video.mp4"));
-    try std.testing.expectEqualStrings("audio/mpeg", getMimeType("song.mp3"));
-}
-
-test "getMimeType: unknown extension" {
-    try std.testing.expectEqualStrings("application/octet-stream", getMimeType("file.xyz"));
-    try std.testing.expectEqualStrings("application/octet-stream", getMimeType("noextension"));
-}
-
 test "parseDimensionParam: extracts width" {
     try std.testing.expectEqual(@as(?u32, 300), parseDimensionParam("w=300", "w="));
     try std.testing.expectEqual(@as(?u32, 600), parseDimensionParam("w=600&fmt=webp", "w="));

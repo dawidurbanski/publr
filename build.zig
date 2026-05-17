@@ -695,6 +695,9 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tools/dev_server.zig"),
             .target = b.graph.host,
+            .imports = &.{
+                .{ .name = "mime", .module = mime_module },
+            },
         }),
     });
     const run_dev_server = b.addRunArtifact(dev_server_exe);

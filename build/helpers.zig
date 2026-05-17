@@ -89,29 +89,4 @@ pub const ModuleRegistry = struct {
 };
 
 /// Get MIME type from file path for build-time code generation.
-pub fn getMimeForBuild(path: []const u8) []const u8 {
-    const ext = std.fs.path.extension(path);
-    const map = .{
-        .{ ".css", "text/css" },
-        .{ ".js", "application/javascript" },
-        .{ ".json", "application/json" },
-        .{ ".html", "text/html" },
-        .{ ".svg", "image/svg+xml" },
-        .{ ".png", "image/png" },
-        .{ ".jpg", "image/jpeg" },
-        .{ ".jpeg", "image/jpeg" },
-        .{ ".webp", "image/webp" },
-        .{ ".gif", "image/gif" },
-        .{ ".ico", "image/x-icon" },
-        .{ ".woff", "font/woff" },
-        .{ ".woff2", "font/woff2" },
-        .{ ".ttf", "font/ttf" },
-        .{ ".otf", "font/otf" },
-        .{ ".xml", "application/xml" },
-        .{ ".txt", "text/plain" },
-    };
-    inline for (map) |entry| {
-        if (std.mem.eql(u8, ext, entry[0])) return entry[1];
-    }
-    return "application/octet-stream";
-}
+pub const getMimeForBuild = @import("../src/mime.zig").fromPath;

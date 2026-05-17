@@ -298,8 +298,8 @@ fn serveStaticFile(stream: std.net.Stream, root: []const u8) void {
         return;
     };
 
-    const mime = getMime(file_path);
-    writeResponse(stream, "200 OK", mime, content);
+    const mime_type = @import("mime").fromPath(file_path);
+    writeResponse(stream, "200 OK", mime_type, content);
 }
 
 fn writeResponse(stream: std.net.Stream, status: []const u8, content_type: []const u8, body: []const u8) void {
@@ -307,20 +307,6 @@ fn writeResponse(stream: std.net.Stream, status: []const u8, content_type: []con
     const header = std.fmt.bufPrint(&hdr_buf, "HTTP/1.1 {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n", .{ status, content_type, body.len }) catch return;
     _ = stream.write(header) catch return;
     _ = stream.write(body) catch return;
-}
-
-fn getMime(path: []const u8) []const u8 {
-    const ext = std.fs.path.extension(path);
-    const map = .{
-        .{ ".html", "text/html" }, .{ ".css", "text/css" }, .{ ".js", "application/javascript" },
-        .{ ".json", "application/json" }, .{ ".svg", "image/svg+xml" }, .{ ".png", "image/png" },
-        .{ ".jpg", "image/jpeg" }, .{ ".webp", "image/webp" }, .{ ".ico", "image/x-icon" },
-        .{ ".woff2", "font/woff2" }, .{ ".woff", "font/woff" }, .{ ".xml", "application/xml" },
-    };
-    inline for (map) |entry| {
-        if (std.mem.eql(u8, ext, entry[0])) return entry[1];
-    }
-    return "application/octet-stream";
 }
 
 /// Resolves port with precedence: CLI flag > PORT env var > default (8080)

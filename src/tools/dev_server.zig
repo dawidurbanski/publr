@@ -170,19 +170,7 @@ fn resolveBrowser(tail: []const u8) ?[]const u8 {
     return result;
 }
 
-fn mimeFor(path: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, path, ".html")) return "text/html; charset=utf-8";
-    if (std.mem.endsWith(u8, path, ".js")) return "application/javascript; charset=utf-8";
-    if (std.mem.endsWith(u8, path, ".css")) return "text/css; charset=utf-8";
-    if (std.mem.endsWith(u8, path, ".wasm")) return "application/wasm";
-    if (std.mem.endsWith(u8, path, ".svg")) return "image/svg+xml";
-    if (std.mem.endsWith(u8, path, ".png")) return "image/png";
-    if (std.mem.endsWith(u8, path, ".jpg") or std.mem.endsWith(u8, path, ".jpeg")) return "image/jpeg";
-    if (std.mem.endsWith(u8, path, ".woff2")) return "font/woff2";
-    if (std.mem.endsWith(u8, path, ".json")) return "application/json";
-    if (std.mem.endsWith(u8, path, ".ico")) return "image/x-icon";
-    return "application/octet-stream";
-}
+const mimeFor = @import("mime").fromPath;
 
 fn writeStatus(stream: std.net.Stream, status: []const u8, content_type: []const u8, body: []const u8) !void {
     var buf: [512]u8 = undefined;

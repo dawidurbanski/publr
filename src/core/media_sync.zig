@@ -447,22 +447,6 @@ fn detectImageDimensions(data: []const u8) struct { width: ?i64, height: ?i64 } 
 // Tests
 // =============================================================================
 
-test "mimeFromExtension: common types" {
-    try std.testing.expectEqualStrings("image/jpeg", mimeFromExtension("photo.jpg"));
-    try std.testing.expectEqualStrings("image/jpeg", mimeFromExtension("photo.JPEG"));
-    try std.testing.expectEqualStrings("image/png", mimeFromExtension("screenshot.png"));
-    try std.testing.expectEqualStrings("image/webp", mimeFromExtension("image.webp"));
-    try std.testing.expectEqualStrings("application/pdf", mimeFromExtension("doc.pdf"));
-    try std.testing.expectEqualStrings("video/mp4", mimeFromExtension("video.mp4"));
-    try std.testing.expectEqualStrings("audio/mpeg", mimeFromExtension("song.mp3"));
-}
-
-test "mimeFromExtension: unknown extension" {
-    try std.testing.expectEqualStrings("application/octet-stream", mimeFromExtension("data.xyz"));
-    try std.testing.expectEqualStrings("application/octet-stream", mimeFromExtension("noext"));
-}
-
-
 test "media_sync: public API coverage" {
     _ = syncFilesystem;
     _ = countNewFilesOnDisk;

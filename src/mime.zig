@@ -22,6 +22,11 @@ const mime_map = .{
     .{ ".json", "application/json" },
     .{ ".xml", "application/xml" },
     .{ ".html", "text/html" },
+    .{ ".wasm", "application/wasm" },
+    .{ ".woff", "font/woff" },
+    .{ ".woff2", "font/woff2" },
+    .{ ".ttf", "font/ttf" },
+    .{ ".otf", "font/otf" },
 };
 
 /// Get MIME type from file path or filename by extension.
@@ -63,6 +68,9 @@ test "fromPath returns correct MIME for known extensions" {
     try std.testing.expectEqualStrings("application/pdf", fromPath("doc.pdf"));
     try std.testing.expectEqualStrings("video/mp4", fromPath("clip.mp4"));
     try std.testing.expectEqualStrings("text/html", fromPath("page.html"));
+    try std.testing.expectEqualStrings("application/wasm", fromPath("runtime.wasm"));
+    try std.testing.expectEqualStrings("font/woff2", fromPath("geist.woff2"));
+    try std.testing.expectEqualStrings("font/ttf", fromPath("font.ttf"));
 }
 
 test "fromPath is case insensitive" {

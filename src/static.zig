@@ -1,37 +1,7 @@
 const std = @import("std");
 const Context = @import("router").Context;
 
-/// MIME type mappings for common file extensions
-const mime_types = .{
-    .{ ".css", "text/css" },
-    .{ ".js", "application/javascript" },
-    .{ ".html", "text/html" },
-    .{ ".json", "application/json" },
-    .{ ".png", "image/png" },
-    .{ ".jpg", "image/jpeg" },
-    .{ ".jpeg", "image/jpeg" },
-    .{ ".gif", "image/gif" },
-    .{ ".svg", "image/svg+xml" },
-    .{ ".ico", "image/x-icon" },
-    .{ ".woff", "font/woff" },
-    .{ ".woff2", "font/woff2" },
-    .{ ".txt", "text/plain" },
-    .{ ".xml", "application/xml" },
-};
-
-/// Get MIME type for a file path based on extension
-pub fn getMimeType(path: []const u8) []const u8 {
-    const ext = std.fs.path.extension(path);
-    if (ext.len == 0) return "application/octet-stream";
-
-    inline for (mime_types) |entry| {
-        if (std.mem.eql(u8, ext, entry[0])) {
-            return entry[1];
-        }
-    }
-
-    return "application/octet-stream";
-}
+pub const getMimeType = @import("mime").fromPath;
 
 /// ETag length: "\"" + 16 hex chars + "\""
 const ETAG_LEN = 18;
@@ -102,28 +72,6 @@ fn etagMatches(client_etag: []const u8, server_etag: []const u8) bool {
     }
 
     return false;
-}
-
-// Tests
-test "getMimeType common extensions" {
-    try std.testing.expectEqualStrings("text/css", getMimeType("style.css"));
-    try std.testing.expectEqualStrings("text/css", getMimeType("/static/admin.css"));
-    try std.testing.expectEqualStrings("application/javascript", getMimeType("app.js"));
-    try std.testing.expectEqualStrings("text/html", getMimeType("index.html"));
-    try std.testing.expectEqualStrings("application/json", getMimeType("data.json"));
-    try std.testing.expectEqualStrings("image/png", getMimeType("logo.png"));
-    try std.testing.expectEqualStrings("image/jpeg", getMimeType("photo.jpg"));
-    try std.testing.expectEqualStrings("image/jpeg", getMimeType("photo.jpeg"));
-    try std.testing.expectEqualStrings("image/gif", getMimeType("anim.gif"));
-    try std.testing.expectEqualStrings("image/svg+xml", getMimeType("icon.svg"));
-    try std.testing.expectEqualStrings("image/x-icon", getMimeType("favicon.ico"));
-    try std.testing.expectEqualStrings("font/woff", getMimeType("font.woff"));
-    try std.testing.expectEqualStrings("font/woff2", getMimeType("font.woff2"));
-}
-
-test "getMimeType unknown extension" {
-    try std.testing.expectEqualStrings("application/octet-stream", getMimeType("file.unknown"));
-    try std.testing.expectEqualStrings("application/octet-stream", getMimeType("noextension"));
 }
 
 test "compileTimeETag generates valid format" {
