@@ -16,7 +16,7 @@ const csrf = @import("csrf");
 const wasm_storage = @import("wasm_storage");
 const wasm_media_handler = @import("wasm_media_handler");
 const wasm_static_handler = @import("wasm_static_handler");
-const error_pages = @import("error.zig");
+const error_pages = @import("error_pages");
 const seed = @import("seed");
 const config = @import("config");
 const schema_registry = @import("schema_registry");
@@ -27,7 +27,7 @@ const schemas = @import("schemas");
 const views = @import("views");
 
 // Database schema (single source of truth)
-const schema_sql = @embedFile("tools/schema.sql");
+const schema_sql = @embedFile("schema_sql");
 
 // Required for libc linking in WASM
 pub fn main() void {}

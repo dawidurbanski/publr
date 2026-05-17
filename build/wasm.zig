@@ -50,7 +50,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
     const browser_wasm = b.addExecutable(.{
         .name = "cms",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/wasm_main.zig"),
+            .root_source_file = b.path("src/wasm/main.zig"),
             .target = wasm_target,
             .optimize = .ReleaseSmall,
         }),
@@ -64,16 +64,26 @@ pub fn build(b: *std.Build, deps: Deps) Result {
     browser_wasm.addIncludePath(b.path("vendor"));
     browser_wasm.linkLibrary(vendor_lib_wasm);
 
+    // error.zig lives outside src/wasm/, so wire it in as a named module
+    // (relative @import("..") is disallowed across module root boundaries).
+    const error_pages_module = b.createModule(.{
+        .root_source_file = b.path("src/error.zig"),
+        .imports = deps.shared_imports,
+    });
+    browser_wasm.root_module.addAnonymousImport("schema_sql", .{
+        .root_source_file = b.path("src/tools/schema.sql"),
+    });
+
     // WASM-specific modules
     const wasm_storage_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm_storage.zig"),
+        .root_source_file = b.path("src/wasm/storage.zig"),
         .imports = &.{
             .{ .name = "db", .module = deps.db },
             .{ .name = "storage", .module = deps.storage },
         },
     });
     const wasm_media_handler_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm_media_handler.zig"),
+        .root_source_file = b.path("src/wasm/media_handler.zig"),
         .imports = &.{
             .{ .name = "middleware", .module = deps.middleware },
             .{ .name = "wasm_storage", .module = wasm_storage_module },
@@ -84,7 +94,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
         },
     });
     const wasm_router_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm_router.zig"),
+        .root_source_file = b.path("src/wasm/router.zig"),
         .imports = &.{
             .{ .name = "middleware", .module = deps.middleware },
             .{ .name = "admin_api", .module = deps.admin_api },
@@ -92,7 +102,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
         },
     });
     const wasm_static_handler_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm_static_handler.zig"),
+        .root_source_file = b.path("src/wasm/static_handler.zig"),
         .imports = &.{
             .{ .name = "middleware", .module = deps.middleware },
         },
@@ -109,6 +119,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
         .{ .name = "wasm_storage", .module = wasm_storage_module },
         .{ .name = "wasm_media_handler", .module = wasm_media_handler_module },
         .{ .name = "wasm_static_handler", .module = wasm_static_handler_module },
+        .{ .name = "error_pages", .module = error_pages_module },
     });
 
     // Comptime config module (generated from build options)

@@ -474,9 +474,9 @@ const modules = [_]Module{
     .{ .name = "media_handler", .src = "src/media_handler.zig", .deps = &.{ "storage", "auth_middleware", "middleware", "image" } },
     .{ .name = "gravatar", .src = "src/gravatar.zig", .deps = &.{} },
     // WASM-specific modules
-    .{ .name = "wasm_storage", .src = "src/wasm_storage.zig", .deps = &.{ "db", "storage" } },
-    .{ .name = "wasm_media_handler", .src = "src/wasm_media_handler.zig", .deps = &.{ "middleware", "wasm_storage", "auth_middleware", "media_handler", "image", "storage" } },
-    .{ .name = "wasm_router", .src = "src/wasm_router.zig", .deps = &.{ "middleware", "admin_api" } },
+    .{ .name = "wasm_storage", .src = "src/wasm/storage.zig", .deps = &.{ "db", "storage" } },
+    .{ .name = "wasm_media_handler", .src = "src/wasm/media_handler.zig", .deps = &.{ "middleware", "wasm_storage", "auth_middleware", "media_handler", "image", "storage" } },
+    .{ .name = "wasm_router", .src = "src/wasm/router.zig", .deps = &.{ "middleware", "admin_api" } },
     // Views
     .{ .name = "zsx", .src = "vendor/zsx.zig", .deps = &.{} },
     .{ .name = "views", .src = "src/gen/views/views.zig", .deps = &.{"zsx"} },
@@ -491,7 +491,7 @@ const modules = [_]Module{
     .{ .name = "registry", .src = "src/registry.zig", .deps = &.{ "admin_api", "middleware", "tpl", "csrf", "auth_middleware", "gravatar", "views", "plugin_dashboard", "plugin_media", "plugin_users", "plugin_settings", "plugin_content_types", "plugin_releases" } },
 };
 
-// Root module deps — what wasm_main.zig imports
+// Root module deps — what wasm/main.zig imports
 const root_deps = [_][]const u8{
     "config",          "db",           "tpl",                "auth",
     "middleware",      "admin_api",    "registry",           "wasm_router",
@@ -507,7 +507,7 @@ fn writeManifest(alloc: Allocator, out_dir: []const u8) !void {
     const w = buf.writer(alloc);
 
     try w.writeAll("{\n");
-    try w.writeAll("  \"entry\": \"src/wasm_main.zig\",\n");
+    try w.writeAll("  \"entry\": \"src/wasm/main.zig\",\n");
     try w.writeAll("  \"target\": \"wasm32-wasi\",\n");
     try w.writeAll("  \"flags\": [\"-fno-entry\", \"-fno-llvm\", \"-fno-lld\", \"-fno-ubsan-rt\", \"-rdynamic\", \"-OReleaseSafe\"],\n");
 
@@ -527,7 +527,7 @@ fn writeManifest(alloc: Allocator, out_dir: []const u8) !void {
     try w.writeAll("  \"modules\": {\n");
 
     // Root module
-    try w.writeAll("    \"root\": { \"src\": \"src/wasm_main.zig\", \"deps\": [");
+    try w.writeAll("    \"root\": { \"src\": \"src/wasm/main.zig\", \"deps\": [");
     for (root_deps, 0..) |dep, i| {
         if (i > 0) try w.writeAll(", ");
         try w.print("\"{s}\"", .{dep});

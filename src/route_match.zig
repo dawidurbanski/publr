@@ -1,5 +1,5 @@
 //! Shared route pattern matcher used by both `router.zig` (native, stream-
-//! based dispatch) and `wasm_router.zig` (WASM, bool-return dispatch). The
+//! based dispatch) and `wasm/router.zig` (WASM, bool-return dispatch). The
 //! parsing and matching is identical; only the surrounding dispatch loop
 //! differs between the two.
 
