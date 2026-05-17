@@ -205,7 +205,15 @@ export fn cms_import_db(data_ptr: [*]const u8, data_len: usize) i32 {
     }
 
     global_db = db.Db.init(allocator, ":memory:") catch return -1;
-    if (!global_db.?.deserialize(data_ptr[0..data_len])) return -1;
+    if (!global_db.?.deserialize(data_ptr[0..data_len])) {
+        // Roll back: leave globals in the same "uninitialized" state the
+        // worker expects after a failed restore, so the fallback cms_init()
+        // call actually runs (otherwise its `if (global_db != null) return 0`
+        // short-circuits and the router/auth pointers stay dangling).
+        global_db.?.deinit();
+        global_db = null;
+        return -1;
+    }
     // Re-apply schema (all CREATE statements are IF NOT EXISTS) so DBs cached
     // in OPFS from an older build pick up any new tables — e.g. the releases
     // tables were missing here, causing listReleases to fail with "no such table".
