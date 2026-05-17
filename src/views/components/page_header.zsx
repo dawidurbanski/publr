@@ -14,15 +14,15 @@ pub fn PageHeader(props: struct {
     subtitle: []const u8 = "",
     children: []const u8 = "",
 }) {
-    <Flex justify=.between items=.end class="mb-6 gap-4">
-        <Stack gap=.none class="min-w-0">
+    <Flex justify=.between items=.end class="mb-6 gap-4 flex-wrap">
+        <Stack gap=.none class="min-w-0 flex-1">
             <Heading level=.h1 size=.xl class="m-0">{props.title}</Heading>
             {if (props.subtitle.len > 0) (
                 <span class="mt-1 text-sm text-muted-foreground">{@raw props.subtitle}</span>
             )}
         </Stack>
         {if (props.children.len > 0) (
-            <Flex items=.center class="shrink-0 gap-2">{@raw props.children}</Flex>
+            <Flex items=.center class="shrink-0 gap-2 flex-wrap">{@raw props.children}</Flex>
         )}
     </Flex>
 }

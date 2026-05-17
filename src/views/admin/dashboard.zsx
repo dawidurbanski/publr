@@ -123,15 +123,15 @@ pub fn Dashboard(props: Props) {
     </PageHeader>
 
     <Stack gap=.lg>
-        <div class="grid grid-cols-4 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard label="Posts" value={props.posts_count} delta={props.posts_delta} />
             <StatCard label="Drafts" value={props.drafts_count} delta={props.drafts_delta} />
             <StatCard label="Views (7d)" value={props.views_count} delta={props.views_delta} />
             <StatCard label="Subscribers" value={props.subscribers_count} delta={props.subscribers_delta} />
         </div>
 
-        <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2"><Card>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div class="lg:col-span-2"><Card>
                 <div class="overflow-hidden rounded-lg">
                     <Flex items=.center class="px-4 py-3 border-b border-border">
                         <Heading level=.h2 size=.sm class="m-0">Recent posts</Heading>

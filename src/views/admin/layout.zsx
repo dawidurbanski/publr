@@ -40,9 +40,9 @@ fn SidebarItem(props: struct {
             props.current[props.match.len] == '.')
     );
     const link_class = if (is_active)
-        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
+        "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
     else
-        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
+        "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
 
     <li>
         <a href={props.href} class={link_class} aria-current={if (is_active) "page" else null}>
@@ -67,9 +67,9 @@ fn SubLink(props: struct {
 }) void {
     const is_active = props.match.len > 0 and std.mem.eql(u8, props.current, props.match);
     const cls = if (is_active)
-        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
+        "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
     else
-        "flex items-center gap-2.5 py-1.5 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
+        "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
     <li>
         <a href={props.href}
            class={cls}
@@ -126,14 +126,14 @@ pub fn Layout(props: struct {
     <html class="dark h-full">
         <head>
             <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
             <title>{props.title} - Publr Admin</title>
             <link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
             <link rel="stylesheet" href="/static/tokens.css" />
             <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
             <style>{@raw ".theme-toggle-sun{display:none}.dark .theme-toggle-sun{display:block}.dark .theme-toggle-moon{display:none}"}</style>
-            <style>{@raw ":root{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(181,207,210,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(197,204,184,0.35) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(224,207,163,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(221,208,171,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(200,196,168,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(168,191,194,0.4) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(184,176,138,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(200,192,160,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(213,207,192,0.35) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(237,220,184,0.35) 0%, transparent 65%),#f6f4f1;}.dark{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(40,65,68,0.5) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(50,55,42,0.4) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(80,65,35,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(70,58,30,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(55,52,38,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(35,55,58,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(50,46,28,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(45,42,30,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(48,44,35,0.4) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(90,72,35,0.4) 0%, transparent 65%),#141310;}body.admin{background:var(--admin-shell-bg)}"}</style>
+            <style>{@raw ":root{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(181,207,210,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(197,204,184,0.35) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(224,207,163,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(221,208,171,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(200,196,168,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(168,191,194,0.4) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(184,176,138,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(200,192,160,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(213,207,192,0.35) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(237,220,184,0.35) 0%, transparent 65%),#f6f4f1;}.dark{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(40,65,68,0.5) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(50,55,42,0.4) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(80,65,35,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(70,58,30,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(55,52,38,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(35,55,58,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(50,46,28,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(45,42,30,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(48,44,35,0.4) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(90,72,35,0.4) 0%, transparent 65%),#141310;}body.admin{background:var(--admin-shell-bg)}.admin-shell{padding-top:max(0.375rem,env(safe-area-inset-top));padding-bottom:0.375rem;padding-right:max(0.375rem,env(safe-area-inset-right));padding-left:max(0.375rem,env(safe-area-inset-left));height:100dvh;}@media (min-width:1024px){.admin-shell{padding-bottom:max(0.375rem,env(safe-area-inset-bottom));padding-left:max(17.5rem,env(safe-area-inset-left));}}.admin-sidebar-safe{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);}.admin-card{border-top-left-radius:0.75rem;border-top-right-radius:0.75rem;border-bottom-left-radius:var(--device-corner-radius,0.75rem);border-bottom-right-radius:var(--device-corner-radius,0.75rem);}.admin-content-pad{padding-bottom:calc(1rem + env(safe-area-inset-bottom));}@media (min-width:640px){.admin-content-pad{padding-bottom:calc(1.25rem + env(safe-area-inset-bottom));}}@media (min-width:1024px){.admin-content-pad{padding-bottom:1.75rem;}}"}</style>
             <script>
                 {@raw "(function(){var t=localStorage.getItem('publr-theme');if(t==='light')document.documentElement.classList.remove('dark');else if(t==='dark')document.documentElement.classList.add('dark');})();"}
             </script>
@@ -146,8 +146,14 @@ pub fn Layout(props: struct {
             <span class="hidden pl-96" aria-hidden="true"></span>
 
             <TooltipProvider>
+                <div data-publr-sidebar-backdrop
+                     class="fixed inset-0 z-40 bg-black/40 lg:hidden hidden"
+                     aria-hidden="true"></div>
+
                 <aside data-publr-component="admin-sidebar"
-                       class="fixed inset-y-0 left-0 z-50 flex w-70 flex-col bg-transparent text-foreground">
+                       class="admin-sidebar-safe fixed inset-y-0 left-0 z-50 flex w-70 flex-col bg-background lg:bg-transparent text-foreground border-r border-border lg:border-r-0 -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-out"
+                       data-publr-sidebar-state="closed"
+                       aria-label="Admin navigation">
                     <Flex items=.center class="gap-2.5 pt-5 pb-3 px-3.5">
                         <a href="/admin" aria-label="Publr"
                            class="flex items-center gap-2.5 text-foreground no-underline hover:no-underline">
@@ -260,11 +266,20 @@ pub fn Layout(props: struct {
                     </Flex>
                 </aside>
 
-                <div class="pl-70 pr-1.5 pt-1.5 pb-1.5 h-screen">
-                  <div class="h-full flex flex-col bg-background border border-border rounded-xl shadow-xs overflow-hidden">
-                    <header class="sticky top-0 z-40 h-12 shrink-0 flex items-center gap-3 border-b border-border px-6">
+                <div class="admin-shell">
+                  <div class="admin-card h-full flex flex-col bg-background border border-border shadow-xs overflow-hidden">
+                    <header class="sticky top-0 z-40 h-12 shrink-0 flex items-center gap-2 sm:gap-3 border-b border-border px-3 sm:px-4 lg:px-6">
+                        <button
+                            type="button"
+                            data-publr-sidebar-trigger
+                            aria-label="Open navigation"
+                            aria-expanded="false"
+                            class="lg:hidden inline-flex items-center justify-center bg-transparent border-0 p-1.5 -ml-1 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                        >
+                            <Icon name=.menu_03 size={16} />
+                        </button>
                         <span class="flex-1 min-w-0 text-xs text-muted-foreground truncate">{props.title}</span>
-                        <Flex items=.center class="gap-1.5 text-xs text-muted-foreground">
+                        <Flex items=.center class="hidden sm:flex gap-1.5 text-xs text-muted-foreground">
                             <span class="w-1.5 h-1.5 rounded-full bg-success inline-block"></span>
                             <span>Saved</span>
                         </Flex>
@@ -280,7 +295,7 @@ pub fn Layout(props: struct {
                     </header>
 
                     <main class="flex-1 overflow-auto">
-                        <div class="flex flex-col gap-3 p-7 max-w-7xl mx-auto">
+                        <div class="admin-content-pad flex flex-col gap-3 px-4 pt-4 sm:px-5 sm:pt-5 lg:px-7 lg:pt-7 max-w-7xl mx-auto">
                             {@raw props.content}
                         </div>
                     </main>
@@ -305,6 +320,9 @@ pub fn Layout(props: struct {
             <script src="/static/media-selection.js"></script>
             <script>
                 {@raw "document.getElementById('theme-toggle').addEventListener('click',function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('publr-theme',d?'dark':'light');});"}
+            </script>
+            <script>
+                {@raw "(function(){var s=document.querySelector('[data-publr-component=\"admin-sidebar\"]');var b=document.querySelector('[data-publr-sidebar-backdrop]');var t=document.querySelector('[data-publr-sidebar-trigger]');if(!s||!b||!t)return;function open(){s.classList.remove('-translate-x-full');s.setAttribute('data-publr-sidebar-state','open');b.classList.remove('hidden');t.setAttribute('aria-expanded','true');document.body.style.overflow='hidden';}function close(){s.classList.add('-translate-x-full');s.setAttribute('data-publr-sidebar-state','closed');b.classList.add('hidden');t.setAttribute('aria-expanded','false');document.body.style.overflow='';}t.addEventListener('click',function(e){e.stopPropagation();if(s.getAttribute('data-publr-sidebar-state')==='open')close();else open();});b.addEventListener('click',close);document.addEventListener('keydown',function(e){if(e.key==='Escape'&&s.getAttribute('data-publr-sidebar-state')==='open')close();});s.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&window.matchMedia('(max-width: 1023px)').matches)close();});window.matchMedia('(min-width: 1024px)').addEventListener('change',function(ev){if(ev.matches){b.classList.add('hidden');document.body.style.overflow='';t.setAttribute('aria-expanded','false');s.setAttribute('data-publr-sidebar-state','closed');}});})();"}
             </script>
         </body>
     </html>
