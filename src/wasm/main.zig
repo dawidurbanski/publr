@@ -30,6 +30,11 @@ const views = @import("views");
 // Database schema (single source of truth)
 const schema_sql = @embedFile("schema_sql");
 
+// Optional snapshot of the native publr DB, embedded at build time. Empty
+// when `data/publr.db` was absent during the WASM build. See
+// `build/wasm.zig` for the embed wiring and `cms_init` for usage.
+const starter_db: []const u8 = @embedFile("starter_db");
+
 // Required for libc linking in WASM
 pub fn main() void {}
 
@@ -133,8 +138,18 @@ export fn cms_init() i32 {
     if (global_db != null) return 0;
 
     global_db = db.Db.init(allocator, ":memory:") catch return -1;
-    global_db.?.exec(schema_sql) catch return -1;
-    global_db.?.exec(seed.seed_sql) catch return -1;
+
+    if (starter_db.len > 0) {
+        // Bootstrap from a native-built snapshot baked in at WASM build
+        // time. Same content types, same data, no schema/seed run.
+        if (!global_db.?.deserialize(starter_db)) return -1;
+        // Schema is idempotent (CREATE IF NOT EXISTS) — run it so an
+        // out-of-date snapshot picks up any new tables added in code.
+        global_db.?.exec(schema_sql) catch return -1;
+    } else {
+        global_db.?.exec(schema_sql) catch return -1;
+        global_db.?.exec(seed.seed_sql) catch return -1;
+    }
 
     db_open_hooks.fireAll(&global_db.?) catch |err| {
         std.log.warn("db_open_hooks.fireAll failed: {s}", .{@errorName(err)});

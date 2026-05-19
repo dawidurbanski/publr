@@ -80,6 +80,26 @@ pub fn build(b: *std.Build, deps: Deps) Result {
         .root_source_file = b.path("src/tools/schema.sql"),
     });
 
+    // Optional "starter DB" — if `data/publr.db` exists at build time,
+    // embed it into the WASM blob. On first init (OPFS empty), the WASM
+    // worker deserializes this instead of running schema+seed from
+    // scratch, so the in-browser CMS starts with the same content types
+    // and data the native instance has. See wasm/main.zig:cms_init.
+    // When the file doesn't exist, embed an empty placeholder so the
+    // @embedFile declaration always resolves.
+    const starter_db_path = "data/publr.db";
+    const starter_db_lazy: std.Build.LazyPath = blk: {
+        if (b.build_root.handle.access(starter_db_path, .{})) {
+            break :blk b.path(starter_db_path);
+        } else |_| {
+            const empty_wf = b.addWriteFiles();
+            break :blk empty_wf.add("empty_starter_db.bin", "");
+        }
+    };
+    browser_wasm.root_module.addAnonymousImport("starter_db", .{
+        .root_source_file = starter_db_lazy,
+    });
+
     // WASM-specific modules
     const wasm_storage_module = b.createModule(.{
         .root_source_file = b.path("src/wasm/storage.zig"),
