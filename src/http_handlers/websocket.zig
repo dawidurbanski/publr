@@ -8,14 +8,19 @@ const plugin_content = @import("plugin_content");
 const plugin_utils = @import("plugin_utils");
 const url_util = @import("url");
 const sync_token = @import("sync_token");
+const apply_remote_hooks = @import("apply_remote_hooks");
+const sync_catchup_hooks = @import("sync_catchup_hooks");
+const core_init = @import("core_init");
 const collaboration_config = @import("../collaboration_config.zig");
 
 var shutdown_requested: ?*const std.atomic.Value(bool) = null;
 var is_dev_mode: bool = false;
+var configured_db_path: []const u8 = "";
 
-pub fn configure(shutdown: *const std.atomic.Value(bool), dev_mode: bool) void {
+pub fn configure(shutdown: *const std.atomic.Value(bool), dev_mode: bool, db_path: []const u8) void {
     shutdown_requested = shutdown;
     is_dev_mode = dev_mode;
+    configured_db_path = db_path;
 }
 
 pub fn handleWebSocket(ctx: *Context) !void {
@@ -190,10 +195,36 @@ pub fn handleSyncWebSocket(ctx: *Context) !void {
         std.heap.page_allocator.destroy(conn);
     }
 
+    // Per-connection DB handle for applying incoming changesets locally.
+    // SQLite's serialized threading mode (SQLITE_THREADSAFE=1) makes one
+    // connection per thread the canonical pattern; opening here keeps
+    // the WS thread independent of the main request thread's connection.
+    // We also fire db_open_hooks so plugin extensions (cr-sqlite's UDFs
+    // and the crsql_changes vtab) get registered on this connection —
+    // without that, applyChanges' INSERT INTO crsql_changes fails.
+    var db = core_init.initDatabase(std.heap.page_allocator, configured_db_path) catch |err| {
+        if (is_dev_mode) std.debug.print("[ws/sync] DB open failed: {s}\n", .{@errorName(err)});
+        return;
+    };
+    defer db.deinit();
+    core_init.fireDbOpenHooks(&db) catch |err| {
+        if (is_dev_mode) std.debug.print("[ws/sync] db_open_hooks failed: {s}\n", .{@errorName(err)});
+        return;
+    };
+
     conn.sendJson("connected", null) catch return;
     if (is_dev_mode) {
         std.debug.print("[ws/sync] Connection {d} opened (active: {d})\n", .{ conn.id, websocket.registry.count() });
     }
+
+    // Emit this relay's full state outward. Reaches every connected
+    // replica (cr-sqlite dedupes echoes on peers that already have the
+    // rows). Lets a fresh WASM replica learn about whatever the native
+    // server has stored locally without waiting for the next write.
+    sync_catchup_hooks.fireAll(.{
+        .db = &db,
+        .allocator = std.heap.page_allocator,
+    });
     defer {
         if (is_dev_mode) {
             std.debug.print("[ws/sync] Connection {d} closed (active: {d})\n", .{ conn.id, websocket.registry.count() });
@@ -218,7 +249,14 @@ pub fn handleSyncWebSocket(ctx: *Context) !void {
 
         switch (frame.opcode) {
             .text => {
-                // Dumb fanout to every other connected replica.
+                std.debug.print("[ws/sync] #{d}: received {d} bytes\n", .{ conn.id, frame.payload.len });
+                // Apply locally so the relay node is itself a replica,
+                // then rebroadcast so every OTHER connected replica
+                // sees the frame. cr-sqlite's merge is idempotent so a
+                // peer that ends up applying its own echo is a no-op.
+                applySyncFrame(&db, frame.payload) catch |err| {
+                    std.debug.print("[ws/sync] #{d}: apply failed: {s}\n", .{ conn.id, @errorName(err) });
+                };
                 websocket.registry.broadcast(frame.payload, conn);
             },
             .ping => websocket.writeFrame(stream, .pong, frame.payload) catch break,
@@ -230,6 +268,31 @@ pub fn handleSyncWebSocket(ctx: *Context) !void {
             else => {},
         }
     }
+}
+
+/// Unwrap a `{"type":"sync_changes","data":"<inner-json>"}` envelope and
+/// dispatch the inner array through `apply_remote_hooks`. The envelope
+/// shape is what `sync_transport.send` produces (both native and WASM
+/// paths agree on it); `data` is a JSON-encoded string containing the
+/// changeset array, so the JSON parser unescapes it for us before we
+/// hand the inner bytes to the plugin.
+fn applySyncFrame(db: *core_init.Db, envelope: []const u8) !void {
+    const alloc = std.heap.page_allocator;
+    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, envelope, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.NotAnObject;
+
+    const t = parsed.value.object.get("type") orelse return error.MissingType;
+    if (t != .string or !std.mem.eql(u8, t.string, "sync_changes")) return;
+
+    const data = parsed.value.object.get("data") orelse return error.MissingData;
+    if (data != .string) return error.DataNotString;
+
+    try apply_remote_hooks.applyAll(.{
+        .db = db,
+        .allocator = alloc,
+        .payload = data.string,
+    });
 }
 
 fn shouldShutdown() bool {

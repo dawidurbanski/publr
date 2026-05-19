@@ -56,6 +56,11 @@ fn nativeBroadcast(inner: []const u8) void {
     writeJsonString(w, inner) catch return;
     w.writeByte('}') catch return;
 
+    std.debug.print("[sync] nativeBroadcast: {d} conns, {d} bytes inner / {d} bytes envelope\n", .{
+        websocket.registry.count(),
+        inner.len,
+        buf.items.len,
+    });
     websocket.registry.broadcast(buf.items, null);
 }
 

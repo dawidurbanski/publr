@@ -1,11 +1,15 @@
 const std = @import("std");
 const db_mod = @import("db");
-const schema_sync = @import("schema_sync");
 const seed_mod = @import("seed");
 const schema_registry = @import("schema_registry");
 const db_open_hooks = @import("db_open_hooks");
 
 pub const Db = db_mod.Db;
+
+/// DDL for the content schema. The active flavor (strict default, loose
+/// when a plugin's manifest.zon requests it) is wired as an anonymous
+/// `schema_sql` import by build.zig — consumers never see the split.
+pub const schema_sql = @embedFile("schema_sql");
 
 /// Open/create a SQLite database and enable foreign keys.
 pub fn initDatabase(allocator: std.mem.Allocator, db_path: []const u8) !Db {
@@ -24,7 +28,7 @@ pub fn fireDbOpenHooks(db: *Db) !void {
 
 /// Ensure all schema tables exist.
 pub fn ensureSchema(db: *Db) !void {
-    try schema_sync.ensureSchema(db);
+    try db.exec(schema_sql);
 }
 
 /// Seed core data (content types, taxonomies, defaults). Also initializes

@@ -12,7 +12,7 @@ const c = @cImport({
 
 const seed = @import("seed");
 
-const schema_sql = @embedFile("schema.sql");
+const schema_sql = @embedFile("schema_sql");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

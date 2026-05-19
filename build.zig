@@ -92,8 +92,13 @@ pub fn build(b: *std.Build) void {
     // `plugins/<name>/vendor/` (C sources) and `plugins/<name>/lib/<target>.a`
     // (static libs) are folded in here so their extension code shares the
     // SQLite build.
-    const native_vendor_opts = collectPluginVendor(b, false);
-    const wasm_vendor_opts = collectPluginVendor(b, true);
+    // Plugin manifest pre-scan: walks plugins/<name>/manifest.zon BEFORE
+    // module registration so build-time choices (schema flavor, sqlite
+    // source dir) can be wired into the right modules. Full plugin module
+    // discovery still happens later via plugins_mod.load.
+    const plugin_prescan = plugins_mod.preScan(b, &.{"plugins"});
+    const native_vendor_opts = withPluginSqliteOverride(collectPluginVendor(b, false), plugin_prescan);
+    const wasm_vendor_opts = withPluginSqliteOverride(collectPluginVendor(b, true), plugin_prescan);
     const vendor_lib = vendors.library(b, target, optimize, native_vendor_opts);
     exe.linkLibC();
     exe.addIncludePath(b.path("vendor")); // for @cImport headers
@@ -257,7 +262,7 @@ pub fn build(b: *std.Build) void {
     );
     reg.register("compiled_in_content_types", content_types_discovery.module);
     const schema_registry_module = reg.simple("schema_registry", "src/core/schema/registry.zig", &.{ "field", "content_type", "schemas", "compiled_in_content_types" });
-    const seed_module = reg.simple("seed", "src/core/schema/seed.zig", &.{ "schema_registry", "field", "db", "sync" });
+    const seed_module = reg.simple("seed", "src/core/schema/seed.zig", &.{ "schema_registry", "field", "db" });
 
     // Shared leaves (no deps)
     _ = reg.leaf("url", "src/url.zig");
@@ -275,10 +280,18 @@ pub fn build(b: *std.Build) void {
     _ = reg.simple("publish_hooks", "src/publish_hooks.zig", &.{"db"});
     const modules_api_module = reg.simple("modules", "src/modules/mod.zig", &.{ "router", "db", "publr_config" });
     _ = reg.leaf("id_gen", "src/core/id_gen.zig");
-    const schema_sync_module = reg.simple("schema_sync", "src/core/schema/sync.zig", &.{"db"});
-    // schema_sync is also imported as "sync" by seed_module.
-    reg.register("sync", schema_sync_module);
-    const core_init_module = reg.simple("core_init", "src/core/init.zig", &.{ "db", "schema_sync", "seed", "schema_registry", "schemas" });
+    // Active schema source — strict by default, loose when a plugin's
+    // manifest.zon declares `.requires_schema = .loose`. Wired as an
+    // anonymous `schema_sql` import on every module that does
+    // `@embedFile("schema_sql")` (core_init, seed, the init_db tool,
+    // the WASM exe). No wrapper .zig file — the build attaches the
+    // path directly.
+    const active_schema_sql_path: std.Build.LazyPath = b.path(if (plugin_prescan.requires_loose_schema)
+        "src/core/schema/content_schema_loose.sql"
+    else
+        "src/core/schema/content_schema.sql");
+    const core_init_module = reg.simple("core_init", "src/core/init.zig", &.{ "db", "seed", "schema_registry", "schemas" });
+    core_init_module.addAnonymousImport("schema_sql", .{ .root_source_file = active_schema_sql_path });
 
     // =========================================================================
     // Database Initialization Tool (comptime schema generation)
@@ -287,6 +300,7 @@ pub fn build(b: *std.Build) void {
         .schema_registry = schema_registry_module,
         .field = field_module,
         .seed = seed_module,
+        .schema_sql_path = active_schema_sql_path,
         .exe = exe,
         .project_dir = project_dir,
         .config_path = config_path,
@@ -472,6 +486,24 @@ pub fn build(b: *std.Build) void {
     });
     reg.register("db_open_hooks", db_open_hooks_module);
 
+    const apply_remote_hooks_module = b.createModule(.{
+        .root_source_file = b.path("src/apply_remote_hooks.zig"),
+        .imports = &.{
+            .{ .name = "plugin_registry", .module = plugins.manifest_module },
+            .{ .name = "db", .module = db_module },
+        },
+    });
+    reg.register("apply_remote_hooks", apply_remote_hooks_module);
+
+    const sync_catchup_hooks_module = b.createModule(.{
+        .root_source_file = b.path("src/sync_catchup_hooks.zig"),
+        .imports = &.{
+            .{ .name = "plugin_registry", .module = plugins.manifest_module },
+            .{ .name = "db", .module = db_module },
+        },
+    });
+    reg.register("sync_catchup_hooks", sync_catchup_hooks_module);
+
     // Outbound sync transport — calls a JS import in WASM, broadcasts via
     // websocket.registry on native (server is the relay; save_hooks here
     // capture local changes for cross-replica fanout). The websocket dep
@@ -510,7 +542,10 @@ pub fn build(b: *std.Build) void {
         p.module.addImport("registry", registry_module);
         p.module.addImport("save_hooks", save_hooks_module);
         p.module.addImport("db_open_hooks", db_open_hooks_module);
+        p.module.addImport("apply_remote_hooks", apply_remote_hooks_module);
+        p.module.addImport("sync_catchup_hooks", sync_catchup_hooks_module);
         p.module.addImport("sync_transport", reg.get("sync_transport"));
+        p.module.addImport("sync_token", reg.get("sync_token"));
         views.addImport(b.fmt("plugin_{s}", .{p.name}), p.module);
 
         // Per-plugin ZSX views: if `plugins/<name>/views/` exists, run the
@@ -582,6 +617,7 @@ pub fn build(b: *std.Build) void {
         "middleware", "schema_media", "seed",            "storage",         "svg_sanitize",
         "tpl",        "actions",      "content_actions", "schema_registry", "schema_db_types",
         "schemas",    "save_hooks",   "db_open_hooks",   "sync_transport",
+        "apply_remote_hooks", "sync_catchup_hooks",
     });
     reg.attachAll(exe.root_module, &.{
         "views",             "admin_api",       "auth",             "auth_middleware", "cms",
@@ -593,10 +629,10 @@ pub fn build(b: *std.Build) void {
         // modules the REST tree reaches for that aren't already shared.
         "core_time",         "media_query",     "mime",             "multipart",       "taxonomy",
         "rest_test_helpers", "router",          "url",              "field",           "content_type",
-        "schemas",           "schema_registry", "schema_sync",      "core_init",       "media_sync",
+        "schemas",           "schema_registry", "core_init",        "media_sync",
         "websocket",         "presence",        "schema_db_types", "db_path",
         "save_hooks",        "db_open_hooks",   "sync_transport",  "sync_token",
-        "plugin_utils",
+        "apply_remote_hooks", "sync_catchup_hooks", "plugin_utils",
     });
 
     // Add plugin modules to main exe
@@ -653,7 +689,7 @@ pub fn build(b: *std.Build) void {
         "multipart",         "actions",      "cms",             "entry_storage",
         "field",             "content_type", "schema_registry", "field_types",
         "db_path",           "save_hooks",   "db_open_hooks",   "sync_transport",
-        "sync_token",
+        "sync_token",        "apply_remote_hooks", "sync_catchup_hooks",
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
@@ -763,6 +799,10 @@ pub fn build(b: *std.Build) void {
         .registry = registry_module,
         .route_match = route_match_module,
         .plugins = plugins.plugins,
+        .schema_sql_path = b.path(if (plugin_prescan.requires_loose_schema)
+            "src/core/schema/content_schema_loose.sql"
+        else
+            "src/core/schema/content_schema.sql"),
         .setup_bg_dark = setup_bg_dark,
         .transpile_step = &transpile_zsx_cmd.step,
         .jit_css_output = jit_css_output,
@@ -819,19 +859,14 @@ pub fn build(b: *std.Build) void {
     dev_browser_step.dependOn(&run_dev_server.step);
 }
 
-/// Scan `plugins/<name>/` for C source + static-lib contributions to
+/// Scan `plugins/<name>/lib/` for static-lib contributions to
 /// `publr_vendors`. Convention:
-///   - `plugins/<name>/vendor/*.c` are compiled into publr_vendors.
-///   - `plugins/<name>/vendor/` is added as an include path.
-///   - `plugins/<name>/lib/native.a` (for native) or `lib/wasm.a` (for
-///     wasm) is linked in.
-/// A plugin's vendor C sources are only included if its matching static
-/// lib exists, since the C entry typically calls into Rust symbols
-/// provided by the lib — partial inclusion would produce undefined
-/// references at link time.
+///   - `plugins/<name>/lib/native.a` (for native) is linked in.
+///   - `plugins/<name>/lib/wasm.a` (for wasm) is linked in.
+/// C sources and include paths come via the `sqlite_override_dir`
+/// manifest field instead (see `vendors.zig`), so a plugin can swap
+/// sqlite + glue without ever touching the wider plugin-vendor surface.
 fn collectPluginVendor(b: *std.Build, wasm: bool) vendors.Opts {
-    var c_sources: std.ArrayList(vendors.ExtraCSource) = .empty;
-    var includes: std.ArrayList(std.Build.LazyPath) = .empty;
     var libs: std.ArrayList(std.Build.LazyPath) = .empty;
 
     var plugins_dir = b.build_root.handle.openDir("plugins", .{ .iterate = true }) catch {
@@ -847,28 +882,13 @@ fn collectPluginVendor(b: *std.Build, wasm: bool) vendors.Opts {
         const lib_path = b.fmt("plugins/{s}/lib/{s}", .{ name, lib_name });
         b.build_root.handle.access(lib_path, .{}) catch continue;
 
-        const vendor_path = b.fmt("plugins/{s}/vendor", .{name});
-        if (b.build_root.handle.openDir(vendor_path, .{ .iterate = true })) |vd_const| {
-            var vd = vd_const;
-            defer vd.close();
-            var vit = vd.iterate();
-            while (vit.next() catch null) |v| {
-                if (v.kind != .file or !std.mem.endsWith(u8, v.name, ".c")) continue;
-                c_sources.append(b.allocator, .{
-                    .file = b.path(b.fmt("{s}/{s}", .{ vendor_path, v.name })),
-                    .flags = pluginCFlags(name),
-                }) catch @panic("OOM");
-            }
-            includes.append(b.allocator, b.path(vendor_path)) catch @panic("OOM");
-        } else |_| {}
-
         libs.append(b.allocator, b.path(lib_path)) catch @panic("OOM");
     }
 
     return .{
         .wasm = wasm,
-        .extra_c_sources = c_sources.toOwnedSlice(b.allocator) catch @panic("OOM"),
-        .extra_include_paths = includes.toOwnedSlice(b.allocator) catch @panic("OOM"),
+        .extra_c_sources = &.{},
+        .extra_include_paths = &.{},
         .static_libs = libs.toOwnedSlice(b.allocator) catch @panic("OOM"),
     };
 }
@@ -878,4 +898,15 @@ fn collectPluginVendor(b: *std.Build, wasm: bool) vendors.Opts {
 fn pluginCFlags(plugin_name: []const u8) []const []const u8 {
     _ = plugin_name;
     return &.{};
+}
+
+/// Fold the plugin-manifest sqlite override decisions onto an existing
+/// vendor opts (from collectPluginVendor). Keeps the two concerns —
+/// scanning plugin vendor dirs for static libs and reading manifests for
+/// the override path — wired in the right order.
+fn withPluginSqliteOverride(opts: vendors.Opts, prescan: plugins_mod.PreScan) vendors.Opts {
+    var out = opts;
+    out.sqlite_override_dir = prescan.sqlite_override_dir;
+    out.sqlite_override_extra_cflags = prescan.sqlite_override_cflags;
+    return out;
 }

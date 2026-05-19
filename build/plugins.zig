@@ -17,12 +17,74 @@ const std = @import("std");
 pub const Plugin = struct {
     name: []const u8,
     module: *std.Build.Module,
+    /// Set when the plugin's manifest.zon declares `.requires_schema = .loose`.
+    /// Plugins requiring the CRDT-compatible schema flavor (cr-sqlite, etc.)
+    /// flip this; the build aggregates and picks the loose schema file when
+    /// any plugin requires it.
+    requires_loose_schema: bool = false,
+    /// Set when the plugin's manifest.zon declares `.sqlite_override_dir = "..."`.
+    /// Absolute build-root-relative path of a directory containing the
+    /// plugin's vendored sqlite3.c + glue. Only one plugin per build may
+    /// declare this; the build errors if two collide.
+    sqlite_override_dir: ?[]const u8 = null,
 };
 
 pub const Discovery = struct {
     plugins: []const Plugin,
     manifest_module: *std.Build.Module,
+    /// True if any plugin's manifest requested the loose schema.
+    requires_loose_schema: bool,
+    /// Set to the single plugin-declared sqlite override directory, if any.
+    sqlite_override_dir: ?[]const u8,
 };
+
+/// Aggregated manifest decisions, read by a quick pre-scan of all
+/// plugins/<name>/manifest.zon files. Called before module registration
+/// so the build can wire the anonymous schema_sql import + vendor options to the right files
+/// before they're frozen into module imports.
+pub const PreScan = struct {
+    requires_loose_schema: bool,
+    sqlite_override_dir: ?[]const u8,
+    sqlite_override_cflags: []const []const u8,
+};
+
+pub fn preScan(b: *std.Build, dirs: []const []const u8) PreScan {
+    var any_loose = false;
+    var sqlite_dir: ?[]const u8 = null;
+    var sqlite_dir_owner: []const u8 = "";
+    var sqlite_cflags: []const []const u8 = &.{};
+
+    for (dirs) |base| {
+        var dir_open = b.build_root.handle.openDir(base, .{ .iterate = true }) catch continue;
+        defer dir_open.close();
+        var it = dir_open.iterate();
+        while (it.next() catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            const plugin_dir = b.fmt("{s}/{s}", .{ base, entry.name });
+            const info = readManifest(b, plugin_dir);
+            if (info.requires_loose_schema) any_loose = true;
+            if (info.sqlite_override_dir) |dir| {
+                if (sqlite_dir) |existing| {
+                    std.debug.print(
+                        "build error: plugins '{s}' and '{s}' both declare sqlite_override_dir " ++
+                            "('{s}' vs '{s}'). Only one plugin per build may swap sqlite.\n",
+                        .{ sqlite_dir_owner, entry.name, existing, dir },
+                    );
+                    @panic("sqlite_override_dir collision");
+                }
+                sqlite_dir = dir;
+                sqlite_dir_owner = b.dupe(entry.name);
+                sqlite_cflags = info.sqlite_override_cflags;
+            }
+        }
+    }
+
+    return .{
+        .requires_loose_schema = any_loose,
+        .sqlite_override_dir = sqlite_dir,
+        .sqlite_override_cflags = sqlite_cflags,
+    };
+}
 
 pub fn load(
     b: *std.Build,
@@ -73,7 +135,20 @@ pub fn load(
                 .imports = plugin_imports,
             });
 
-            found.append(b.allocator, .{ .name = info.name, .module = plugin_module }) catch @panic("OOM");
+            // Manifest is optional and only meaningful for directory-style
+            // plugins (flat .zig plugins are simple comptime hooks with no
+            // build-time concerns). Absent file → defaults.
+            const manifest_info: ManifestInfo = if (entry.kind == .directory)
+                readManifest(b, b.fmt("{s}/{s}", .{ base, entry.name }))
+            else
+                .{};
+
+            found.append(b.allocator, .{
+                .name = info.name,
+                .module = plugin_module,
+                .requires_loose_schema = manifest_info.requires_loose_schema,
+                .sqlite_override_dir = manifest_info.sqlite_override_dir,
+            }) catch @panic("OOM");
 
             manifest.writer(b.allocator).print(
                 "    .{{ .name = \"{s}\", .mod = @import(\"plugin_{s}\") }},\n",
@@ -92,10 +167,116 @@ pub fn load(
         manifest_module.addImport(b.fmt("plugin_{s}", .{p.name}), p.module);
     }
 
+    // Aggregate manifest-derived decisions. At most one plugin may declare
+    // a sqlite override — collision is a build error since both can't win.
+    var any_loose = false;
+    var sqlite_dir: ?[]const u8 = null;
+    var sqlite_dir_owner: []const u8 = "";
+    for (found.items) |p| {
+        if (p.requires_loose_schema) any_loose = true;
+        if (p.sqlite_override_dir) |dir| {
+            if (sqlite_dir) |existing| {
+                std.debug.print(
+                    "build error: plugins '{s}' and '{s}' both declare sqlite_override_dir " ++
+                        "('{s}' vs '{s}'). Only one plugin per build may swap sqlite.\n",
+                    .{ sqlite_dir_owner, p.name, existing, dir },
+                );
+                @panic("sqlite_override_dir collision");
+            }
+            sqlite_dir = dir;
+            sqlite_dir_owner = p.name;
+        }
+    }
+
     return .{
         .plugins = found.toOwnedSlice(b.allocator) catch @panic("OOM"),
         .manifest_module = manifest_module,
+        .requires_loose_schema = any_loose,
+        .sqlite_override_dir = sqlite_dir,
     };
+}
+
+const ManifestInfo = struct {
+    requires_loose_schema: bool = false,
+    sqlite_override_dir: ?[]const u8 = null,
+    /// Extra C flags applied to glue C sources in the override dir.
+    /// Plugin authors supply these as a comma-separated string in
+    /// manifest.zon: `.sqlite_override_cflags = "-DA,-DB"`.
+    sqlite_override_cflags: []const []const u8 = &.{},
+};
+
+/// Read `<plugin_dir>/manifest.zon` if present and pull out the optional
+/// `requires_schema` and `sqlite_override_dir` fields. Returns defaults
+/// on missing file or absent fields. Format is a plain zon literal:
+///
+///     .{
+///         .requires_schema = .loose,
+///         .sqlite_override_dir = "vendor",
+///     }
+///
+/// Both fields optional. Path is interpreted relative to the plugin's
+/// directory; we resolve to build-root-relative here.
+fn readManifest(b: *std.Build, plugin_dir: []const u8) ManifestInfo {
+    const manifest_rel = b.fmt("{s}/manifest.zon", .{plugin_dir});
+    const source = b.build_root.handle.readFileAlloc(b.allocator, manifest_rel, 64 * 1024) catch return .{};
+
+    var info: ManifestInfo = .{};
+
+    if (findField(source, ".requires_schema")) |val| {
+        if (std.mem.eql(u8, val, ".loose")) info.requires_loose_schema = true;
+    }
+    if (findFieldString(b.allocator, source, ".sqlite_override_dir")) |path| {
+        info.sqlite_override_dir = b.fmt("{s}/{s}", .{ plugin_dir, path });
+    }
+    if (findFieldString(b.allocator, source, ".sqlite_override_cflags")) |cflags_str| {
+        info.sqlite_override_cflags = splitCflags(b.allocator, cflags_str);
+    }
+
+    return info;
+}
+
+fn splitCflags(allocator: std.mem.Allocator, csv: []const u8) []const []const u8 {
+    var list: std.ArrayList([]const u8) = .empty;
+    var it = std.mem.splitScalar(u8, csv, ',');
+    while (it.next()) |raw| {
+        const trimmed = std.mem.trim(u8, raw, " \t\r");
+        if (trimmed.len == 0) continue;
+        list.append(allocator, allocator.dupe(u8, trimmed) catch continue) catch continue;
+    }
+    return list.toOwnedSlice(allocator) catch &.{};
+}
+
+/// Find `<field> = <value>` in a zon source. Returns the trimmed value
+/// token (e.g. `.loose`, `42`, `"some,string"`) up to the next `,` or `}`
+/// at the same nesting level. Quoted strings are returned including their
+/// surrounding `"`; commas/newlines inside the quotes don't terminate.
+fn findField(source: []const u8, field: []const u8) ?[]const u8 {
+    const idx = std.mem.indexOf(u8, source, field) orelse return null;
+    var i = idx + field.len;
+    while (i < source.len and (source[i] == ' ' or source[i] == '\t' or source[i] == '=')) i += 1;
+    const start = i;
+    var in_string = false;
+    while (i < source.len) : (i += 1) {
+        const ch = source[i];
+        if (in_string) {
+            if (ch == '"') in_string = false;
+            continue;
+        }
+        if (ch == '"') {
+            in_string = true;
+            continue;
+        }
+        if (ch == ',' or ch == '\n' or ch == '}') break;
+    }
+    return std.mem.trim(u8, source[start..i], " \t\r");
+}
+
+/// Same as `findField` but unquotes a `"..."` string value. Returns null
+/// when the field is absent or the value isn't a string literal.
+fn findFieldString(allocator: std.mem.Allocator, source: []const u8, field: []const u8) ?[]const u8 {
+    const raw = findField(source, field) orelse return null;
+    if (raw.len < 2 or raw[0] != '"' or raw[raw.len - 1] != '"') return null;
+    return allocator.dupe(u8, raw[1 .. raw.len - 1]) catch null;
 }
 
 /// Return the subset of `available` whose names appear in @import("name")

@@ -19,6 +19,19 @@ pub const Opts = struct {
     /// Prebuilt static libraries (e.g. Rust-built cr-sqlite core) to
     /// link into publr_vendors. Resolved at the final link.
     static_libs: []const std.Build.LazyPath = &.{},
+    /// Plugin-provided sqlite source directory (build-root-relative).
+    /// When set, the build:
+    ///   - uses `<dir>/sqlite3.c` instead of `vendor/sqlite3.c`
+    ///   - adds `<dir>` to the include path FIRST so its `sqlite3.h` wins
+    ///   - compiles every other `*.c` in `<dir>` with the override's flags
+    /// Set by plugins whose manifest.zon declares `.sqlite_override_dir`
+    /// (cr-sqlite, etc.). Only one plugin per build may override.
+    sqlite_override_dir: ?[]const u8 = null,
+    /// Extra C flags applied to override C sources (not the amalgamation
+    /// — sqlite3.c always uses `sqliteFlags()`). Typically the override
+    /// flags expected by the swapped sqlite extension (e.g. for cr-sqlite:
+    /// `-DSQLITE_CORE -DSQLITE_OMIT_LOAD_EXTENSION -DHAVE_GETHOSTUUID=0`).
+    sqlite_override_extra_cflags: []const []const u8 = &.{},
 };
 
 pub const ExtraCSource = struct {
@@ -34,10 +47,16 @@ pub const ExtraCSource = struct {
 /// only pulled in at the final link).
 pub fn addAll(b: *std.Build, compile: *std.Build.Step.Compile, opts: Opts) void {
     compile.linkLibC();
+    // Override include path FIRST so the plugin's sqlite3.h is the one
+    // every TU sees (the C glue is compiled against it). Default
+    // vendor/ is added next so non-sqlite headers (stb, libwebp) still
+    // resolve.
+    if (opts.sqlite_override_dir) |dir| compile.addIncludePath(b.path(dir));
     compile.addIncludePath(b.path("vendor"));
     for (opts.extra_include_paths) |p| compile.addIncludePath(p);
     addSqlite(b, compile, opts);
     addImage(b, compile);
+    addSqliteOverrideGlue(b, compile, opts);
     for (opts.extra_c_sources) |src| {
         compile.addCSourceFile(.{ .file = src.file, .flags = src.flags });
     }
@@ -51,11 +70,39 @@ pub fn linkStaticLibs(compile: *std.Build.Step.Compile, opts: Opts) void {
 }
 
 /// Attach just SQLite (used by db_init, which doesn't need image processing).
+/// Picks the plugin override's `sqlite3.c` when `opts.sqlite_override_dir`
+/// is set; otherwise the vendored amalgamation. Flags come from
+/// `sqliteFlags(opts.wasm)` in both cases — plugins must keep their swapped
+/// sqlite3.c compatible with these flags.
 pub fn addSqlite(b: *std.Build, compile: *std.Build.Step.Compile, opts: Opts) void {
+    const sqlite_c_path = if (opts.sqlite_override_dir) |dir|
+        b.fmt("{s}/sqlite3.c", .{dir})
+    else
+        "vendor/sqlite3.c";
     compile.addCSourceFile(.{
-        .file = b.path("vendor/sqlite3.c"),
+        .file = b.path(sqlite_c_path),
         .flags = sqliteFlags(opts.wasm),
     });
+}
+
+/// Compile every `*.c` in `opts.sqlite_override_dir` except `sqlite3.c`
+/// (already handled by `addSqlite`). Plugin override dirs typically
+/// contain glue C the plugin's static lib calls into — compiled with the
+/// override's extra cflags so they match the plugin's expectations.
+fn addSqliteOverrideGlue(b: *std.Build, compile: *std.Build.Step.Compile, opts: Opts) void {
+    const dir = opts.sqlite_override_dir orelse return;
+    var d = b.build_root.handle.openDir(dir, .{ .iterate = true }) catch return;
+    defer d.close();
+    var it = d.iterate();
+    while (it.next() catch null) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".c")) continue;
+        if (std.mem.eql(u8, entry.name, "sqlite3.c")) continue;
+        compile.addCSourceFile(.{
+            .file = b.path(b.fmt("{s}/{s}", .{ dir, entry.name })),
+            .flags = opts.sqlite_override_extra_cflags,
+        });
+    }
 }
 
 /// Attach stb_image (stb_impl.c) + libwebp (split amalgamation, 124 parts).

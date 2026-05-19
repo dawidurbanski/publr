@@ -46,18 +46,33 @@ CREATE TABLE IF NOT EXISTS content_types (
 
 -- Unified content lifecycle tables
 CREATE TABLE IF NOT EXISTS content_anchors (
-    id TEXT PRIMARY KEY,
-    content_type TEXT NOT NULL,
+    -- NOT NULL on TEXT PK + FK on created_by stripped for cr-sqlite CRR
+    -- compatibility; DEFAULT added on the NOT NULL column. See
+    -- content_entries below for the detailed rationale.
+    id TEXT PRIMARY KEY NOT NULL,
+    content_type TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    created_by TEXT REFERENCES users(id)
+    created_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_anchors_content_type ON content_anchors(content_type);
 
 CREATE TABLE IF NOT EXISTS content_entries (
-    id TEXT PRIMARY KEY,
-    anchor_id TEXT NOT NULL,
-    locale TEXT NOT NULL,
-    content_type_id TEXT NOT NULL REFERENCES content_types(id),
+    -- NOT NULL added: SQLite quirk — only INTEGER PRIMARY KEY is implicitly
+    -- NOT NULL (via rowid aliasing). TEXT PRIMARY KEY allows NULL unless
+    -- you say so explicitly, and cr-sqlite refuses to mark a CRR if any
+    -- PK column is nullable.
+    id TEXT PRIMARY KEY NOT NULL,
+    -- DEFAULTs added on these three NOT NULL columns vs upstream schema:
+    -- cr-sqlite refuses crsql_as_crr on a NOT NULL column without a
+    -- DEFAULT (it can't materialise stub rows during merge otherwise).
+    -- Writers always supply real values, so the defaults are never read.
+    anchor_id TEXT NOT NULL DEFAULT '',
+    locale TEXT NOT NULL DEFAULT 'en',
+    -- Inline `REFERENCES content_types(id)` stripped from upstream: cr-sqlite
+    -- refuses CRR-marking on any table with "checked" FKs (the constraint
+    -- can be violated by a remote-applied changeset that arrives before the
+    -- referenced row). FK enforcement is off in SQLite by default anyway.
+    content_type_id TEXT NOT NULL DEFAULT '',
     slug TEXT,
     title TEXT,
     data TEXT NOT NULL DEFAULT '{}',
@@ -68,12 +83,18 @@ CREATE TABLE IF NOT EXISTS content_entries (
     published_at INTEGER,
     archived INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    FOREIGN KEY (anchor_id) REFERENCES content_anchors(id) ON DELETE CASCADE,
-    FOREIGN KEY (current_version_id) REFERENCES content_versions(id),
-    FOREIGN KEY (published_version_id) REFERENCES content_versions(id),
-    UNIQUE(anchor_id, locale),
-    UNIQUE(content_type_id, locale, slug)
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    -- Stripped from upstream for cr-sqlite compatibility:
+    --   FOREIGN KEY (anchor_id) REFERENCES content_anchors(id) ON DELETE CASCADE
+    --   FOREIGN KEY (current_version_id) REFERENCES content_versions(id)
+    --   FOREIGN KEY (published_version_id) REFERENCES content_versions(id)
+    --   UNIQUE(anchor_id, locale)
+    --   UNIQUE(content_type_id, locale, slug)
+    -- cr-sqlite 0.16 refuses both: "checked" FKs (a remote changeset can
+    -- arrive before its referenced row) and non-PK UNIQUE indices (no
+    -- merge strategy for unique conflicts). The demo writers naturally
+    -- generate unique ids; FK enforcement is off by default in SQLite, so
+    -- dropping these is a no-op at runtime.
 );
 CREATE INDEX IF NOT EXISTS idx_content_entries_anchor ON content_entries(anchor_id);
 CREATE INDEX IF NOT EXISTS idx_content_entries_locale ON content_entries(locale);
@@ -81,15 +102,19 @@ CREATE INDEX IF NOT EXISTS idx_content_entries_type_status ON content_entries(co
 CREATE INDEX IF NOT EXISTS idx_content_entries_published ON content_entries(published_version_id) WHERE published_version_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS content_versions (
-    id TEXT PRIMARY KEY,
-    entry_id TEXT NOT NULL,
-    parent_id TEXT REFERENCES content_versions(id),
-    data_json TEXT NOT NULL,
-    author_id TEXT REFERENCES users(id),
+    -- Same cr-sqlite CRR adjustments as content_entries: NOT NULL on
+    -- TEXT PK, DEFAULTs on NOT NULL columns, inline + table-level FKs
+    -- stripped. The admin list query JOINs through content_versions
+    -- so it has to sync alongside content_entries — otherwise merged
+    -- entries get filtered out for missing version rows.
+    id TEXT PRIMARY KEY NOT NULL,
+    entry_id TEXT NOT NULL DEFAULT '',
+    parent_id TEXT,
+    data_json TEXT NOT NULL DEFAULT '{}',
+    author_id TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     version_type TEXT NOT NULL DEFAULT 'edit',
-    collaborators TEXT,
-    FOREIGN KEY (entry_id) REFERENCES content_entries(id) ON DELETE CASCADE
+    collaborators TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_content_versions_entry ON content_versions(entry_id);
 CREATE INDEX IF NOT EXISTS idx_content_versions_entry_created ON content_versions(entry_id, created_at DESC);

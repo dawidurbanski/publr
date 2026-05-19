@@ -23,6 +23,8 @@ const schema_registry = @import("schema_registry");
 const schema_db_types = @import("schema_db_types");
 const schemas = @import("schemas");
 const db_open_hooks = @import("db_open_hooks");
+const apply_remote_hooks = @import("apply_remote_hooks");
+const sync_catchup_hooks = @import("sync_catchup_hooks");
 
 // Generated ZSX views
 const views = @import("views");
@@ -265,6 +267,38 @@ export fn cms_export_db() i32 {
     if (data.len > result_buffer.len) return -1;
     @memcpy(result_buffer[0..data.len], data);
     result_len = data.len;
+    return 0;
+}
+
+/// Broadcast this replica's full state via `sync_transport.send`.
+/// Called by cms-worker.js when the relay WebSocket opens so OPFS-
+/// restored content + anything saved-while-disconnected gets pushed
+/// to peers. cr-sqlite's merge dedupes against rows peers already have.
+export fn cms_sync_emit_full() void {
+    if (global_db == null) return;
+    sync_catchup_hooks.fireAll(.{
+        .db = &global_db.?,
+        .allocator = allocator,
+    });
+}
+
+/// Apply a remote sync frame to the local DB. Called by cms-worker.js
+/// when the worker's WebSocket receives a `sync_changes` envelope —
+/// `ptr/len` points at the inner `data` payload (the JSON array of
+/// cr-sqlite changeset rows). Dispatches through `apply_remote_hooks`
+/// so any plugin that registered for remote frames gets a shot at it.
+/// Returns 0 on success, -1 on any failure (logged via std.log.warn).
+export fn cms_apply_remote_changeset(ptr: [*]const u8, len: usize) i32 {
+    if (global_db == null) return -1;
+    if (len == 0) return 0;
+    apply_remote_hooks.applyAll(.{
+        .db = &global_db.?,
+        .allocator = allocator,
+        .payload = ptr[0..len],
+    }) catch |err| {
+        std.log.warn("cms_apply_remote_changeset failed: {s}", .{@errorName(err)});
+        return -1;
+    };
     return 0;
 }
 

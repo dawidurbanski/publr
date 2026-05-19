@@ -27,6 +27,9 @@ pub const Deps = struct {
     /// Plugins discovered by build/plugins.zig — wasm_storage is wired into
     /// each post-hoc because plugins may conditionally @import it.
     plugins: []const plugins_mod.Plugin,
+    /// Resolved schema source file (strict or loose) for the active build.
+    /// Wired as the `schema_sql` anonymous import on the WASM exe.
+    schema_sql_path: std.Build.LazyPath,
     /// Comptime config inputs.
     setup_bg_dark: bool,
     /// The transpile step the WASM exe must run after.
@@ -77,7 +80,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
         .imports = deps.shared_imports,
     });
     browser_wasm.root_module.addAnonymousImport("schema_sql", .{
-        .root_source_file = b.path("src/tools/schema.sql"),
+        .root_source_file = deps.schema_sql_path,
     });
 
     // Optional "starter DB" — if `data/publr.db` exists at build time,

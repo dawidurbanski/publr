@@ -61,7 +61,7 @@ pub fn serve(
     is_dev_mode = dev_mode;
     static_handlers.setDevMode(dev_mode);
     theme_handlers.setDevMode(dev_mode);
-    ws_handlers.configure(&shutdown_requested, dev_mode);
+    ws_handlers.configure(&shutdown_requested, dev_mode, db_path);
     collaboration_config.setTiming(lock_timeout_ms, heartbeat_interval_ms);
     presence.setTiming(
         collaboration_config.getLockTimeoutMs(),

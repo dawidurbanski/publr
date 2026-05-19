@@ -1,0 +1,19 @@
+.{
+    // cr-sqlite requires a relaxed schema flavor: no FK constraints (a
+    // remote changeset can arrive before its referenced row), no non-PK
+    // UNIQUE indexes (no merge strategy for unique conflicts), and
+    // DEFAULTs on all NOT NULL columns (so merges can materialize stub
+    // rows). Activating this plugin flips the whole build over.
+    .requires_schema = .loose,
+    // Replace the vanilla SQLite amalgamation with cr-sqlite-enabled
+    // sources. The dir's sqlite3.h goes on the include path FIRST so all
+    // TUs (Zig @cImport, plugin glue, core C) see the same header. Every
+    // other *.c in the dir gets compiled with the cflags below.
+    .sqlite_override_dir = "vendor",
+    // SQLITE_CORE is critical: without it cr-sqlite's C glue compiles in
+    // loadable-extension mode and routes every sqlite3_* call through a
+    // function-pointer table we never initialize → segfault in
+    // sqlite3VdbeExec on the first prepared-statement step. Matches the
+    // /demos/crsqlite-* working recipe.
+    .sqlite_override_cflags = "-DSQLITE_CORE,-DSQLITE_OMIT_LOAD_EXTENSION,-DHAVE_GETHOSTUUID=0",
+}

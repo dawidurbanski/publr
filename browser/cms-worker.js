@@ -8,12 +8,17 @@ const DB_FILENAME = 'cms.sqlite';
 // =============================================================================
 // Sync transport (cr-sqlite changeset relay over WebSocket)
 // =============================================================================
-// The worker maintains its own WebSocket to /admin/ws, separate from the
-// main-thread presence socket. cr-sqlite emits a JSON array on every
+// When the user has configured a Relay URL + sync token in the cr-sqlite
+// admin page (stored in localStorage, forwarded to init() by
+// cms-runtime.js), the worker opens a WebSocket to `<URL>/admin/ws/sync`
+// with `?sync_token=<token>`. cr-sqlite emits a JSON array on every
 // saveEntry via the `env.js_sync_send` import; we wrap it in a
-// `sync_changes` envelope and forward to the server, which rebroadcasts
+// `sync_changes` envelope and forward to the relay, which rebroadcasts
 // to every other connected replica. Inbound `sync_changes` frames are
-// pushed back into WASM via cms_apply_remote_changeset.
+// pushed back into WASM via `cms_apply_remote_changeset`.
+//
+// Without configured URL + token we don't open a socket at all — the
+// local CMS still works, save_hooks just have nowhere to publish to.
 
 let syncWs = null;
 let syncWsReady = false;
@@ -21,30 +26,28 @@ let syncWsUrl = null;
 let syncToken = null;
 let opfsSaveTimer = null;
 
-function defaultSyncWsUrl() {
-    const protocol = self.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${self.location.host}/admin/ws`;
-}
-
 function connectSyncWs() {
     if (syncWs) return;
-    let url = syncWsUrl || defaultSyncWsUrl();
-    if (syncToken) {
-        // Token-auth endpoint lives at `/admin/ws/sync`. If the user-
-        // configured URL points at `/admin/ws` (the cookie-auth endpoint),
-        // auto-correct it — that's the cross-origin path and `/admin/ws`
-        // doesn't accept tokens. Save one round of "why doesn't it
-        // connect" debugging.
-        try {
-            const u = new URL(url);
-            if (u.pathname === '/admin/ws') {
-                u.pathname = '/admin/ws/sync';
-                url = u.toString();
-            }
-        } catch (_) { /* relative URL or junk — leave it alone */ }
-        const sep = url.includes('?') ? '&' : '?';
-        url += `${sep}sync_token=${encodeURIComponent(syncToken)}`;
-    }
+    // Sync is strictly opt-in: only connect when both URL and token are
+    // present. A replica without these is a standalone WASM CMS — no
+    // peers, no relay, save_hooks just fire into js_sync_send's no-op.
+    if (!syncWsUrl || !syncToken) return;
+
+    let url = syncWsUrl;
+    // Token-auth endpoint lives at `/admin/ws/sync`. If the user-
+    // configured URL points at `/admin/ws` (the cookie-auth endpoint),
+    // auto-correct it — that's the cross-origin path and `/admin/ws`
+    // doesn't accept tokens.
+    try {
+        const u = new URL(url);
+        if (u.pathname === '/admin/ws') {
+            u.pathname = '/admin/ws/sync';
+            url = u.toString();
+        }
+    } catch (_) { /* relative URL or junk — leave it alone */ }
+    const sep = url.includes('?') ? '&' : '?';
+    url += `${sep}sync_token=${encodeURIComponent(syncToken)}`;
+
     try {
         syncWs = new WebSocket(url);
     } catch (e) {
@@ -58,19 +61,22 @@ function connectSyncWs() {
         console.log('[Worker] Sync WS connected');
         // Emit this replica's full state so the relay (and any other
         // connected replicas) catch up on whatever was saved locally
-        // while we were offline / before this WASM blob was built.
-        if (wasmInstance && wasmInstance.exports.cms_emit_full_sync_state) {
-            wasmInstance.exports.cms_emit_full_sync_state();
+        // while we were offline, or was restored from OPFS without
+        // firing any save_hook. cr-sqlite dedupes echoes on peers.
+        if (wasmInstance && wasmInstance.exports.cms_sync_emit_full) {
+            wasmInstance.exports.cms_sync_emit_full();
         }
     });
     syncWs.addEventListener('message', (event) => {
+        console.log('[Worker] WS message:', event.data.length, 'bytes');
         try {
             const msg = JSON.parse(event.data);
+            console.log('[Worker] WS message type:', msg.type, 'data len:', typeof msg.data === 'string' ? msg.data.length : '(not a string)');
             if (msg.type === 'sync_changes' && typeof msg.data === 'string') {
                 applyRemoteChangeset(msg.data);
             }
         } catch (e) {
-            // ignore malformed
+            console.warn('[Worker] WS message parse failed:', e);
         }
     });
     syncWs.addEventListener('close', () => {
@@ -84,10 +90,14 @@ function connectSyncWs() {
 }
 
 function applyRemoteChangeset(jsonString) {
-    if (!wasmInstance || !wasmInstance.exports.cms_apply_remote_changeset) return;
+    if (!wasmInstance || !wasmInstance.exports.cms_apply_remote_changeset) {
+        console.warn('[Worker] cms_apply_remote_changeset not available');
+        return;
+    }
     const b = writeString(jsonString);
     const rc = wasmInstance.exports.cms_apply_remote_changeset(b.ptr, b.len);
     if (b.len > 0) wasmInstance.exports.wasm_free(b.ptr, b.len);
+    console.log('[Worker] applied', jsonString.length, 'bytes, rc=', rc);
     if (rc !== 0) console.warn('[Worker] cms_apply_remote_changeset failed:', rc);
     scheduleOpfsSave();
 }

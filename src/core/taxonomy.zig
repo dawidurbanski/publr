@@ -438,7 +438,7 @@ pub fn slugify(allocator: Allocator, name: []const u8) ![]u8 {
 // Tests
 // =============================================================================
 
-const schema_sql = @embedFile("tools/schema.sql");
+const schema_sql = @embedFile("schema/content_schema.sql");
 
 fn initTestDb() !Db {
     var db = try Db.init(std.testing.allocator, ":memory:");

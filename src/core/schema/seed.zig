@@ -84,11 +84,10 @@ test "seed_sql contains taxonomy inserts" {
 
 test "ensureSeed populates content types" {
     const Db = @import("db").Db;
-    const sync = @import("sync");
     var db = try Db.init(std.testing.allocator, ":memory:");
     defer db.deinit();
 
-    try sync.ensureSchema(&db);
+    try db.exec(@embedFile("content_schema.sql"));
     try db.exec(seed_sql);
 
     var stmt = try db.prepare("SELECT COUNT(*) FROM content_types");
@@ -100,11 +99,10 @@ test "ensureSeed populates content types" {
 
 test "ensureSeed is idempotent" {
     const Db = @import("db").Db;
-    const sync = @import("sync");
     var db = try Db.init(std.testing.allocator, ":memory:");
     defer db.deinit();
 
-    try sync.ensureSchema(&db);
+    try db.exec(@embedFile("content_schema.sql"));
     try db.exec(seed_sql);
     try db.exec(seed_sql); // second call should not fail
 
@@ -117,11 +115,10 @@ test "ensureSeed is idempotent" {
 
 test "ensureSeed populates taxonomies" {
     const Db = @import("db").Db;
-    const sync = @import("sync");
     var db = try Db.init(std.testing.allocator, ":memory:");
     defer db.deinit();
 
-    try sync.ensureSchema(&db);
+    try db.exec(@embedFile("content_schema.sql"));
     try db.exec(seed_sql);
 
     // Count user-defined taxonomies (exclude media taxonomies from schema.sql)

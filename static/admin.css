@@ -7,6 +7,18 @@
     box-sizing: border-box;
 }
 
+/* Mobile: keep form controls at >= 16px so iOS Safari/WKWebView doesn't auto-zoom
+ * on focus (it does so for any focused control under 16px and won't reliably
+ * zoom back out, which breaks the layout). Excludes checkbox/radio/range/color
+ * whose font-size is irrelevant. */
+@media (max-width: 640px) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="hidden"]),
+    select,
+    textarea {
+        font-size: 16px;
+    }
+}
+
 body {
     margin: 0;
     -webkit-font-smoothing: antialiased;

@@ -20,11 +20,11 @@ const entry_mod = @import("entry");
 const ContentTypeDef = content_type_mod.ContentTypeDef;
 const FieldMap = entry_mod.FieldMap;
 
-// Schema lives at the project root (src/tools/schema.sql). Reading at
-// runtime via std.fs avoids the package-boundary restriction Zig places on
+// Schema lives at src/core/schema/content_schema.sql. Reading at runtime
+// via std.fs avoids the package-boundary restriction Zig places on
 // `@embedFile` paths for test-mode roots in `src/tests/`.
 fn loadSchema(allocator: std.mem.Allocator) ![]u8 {
-    var file = try std.fs.cwd().openFile("src/tools/schema.sql", .{});
+    var file = try std.fs.cwd().openFile("src/core/schema/content_schema.sql", .{});
     defer file.close();
     return file.readToEndAlloc(allocator, 1 * 1024 * 1024);
 }

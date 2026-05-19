@@ -1,0 +1,88 @@
+// cr-sqlite plugin admin page. Three halves:
+//   - Relay URL (native-only): the WS endpoint other replicas connect to.
+//     Computed client-side from `window.location` so it always matches the
+//     scheme/host this admin is reachable through.
+//   - Relay token (native-only): the server-side bearer token that replicas
+//     embed in `?sync_token=` when connecting. Empty on WASM (no filesystem).
+//   - Replica config (all builds): two localStorage-backed inputs that the
+//     WASM worker reads when opening the sync socket. Shown on every replica
+//     so an iOS WASM client can paste in the relay URL + token.
+
+const ui = @import("publr_ui");
+const Stack = ui.stack.Stack;
+const Heading = ui.heading.Heading;
+const Text = ui.text.Text;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const Input = ui.text_input.Input;
+const Button = ui.button.Button;
+
+pub const Props = struct {
+    relay_token: []const u8,
+    is_native: bool,
+};
+
+pub fn CrSqlite(props: Props) {
+    <Stack gap=.lg>
+        <Heading level=.h1 size=.lg>cr-sqlite</Heading>
+        <Text size=.sm color=.muted>
+            {"CRDT-backed sync between this CMS and any number of WASM replicas. Each replica connects to /admin/ws/sync with a bearer token; the server is a pure broadcast relay."}
+        </Text>
+
+        {if (props.is_native) (
+            <div>
+                <Stack gap=.lg>
+                    <div>
+                        <Heading level=.h2 size=.md>Relay URL</Heading>
+                        <Text size=.sm color=.muted>
+                            {"Paste this into a replica's Relay URL field. Computed from this admin's address so the scheme (ws:// vs wss://) matches the one you're connected through."}
+                        </Text>
+                        <div style="max-width: 520px; margin-top: 12px;">
+                            <Field>
+                                <FieldLabel>{"Relay URL"}</FieldLabel>
+                                <Input input_type=.text name="relay-url-readonly" id="publr-crsqlite-relay-url" value="" />
+                            </Field>
+                        </div>
+                    </div>
+
+                    <div>
+                        <Heading level=.h2 size=.md>Relay token</Heading>
+                        <Text size=.sm color=.muted>
+                            {"Paste this into a replica's Relay sync token field. Regenerate by deleting data/sync_token and restarting the server."}
+                        </Text>
+                        <div style="max-width: 520px; margin-top: 12px;">
+                            <Field>
+                                <FieldLabel>{"Relay sync token"}</FieldLabel>
+                                <Input input_type=.text name="relay-token-readonly" value={props.relay_token} />
+                            </Field>
+                        </div>
+                    </div>
+                </Stack>
+            </div>
+        )}
+
+        <div>
+            <Heading level=.h2 size=.md>Replica configuration</Heading>
+            <Text size=.sm color=.muted>
+                {"This replica's outbound WebSocket. Stored in localStorage and read by the WASM worker on connect. Leave blank if this is the relay itself."}
+            </Text>
+            <div style="max-width: 520px; margin-top: 12px;">
+                <Stack gap=.md>
+                    <Field>
+                        <FieldLabel>{"Relay URL (wss://host/admin/ws/sync)"}</FieldLabel>
+                        <Input input_type=.text name="relay-url" id="publr-crsqlite-url" value="" />
+                    </Field>
+                    <Field>
+                        <FieldLabel>{"Relay sync token"}</FieldLabel>
+                        <Input input_type=.text name="relay-token" id="publr-crsqlite-token" value="" />
+                    </Field>
+                    <div>
+                        <Button hierarchy=.primary label="Save" id="publr-crsqlite-save" />
+                    </div>
+                </Stack>
+            </div>
+        </div>
+
+        <script>{@raw "(function(){var r=document.getElementById('publr-crsqlite-relay-url');if(r){var proto=window.location.protocol==='https:'?'wss:':'ws:';r.value=proto+'//'+window.location.host+'/admin/ws/sync';}var u=document.getElementById('publr-crsqlite-url'),t=document.getElementById('publr-crsqlite-token'),b=document.getElementById('publr-crsqlite-save');if(!u||!t||!b)return;try{u.value=localStorage.getItem('publr.crsqlite.ws_url')||'';t.value=localStorage.getItem('publr.crsqlite.sync_token')||'';}catch(e){}b.addEventListener('click',function(e){e.preventDefault();try{localStorage.setItem('publr.crsqlite.ws_url',u.value.trim());localStorage.setItem('publr.crsqlite.sync_token',t.value.trim());b.textContent='Saved — reloading…';setTimeout(function(){window.location.reload();},400);}catch(err){b.textContent='Save failed: '+err.message;}});})();"}</script>
+    </Stack>
+}

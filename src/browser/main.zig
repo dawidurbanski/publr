@@ -3,7 +3,7 @@ const db = @import("db.zig");
 const Db = db.Db;
 
 // Database schema (single source of truth)
-const schema_sql = @embedFile("../tools/schema.sql");
+const schema_sql = @embedFile("../core/schema/content_schema.sql");
 
 // Use a simple bump allocator for WASM
 var wasm_memory: [8 * 1024 * 1024]u8 = undefined; // 8MB

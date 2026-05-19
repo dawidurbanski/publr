@@ -10,6 +10,9 @@ pub const Deps = struct {
     schema_registry: *std.Build.Module,
     field: *std.Build.Module,
     seed: *std.Build.Module,
+    /// Resolved active schema (strict or loose) wired as an anonymous
+    /// `schema_sql` import on the init_db tool. Plugin-manifest-driven.
+    schema_sql_path: std.Build.LazyPath,
     /// Main exe Compile step; its build step gets a dependency on init_db
     /// when applicable.
     exe: *std.Build.Step.Compile,
@@ -37,6 +40,7 @@ pub fn wire(b: *std.Build, deps: Deps) void {
     init_db.root_module.addImport("schema_registry", deps.schema_registry);
     init_db.root_module.addImport("field", deps.field);
     init_db.root_module.addImport("seed", deps.seed);
+    init_db.root_module.addAnonymousImport("schema_sql", .{ .root_source_file = deps.schema_sql_path });
 
     const init_db_cmd = b.addRunArtifact(init_db);
     init_db_cmd.addArg(if (deps.project_dir) |pd|
