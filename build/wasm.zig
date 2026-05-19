@@ -7,6 +7,9 @@ const plugins_mod = @import("plugins.zig");
 const vendors = @import("vendors.zig");
 
 pub const Deps = struct {
+    /// Vendor build options — includes plugin-contributed C sources +
+    /// static libs for the wasm32-wasi target.
+    vendor_opts: vendors.Opts,
     /// Shared imports common to native exe and WASM exe.
     shared_imports: []const std.Build.Module.Import,
     /// Modules WASM-only modules need to import.
@@ -58,11 +61,14 @@ pub fn build(b: *std.Build, deps: Deps) Result {
     browser_wasm.rdynamic = true;
 
     // Vendor static library for WASM — separate from native because of
-    // different SQLite flags (single-threaded, no load_extension).
-    const vendor_lib_wasm = vendors.library(b, wasm_target, .ReleaseSmall, .{ .wasm = true });
+    // different SQLite flags (single-threaded, no load_extension). Plugin
+    // contributions (C sources + static libs) are folded in via vendor_opts.
+    const vendor_lib_wasm = vendors.library(b, wasm_target, .ReleaseSmall, deps.vendor_opts);
     browser_wasm.linkLibC();
     browser_wasm.addIncludePath(b.path("vendor"));
+    for (deps.vendor_opts.extra_include_paths) |p| browser_wasm.addIncludePath(p);
     browser_wasm.linkLibrary(vendor_lib_wasm);
+    vendors.linkStaticLibs(browser_wasm, deps.vendor_opts);
 
     // error.zig lives outside src/wasm/, so wire it in as a named module
     // (relative @import("..") is disallowed across module root boundaries).
@@ -136,6 +142,11 @@ pub fn build(b: *std.Build, deps: Deps) Result {
     deps.media.addImport("wasm_storage", wasm_storage_module);
     for (deps.plugins) |p| {
         p.module.addImport("wasm_storage", wasm_storage_module);
+        // Expose each plugin module to wasm/main.zig the same way the
+        // native exe does — escape hatch for code that needs to call a
+        // specific plugin's helpers (e.g. cms_apply_remote_changeset
+        // forwarding into the cr-sqlite plugin's sync.applyChangeset).
+        browser_wasm.root_module.addImport(b.fmt("plugin_{s}", .{p.name}), p.module);
     }
 
     browser_wasm.step.dependOn(deps.transpile_step);

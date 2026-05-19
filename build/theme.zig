@@ -28,6 +28,9 @@ pub const Result = struct {
     publr_template_module: *std.Build.Module,
     transpile_zsx_cmd: *std.Build.Step.Run,
     transpile_theme_cmd: *std.Build.Step.Run,
+    /// The compiled ZSX transpiler exe — surfaced so plugins can spawn
+    /// their own transpile runs over `plugins/<name>/views/`.
+    zsx_transpiler: *std.Build.Step.Compile,
     /// Output of ZSX views transpile — referenced for class-manifest reads.
     gen_views: std.Build.LazyPath,
     /// Output of theme .publr → .zsx → transpile — referenced by tests/REST.
@@ -211,6 +214,7 @@ pub fn wire(b: *std.Build, deps: Deps) Result {
         .publr_template_module = publr_template_module,
         .transpile_zsx_cmd = transpile_zsx_cmd,
         .transpile_theme_cmd = transpile_theme_cmd,
+        .zsx_transpiler = zsx_transpiler,
         .gen_views = gen_views,
         .gen_theme = gen_theme,
         .jit_css_output = jit_css_output,

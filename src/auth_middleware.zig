@@ -14,6 +14,11 @@ const public_routes = [_][]const u8{
     "/admin/login",
     "/admin/setup",
     "/admin/system/health",
+    // cr-sqlite replica sync endpoint — token-authenticated by its own
+    // handler (validates `?sync_token=` against `data/sync_token`). It's
+    // exempt from cookie auth because WASM replicas connect cross-origin
+    // and can't share the admin session cookie.
+    "/admin/ws/sync",
 };
 
 /// Auth middleware state (must be initialized before use)
@@ -286,8 +291,9 @@ test "authMiddleware: passes through non-admin routes" {
 
 test "authMiddleware: public routes are allowed" {
     // Verify public routes list
-    try std.testing.expect(public_routes.len == 3);
+    try std.testing.expect(public_routes.len == 4);
     try std.testing.expectEqualStrings("/admin/login", public_routes[0]);
     try std.testing.expectEqualStrings("/admin/setup", public_routes[1]);
     try std.testing.expectEqualStrings("/admin/system/health", public_routes[2]);
+    try std.testing.expectEqualStrings("/admin/ws/sync", public_routes[3]);
 }

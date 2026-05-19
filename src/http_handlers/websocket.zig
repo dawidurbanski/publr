@@ -5,6 +5,9 @@ const auth_middleware = @import("auth_middleware");
 const websocket = @import("websocket");
 const presence = @import("presence");
 const plugin_content = @import("plugin_content");
+const plugin_utils = @import("plugin_utils");
+const url_util = @import("url");
+const sync_token = @import("sync_token");
 const collaboration_config = @import("../collaboration_config.zig");
 
 var shutdown_requested: ?*const std.atomic.Value(bool) = null;
@@ -124,6 +127,101 @@ pub fn handleWebSocket(ctx: *Context) !void {
             .ping => {
                 websocket.writeFrame(stream, .pong, frame.payload) catch break;
             },
+            .pong => {},
+            .close => {
+                conn.sendClose();
+                break;
+            },
+            else => {},
+        }
+    }
+}
+
+/// Token-authenticated WS endpoint used by replicas that can't reuse the
+/// admin cookie session (different origin / no cookies). Validates a
+/// stable bearer token from the `?sync_token=` query param and joins the
+/// same broadcast registry as `/admin/ws`. Pure relay — every received
+/// frame is rebroadcast to all other connected sockets. No apply, no
+/// inspection beyond the auth check.
+pub fn handleSyncWebSocket(ctx: *Context) !void {
+    const upgrade_header = ctx.getRequestHeader("Upgrade") orelse {
+        ctx.response.setStatus("400 Bad Request");
+        ctx.response.setBody("Expected WebSocket upgrade");
+        return;
+    };
+    if (!std.ascii.eqlIgnoreCase(upgrade_header, "websocket")) {
+        ctx.response.setStatus("400 Bad Request");
+        ctx.response.setBody("Expected WebSocket upgrade");
+        return;
+    }
+    const ws_key = ctx.getRequestHeader("Sec-WebSocket-Key") orelse {
+        ctx.response.setStatus("400 Bad Request");
+        ctx.response.setBody("Missing Sec-WebSocket-Key");
+        return;
+    };
+
+    const raw_token = plugin_utils.queryParam(ctx.query, "sync_token") orelse {
+        ctx.response.setStatus("401 Unauthorized");
+        ctx.response.setBody("Missing sync_token");
+        return;
+    };
+    // queryParam returns the raw URL-encoded value; tokens are base64
+    // (`+`, `/`, `=` all percent-encode), so we decode before compare.
+    const presented = url_util.pathDecode(ctx.allocator, raw_token);
+    if (!sync_token.verify(presented, std.heap.page_allocator)) {
+        ctx.response.setStatus("401 Unauthorized");
+        ctx.response.setBody("Invalid sync_token");
+        return;
+    }
+
+    const stream = ctx.stream orelse return error.NoStream;
+    try websocket.upgrade(stream, ws_key);
+    ctx.response.headers_sent = true;
+
+    const conn = try std.heap.page_allocator.create(websocket.Connection);
+    conn.* = .{
+        .stream = stream,
+        .allocator = std.heap.page_allocator,
+        .id = websocket.nextId(),
+    };
+    websocket.registry.add(conn);
+    defer {
+        websocket.registry.remove(conn);
+        std.heap.page_allocator.destroy(conn);
+    }
+
+    conn.sendJson("connected", null) catch return;
+    if (is_dev_mode) {
+        std.debug.print("[ws/sync] Connection {d} opened (active: {d})\n", .{ conn.id, websocket.registry.count() });
+    }
+    defer {
+        if (is_dev_mode) {
+            std.debug.print("[ws/sync] Connection {d} closed (active: {d})\n", .{ conn.id, websocket.registry.count() });
+        }
+    }
+
+    var poll_fds = [_]posix.pollfd{
+        .{ .fd = stream.handle, .events = posix.POLL.IN, .revents = 0 },
+    };
+
+    while (!shouldShutdown()) {
+        // 30s timeout: send a ping to keep NATs / load balancers from
+        // dropping the connection.
+        const poll_result = posix.poll(&poll_fds, 30_000) catch break;
+        if (poll_result == 0) {
+            websocket.writeFrame(stream, .ping, &.{}) catch break;
+            continue;
+        }
+
+        const frame = websocket.readFrame(stream, std.heap.page_allocator) catch break;
+        defer std.heap.page_allocator.free(frame.payload);
+
+        switch (frame.opcode) {
+            .text => {
+                // Dumb fanout to every other connected replica.
+                websocket.registry.broadcast(frame.payload, conn);
+            },
+            .ping => websocket.writeFrame(stream, .pong, frame.payload) catch break,
             .pong => {},
             .close => {
                 conn.sendClose();

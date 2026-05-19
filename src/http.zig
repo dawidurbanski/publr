@@ -92,6 +92,14 @@ pub fn serve(
         return err;
     };
 
+    // Fire plugin db_open_hooks now that the schema + seed are in place.
+    // The cr-sqlite plugin uses this to mark `content_entries` and
+    // `content_versions` as CRRs, which is required for the native
+    // server to ingest changeset frames from WASM replicas.
+    core_init.fireDbOpenHooks(&db) catch |err| {
+        std.debug.print("db_open_hooks failed (non-fatal): {s}\n", .{@errorName(err)});
+    };
+
     // Initialize the runtime content type registry. `compiled_in_types`
     // already concatenates core schemas + plugin-discovered descriptors;
     // DB-defined types are loaded from the `content_types` table next.
@@ -163,6 +171,9 @@ pub fn serve(
     try router.post("/admin/system/config", recompile.handleConfigUpdate);
     try router.get("/admin/system/health", recompile.handleHealth);
     try router.get("/admin/ws", ws_handlers.handleWebSocket);
+    // Sync-only endpoint for cr-sqlite replicas that can't reuse the admin
+    // cookie. Token-authenticated via ?sync_token=<base64> query param.
+    try router.get("/admin/ws/sync", ws_handlers.handleSyncWebSocket);
 
     // Action dispatcher — plugins register named actions via app.action(),
     // forms POST to /admin/action with a hidden `action=plugin.verb` field.

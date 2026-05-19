@@ -3,12 +3,23 @@ const db_mod = @import("db");
 const schema_sync = @import("schema_sync");
 const seed_mod = @import("seed");
 const schema_registry = @import("schema_registry");
+const db_open_hooks = @import("db_open_hooks");
 
 pub const Db = db_mod.Db;
 
 /// Open/create a SQLite database and enable foreign keys.
 pub fn initDatabase(allocator: std.mem.Allocator, db_path: []const u8) !Db {
     return db_mod.Db.init(allocator, db_path);
+}
+
+/// Fire every plugin-contributed `db_open_hooks` against the connection.
+/// Call this once the schema is in place (cr-sqlite's CRR marking needs
+/// the tables to exist). Native callers run this after `initDatabase` if
+/// the on-disk DB already has the schema; WASM runs it after the in-memory
+/// schema exec + seed. Hooks must be idempotent — they run on every
+/// startup, and re-marking an already-CRR table no-ops in cr-sqlite.
+pub fn fireDbOpenHooks(db: *Db) !void {
+    try db_open_hooks.fireAll(db);
 }
 
 /// Ensure all schema tables exist.

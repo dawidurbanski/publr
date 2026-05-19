@@ -9,15 +9,45 @@ const std = @import("std");
 pub const Opts = struct {
     /// Build for WASM: single-threaded SQLite + no load_extension.
     wasm: bool = false,
+    /// Extra C sources contributed by plugins. Compiled with their own
+    /// flags into publr_vendors so the plugin's extension code shares
+    /// the SQLite build.
+    extra_c_sources: []const ExtraCSource = &.{},
+    /// Extra include paths so plugin C sources can find their own
+    /// headers (publr's vendor/ is already on the path).
+    extra_include_paths: []const std.Build.LazyPath = &.{},
+    /// Prebuilt static libraries (e.g. Rust-built cr-sqlite core) to
+    /// link into publr_vendors. Resolved at the final link.
+    static_libs: []const std.Build.LazyPath = &.{},
+};
+
+pub const ExtraCSource = struct {
+    file: std.Build.LazyPath,
+    flags: []const []const u8,
 };
 
 /// Attach libc + vendor/ include path + SQLite + stb_image + libwebp C
-/// sources to any compile step (exe, lib, test).
+/// sources to any compile step (exe, lib, test). Plugin C sources are
+/// compiled in here; plugin static libs (`opts.static_libs`) must be
+/// attached separately to the final exe step (a static archive's contents
+/// don't propagate when nested inside another archive — the symbols are
+/// only pulled in at the final link).
 pub fn addAll(b: *std.Build, compile: *std.Build.Step.Compile, opts: Opts) void {
     compile.linkLibC();
     compile.addIncludePath(b.path("vendor"));
+    for (opts.extra_include_paths) |p| compile.addIncludePath(p);
     addSqlite(b, compile, opts);
     addImage(b, compile);
+    for (opts.extra_c_sources) |src| {
+        compile.addCSourceFile(.{ .file = src.file, .flags = src.flags });
+    }
+}
+
+/// Attach plugin-contributed static libs to a final exe / test target.
+/// Call this on every step that links publr_vendors, since the symbols
+/// from these libs are referenced by C sources inside publr_vendors.
+pub fn linkStaticLibs(compile: *std.Build.Step.Compile, opts: Opts) void {
+    for (opts.static_libs) |lib| compile.addObjectFile(lib);
 }
 
 /// Attach just SQLite (used by db_init, which doesn't need image processing).

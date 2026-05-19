@@ -22,6 +22,7 @@ const config = @import("config");
 const schema_registry = @import("schema_registry");
 const schema_db_types = @import("schema_db_types");
 const schemas = @import("schemas");
+const db_open_hooks = @import("db_open_hooks");
 
 // Generated ZSX views
 const views = @import("views");
@@ -134,6 +135,10 @@ export fn cms_init() i32 {
     global_db = db.Db.init(allocator, ":memory:") catch return -1;
     global_db.?.exec(schema_sql) catch return -1;
     global_db.?.exec(seed.seed_sql) catch return -1;
+
+    db_open_hooks.fireAll(&global_db.?) catch |err| {
+        std.log.warn("db_open_hooks.fireAll failed: {s}", .{@errorName(err)});
+    };
     global_auth = auth_mod.Auth.init(allocator, &global_db.?);
     tpl.init(false);
 
@@ -218,6 +223,14 @@ export fn cms_import_db(data_ptr: [*]const u8, data_len: usize) i32 {
     // in OPFS from an older build pick up any new tables — e.g. the releases
     // tables were missing here, causing listReleases to fail with "no such table".
     global_db.?.exec(schema_sql) catch return -1;
+    // Plugin db_open_hooks run after schema is in place (see cms_init).
+    db_open_hooks.fireAll(&global_db.?) catch |err| {
+        // Hook failures are logged but don't abort init — cr-sqlite CRR
+        // marking can fail on a stale OPFS schema (e.g. a DB cached
+        // before the unique-constraint drop), and we'd rather boot
+        // without sync than refuse to start. Reset OPFS to recover.
+        std.log.warn("db_open_hooks.fireAll failed: {s}", .{@errorName(err)});
+    };
     global_auth = auth_mod.Auth.init(allocator, &global_db.?);
     tpl.init(false);
     auth_middleware.init(&global_auth.?);

@@ -233,6 +233,22 @@ pub const Statement = struct {
         return c.sqlite3_column_type(self.handle, @intCast(index)) == c.SQLITE_NULL;
     }
 
+    pub const SqliteType = enum { Null, Integer, Real, Text, Blob };
+
+    /// Return the SQLite storage type of a column (0-indexed). cr-sqlite's
+    /// `val` column in its changes view is declared BLOB but actually
+    /// holds whatever type the original column had — so plugins that
+    /// serialize changesets need to dispatch on the real runtime type.
+    pub fn columnSqliteType(self: *Statement, index: u32) SqliteType {
+        return switch (c.sqlite3_column_type(self.handle, @intCast(index))) {
+            c.SQLITE_INTEGER => .Integer,
+            c.SQLITE_FLOAT => .Real,
+            c.SQLITE_TEXT => .Text,
+            c.SQLITE_BLOB => .Blob,
+            else => .Null,
+        };
+    }
+
     /// Reset statement for reuse with new parameters
     pub fn reset(self: *Statement) void {
         _ = c.sqlite3_reset(self.handle);

@@ -21,6 +21,7 @@ const id_gen = @import("id_gen");
 const core_init = @import("core_init");
 const schemas = @import("schemas");
 const publish_hooks = @import("publish_hooks");
+const save_hooks = @import("save_hooks");
 const schema_registry = @import("schema_registry");
 const content_type_mod = @import("content_type");
 const field_mod = @import("field");
@@ -824,6 +825,13 @@ pub fn saveEntry(
             }, data_json);
         }
     }
+
+    save_hooks.afterSave(.{
+        .db = db,
+        .allocator = allocator,
+        .entry_id = entry_id,
+        .content_type = def.type_id,
+    });
 
     return (try query.getEntry(allocator, db, type_id, entry_id)) orelse
         error.EntryNotFound;
