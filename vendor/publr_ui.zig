@@ -2656,9 +2656,9 @@ pub const DialogTriggerProps = struct {
 };
 pub fn DialogTrigger(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogTriggerProps, _props);
-    try writer.writeAll("<span data-publr-part=\"trigger\" aria-expanded=\"false\">\n");
+    try writer.writeAll("<button class=\"h-full\" data-publr-part=\"trigger\" aria-expanded=\"false\">\n");
     try writer.writeAll(props.children);
-    try writer.writeAll("\n</span>");
+    try writer.writeAll("\n</button>");
 }
 
 pub const DialogOverlayProps = struct {
@@ -3009,9 +3009,9 @@ pub const DropdownMenuTriggerProps = struct {
 };
 pub fn DropdownMenuTrigger(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuTriggerProps, _props);
-    try writer.writeAll("<span data-publr-part=\"trigger\" aria-expanded=\"false\" aria-haspopup=\"menu\">\n");
+    try writer.writeAll("<button class=\"h-full\" data-publr-part=\"trigger\" aria-expanded=\"false\" aria-haspopup=\"menu\">\n");
     try writer.writeAll(props.children);
-    try writer.writeAll("\n</span>");
+    try writer.writeAll("\n</button>");
 }
 
 pub const DropdownMenuContentProps = struct {

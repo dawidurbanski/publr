@@ -59,8 +59,16 @@ register('dropdown', (el) => {
         } else {
             open(el);
             portal(content);
+            // Portal detaches content from the dropdown's `.group` ancestor,
+            // so the `group-data-[publr-state=open]:block` rule no longer
+            // applies and the Tailwind `hidden` class wins. Force display
+            // here and clear it on close.
+            content.style.display = 'block';
             position(content, trigger);
-            el._publrOnClose = () => unportal(content);
+            el._publrOnClose = () => {
+                content.style.display = '';
+                unportal(content);
+            };
             const first = content.querySelector('[data-publr-part="item"]');
             if (first) first.focus();
         }
