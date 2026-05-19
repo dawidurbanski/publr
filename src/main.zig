@@ -7,6 +7,7 @@ const cli_main = @import("cli_main");
 const publr_config = @import("publr_config");
 const build_options = @import("build_options");
 const collaboration_config = @import("collaboration_config.zig");
+const db_path_mod = @import("db_path");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -25,7 +26,7 @@ pub fn main() !void {
     };
 
     if (std.mem.eql(u8, command, "serve")) {
-        try runServe(&args);
+        try runServe(allocator, &args);
     } else if (std.mem.eql(u8, command, "build")) {
         try runBuild(allocator, &args);
     } else if (std.mem.eql(u8, command, "preview")) {
@@ -41,7 +42,7 @@ pub fn main() !void {
     }
 }
 
-fn runServe(args: *std.process.ArgIterator) !void {
+fn runServe(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void {
     var cli_port: ?u16 = null;
     var cli_db_path: ?[]const u8 = null;
     var cli_lock_timeout_ms: ?u32 = null;
@@ -93,7 +94,9 @@ fn runServe(args: *std.process.ArgIterator) !void {
     }
 
     const port = resolvePort(cli_port);
-    const db_path = resolveDbPath(cli_db_path);
+    const resolved_db = try db_path_mod.resolve(allocator, cli_db_path);
+    defer resolved_db.deinit(allocator);
+    const db_path = resolved_db.path;
     const lock_timeout_ms = resolveLockTimeoutMs(cli_lock_timeout_ms);
     const heartbeat_interval_ms = resolveHeartbeatIntervalMs(cli_heartbeat_interval_ms);
 
@@ -120,7 +123,7 @@ fn runBuild(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void 
         publr_config.output
     else
         "output";
-    var db_path: []const u8 = resolveDbPath(null);
+    var cli_db_path: ?[]const u8 = null;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--output") or std.mem.eql(u8, arg, "-o")) {
@@ -129,12 +132,15 @@ fn runBuild(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void 
                 return;
             };
         } else if (std.mem.eql(u8, arg, "--db")) {
-            db_path = args.next() orelse {
+            cli_db_path = args.next() orelse {
                 std.debug.print("Error: --db requires a value\n", .{});
                 return;
             };
         }
     }
+    const resolved_db = try db_path_mod.resolve(allocator, cli_db_path);
+    defer resolved_db.deinit(allocator);
+    const db_path = resolved_db.path;
 
     var timer = try std.time.Timer.start();
 
@@ -326,16 +332,6 @@ fn resolvePort(cli_port: ?u16) u16 {
     return 8080;
 }
 
-/// Resolves database path with precedence: CLI flag > PUBLR_DB env var > default (data/publr.db)
-fn resolveDbPath(cli_db_path: ?[]const u8) []const u8 {
-    if (cli_db_path) |path| return path;
-
-    if (std.posix.getenv("PUBLR_DB")) |path| {
-        if (path.len > 0) return path;
-    }
-
-    return "data/publr.db";
-}
 
 fn resolveLockTimeoutMs(cli_lock_timeout_ms: ?u32) u32 {
     return cli_lock_timeout_ms orelse collaboration_config.default_lock_timeout_ms;

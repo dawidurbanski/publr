@@ -2,9 +2,12 @@ const std = @import("std");
 const core_init = @import("core_init");
 const core_time = @import("core_time");
 const Db = @import("db").Db;
+const db_path_mod = @import("db_path");
 const fmt = @import("format.zig");
 
 pub const GlobalOptions = struct {
+    /// Resolved absolute-or-project-anchored DB path. See `db_path.resolve`.
+    /// Ownership is tracked by `ParsedCli.db_path_owned`.
     db_path: []const u8 = "data/publr.db",
     format: fmt.OutputFormat = .table,
     quiet: bool = false,
@@ -13,10 +16,18 @@ pub const GlobalOptions = struct {
 pub const ParsedCli = struct {
     opts: GlobalOptions,
     args: []const []const u8,
+    /// True when `opts.db_path` is heap-allocated and must be freed.
+    db_path_owned: bool,
+
+    pub fn deinit(self: ParsedCli, allocator: std.mem.Allocator) void {
+        allocator.free(self.args);
+        if (self.db_path_owned) allocator.free(self.opts.db_path);
+    }
 };
 
 pub fn extractGlobalOptions(allocator: std.mem.Allocator, raw_args: []const []const u8) !ParsedCli {
     var opts = GlobalOptions{};
+    var cli_db_path: ?[]const u8 = null;
     var cleaned: std.ArrayList([]const u8) = .{};
     errdefer cleaned.deinit(allocator);
 
@@ -26,9 +37,9 @@ pub fn extractGlobalOptions(allocator: std.mem.Allocator, raw_args: []const []co
         if (std.mem.eql(u8, arg, "--db")) {
             i += 1;
             if (i >= raw_args.len) return error.MissingDbPath;
-            opts.db_path = raw_args[i];
+            cli_db_path = raw_args[i];
         } else if (std.mem.startsWith(u8, arg, "--db=")) {
-            opts.db_path = arg["--db=".len..];
+            cli_db_path = arg["--db=".len..];
         } else if (std.mem.eql(u8, arg, "--format")) {
             i += 1;
             if (i >= raw_args.len) return error.MissingFormat;
@@ -44,9 +55,13 @@ pub fn extractGlobalOptions(allocator: std.mem.Allocator, raw_args: []const []co
         i += 1;
     }
 
+    const resolved = try db_path_mod.resolve(allocator, cli_db_path);
+    opts.db_path = resolved.path;
+
     return .{
         .opts = opts,
         .args = try cleaned.toOwnedSlice(allocator),
+        .db_path_owned = resolved.owned,
     };
 }
 

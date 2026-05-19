@@ -227,6 +227,12 @@ pub fn serve(
     defer server.deinit();
 
     std.debug.print("Publr running at http://localhost:{d}\n", .{port});
+    if (std.fs.cwd().realpathAlloc(allocator, db_path)) |abs| {
+        defer allocator.free(abs);
+        std.debug.print("  db: {s}\n", .{abs});
+    } else |_| {
+        std.debug.print("  db: {s}\n", .{db_path});
+    }
     std.debug.print("Press Ctrl+C to stop\n", .{});
 
     // Set up poll for timeout-based accept

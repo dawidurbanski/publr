@@ -39,6 +39,12 @@ pub fn run(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, ar
     return error.UnknownStarterCommand;
 }
 
+/// Resolve `opts.db_path` to an absolute filesystem path for display. Falls
+/// back to the raw path if absolute-ification fails (e.g. `:memory:`).
+fn absoluteDbPath(allocator: std.mem.Allocator, db_path: []const u8) []const u8 {
+    return std.fs.cwd().realpathAlloc(allocator, db_path) catch allocator.dupe(u8, db_path) catch db_path;
+}
+
 /// Print available starter names.
 pub fn list(opts: common.GlobalOptions) !void {
     if (opts.format == .json or opts.format == .jsonl) {
@@ -60,11 +66,14 @@ pub fn list(opts: common.GlobalOptions) !void {
 /// type with the same `type_id` is already registered.
 pub fn add(allocator: std.mem.Allocator, db: *Db, opts: common.GlobalOptions, name: []const u8) !void {
     try install(allocator, db, name);
+    const abs = absoluteDbPath(allocator, opts.db_path);
+    defer if (abs.ptr != opts.db_path.ptr) allocator.free(abs);
     if (opts.format == .json or opts.format == .jsonl) {
         var stdout = std.fs.File.stdout().writer(&.{});
-        try stdout.interface.print("{{\"installed\":true,\"name\":\"{s}\"}}\n", .{name});
+        try stdout.interface.print("{{\"installed\":true,\"name\":\"{s}\",\"db\":\"{s}\"}}\n", .{ name, abs });
     } else if (!opts.quiet) {
         std.debug.print("Installed starter content type: {s}\n", .{name});
+        std.debug.print("  db: {s}\n", .{abs});
     }
 }
 

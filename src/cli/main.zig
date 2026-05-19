@@ -10,6 +10,7 @@ const schema_cli = @import("schema.zig");
 const db_cli = @import("db.zig");
 const info_cli = @import("info.zig");
 const starter_cli = @import("starter.zig");
+const schema_registry = @import("schema_registry");
 
 pub fn run(allocator: std.mem.Allocator, first_command: []const u8, args_it: *std.process.ArgIterator) !void {
     var raw: std.ArrayList([]const u8) = .{};
@@ -30,7 +31,7 @@ pub fn run(allocator: std.mem.Allocator, first_command: []const u8, args_it: *st
     }
 
     const parsed = try common.extractGlobalOptions(allocator, raw.items);
-    defer allocator.free(parsed.args);
+    defer parsed.deinit(allocator);
 
     if (parsed.args.len == 0) {
         printUsage();
@@ -45,6 +46,7 @@ pub fn run(allocator: std.mem.Allocator, first_command: []const u8, args_it: *st
 
     var db = try common.openDb(allocator, parsed.opts);
     defer db.deinit();
+    defer schema_registry.deinit();
 
     if (std.mem.eql(u8, command, "content")) {
         if (parsed.args.len < 2) return error.MissingContentSubcommand;
