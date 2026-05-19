@@ -4,6 +4,14 @@ const ui = @import("publr_ui");
 const ContentTypeNav = struct {
     href: []const u8,
     label: []const u8,
+    type_id: []const u8 = "",
+};
+
+pub const PluginNav = struct {
+    id: []const u8,
+    href: []const u8,
+    label: []const u8,
+    icon: IconName,
 };
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
@@ -121,6 +129,15 @@ pub fn Layout(props: struct {
     bottom_bar: []const u8 = "",
     topbar_nav_html: []const u8 = "",
     content_types: []const ContentTypeNav = &.{},
+    plugin_pages: []const PluginNav = &.{},
+    /// When the user is viewing a specific content type (list or edit) or
+    /// `/admin/content?type=<id>`, this is that type's id. Drives sidebar
+    /// active state: the matching content-type item lights up.
+    active_content_type_id: []const u8 = "",
+    /// Active saved-view filter for the Content section sidebar. One of
+    /// `"all"`, `"recent"`, `"created_by_me"`, `"updated_by_me"`, or
+    /// `"status_<value>"`. Empty when no filter applies.
+    active_content_view: []const u8 = "",
 }) {
     <!DOCTYPE html>
     <html class="dark h-full">
@@ -193,11 +210,15 @@ pub fn Layout(props: struct {
                                 <SidebarItem href="/admin/settings" icon=.settings label="Settings" current={props.current_section} match="settings" />
                             </ul>
 
-                            <div class="h-3.5"></div>
-                            <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2">Plugins</div>
-                            <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
-                                <SidebarItem href="/admin/settings" icon=.settings label="App Demo" current={props.current_section} match="app-demo" />
-                            </ul>
+                            {if (props.plugin_pages.len > 0) (
+                                <div class="h-3.5"></div>
+                                <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2">Plugins</div>
+                                <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
+                                    {for (props.plugin_pages) |p| (
+                                        <SidebarItem href={p.href} icon={p.icon} label={p.label} current={props.current_section} match={p.id} />
+                                    )}
+                                </ul>
+                            )}
                         </div>
 
                         <div data-publr-sidebar-panel="content" class={if (std.mem.eql(u8, props.current_section, "content") or std.mem.startsWith(u8, props.current_section, "content.")) "" else "hidden"}>
@@ -207,8 +228,8 @@ pub fn Layout(props: struct {
                             </a>
 
                             <ul role="list" class="flex flex-col gap-px list-none p-0 m-0 mt-1">
-                                <SubLink href="/admin/content" icon=.menu_03 label="All content" current={props.current_section} match="content" />
-                                <SubLink href="#" icon=.clock_rewind label="Recent" />
+                                <SubLink href="/admin/content" icon=.menu_03 label="All content" current={props.active_content_view} match="all" />
+                                <SubLink href="/admin/content?recent=1" icon=.clock_rewind label="Recent" current={props.active_content_view} match="recent" />
                                 <SubLink href="#" icon=.clock_check label="Scheduled" />
                                 <SubLink href="/admin/releases" icon=.calendar_check label="Releases" external={true} />
                             </ul>
@@ -218,8 +239,8 @@ pub fn Layout(props: struct {
                             <SubSectionHeading label="My views" />
 
                             <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
-                                <SubLink href="#" icon=.bookmark label="Created by me" />
-                                <SubLink href="#" icon=.bookmark label="Updated by me" />
+                                <SubLink href="/admin/content?author=me" icon=.bookmark label="Created by me" current={props.active_content_view} match="created_by_me" />
+                                <SubLink href="/admin/content?editor=me" icon=.bookmark label="Updated by me" current={props.active_content_view} match="updated_by_me" />
                             </ul>
 
                             <hr class="my-3 border-gray-500/30" />
@@ -227,16 +248,16 @@ pub fn Layout(props: struct {
                             <SubSectionHeading label="Views" />
 
                             <ul role="list" class="flex flex-col gap-px list-none p-0 m-0">
-                                <SubLink href="#" icon=.menu_03 label="All" />
+                                <SubLink href="/admin/content" icon=.menu_03 label="All" current={props.active_content_view} match="all" />
                                 <SubFolder label="Status" count={4}>
-                                    <SubLink href="#" icon=.bookmark label="Published" />
-                                    <SubLink href="#" icon=.bookmark label="Changed" />
-                                    <SubLink href="#" icon=.bookmark label="Draft" />
-                                    <SubLink href="#" icon=.bookmark label="Archived" />
+                                    <SubLink href="/admin/content?status=published" icon=.bookmark label="Published" current={props.active_content_view} match="status_published" />
+                                    <SubLink href="/admin/content?status=changed" icon=.bookmark label="Changed" current={props.active_content_view} match="status_changed" />
+                                    <SubLink href="/admin/content?status=draft" icon=.bookmark label="Draft" current={props.active_content_view} match="status_draft" />
+                                    <SubLink href="/admin/content?status=archived" icon=.bookmark label="Archived" current={props.active_content_view} match="status_archived" />
                                 </SubFolder>
                                 <SubFolder label="Content type" count={props.content_types.len}>
                                     {for (props.content_types) |ct| (
-                                        <SubLink href={ct.href} icon=.bookmark label={ct.label} />
+                                        <SubLink href={ct.href} icon=.bookmark label={ct.label} current={props.active_content_type_id} match={ct.type_id} />
                                     )}
                                 </SubFolder>
                             </ul>

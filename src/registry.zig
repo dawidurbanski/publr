@@ -18,6 +18,9 @@ const views = @import("views");
 const auth_middleware = @import("auth_middleware");
 const gravatar = @import("gravatar");
 const plugin_registry = @import("plugin_registry");
+const publr_ui = @import("publr_ui");
+
+pub const IconName = publr_ui.icon.Name;
 
 /// All registered admin pages, aggregated from auto-discovered plugins.
 /// Each plugin may export `pub const page` (single) or `pub const pages` (array).
@@ -143,6 +146,63 @@ pub fn topbarNavItems(comptime current_id: []const u8) []const NavItem {
 }
 
 // =============================================================================
+// Plugins Sidebar Section
+// =============================================================================
+
+pub const PluginNavItem = struct {
+    id: []const u8,
+    label: []const u8,
+    href: []const u8,
+    icon: admin.IconName,
+};
+
+/// Top-level pages with `menu_section == "plugins"`, sorted by position.
+/// Rendered in the sidebar's Plugins section by layout.zsx. Child pages
+/// (parent != null) are excluded — they live as sub-routes of their parent.
+pub fn pluginMenuItems() []const PluginNavItem {
+    comptime {
+        var count: usize = 0;
+        for (pages) |p| {
+            if (p.parent != null) continue;
+            const sec = p.menu_section orelse continue;
+            if (!std.mem.eql(u8, sec, "plugins")) continue;
+            count += 1;
+        }
+
+        var items: [count]PluginNavItem = undefined;
+        var i: usize = 0;
+        for (pages) |p| {
+            if (p.parent != null) continue;
+            const sec = p.menu_section orelse continue;
+            if (!std.mem.eql(u8, sec, "plugins")) continue;
+            items[i] = .{
+                .id = p.id,
+                .label = p.title,
+                .href = admin.resolvePagePath(p, pages),
+                .icon = p.icon,
+            };
+            i += 1;
+        }
+
+        // position sort (lower first)
+        for (0..count) |j| {
+            for (j + 1..count) |k| {
+                const pj = findById(items[j].id).?.position;
+                const pk = findById(items[k].id).?.position;
+                if (pk < pj) {
+                    const tmp = items[j];
+                    items[j] = items[k];
+                    items[k] = tmp;
+                }
+            }
+        }
+
+        const result = items;
+        return &result;
+    }
+}
+
+// =============================================================================
 // Page Rendering
 // =============================================================================
 
@@ -150,6 +210,14 @@ pub const EditOpts = struct {
     back_url: []const u8,
     back_label: []const u8 = "",
     sidebar: []const u8 = "",
+    /// Content-type label for the breadcrumb middle segment. Empty hides
+    /// the breadcrumb and falls back to a plain title.
+    content_type_label: []const u8 = "",
+    /// URL the content-type breadcrumb segment links to (typically the
+    /// list of entries of that type).
+    content_type_url: []const u8 = "",
+    /// Icon rendered next to the content-type breadcrumb segment.
+    content_type_icon: IconName = .bookmark,
 };
 
 pub fn renderEditPage(comptime pg: admin.Page, ctx: *mw.Context, title: []const u8, content: []const u8, opts: EditOpts) []const u8 {
@@ -165,6 +233,9 @@ pub fn renderEditPage(comptime pg: admin.Page, ctx: *mw.Context, title: []const 
         .user_gravatar_url = gravatar_url.slice(),
         .back_url = opts.back_url,
         .sidebar = opts.sidebar,
+        .content_type_label = opts.content_type_label,
+        .content_type_url = opts.content_type_url,
+        .content_type_icon = opts.content_type_icon,
     }});
 }
 

@@ -121,6 +121,12 @@ pub const Page = struct {
     /// Topbar section: "content", "content_types", "media"
     section: ?[]const u8 = null,
 
+    /// Which sidebar group this page belongs to. Today only "plugins" is
+    /// honored — pages with `menu_section = "plugins"` render in the
+    /// sidebar's Plugins section (built-in pages are hardcoded in
+    /// layout.zsx and ignore this field).
+    menu_section: ?[]const u8 = null,
+
     /// Setup function that registers routes for this page
     setup: *const fn (*PageApp) void,
 
@@ -261,6 +267,27 @@ pub fn renderWithLayout(
     content: []const u8,
     bottom_bar: []const u8,
 ) []const u8 {
+    return renderWithLayoutTyped(page_id, page_title, ctx, content, bottom_bar, "", "");
+}
+
+/// Variant of `renderWithLayout` that takes the sidebar's active state so
+/// the matching item (content type and/or saved view) lights up. Pass
+/// empty strings to disable.
+///
+/// - `active_content_type_id` — id of a content type when viewing
+///   `/admin/content/<id>` or `/admin/content?type=<id>`.
+/// - `active_content_view` — one of `"all"`, `"recent"`, `"created_by_me"`,
+///   `"updated_by_me"`, or `"status_<value>"` for sidebar saved-view
+///   filters under the Content section.
+pub fn renderWithLayoutTyped(
+    comptime page_id: []const u8,
+    page_title: []const u8,
+    ctx: *mw.Context,
+    content: []const u8,
+    bottom_bar: []const u8,
+    active_content_type_id: []const u8,
+    active_content_view: []const u8,
+) []const u8 {
     const csrf_token = csrf.ensureToken(ctx);
     const topbar_nav_html = tpl.render(views.components.topbar_nav.TopbarNav, .{.{ .items = comptime registry.topbarNavItems(page_id) }});
     const user_email = auth_middleware.getUserEmail(ctx) orelse "";
@@ -278,9 +305,29 @@ pub fn renderWithLayout(
             buf[i] = .{
                 .href = std.fmt.allocPrint(ctx.allocator, "/admin/content/{s}", .{def.type_id}) catch "/admin/content",
                 .label = def.display_name,
+                .type_id = def.type_id,
             };
         }
         break :blk buf;
+    };
+
+    // Plugin pages rendered in the sidebar's "Plugins" section. Comptime-
+    // collected from `registry.pluginMenuItems()`; we materialize the
+    // matching nav-item shape for the layout component.
+    const PluginNav = views.admin.layout.PluginNav;
+    const plugin_items_src = comptime registry.pluginMenuItems();
+    const plugin_pages = comptime blk: {
+        var arr: [plugin_items_src.len]PluginNav = undefined;
+        for (plugin_items_src, 0..) |it, i| {
+            arr[i] = .{
+                .id = it.id,
+                .href = it.href,
+                .label = it.label,
+                .icon = it.icon,
+            };
+        }
+        const out = arr;
+        break :blk &out;
     };
 
     return tpl.render(views.admin.layout.Layout, .{.{
@@ -294,6 +341,9 @@ pub fn renderWithLayout(
         .current_section = page_id,
         .bottom_bar = bottom_bar,
         .content_types = nav_items,
+        .active_content_type_id = active_content_type_id,
+        .active_content_view = active_content_view,
+        .plugin_pages = plugin_pages,
     }});
 }
 
@@ -345,6 +395,7 @@ pub fn registerPage(comptime opts: anytype) Page {
         .position = if (@hasField(T, "position")) opts.position else 100,
         .parent = if (@hasField(T, "parent")) opts.parent else null,
         .section = if (@hasField(T, "section")) opts.section else null,
+        .menu_section = if (@hasField(T, "menu_section")) opts.menu_section else null,
         .setup = setup_fn,
     };
 }

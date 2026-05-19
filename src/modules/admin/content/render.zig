@@ -29,6 +29,83 @@ pub const SidebarOptions = struct {
     base_url: []const u8 = "",
 };
 
+/// Fallback renderer for fields loaded from the DB (parseFields assigns
+/// a noopRender stub — see db_types.zig). Mirrors the comptime builders'
+/// HTML shape but ignores per-field options (max_length, rows, etc.) that
+/// don't round-trip through the DB schema yet.
+fn renderDefaultField(
+    w: std.io.AnyWriter,
+    fd: field_mod.FieldDef,
+    ctx: field_mod.RenderContext,
+) !void {
+    try field_mod.writeFieldLabelRow(w, ctx, .label_with_for);
+    const value = ctx.value orelse "";
+    const required_attr: []const u8 = if (ctx.required) " required" else "";
+
+    if (std.mem.eql(u8, fd.field_type_id, "text") or std.mem.eql(u8, fd.field_type_id, "richtext")) {
+        try w.print(
+            "  <textarea class=\"form-control\" id=\"{s}\" name=\"{s}\" rows=\"5\"{s}>{s}</textarea>\n</div>\n",
+            .{ ctx.name, ctx.name, required_attr, value },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "boolean")) {
+        const checked: []const u8 = if (std.mem.eql(u8, value, "true")) " checked" else "";
+        try w.print(
+            "  <label class=\"switch-label\"><input type=\"checkbox\" class=\"switch-input\" id=\"{s}\" name=\"{s}\" value=\"true\"{s} /><span class=\"switch-track\" role=\"switch\"><span class=\"switch-thumb\"></span></span></label>\n</div>\n",
+            .{ ctx.name, ctx.name, checked },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "datetime")) {
+        try w.print(
+            "  <input type=\"datetime-local\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
+            .{ ctx.name, ctx.name, value, required_attr },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "integer") or std.mem.eql(u8, fd.field_type_id, "number")) {
+        const step: []const u8 = if (std.mem.eql(u8, fd.field_type_id, "integer")) "1" else "any";
+        try w.print(
+            "  <input type=\"number\" step=\"{s}\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
+            .{ step, ctx.name, ctx.name, value, required_attr },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "email")) {
+        try w.print(
+            "  <input type=\"email\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
+            .{ ctx.name, ctx.name, value, required_attr },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "url")) {
+        try w.print(
+            "  <input type=\"url\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
+            .{ ctx.name, ctx.name, value, required_attr },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "image")) {
+        try w.print(
+            "  <div data-widget=\"media-picker\" data-name=\"{s}\" data-value=\"{s}\">\n" ++
+                "    <input type=\"hidden\" name=\"{s}\" value=\"{s}\" />\n" ++
+                "    <button type=\"button\" class=\"btn btn-sm\">Select image</button>\n" ++
+                "  </div>\n</div>\n",
+            .{ ctx.name, value, ctx.name, value },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "reference")) {
+        try w.print(
+            "  <input type=\"text\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\" placeholder=\"Entry ID\"{s} />\n</div>\n",
+            .{ ctx.name, ctx.name, value, required_attr },
+        );
+    } else if (std.mem.eql(u8, fd.field_type_id, "taxonomy")) {
+        const tax = fd.taxonomy_id orelse fd.name;
+        const many: []const u8 = if (fd.multi) "true" else "false";
+        try w.print(
+            "  <div data-widget=\"taxonomy-picker\" data-taxonomy=\"{s}\" data-many=\"{s}\" data-name=\"{s}\" data-value=\"{s}\">\n" ++
+                "    <input type=\"hidden\" name=\"{s}\" value=\"{s}\" />\n" ++
+                "    <button type=\"button\" class=\"btn btn-sm\">Select {s}</button>\n" ++
+                "  </div>\n</div>\n",
+            .{ tax, many, ctx.name, value, ctx.name, value, fd.display_name },
+        );
+    } else {
+        // string, slug, select, and any unknown type fall back to a text input.
+        try w.print(
+            "  <input type=\"text\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
+            .{ ctx.name, ctx.name, value, required_attr },
+        );
+    }
+}
+
 /// Escape a string for safe use in an HTML attribute value.
 pub fn htmlAttrEscape(allocator: Allocator, input: []const u8) []const u8 {
     var buf: std.ArrayListUnmanaged(u8) = .{};
@@ -111,13 +188,21 @@ pub fn renderFieldsHtml(
     for (def.fields) |fd| {
         if (fd.position == position) {
             const value = fieldMapValueToString(allocator, data.*, fd.name);
-            fd.render(w.any(), .{
+            const ctx = field_mod.RenderContext{
                 .name = fd.name,
                 .display_name = fd.display_name,
                 .value = value,
                 .required = fd.required,
                 .allocator = allocator,
-            }) catch {};
+            };
+            const before = buf.items.len;
+            fd.render(w.any(), ctx) catch {};
+            if (buf.items.len == before) {
+                // The field's render fn produced nothing — typically a
+                // db-loaded FieldDef with a stub renderer. Fall back to
+                // a field_type_id-dispatched default.
+                renderDefaultField(w.any(), fd, ctx) catch {};
+            }
         }
     }
 
@@ -216,15 +301,19 @@ pub fn renderSidebarHtml(
         for (def.fields) |fd| {
             if (fd.position == .side) {
                 const value = fieldMapValueToString(allocator, data.*, fd.name);
-                var field_buf: std.ArrayListUnmanaged(u8) = .{};
-                const fw = field_buf.writer(allocator);
-                fd.render(fw.any(), .{
+                const ctx = field_mod.RenderContext{
                     .name = fd.name,
                     .display_name = fd.display_name,
                     .value = value,
                     .required = fd.required,
                     .allocator = allocator,
-                }) catch {};
+                };
+                var field_buf: std.ArrayListUnmanaged(u8) = .{};
+                const fw = field_buf.writer(allocator);
+                fd.render(fw.any(), ctx) catch {};
+                if (field_buf.items.len == 0) {
+                    renderDefaultField(fw.any(), fd, ctx) catch {};
+                }
                 const field_html = field_buf.toOwnedSlice(allocator) catch "";
                 const patched = injectFormAttr(allocator, field_html, "entry-form");
                 w.writeAll(patched) catch {};

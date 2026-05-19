@@ -82,11 +82,21 @@ pub const Entry = struct {
     edit_url: []const u8,
 };
 
+/// Option for the type-filter dropdown (when `is_type_locked = false`) and
+/// the "Add entry" dropdown (when more than one type is offered).
+pub const TypeOption = struct {
+    label: []const u8,
+    href: []const u8,
+};
+
 /// Top-of-page action menu (visual placeholder — "View" surfaces saved view
 /// presets in Contentful; here it's a stub the user can fill out later).
+/// When `new_options` is non-empty the primary button becomes a dropdown
+/// (one item per content type) instead of a single link.
 fn HeaderActions(props: struct {
     new_url: []const u8,
     new_label: []const u8,
+    new_options: []const TypeOption = &.{},
 }) void {
     <Flex items=.center gap=.sm>
         <DropdownMenu>
@@ -98,7 +108,20 @@ fn HeaderActions(props: struct {
                 <DropdownMenuItem>Save current as new view</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
-        <Button hierarchy=.primary size=.sm icon=.plus label={props.new_label} href={props.new_url} />
+        {if (props.new_options.len > 0) (
+            <DropdownMenu>
+                <DropdownMenuTrigger>
+                    <Button hierarchy=.primary size=.sm icon=.plus label={props.new_label} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    {for (props.new_options) |opt| (
+                        <DropdownMenuItem href={opt.href}>{opt.label}</DropdownMenuItem>
+                    )}
+                </DropdownMenuContent>
+            </DropdownMenu>
+        ) else (
+            <Button hierarchy=.primary size=.sm icon=.plus label={props.new_label} href={props.new_url} />
+        )}
     </Flex>
 }
 
@@ -110,39 +133,45 @@ fn FilterBar(props: struct {
     locked_type_label: []const u8,
     search_query: []const u8,
     search_action: []const u8,
+    type_options: []const TypeOption = &.{},
+    current_type_label: []const u8 = "Any2",
 }) void {
     <Flex
-        items=.center
+        items=.stretch
         gap=.sm
         class="px-3 py-2 bg-card border border-border rounded-full shadow-xs"
     >
-        <span class="text-xs font-medium text-muted-foreground px-2 py-1 bg-muted rounded-full select-none">
-            Content type
-        </span>
-        {if (props.is_type_locked) (
-            <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 bg-primary/10 text-primary rounded-full">
-                {props.locked_type_label}
-            </span>
-        ) else (
-            <DropdownMenu>
-                <DropdownMenuTrigger>
-                    <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 bg-primary text-primary-foreground rounded-full cursor-pointer">
-                        Any
-                        <Icon name=.chevron_down size={12} />
-                    </span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                    <DropdownMenuItem>Any</DropdownMenuItem>
-                </DropdownMenuContent>
-            </DropdownMenu>
-        )}
+        <Flex items=.stretch class="shrink-0">
+            <Flex items=.center class="text-xs font-medium text-muted-foreground pl-3 pr-2 py-1 bg-muted rounded-ss-full rounded-es-full select-none">
+                Content type
+            </Flex>
+            {if (props.is_type_locked) (
+                <Flex items=.center class="inline-flex items-center gap-1 text-xs font-medium pl-2 pr-3 py-1 bg-primary/10 text-primary rounded-se-full rounded-ee-full">
+                    {props.locked_type_label}
+                </Flex>
+            ) else (
+                <DropdownMenu>
+                    <DropdownMenuTrigger>
+                        <Flex display=.inline_flex items=.center gap=.xs class="h-full text-xs font-medium pl-2 pr-3 py-1 bg-primary text-primary-foreground rounded-se-full rounded-ee-full cursor-pointer">
+                            {props.current_type_label}
+                            <Icon name=.chevron_down size={12} />
+                        </Flex>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                        {for (props.type_options) |opt| (
+                            <DropdownMenuItem href={opt.href}>{opt.label}</DropdownMenuItem>
+                        )}
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            )}
+        </Flex>
         <form method="get" action={props.search_action} class="flex-1">
             <input
                 type="search"
                 name="q"
                 value={props.search_query}
                 placeholder="Type to search for entries"
-                class="w-full bg-transparent border-0 outline-none text-sm placeholder:text-muted-foreground"
+                class="w-full h-full bg-transparent border-0 outline-none text-sm placeholder:text-muted-foreground"
             />
         </form>
         <Button hierarchy=.tertiary size=.sm icon=.menu_03 label="Filter" />
@@ -154,6 +183,9 @@ pub fn List(props: struct {
     page_title: []const u8,
     new_url: []const u8,
     new_label: []const u8 = "Add entry",
+    /// When set, "Add entry" renders as a dropdown of these options
+    /// (one per content type) instead of a single link.
+    new_options: []const TypeOption = &.{},
 
     // Filter bar
     is_type_locked: bool = true,
@@ -161,6 +193,11 @@ pub fn List(props: struct {
     search_query: []const u8 = "",
     search_action: []const u8 = "",
     suggested_filters: []const SuggestedFilter = &.{},
+    /// Type picker dropdown items — used only when `is_type_locked = false`.
+    type_options: []const TypeOption = &.{},
+    /// Current type filter label shown in the dropdown trigger
+    /// (e.g. "Any", "Blog Post").
+    current_type_label: []const u8 = "Any",
 
     // Table data
     has_entries: bool,
@@ -174,7 +211,7 @@ pub fn List(props: struct {
     page_urls: []const PageUrl,
 }) {
     <PageHeader title={props.page_title}>
-        <HeaderActions new_url={props.new_url} new_label={props.new_label} />
+        <HeaderActions new_url={props.new_url} new_label={props.new_label} new_options={props.new_options} />
     </PageHeader>
 
     <FilterBar
@@ -182,6 +219,8 @@ pub fn List(props: struct {
         locked_type_label={props.locked_type_label}
         search_query={props.search_query}
         search_action={props.search_action}
+        type_options={props.type_options}
+        current_type_label={props.current_type_label}
     />
 
     {if (props.suggested_filters.len > 0) (

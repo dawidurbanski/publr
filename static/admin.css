@@ -47,8 +47,6 @@ a:not([class]):hover {
     scrollbar-width: thin;
 }
 
-.hidden { display: none !important; }
-
 /* Utility classes not in publr.css (DS doesn't use these) */
 .w-80 { width: 20rem; }
 .w-96 { width: 24rem; }

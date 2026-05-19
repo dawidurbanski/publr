@@ -88,7 +88,7 @@ pub fn listFor(def: *const ContentTypeDef, ctx: *Context) !void {
             .next_page_url = "",
             .page_urls = &[_]views.admin.content.list.PageUrl{},
         }});
-        ctx.html(admin.renderWithLayout(PAGE_ID, def.display_name, ctx, content, ""));
+        ctx.html(admin.renderWithLayoutTyped(PAGE_ID, def.display_name, ctx, content, "", def.type_id, ""));
         return;
     };
 
@@ -178,7 +178,7 @@ pub fn listFor(def: *const ContentTypeDef, ctx: *Context) !void {
         .page_urls = tpl_page_urls,
     }});
 
-    ctx.html(admin.renderWithLayout(PAGE_ID, def.display_name, ctx, content, ""));
+    ctx.html(admin.renderWithLayoutTyped(PAGE_ID, def.display_name, ctx, content, "", def.type_id, ""));
 }
 
 pub fn newFor(def: *const ContentTypeDef, ctx: *Context) !void {
@@ -284,10 +284,15 @@ pub fn editFor(def: *const ContentTypeDef, ctx: *Context) !void {
     });
 
     const display_title = if (entry.title.len > 0) entry.title else "Untitled";
+    const icon_str = def.icon orelse "bookmark";
+    const icon_enum: registry.IconName = std.meta.stringToEnum(registry.IconName, icon_str) orelse .bookmark;
     ctx.html(registry.renderEditPage(root.page, ctx, display_title, form_html, .{
         .back_url = base_url,
         .back_label = def.display_name,
         .sidebar = sidebar_html,
+        .content_type_label = def.display_name,
+        .content_type_url = base_url,
+        .content_type_icon = icon_enum,
     }));
 }
 
@@ -616,36 +621,290 @@ pub fn handleAll(ctx: *Context) !void {
     };
 
     const defs = schema_registry.all();
-    if (defs.len == 0) {
-        const content = tpl.render(views.admin.content.all.AllContent, .{.{
-            .has_types = false,
-            .types = &[_]views.admin.content.all.TypeCard{},
-        }});
-        ctx.html(admin.renderWithLayout(PAGE_ID, "All Content", ctx, content, ""));
-        return;
-    }
+    const base_path: []const u8 = "/admin/content";
 
-    var cards = ctx.allocator.alloc(views.admin.content.all.TypeCard, defs.len) catch {
-        ctx.html("Error allocating memory");
-        return;
+    // ── Filter parsing ──────────────────────────────────────────────────
+    const type_filter: ?*const ContentTypeDef = blk: {
+        const raw = pu.queryParam(ctx.query, "type") orelse break :blk null;
+        if (raw.len == 0) break :blk null;
+        break :blk schema_registry.findById(raw);
     };
-    for (defs, 0..) |def, i| {
-        const count = cms.query.countEntries(db, def.type_id, .{}) catch 0;
-        const count_label = std.fmt.allocPrint(ctx.allocator, "{d} entries", .{count}) catch "0 entries";
-        const list_url = std.fmt.allocPrint(ctx.allocator, "/admin/content/{s}", .{def.type_id}) catch "/admin/content";
-        cards[i] = .{
-            .type_id = def.type_id,
-            .display_name = def.display_name,
-            .display_name_plural = def.display_name_plural,
-            .icon = def.icon orelse "bookmark",
-            .list_url = list_url,
-            .entry_count_label = count_label,
-        };
+    const me_id = auth_middleware.getUserId(ctx);
+    const recent = pu.queryParam(ctx.query, "recent") != null;
+    const created_by_me = blk: {
+        const v = pu.queryParam(ctx.query, "author") orelse break :blk false;
+        break :blk std.mem.eql(u8, v, "me");
+    };
+    const updated_by_me = blk: {
+        const v = pu.queryParam(ctx.query, "editor") orelse break :blk false;
+        break :blk std.mem.eql(u8, v, "me");
+    };
+    const status_filter: ?[]const u8 = blk: {
+        const v = pu.queryParam(ctx.query, "status") orelse break :blk null;
+        if (v.len == 0) break :blk null;
+        break :blk v;
+    };
+
+    // Active sidebar view — first match wins.
+    const active_content_view: []const u8 = blk: {
+        if (recent) break :blk "recent";
+        if (created_by_me) break :blk "created_by_me";
+        if (updated_by_me) break :blk "updated_by_me";
+        if (status_filter) |s| break :blk std.fmt.allocPrint(ctx.allocator, "status_{s}", .{s}) catch "all";
+        break :blk "all";
+    };
+
+    // ── WHERE builder shared by COUNT + SELECT ──────────────────────────
+    // Slot ?1 is LIMIT, ?2 is OFFSET for the row query (unused in COUNT,
+    // but kept off-limits to make the indexing simple). Slot ?3 onward is
+    // for filter binds, in declaration order below.
+    var where: std.ArrayList(u8) = .{};
+    defer where.deinit(ctx.allocator);
+    const ww = where.writer(ctx.allocator);
+
+    const Bind = union(enum) { text: []const u8, int: i64 };
+    var binds: std.ArrayListUnmanaged(Bind) = .{};
+    defer binds.deinit(ctx.allocator);
+
+    // Archived: by default exclude; for ?status=archived include only.
+    const archived_only = if (status_filter) |s| std.mem.eql(u8, s, "archived") else false;
+    if (archived_only) {
+        try ww.writeAll(" AND e.archived = 1");
+    } else {
+        try ww.writeAll(" AND e.archived = 0");
     }
 
-    const content = tpl.render(views.admin.content.all.AllContent, .{.{
-        .has_types = true,
-        .types = cards,
+    if (type_filter) |d| {
+        try ww.print(" AND e.content_type_id = ?{d}", .{binds.items.len + 3});
+        try binds.append(ctx.allocator, .{ .text = d.type_id });
+    }
+
+    if (recent) {
+        const seven_days_ago = std.time.timestamp() - 7 * 86400;
+        try ww.print(" AND e.updated_at >= ?{d}", .{binds.items.len + 3});
+        try binds.append(ctx.allocator, .{ .int = seven_days_ago });
+    }
+
+    if (created_by_me) if (me_id) |uid| {
+        try ww.print(
+            \\ AND EXISTS (SELECT 1 FROM content_versions cv
+            \\             WHERE cv.entry_id = e.id
+            \\             AND cv.version_type = 'created'
+            \\             AND cv.author_id = ?{d})
+        , .{binds.items.len + 3});
+        try binds.append(ctx.allocator, .{ .text = uid });
+    };
+
+    if (updated_by_me) if (me_id) |uid| {
+        try ww.print(
+            \\ AND EXISTS (SELECT 1 FROM content_versions cv
+            \\             WHERE cv.entry_id = e.id
+            \\             AND cv.version_type IN ('updated','published')
+            \\             AND cv.author_id = ?{d})
+        , .{binds.items.len + 3});
+        try binds.append(ctx.allocator, .{ .text = uid });
+    };
+
+    if (status_filter) |s| if (!archived_only) {
+        try ww.print(" AND e.status = ?{d}", .{binds.items.len + 3});
+        try binds.append(ctx.allocator, .{ .text = s });
+    };
+
+    const where_sql = where.items;
+
+    // ── Type-picker dropdown ────────────────────────────────────────────
+    // Each item links back to this page with the `type` query param flipped.
+    const TypeOption = views.admin.content.list.TypeOption;
+    const type_options: []const TypeOption = blk: {
+        const buf = ctx.allocator.alloc(TypeOption, defs.len + 1) catch break :blk &[_]TypeOption{};
+        buf[0] = .{ .label = "Any", .href = base_path };
+        for (defs, 0..) |def, i| {
+            buf[i + 1] = .{
+                .label = def.display_name,
+                .href = std.fmt.allocPrint(ctx.allocator, "{s}?type={s}", .{ base_path, def.type_id }) catch base_path,
+            };
+        }
+        break :blk buf;
+    };
+
+    const current_type_label: []const u8 = if (type_filter) |d| d.display_name else "Any";
+
+    // "Add entry" becomes a dropdown — one item per type.
+    const new_options: []const TypeOption = blk: {
+        const buf = ctx.allocator.alloc(TypeOption, defs.len) catch break :blk &[_]TypeOption{};
+        for (defs, 0..) |def, i| {
+            buf[i] = .{
+                .label = std.fmt.allocPrint(ctx.allocator, "Add {s}", .{def.display_name}) catch def.display_name,
+                .href = std.fmt.allocPrint(ctx.allocator, "{s}/{s}/new", .{ base_path, def.type_id }) catch base_path,
+            };
+        }
+        break :blk buf;
+    };
+
+    // ── COUNT (binds shifted by -2 since LIMIT/OFFSET are skipped) ──────
+    const total_count: u32 = blk: {
+        var count_sql: std.ArrayList(u8) = .{};
+        defer count_sql.deinit(ctx.allocator);
+        const cw = count_sql.writer(ctx.allocator);
+        cw.writeAll("SELECT COUNT(*) FROM content_entries e WHERE 1=1") catch break :blk 0;
+        cw.writeAll(where_sql) catch break :blk 0;
+        var stmt = db.prepare(count_sql.items) catch break :blk 0;
+        defer stmt.deinit();
+        for (binds.items, 0..) |b, i| switch (b) {
+            .text => |t| stmt.bindText(@intCast(i + 3), t) catch break :blk 0,
+            .int => |n| stmt.bindInt(@intCast(i + 3), n) catch break :blk 0,
+        };
+        if (stmt.step() catch false) break :blk @intCast(stmt.columnInt(0));
+        break :blk 0;
+    };
+    const pag = pagination.Paginator.init(ctx.query, total_count, 20);
+
+    const Row = struct {
+        id: []const u8,
+        type_id: []const u8,
+        title: []const u8,
+        status: []const u8,
+        updated_at: i64,
+    };
+
+    var rows: std.ArrayListUnmanaged(Row) = .{};
+    if (total_count > 0) row_block: {
+        var sel_sql: std.ArrayList(u8) = .{};
+        defer sel_sql.deinit(ctx.allocator);
+        const sw = sel_sql.writer(ctx.allocator);
+        sw.writeAll(
+            \\SELECT e.id, e.content_type_id, e.title, e.status, e.updated_at
+            \\FROM content_entries e WHERE 1=1
+        ) catch break :row_block;
+        sw.writeAll(where_sql) catch break :row_block;
+        sw.writeAll(" ORDER BY e.updated_at DESC LIMIT ?1 OFFSET ?2") catch break :row_block;
+
+        var stmt = db.prepare(sel_sql.items) catch break :row_block;
+        defer stmt.deinit();
+        stmt.bindInt(1, @intCast(pag.items_per_page)) catch break :row_block;
+        stmt.bindInt(2, @intCast(pag.offset())) catch break :row_block;
+        for (binds.items, 0..) |b, i| switch (b) {
+            .text => |t| stmt.bindText(@intCast(i + 3), t) catch break :row_block,
+            .int => |n| stmt.bindInt(@intCast(i + 3), n) catch break :row_block,
+        };
+        while (stmt.step() catch false) {
+            const id = stmt.columnText(0) orelse continue;
+            const type_id = stmt.columnText(1) orelse continue;
+            const title = stmt.columnText(2) orelse "";
+            const status = stmt.columnText(3) orelse "draft";
+            rows.append(ctx.allocator, .{
+                .id = ctx.allocator.dupe(u8, id) catch continue,
+                .type_id = ctx.allocator.dupe(u8, type_id) catch continue,
+                .title = ctx.allocator.dupe(u8, title) catch "",
+                .status = ctx.allocator.dupe(u8, status) catch "draft",
+                .updated_at = stmt.columnInt(4),
+            }) catch break;
+        }
+    }
+
+    // Resolve authors for the page's entries.
+    const entry_ids: []const []const u8 = blk: {
+        const buf = ctx.allocator.alloc([]const u8, rows.items.len) catch break :blk &[_][]const u8{};
+        for (rows.items, 0..) |r, i| buf[i] = r.id;
+        break :blk buf;
+    };
+    const all_authors = authors.resolveEntryAuthors(ctx.allocator, db, entry_ids);
+
+    const view_entries: []const ViewEntry = blk_ve: {
+        const buf = ctx.allocator.alloc(ViewEntry, rows.items.len) catch break :blk_ve &[_]ViewEntry{};
+        for (rows.items, 0..) |r, i| {
+            const def_opt = schema_registry.findById(r.type_id);
+            const type_label: []const u8 = if (def_opt) |d| d.display_name else r.type_id;
+            const icon_str: []const u8 = if (def_opt) |d| (d.icon orelse "bookmark") else "bookmark";
+
+            const author_list = authors.findAuthorsForEntry(all_authors, r.id);
+            const last_author: ?AuthorInfo = if (author_list.len > 0) author_list[author_list.len - 1] else null;
+            const author_label: []const u8 = if (last_author) |a| a.label() else "Unknown";
+            const avatar_url: []const u8 = if (last_author) |a| gravatar.url(a.email, 24).slice() else "";
+
+            buf[i] = .{
+                .id = r.id,
+                .name = if (r.title.len > 0) r.title else "(untitled)",
+                .content_type_label = type_label,
+                .content_type_icon = icon_str,
+                .updated_relative = cms.formatRelativeTime(ctx.allocator, r.updated_at) catch "Unknown",
+                .author_name = author_label,
+                .author_avatar_url = avatar_url,
+                .status = r.status,
+                .edit_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}/{s}", .{ base_path, r.type_id, r.id }) catch base_path,
+            };
+        }
+        break :blk_ve buf;
+    };
+
+    // Preserve all active filters in the pagination/search URL so they
+    // survive page jumps and search submits.
+    const pag_base = blk: {
+        var qs: std.ArrayList(u8) = .{};
+        const qw = qs.writer(ctx.allocator);
+        qw.writeAll(base_path) catch break :blk base_path;
+        var first = true;
+        const append = struct {
+            fn f(buf: *std.ArrayList(u8), alloc: Allocator, is_first: *bool, kv: []const u8) void {
+                buf.appendSlice(alloc, if (is_first.*) "?" else "&") catch return;
+                buf.appendSlice(alloc, kv) catch return;
+                is_first.* = false;
+            }
+        }.f;
+        if (type_filter) |d| {
+            const kv = std.fmt.allocPrint(ctx.allocator, "type={s}", .{d.type_id}) catch break :blk base_path;
+            append(&qs, ctx.allocator, &first, kv);
+        }
+        if (recent) append(&qs, ctx.allocator, &first, "recent=1");
+        if (created_by_me) append(&qs, ctx.allocator, &first, "author=me");
+        if (updated_by_me) append(&qs, ctx.allocator, &first, "editor=me");
+        if (status_filter) |s| {
+            const kv = std.fmt.allocPrint(ctx.allocator, "status={s}", .{s}) catch break :blk base_path;
+            append(&qs, ctx.allocator, &first, kv);
+        }
+        break :blk qs.toOwnedSlice(ctx.allocator) catch base_path;
+    };
+    const page_urls = pag.buildTruncatedPageUrls(ctx.allocator, pag_base);
+    const total_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{total_count}) catch "0";
+
+    const TplPageUrl = views.admin.content.list.PageUrl;
+    const tpl_page_urls = blk: {
+        const buf = ctx.allocator.alloc(TplPageUrl, page_urls.items.len) catch break :blk &[_]TplPageUrl{};
+        for (page_urls.items, 0..) |pu_item, i| {
+            buf[i] = .{
+                .page_num = pu_item.page_num,
+                .url = pu_item.url,
+                .is_current = pu_item.is_current,
+                .is_ellipsis = pu_item.is_ellipsis,
+            };
+        }
+        break :blk @as([]const TplPageUrl, buf);
+    };
+
+    const search_query = pu.queryParam(ctx.query, "q") orelse "";
+
+    const content = tpl.render(views.admin.content.list.List, .{.{
+        .page_title = "All Content",
+        .new_url = base_path,
+        .new_label = "Add entry",
+        .new_options = new_options,
+        .is_type_locked = false,
+        .current_type_label = current_type_label,
+        .type_options = type_options,
+        .search_query = search_query,
+        .search_action = base_path,
+        .has_entries = view_entries.len > 0,
+        .entries = view_entries,
+        .total_count = total_count_str,
+        .total_pages = pag.total_pages,
+        .prev_page_url = page_urls.prev_url,
+        .next_page_url = page_urls.next_url,
+        .page_urls = tpl_page_urls,
     }});
-    ctx.html(admin.renderWithLayout(PAGE_ID, "All Content", ctx, content, ""));
+
+    // The `?type=` filter on /admin/content is a dropdown refinement of the
+    // "All content" view, not a navigation to the type's own list — so the
+    // sidebar's content-type item stays inactive here. Only the path-based
+    // /admin/content/<type> route (handled by `listFor`) lights it up.
+    ctx.html(admin.renderWithLayoutTyped(PAGE_ID, "All Content", ctx, content, "", "", active_content_view));
 }
