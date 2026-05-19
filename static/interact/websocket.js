@@ -14,6 +14,15 @@ function getUrl() {
 }
 
 function doConnect() {
+    // No native WS server at this origin when the admin is running inside
+    // the WASM dev shell (browser/index.html). `window.cms` is the runtime
+    // surface set by cms-runtime.js after init — its presence means we're
+    // a WASM replica, not a native publr admin tab. Presence (field
+    // locks, takeover, etc.) is a native-server feature; skip the connect
+    // attempt rather than spam the console with reconnect failures.
+    if (typeof window !== 'undefined' && window.cms) {
+        return;
+    }
     ws = new WebSocket(getUrl());
 
     ws.onopen = () => {

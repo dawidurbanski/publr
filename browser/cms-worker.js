@@ -6,6 +6,101 @@ let wasmBytes = null;
 const DB_FILENAME = 'cms.sqlite';
 
 // =============================================================================
+// Sync transport (cr-sqlite changeset relay over WebSocket)
+// =============================================================================
+// The worker maintains its own WebSocket to /admin/ws, separate from the
+// main-thread presence socket. cr-sqlite emits a JSON array on every
+// saveEntry via the `env.js_sync_send` import; we wrap it in a
+// `sync_changes` envelope and forward to the server, which rebroadcasts
+// to every other connected replica. Inbound `sync_changes` frames are
+// pushed back into WASM via cms_apply_remote_changeset.
+
+let syncWs = null;
+let syncWsReady = false;
+let syncWsUrl = null;
+let syncToken = null;
+let opfsSaveTimer = null;
+
+function defaultSyncWsUrl() {
+    const protocol = self.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${self.location.host}/admin/ws`;
+}
+
+function connectSyncWs() {
+    if (syncWs) return;
+    let url = syncWsUrl || defaultSyncWsUrl();
+    if (syncToken) {
+        // Token-auth endpoint lives at `/admin/ws/sync`. If the user-
+        // configured URL points at `/admin/ws` (the cookie-auth endpoint),
+        // auto-correct it — that's the cross-origin path and `/admin/ws`
+        // doesn't accept tokens. Save one round of "why doesn't it
+        // connect" debugging.
+        try {
+            const u = new URL(url);
+            if (u.pathname === '/admin/ws') {
+                u.pathname = '/admin/ws/sync';
+                url = u.toString();
+            }
+        } catch (_) { /* relative URL or junk — leave it alone */ }
+        const sep = url.includes('?') ? '&' : '?';
+        url += `${sep}sync_token=${encodeURIComponent(syncToken)}`;
+    }
+    try {
+        syncWs = new WebSocket(url);
+    } catch (e) {
+        console.warn('[Worker] WS create failed:', e);
+        syncWs = null;
+        setTimeout(connectSyncWs, 3000);
+        return;
+    }
+    syncWs.addEventListener('open', () => {
+        syncWsReady = true;
+        console.log('[Worker] Sync WS connected');
+        // Emit this replica's full state so the relay (and any other
+        // connected replicas) catch up on whatever was saved locally
+        // while we were offline / before this WASM blob was built.
+        if (wasmInstance && wasmInstance.exports.cms_emit_full_sync_state) {
+            wasmInstance.exports.cms_emit_full_sync_state();
+        }
+    });
+    syncWs.addEventListener('message', (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'sync_changes' && typeof msg.data === 'string') {
+                applyRemoteChangeset(msg.data);
+            }
+        } catch (e) {
+            // ignore malformed
+        }
+    });
+    syncWs.addEventListener('close', () => {
+        syncWsReady = false;
+        syncWs = null;
+        setTimeout(connectSyncWs, 3000);
+    });
+    syncWs.addEventListener('error', () => {
+        // close handler does the reconnect
+    });
+}
+
+function applyRemoteChangeset(jsonString) {
+    if (!wasmInstance || !wasmInstance.exports.cms_apply_remote_changeset) return;
+    const b = writeString(jsonString);
+    const rc = wasmInstance.exports.cms_apply_remote_changeset(b.ptr, b.len);
+    if (b.len > 0) wasmInstance.exports.wasm_free(b.ptr, b.len);
+    if (rc !== 0) console.warn('[Worker] cms_apply_remote_changeset failed:', rc);
+    scheduleOpfsSave();
+}
+
+function scheduleOpfsSave() {
+    if (opfsSaveTimer) clearTimeout(opfsSaveTimer);
+    opfsSaveTimer = setTimeout(() => {
+        opfsSaveTimer = null;
+        ops.save?.();
+    }, 250);
+}
+
+// =============================================================================
 // OPFS
 // =============================================================================
 
@@ -120,16 +215,33 @@ const wasiStubs = {
     sock_accept: () => 0, sock_recv: () => 0, sock_send: () => 0, sock_shutdown: () => 0, poll_oneoff: () => 0,
 };
 
+// `env` namespace — WASM-side imports for the cr-sqlite sync transport.
+const envImports = {
+    js_sync_send: (ptr, len) => {
+        if (!syncWsReady || !syncWs) return;
+        if (!len) return;
+        const mem = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
+        const payload = new TextDecoder().decode(mem);
+        try {
+            syncWs.send(JSON.stringify({ type: 'sync_changes', data: payload }));
+        } catch (e) {
+            console.warn('[Worker] WS send failed:', e);
+        }
+    },
+};
+
 // =============================================================================
 // Operations
 // =============================================================================
 
 const ops = {
-    async init(wasmUrl) {
+    async init(wasmUrl, configuredSyncWsUrl, configuredSyncToken) {
+        syncWsUrl = (configuredSyncWsUrl && configuredSyncWsUrl.length > 0) ? configuredSyncWsUrl : null;
+        syncToken = (configuredSyncToken && configuredSyncToken.length > 0) ? configuredSyncToken : null;
         wasmBytes = await (await fetch(wasmUrl)).arrayBuffer();
         const { instance } = await WebAssembly.instantiate(
             wasmBytes,
-            { wasi_snapshot_preview1: wasiStubs }
+            { wasi_snapshot_preview1: wasiStubs, env: envImports }
         );
         wasmInstance = instance;
         wasmInstance.exports._start?.();
@@ -143,6 +255,7 @@ const ops = {
             if (b.len > 0) wasmInstance.exports.wasm_free(b.ptr, b.len);
             if (imported === 0) {
                 console.log('[Worker] Restored from OPFS (' + saved.length + ' bytes)');
+                connectSyncWs();
                 return { success: true, restored: true };
             }
             console.warn('[Worker] OPFS restore failed, starting fresh');
@@ -150,6 +263,7 @@ const ops = {
 
         if (wasmInstance.exports.cms_init() !== 0) throw new Error('Init failed');
         console.log('[Worker] Fresh database');
+        connectSyncWs();
         return { success: true, restored: false };
     },
 
@@ -234,7 +348,7 @@ const ops = {
         // Re-instantiate WASM completely (bypasses cms_init guard)
         const { instance } = await WebAssembly.instantiate(
             wasmBytes,
-            { wasi_snapshot_preview1: wasiStubs }
+            { wasi_snapshot_preview1: wasiStubs, env: envImports }
         );
         wasmInstance = instance;
         wasmInstance.exports._start?.();

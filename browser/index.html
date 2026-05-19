@@ -44,6 +44,69 @@
         // Global delegation: catch submit on dynamically created forms too
         document.addEventListener('submit', handleFormSubmit);
 
+        // Route /admin/* fetch() calls through the WASM CMS. admin.js does
+        // direct `fetch('/admin/action', ...)` for autosave and similar AJAX
+        // — in the dev shell those would hit the static dev server (405).
+        // Same for XMLHttpRequest, patched below.
+        const _origFetch = window.fetch.bind(window);
+        window.fetch = async function(input, init) {
+            const urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+            const isAdminLocal = urlStr.startsWith('/admin') ||
+                urlStr.startsWith(location.origin + '/admin');
+            if (cms && isAdminLocal) {
+                const url = new URL(urlStr, location.origin);
+                const path = url.pathname + url.search;
+                const method = (init && init.method) || 'GET';
+                let body = '';
+                if (init && init.body != null) {
+                    body = typeof init.body === 'string' ? init.body : String(init.body);
+                }
+                const res = await cms.request(method, path, body);
+                const trimmed = (res.body || '').trimStart();
+                const ct = (trimmed.startsWith('{') || trimmed.startsWith('['))
+                    ? 'application/json' : 'text/html; charset=utf-8';
+                return new Response(res.body, {
+                    status: res.status || 200,
+                    headers: { 'Content-Type': ct },
+                });
+            }
+            return _origFetch(input, init);
+        };
+
+        // Mirror for XMLHttpRequest. admin.js still has one XHR path
+        // (media upload fallback) that hits /admin/action when
+        // cms.requestBinary isn't wired up — keep it functional for the
+        // dev shell by routing through cms.request.
+        const _XHROpen = XMLHttpRequest.prototype.open;
+        const _XHRSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url) {
+            this._publr = { method, url: String(url) };
+            return _XHROpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function(body) {
+            const ctx = this._publr;
+            if (cms && ctx && (ctx.url.startsWith('/admin') ||
+                ctx.url.startsWith(location.origin + '/admin'))) {
+                const xhr = this;
+                const u = new URL(ctx.url, location.origin);
+                const path = u.pathname + u.search;
+                cms.request(ctx.method, path, typeof body === 'string' ? body : '')
+                    .then(res => {
+                        Object.defineProperty(xhr, 'readyState', { value: 4, configurable: true });
+                        Object.defineProperty(xhr, 'status', { value: res.status || 200, configurable: true });
+                        Object.defineProperty(xhr, 'responseText', { value: res.body || '', configurable: true });
+                        Object.defineProperty(xhr, 'response', { value: res.body || '', configurable: true });
+                        xhr.onreadystatechange && xhr.onreadystatechange();
+                        xhr.onload && xhr.onload();
+                    })
+                    .catch(() => {
+                        xhr.onerror && xhr.onerror();
+                    });
+                return;
+            }
+            return _XHRSend.apply(this, arguments);
+        };
+
         let headSynced = false;
 
         // On first response from the WASM, copy the layout.zsx-rendered <head>

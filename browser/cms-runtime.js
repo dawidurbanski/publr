@@ -22,7 +22,12 @@ export async function initCMS(wasmUrl = '/cms.wasm') {
         }
     };
 
-    await call('init', wasmUrl);
+    // Optional overrides for sync transport. Both set by the cr-sqlite
+    // settings page (Plugins > Sync). Empty / missing → worker uses
+    // same-origin /admin/ws (cookie auth) instead of /admin/ws/sync.
+    const syncWsUrl = localStorage.getItem('publr.crsqlite.ws_url') || '';
+    const syncToken = localStorage.getItem('publr.crsqlite.sync_token') || '';
+    await call('init', wasmUrl, syncWsUrl, syncToken);
 
     // Restore session from localStorage
     const token = localStorage.getItem('cms_session');
