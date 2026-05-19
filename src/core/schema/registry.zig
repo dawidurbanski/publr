@@ -122,6 +122,7 @@ pub const RegisterError = error{
 /// during boot.
 pub fn init(allocator: std.mem.Allocator) void {
     if (runtime_state) |*s| {
+        for (s.order.items) |def| s.allocator.destroy(def);
         s.by_id.deinit(s.allocator);
         s.order.deinit(s.allocator);
     }
@@ -132,10 +133,12 @@ pub fn init(allocator: std.mem.Allocator) void {
     };
 }
 
-/// Tear the registry down. Frees the index but not the descriptor values —
-/// those are typically static (compile-in) or owned by the caller (DB-loaded).
+/// Tear the registry down. Frees the per-entry `ContentTypeDef` copies
+/// allocated by `register`, plus the hashmap/array index storage. The
+/// descriptor *fields* (strings, etc.) are not owned by the registry.
 pub fn deinit() void {
     if (runtime_state) |*s| {
+        for (s.order.items) |def| s.allocator.destroy(def);
         s.by_id.deinit(s.allocator);
         s.order.deinit(s.allocator);
         runtime_state = null;
