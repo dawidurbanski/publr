@@ -1,17 +1,18 @@
-// Edit layout — no left sidebar, topbar with logo, back nav bar, right sidebar shell
+// Edit layout — dashboard chrome (admin-shell + admin-card), no left sidebar.
+// The card splits into a wide editor on the left and a metadata sidebar on the right.
 
 const ui = @import("publr_ui");
 const Icon = ui.icon.Icon;
 const IconName = ui.icon.Name;
-const Size = ui.icon.Size;
-const Button = ui.button.Button;
 const Flex = ui.flex.Flex;
-const Heading = ui.heading.Heading;
-const DropdownMenu = ui.dropdown.DropdownMenu;
-const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
-const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
-const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
-const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
+const ToastRegion = ui.toast.ToastRegion;
+const TooltipProvider = ui.tooltip.TooltipProvider;
+const Breadcrumb = ui.breadcrumbs.Breadcrumb;
+const BreadcrumbList = ui.breadcrumbs.BreadcrumbList;
+const BreadcrumbItem = ui.breadcrumbs.BreadcrumbItem;
+const BreadcrumbLink = ui.breadcrumbs.BreadcrumbLink;
+const BreadcrumbPage = ui.breadcrumbs.BreadcrumbPage;
+const BreadcrumbSeparator = ui.breadcrumbs.BreadcrumbSeparator;
 
 pub fn LayoutEdit(props: struct {
     title: []const u8,
@@ -21,80 +22,99 @@ pub fn LayoutEdit(props: struct {
     user_gravatar_url: []const u8,
     back_url: []const u8,
     sidebar: []const u8 = "",
+    content_type_label: []const u8 = "",
+    content_type_url: []const u8 = "",
+    content_type_icon: IconName = .bookmark,
 }) {
     <!DOCTYPE html>
-    <html>
+    <html class="dark h-full">
         <head>
             <meta charset="utf-8" />
-            <meta
-                name="viewport"
-                content="width=device-width, initial-scale=1"
-            />
+            <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
             <title>{props.title} - Publr Admin</title>
             <link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
+            <link rel="stylesheet" href="/static/tokens.css" />
             <link rel="stylesheet" href="/static/publr.css" />
             <link rel="stylesheet" href="/static/admin.css" />
+            <style>{@raw ".theme-toggle-sun{display:none}.dark .theme-toggle-sun{display:block}.dark .theme-toggle-moon{display:none}"}</style>
+            <style>{@raw ":root{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(181,207,210,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(197,204,184,0.35) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(224,207,163,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(221,208,171,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(200,196,168,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(168,191,194,0.4) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(184,176,138,0.4) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(200,192,160,0.3) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(213,207,192,0.35) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(237,220,184,0.35) 0%, transparent 65%),#f6f4f1;}.dark{--admin-shell-bg:radial-gradient(ellipse 70% 65% at 10% 10%, rgba(40,65,68,0.5) 0%, transparent 70%),radial-gradient(ellipse 55% 55% at 45% 8%, rgba(50,55,42,0.4) 0%, transparent 70%),radial-gradient(ellipse 65% 60% at 85% 12%, rgba(80,65,35,0.5) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 80% 45%, rgba(70,58,30,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 50% 50%, rgba(55,52,38,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 15% 45%, rgba(35,55,58,0.45) 0%, transparent 70%),radial-gradient(ellipse 55% 50% at 12% 88%, rgba(50,46,28,0.45) 0%, transparent 70%),radial-gradient(ellipse 50% 45% at 45% 90%, rgba(45,42,30,0.35) 0%, transparent 70%),radial-gradient(ellipse 50% 50% at 82% 85%, rgba(48,44,35,0.4) 0%, transparent 70%),radial-gradient(ellipse 35% 35% at 70% 25%, rgba(90,72,35,0.4) 0%, transparent 65%),#141310;}body.admin{background:var(--admin-shell-bg)}.admin-shell-edit{padding:max(0.375rem,env(safe-area-inset-top)) max(0.375rem,env(safe-area-inset-right)) max(0.375rem,env(safe-area-inset-bottom)) max(0.375rem,env(safe-area-inset-left));height:100dvh;}.admin-card{border-radius:0.75rem;}"}</style>
+            <script>
+                {@raw "(function(){var t=localStorage.getItem('publr-theme');if(t==='light')document.documentElement.classList.remove('dark');else if(t==='dark')document.documentElement.classList.add('dark');})();"}
+            </script>
         </head>
-        <body class="admin admin-edit">
-            <header class="border-b border-border bg-muted/40">
-                <div class="px-4 py-3">
-                    <Flex justify=.between items=.center>
-                        <a href="/admin" class="text-foreground no-underline hover:no-underline" aria-label="Publr">
-                            <svg fill="none" viewBox="0 0 42 48" xmlns="http://www.w3.org/2000/svg" width="28" height="32" aria-hidden="true">
-                                <path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="currentColor" fill-rule="evenodd" />
-                            </svg>
-                        </a>
-                        <Flex gap=.sm items=.center>
-                            <Button hierarchy=.tertiary size=.sm label="" icon=.settings href="/admin/settings" />
-                            <DropdownMenu>
-                                <DropdownMenuTrigger>
-                                    <button class="avatar-trigger" aria-label="User menu">
-                                        <img src={props.user_gravatar_url} alt="" class="avatar-img" />
-                                    </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                    <DropdownMenuItem href="/admin/users/profile">Profile</DropdownMenuItem>
-                                    <DropdownMenuItem href="/admin/settings">Settings</DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <form method="POST" action="/admin/logout">
-                                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                        <DropdownMenuItem>Logout</DropdownMenuItem>
-                                    </form>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </Flex>
-                    </Flex>
-                </div>
-                <nav class="topbar-nav">
-                    {@raw props.topbar_nav_html}
-                </nav>
-            </header>
-            <div class="flex flex-1 min-h-0">
-                <div class="flex-1 min-w-0 flex flex-col overflow-y-auto">
-                    <div class="px-4 py-3">
-                        <Flex justify=.between items=.center>
-                            <Flex gap=.md items=.center>
-                                <a href={props.back_url} class="text-muted-foreground hover:text-foreground no-underline" aria-label="Back">
-                                    <Icon name={IconName.arrow_left} size={Size.md} />
-                                </a>
-                                <Heading level=.h1 size=.lg>{props.title}</Heading>
+        <body class="h-full text-foreground admin">
+            <TooltipProvider>
+                <div class="admin-shell-edit">
+                    <div class="admin-card h-full flex flex-col bg-background border border-border shadow-xs overflow-hidden">
+                        <header class="sticky top-0 z-40 h-12 shrink-0 flex items-center gap-2 sm:gap-3 border-b border-border px-3 sm:px-4 lg:px-6">
+                            <a href={props.back_url}
+                               class="inline-flex items-center justify-center p-1.5 -ml-1 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground no-underline"
+                               aria-label="Back">
+                                <Icon name={IconName.arrow_left} size={16} />
+                            </a>
+                            <div class="flex-1 min-w-0">
+                                {if (props.content_type_label.len > 0) (
+                                    <Breadcrumb>
+                                        <BreadcrumbList>
+                                            <BreadcrumbItem>
+                                                <BreadcrumbLink href={props.content_type_url} class="inline-flex items-center gap-1.5">
+                                                    <Icon name={props.content_type_icon} size={14} class="shrink-0" />
+                                                    {props.content_type_label}
+                                                </BreadcrumbLink>
+                                            </BreadcrumbItem>
+                                            <BreadcrumbSeparator />
+                                            <BreadcrumbItem>
+                                                <BreadcrumbPage class="truncate">{props.title}</BreadcrumbPage>
+                                            </BreadcrumbItem>
+                                        </BreadcrumbList>
+                                    </Breadcrumb>
+                                ) else (
+                                    <span class="text-sm font-medium text-foreground truncate">{props.title}</span>
+                                )}
+                            </div>
+                            <div id="presence-users" class="flex items-center"></div>
+                            <Flex items=.center class="hidden sm:flex gap-1.5 text-xs text-muted-foreground">
+                                <span class="w-1.5 h-1.5 rounded-full bg-success inline-block"></span>
+                                <span>Saved</span>
                             </Flex>
-                            <div id="presence-users"></div>
-                        </Flex>
+                            <button
+                                type="button"
+                                id="theme-toggle"
+                                aria-label="Toggle theme"
+                                class="ml-1.5 inline-flex items-center justify-center bg-transparent border-0 p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                            >
+                                <Icon name={IconName.sun} size={14} class="theme-toggle-sun" />
+                                <Icon name={IconName.moon} size={14} class="theme-toggle-moon" />
+                            </button>
+                        </header>
+
+                        <div class="flex-1 min-h-0 flex overflow-hidden">
+                            <main class="flex-1 min-w-0 overflow-y-auto">
+                                <div class="max-w-3xl mx-auto px-5 sm:px-7 lg:px-10 py-6 lg:py-8">
+                                    {@raw props.content}
+                                </div>
+                            </main>
+                            <aside class="w-80 shrink-0 border-l border-border bg-background/40 overflow-y-auto flex flex-col">
+                                {@raw props.sidebar}
+                            </aside>
+                        </div>
                     </div>
-                    <main class="flex-1 flex justify-center p-8">
-                        {@raw props.content}
-                    </main>
                 </div>
-                <aside class="w-80 shrink-0 border-l border-border bg-background overflow-y-auto flex flex-col">
-                    {@raw props.sidebar}
-                </aside>
-            </div>
+            </TooltipProvider>
+
+            <ToastRegion />
             <script type="module" src="/static/publr-core.js"></script>
+            <script type="module" src="/static/publr-portal.js"></script>
+            <script type="module" src="/static/publr-position.js"></script>
+            <script type="module" src="/static/publr-toast.js"></script>
+            <script type="module" src="/static/publr-tooltip.js"></script>
             <script type="module" src="/static/interact/index.js"></script>
             <script type="module" src="/static/interact/presence.js"></script>
             <script src="/static/admin.js"></script>
             <script src="/static/media-selection.js"></script>
+            <script>
+                {@raw "document.getElementById('theme-toggle').addEventListener('click',function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('publr-theme',d?'dark':'light');});"}
+            </script>
         </body>
     </html>
 }
