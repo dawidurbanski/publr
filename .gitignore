@@ -11,3 +11,4 @@ browser/node_modules/
 *.wasm
 .publr/
 output
+plugins/
