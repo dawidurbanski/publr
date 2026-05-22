@@ -264,6 +264,11 @@ pub fn build(b: *std.Build) void {
     const schema_registry_module = reg.simple("schema_registry", "src/core/schema/registry.zig", &.{ "field", "content_type", "schemas", "compiled_in_content_types" });
     const seed_module = reg.simple("seed", "src/core/schema/seed.zig", &.{ "schema_registry", "field", "db" });
 
+    // Editor plugins registry. Content types declare which editor renders
+    // their entry edit page via `ContentTypeDef.editor` (default "form").
+    // Built-ins live in src/editors.zig; route dispatch lands in task-03.
+    _ = reg.simple("editors", "src/editors.zig", &.{ "middleware", "content_type" });
+
     // Shared leaves (no deps)
     _ = reg.leaf("url", "src/url.zig");
     const mime_module = reg.leaf("mime", "src/mime.zig");
@@ -421,6 +426,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "pagination", .module = pagination_module },
         .{ .name = "publr_config", .module = publr_config_module },
         .{ .name = "schema_registry", .module = schema_registry_module },
+        .{ .name = "editors", .module = reg.get("editors") },
     };
     const plugins = plugins_mod.load(b, &.{ "src/modules/admin", "plugins" }, &plugin_imports);
 
@@ -461,6 +467,11 @@ pub fn build(b: *std.Build) void {
     admin_api_module.addImport("auth_middleware", auth_middleware_module);
     admin_api_module.addImport("gravatar", gravatar_module);
     admin_api_module.addImport("registry", registry_module);
+
+    // Editors registry aggregates plugin-registered editors via the plugin
+    // manifest. Post-hoc import because plugins.load runs later than the
+    // schema-section module registration where `editors` is first created.
+    reg.get("editors").addImport("plugin_registry", plugins.manifest_module);
 
     // Plugin-facing modules that depend on the auto-discovered plugin
     // manifest (built after plugins.load() so the manifest exists).
@@ -617,7 +628,7 @@ pub fn build(b: *std.Build) void {
         "middleware", "schema_media", "seed",            "storage",         "svg_sanitize",
         "tpl",        "actions",      "content_actions", "schema_registry", "schema_db_types",
         "schemas",    "save_hooks",   "db_open_hooks",   "sync_transport",
-        "apply_remote_hooks", "sync_catchup_hooks",
+        "apply_remote_hooks", "sync_catchup_hooks", "editors",
     });
     reg.attachAll(exe.root_module, &.{
         "views",             "admin_api",       "auth",             "auth_middleware", "cms",
@@ -633,6 +644,7 @@ pub fn build(b: *std.Build) void {
         "websocket",         "presence",        "schema_db_types", "db_path",
         "save_hooks",        "db_open_hooks",   "sync_transport",  "sync_token",
         "apply_remote_hooks", "sync_catchup_hooks", "plugin_utils",
+        "editors",
     });
 
     // Add plugin modules to main exe
@@ -690,6 +702,7 @@ pub fn build(b: *std.Build) void {
         "field",             "content_type", "schema_registry", "field_types",
         "db_path",           "save_hooks",   "db_open_hooks",   "sync_transport",
         "sync_token",        "apply_remote_hooks", "sync_catchup_hooks",
+        "editors",
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
@@ -767,6 +780,44 @@ pub fn build(b: *std.Build) void {
     vendors.linkStaticLibs(storage_tests, native_vendor_opts);
     const run_storage_tests = b.addRunArtifact(storage_tests);
 
+    // Editor registry tests. Wrapper file at `src/tests/editors_tests.zig`
+    // rather than editors.zig itself, because editors.zig is referenced by
+    // the plugin manifest (each plugin imports `editors`), so using it as a
+    // test root would put the same file in two modules. See the wrapper's
+    // header for context.
+    const editors_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/editors_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "editors", .module = reg.get("editors") },
+                .{ .name = "middleware", .module = reg.get("middleware") },
+                .{ .name = "content_type", .module = reg.get("content_type") },
+            },
+        }),
+    });
+    // Plugin tree (incl. gutenberg) transitively pulls in cms → sqlite,
+    // so link the vendor libs to the test binary the same way storage_tests does.
+    vendors.addAll(b, editors_tests, native_vendor_opts);
+    vendors.linkStaticLibs(editors_tests, native_vendor_opts);
+    const run_editors_tests = b.addRunArtifact(editors_tests);
+
+    // Editor asset-serving route tests — dedicated target for the same
+    // reason as editors_tests (test root must reach the file via imports).
+    const editor_assets_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/http_handlers/editor_assets.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "router", .module = reg.get("router") },
+                .{ .name = "editors", .module = reg.get("editors") },
+            },
+        }),
+    });
+    const run_editor_assets_tests = b.addRunArtifact(editor_assets_tests);
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_core_tests.step);
@@ -776,6 +827,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publr_preprocess_tests.step);
     test_step.dependOn(&run_publr_routes_tests.step);
     test_step.dependOn(&run_storage_tests.step);
+    test_step.dependOn(&run_editors_tests.step);
+    test_step.dependOn(&run_editor_assets_tests.step);
 
     // Verify step: runs all tests + WASM build.
     const verify_step = b.step("verify", "Run tests and verify WASM build");
@@ -798,6 +851,7 @@ pub fn build(b: *std.Build) void {
         .admin_api = admin_api_module,
         .registry = registry_module,
         .route_match = route_match_module,
+        .editors = reg.get("editors"),
         .plugins = plugins.plugins,
         .schema_sql_path = b.path(if (plugin_prescan.requires_loose_schema)
             "src/core/schema/content_schema_loose.sql"

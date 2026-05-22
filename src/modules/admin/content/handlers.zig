@@ -17,6 +17,7 @@ const gravatar = @import("gravatar");
 const pagination = @import("pagination");
 const pu = @import("plugin_utils");
 const Context = @import("middleware").Context;
+const editors = @import("editors");
 
 const authors = @import("authors.zig");
 const parse = @import("parse.zig");
@@ -205,6 +206,14 @@ pub fn newFor(def: *const ContentTypeDef, ctx: *Context) !void {
 }
 
 pub fn editFor(def: *const ContentTypeDef, ctx: *Context) !void {
+    // Non-form editors dispatch through the editor registry. The "form"
+    // editor keeps the existing per-field rendering path inline below —
+    // task-03 leaves the form path hardcoded since no non-form content
+    // type exists yet. Task-05+ will register Gutenberg via the registry.
+    if (!std.mem.eql(u8, def.editor, "form")) {
+        return editForViaRegistry(def, ctx);
+    }
+
     const root = @import("main.zig");
     const base_url = baseUrlFor(ctx.allocator, def);
     const db = if (auth_middleware.auth) |a| a.db else {
@@ -287,6 +296,104 @@ pub fn editFor(def: *const ContentTypeDef, ctx: *Context) !void {
     const icon_str = def.icon orelse "bookmark";
     const icon_enum: registry.IconName = std.meta.stringToEnum(registry.IconName, icon_str) orelse .bookmark;
     ctx.html(registry.renderEditPage(root.page, ctx, display_title, form_html, .{
+        .back_url = base_url,
+        .back_label = def.display_name,
+        .sidebar = sidebar_html,
+        .content_type_label = def.display_name,
+        .content_type_url = base_url,
+        .content_type_icon = icon_enum,
+    }));
+}
+
+/// Edit-page dispatch for non-form editors. Looks up `def.editor` in the
+/// registry, calls the editor's `bootstrap` to produce the main-pane HTML,
+/// and wraps it in admin chrome including the same sidebar (publish/discard
+/// buttons, sidebar fields, version history, releases) as the form editor.
+/// Unknown editor id → 404.
+fn editForViaRegistry(def: *const ContentTypeDef, ctx: *Context) !void {
+    const root = @import("main.zig");
+    const base_url = baseUrlFor(ctx.allocator, def);
+    const db = if (auth_middleware.auth) |a| a.db else {
+        redirect(ctx, base_url);
+        return;
+    };
+
+    const entry_id = ctx.param("id") orelse {
+        redirect(ctx, base_url);
+        return;
+    };
+
+    var entry = cms.query.getEntry(ctx.allocator, db, def.type_id, entry_id) catch {
+        redirect(ctx, base_url);
+        return;
+    } orelse {
+        return render.notFound(ctx);
+    };
+    defer entry.deinit(ctx.allocator);
+
+    const editor = editors.get(def.editor) orelse {
+        // Unknown editor id declared on the content type. Surface a 404 —
+        // the schema-side validation should be tightened later to fail at
+        // build time, but for v0 a clear runtime error is enough.
+        return render.notFound(ctx);
+    };
+
+    // Mirror the same chrome setup the form editor uses so the sidebar
+    // (publish/discard/sidebar-fields/history/releases) renders identically.
+    // The only thing that changes is the main pane — editor's bootstrap.
+    const csrf_token = csrf.ensureToken(ctx);
+    const delete_url = std.fmt.allocPrint(ctx.allocator, "{s}/{s}/delete", .{ base_url, entry.id }) catch base_url;
+
+    const history_html = editor_json.buildVersionHistoryHtml(ctx.allocator, db, entry.id, base_url) catch "";
+
+    const pending_releases = cms.listPendingReleases(ctx.allocator, db) catch &.{};
+    const entry_rel_ids = cms.getEntryPendingReleaseIds(ctx.allocator, db, entry.id) catch &.{};
+    const ReleaseViewOption = struct {
+        id: []const u8,
+        name: []const u8,
+        is_added: bool,
+    };
+    const release_opts = ctx.allocator.alloc(ReleaseViewOption, pending_releases.len) catch
+        @as([]ReleaseViewOption, &.{});
+    for (pending_releases, 0..) |rel, i| {
+        var added = false;
+        for (entry_rel_ids) |rid| {
+            if (std.mem.eql(u8, rid, rel.id)) {
+                added = true;
+                break;
+            }
+        }
+        release_opts[i] = .{
+            .id = rel.id,
+            .name = rel.name,
+            .is_added = added,
+        };
+    }
+    const release_html = tpl.render(views.admin.posts.release_menu.ReleaseMenu, .{.{
+        .releases = release_opts,
+    }});
+
+    const sidebar_html = render.renderSidebarHtml(def, ctx.allocator, &entry.data, csrf_token, delete_url, entry.status, .{
+        .entry_id = entry.id,
+        .history_html = history_html,
+        .release_html = release_html,
+        .base_url = base_url,
+    });
+
+    // Bootstrap writes the editor's main-pane HTML — must produce a form
+    // with id="entry-form" and the same hidden inputs the form path emits,
+    // so the sidebar's `form="entry-form"` buttons (publish/discard) work.
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(ctx.allocator);
+    try editor.bootstrap(
+        .{ .def = def, .ctx = ctx, .entry_id = entry.id },
+        buf.writer(ctx.allocator).any(),
+    );
+
+    const display_title = if (entry.title.len > 0) entry.title else "Untitled";
+    const icon_str = def.icon orelse "bookmark";
+    const icon_enum: registry.IconName = std.meta.stringToEnum(registry.IconName, icon_str) orelse .bookmark;
+    ctx.html(registry.renderEditPage(root.page, ctx, display_title, buf.items, .{
         .back_url = base_url,
         .back_label = def.display_name,
         .sidebar = sidebar_html,

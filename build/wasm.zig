@@ -24,6 +24,9 @@ pub const Deps = struct {
     admin_api: *std.Build.Module,
     registry: *std.Build.Module,
     route_match: *std.Build.Module,
+    /// Editor-plugin registry — used by the editor-assets handler module
+    /// when registering the /admin/editors/* route in src/wasm/main.zig.
+    editors: *std.Build.Module,
     /// Plugins discovered by build/plugins.zig — wasm_storage is wired into
     /// each post-hoc because plugins may conditionally @import it.
     plugins: []const plugins_mod.Plugin,
@@ -140,6 +143,17 @@ pub fn build(b: *std.Build, deps: Deps) Result {
     wasm_static_handler_module.addAnonymousImport("static_preflight_css", .{ .root_source_file = b.path("vendor/jit/preflight.css") });
     wasm_static_handler_module.addAnonymousImport("static_jit_css", .{ .root_source_file = deps.jit_css_output });
 
+    // Editor assets handler — same source as native (src/http_handlers/editor_assets.zig).
+    // Exposed as a named module here because the WASM exe's root is
+    // src/wasm/main.zig and relative imports can't cross module roots.
+    const editor_assets_module = b.createModule(.{
+        .root_source_file = b.path("src/http_handlers/editor_assets.zig"),
+        .imports = &.{
+            .{ .name = "middleware", .module = deps.middleware },
+            .{ .name = "editors", .module = deps.editors },
+        },
+    });
+
     // WASM exe shares most modules with the native exe; add WASM-only extras.
     helpers.addImports(browser_wasm.root_module, deps.shared_imports);
     helpers.addImports(browser_wasm.root_module, &.{
@@ -148,6 +162,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
         .{ .name = "wasm_storage", .module = wasm_storage_module },
         .{ .name = "wasm_media_handler", .module = wasm_media_handler_module },
         .{ .name = "wasm_static_handler", .module = wasm_static_handler_module },
+        .{ .name = "editor_assets", .module = editor_assets_module },
         .{ .name = "error_pages", .module = error_pages_module },
     });
 

@@ -38,6 +38,7 @@ const rest_schema = @import("rest/schema.zig");
 const rest_info = @import("rest/info.zig");
 const setup_auth_handlers = @import("http_handlers/setup_auth.zig");
 const static_handlers = @import("http_handlers/static_files.zig");
+const editor_assets = @import("http_handlers/editor_assets.zig");
 const theme_handlers = @import("http_handlers/theme.zig");
 const ws_handlers = @import("http_handlers/websocket.zig");
 const connection_handlers = @import("http_server/connection.zig");
@@ -162,6 +163,11 @@ pub fn serve(
     try router.post("/admin/login", setup_auth_handlers.handleLoginPost);
     try router.post("/admin/logout", setup_auth_handlers.handleLogout);
     try router.get("/static/*", static_handlers.handleStatic);
+    // Under /admin/ so the iOS demo's fetch shim (which routes /admin/* through
+    // the WASM CMS) and any other admin-routing shim picks it up naturally.
+    // Logged-in users pass the auth middleware via session cookie; unauth
+    // requests redirect to /admin/login, which is fine.
+    try router.get("/admin/editors/*", editor_assets.handleEditorAsset);
     if (comptime modules_api.hasModule(.theme)) {
         try router.get("/theme/*", static_handlers.handleThemeStatic);
         try router.get("/sitemap.xml", handleSitemap);

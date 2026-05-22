@@ -80,7 +80,8 @@ pub fn discover(
         manifest.appendSlice(b.allocator,
             \\
             \\pub const all: []const content_type.ContentTypeDef = blk: {
-            \\    comptime var count: usize = 0;
+            \\    @setEvalBranchQuota(10_000);
+            \\    var count: usize = 0;
             \\
         ) catch @panic("OOM");
 
@@ -92,14 +93,14 @@ pub fn discover(
         }
 
         manifest.appendSlice(b.allocator,
-            \\    comptime var out: [count]content_type.ContentTypeDef = undefined;
-            \\    comptime var i: usize = 0;
+            \\    var out: [count]content_type.ContentTypeDef = undefined;
+            \\    var i: usize = 0;
             \\
         ) catch @panic("OOM");
 
         for (sources) |s| {
             manifest.writer(b.allocator).print(
-                "    for (src_{s}.content_types) |ct| : (i += 1) out[i] = ct;\n",
+                "    for (src_{s}.content_types) |ct| {{ out[i] = ct; i += 1; }}\n",
                 .{s.name},
             ) catch @panic("OOM");
         }

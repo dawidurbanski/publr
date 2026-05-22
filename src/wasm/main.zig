@@ -16,6 +16,7 @@ const csrf = @import("csrf");
 const wasm_storage = @import("wasm_storage");
 const wasm_media_handler = @import("wasm_media_handler");
 const wasm_static_handler = @import("wasm_static_handler");
+const editor_assets = @import("editor_assets");
 const error_pages = @import("error_pages");
 const seed = @import("seed");
 const config = @import("config");
@@ -53,8 +54,14 @@ var global_auth: ?auth_mod.Auth = null;
 // Session storage
 var session_token: ?[]const u8 = null;
 
-// Result buffer (2MB for serving images)
-var result_buffer: [2 * 1024 * 1024]u8 = undefined;
+// Result buffer — must accommodate the largest single response. Today the
+// upper bound is the Gutenberg editor plugin's bundled JS (~4 MB raw) plus
+// margin. Buffer lives in WASM linear memory (undefined → zero-init at
+// instantiation), so growing it doesn't bloat the binary, only runtime
+// memory. If a future asset exceeds this, the response is silently
+// truncated at the @min() in the body-write paths below — surface as a
+// fatal error rather than producing a corrupt response.
+var result_buffer: [8 * 1024 * 1024]u8 = undefined;
 var result_len: usize = 0;
 var result_status: u16 = 200;
 var redirect_buffer: [256]u8 = undefined;
@@ -185,6 +192,10 @@ export fn cms_init() i32 {
 
     // Register /static/* — serves tokens.css and publr.css (preflight + JIT) for the WASM dev shell.
     router.get("/static/*", wasm_static_handler.handleStatic);
+
+    // Editor plugin assets — same handler as native, routes through the
+    // editors registry and serves each editor's vendored bundle.
+    router.get("/admin/editors/*", editor_assets.handleEditorAsset);
 
     // Register core routes (setup, login, logout)
     router.get("/admin/setup", handleSetupGet);

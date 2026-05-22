@@ -112,6 +112,10 @@ pub const Config = struct {
     /// Optional HTTP-aware hooks — run from the admin action dispatcher
     /// before the default behavior for each `content.<verb>` action.
     http_hooks: HttpHooks = .{},
+    /// Editor plugin id used to render this content type's entry edit page.
+    /// Built-in: "form" (default). Future: "block", "gutenberg", etc.
+    /// Resolved against the registry in `src/editors.zig` at task-03 dispatch time.
+    editor: []const u8 = "form",
 };
 
 /// Pure-data content type descriptor.
@@ -139,6 +143,8 @@ pub const ContentTypeDef = struct {
     field_permissions: []const FieldPermission = &.{},
     hooks: Hooks = .{},
     http_hooks: HttpHooks = .{},
+    /// Editor plugin id, e.g. "form" (default), "gutenberg", "block".
+    editor: []const u8 = "form",
 
     /// Synthesize a `Data` struct type from `def.fields`. Only callable
     /// from comptime contexts — used by the data layer's compile-in fast
@@ -172,6 +178,8 @@ pub const ContentTypeDef = struct {
         try jw.write(self.internal);
         try jw.objectField("is_taxonomy");
         try jw.write(self.taxonomy != null);
+        try jw.objectField("editor");
+        try jw.write(self.editor);
         try jw.objectField("fields");
         try jw.beginArray();
         for (self.fields) |f| {
@@ -259,6 +267,7 @@ pub fn contentType(comptime config: anytype) ContentTypeDef {
         .field_permissions = if (@hasField(T, "field_permissions")) config.field_permissions else &.{},
         .hooks = if (@hasField(T, "hooks")) config.hooks else .{},
         .http_hooks = if (@hasField(T, "http_hooks")) config.http_hooks else .{},
+        .editor = if (@hasField(T, "editor")) config.editor else "form",
     };
 }
 
@@ -343,6 +352,9 @@ pub fn ContentType(
         /// HTTP-aware hooks for this content type — invoked by the action
         /// dispatcher before each `content.<verb>` default behavior.
         pub const http_hooks = config.http_hooks;
+
+        /// Editor plugin id. Built-in: "form" (default).
+        pub const editor = config.editor;
 
         /// Array of field definitions
         pub const schema = fields;
