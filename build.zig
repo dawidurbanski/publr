@@ -164,6 +164,8 @@ pub fn build(b: *std.Build) void {
         // alongside interact/core.js, for the dashboard demo (#101).
         .{ "static_publr_interactivity_js", "static/publr-interactivity.js" },
         .{ "static_publr_interactivity_query_js", "static/publr-interactivity-query.js" },
+        .{ "static_publr_interactivity_position_js", "static/publr-interactivity-position.js" },
+        .{ "static_publr_interactivity_focus_js", "static/publr-interactivity-focus.js" },
         .{ "static_dashboard_demo_js", "static/dashboard-demo.js" },
     };
     inline for (static_files) |sf| {

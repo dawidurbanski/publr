@@ -2529,6 +2529,7 @@ fn mapDirectiveAttr(allocator: std.mem.Allocator, name: []const u8, value: []con
         if (std.mem.eql(u8, d, "watch")) return .{ .name = "data-p-watch", .value = value };
         if (std.mem.eql(u8, d, "store")) return .{ .name = "data-p-store", .value = value };
         if (std.mem.eql(u8, d, "data")) return .{ .name = "data-p", .value = value };
+        if (std.mem.eql(u8, d, "portal")) return .{ .name = "data-p-portal", .value = value };
         if (std.mem.eql(u8, d, "renderIf")) return .{ .name = "data-p-if", .value = try parsePredicate(allocator, value) };
         // @model[.mod...] — two-way binding (§11.3): strip $, fold dot-modifiers
         // into "path|mod1|mod2". Modifier semantics live in the runtime.
@@ -2573,6 +2574,7 @@ fn directiveName(name: []const u8) ?[]const u8 {
         if (std.mem.eql(u8, d, "for")) return "data-p-for";
         if (std.mem.eql(u8, d, "watch")) return "data-p-watch";
         if (std.mem.eql(u8, d, "model")) return "data-p-model"; // bare-name only; modifiers go through static-value path
+        if (std.mem.eql(u8, d, "portal")) return "data-p-portal";
     }
     if (name.len >= 2 and name[0] == ':') {
         const d = name[1..];

@@ -518,6 +518,8 @@ function wireWatchBlock(state, watchSpec, el) {
 export const Publr = {
   reactive,
   effect,
+  portal,
+  unportal,
 
   /** Generate an opaque client-side id for optimistic records. */
   randomId() {
@@ -1325,6 +1327,62 @@ function setupIf(tpl) {
   });
 }
 
+// ── Portal (core) ─────────────────────────────────────────────────────────
+// Move an element to a fixed portal root so it escapes overflow/stacking
+// contexts (dropdowns, dialogs, tooltips), and restore it on cleanup. Carries
+// the `.dark` class forward so portaled content keeps the theme cascade.
+// Authored as `@portal` (→ data-p-portal); also exposed imperatively as
+// Publr.portal / Publr.unportal for component plugins.
+let portalRoot = null;
+function getPortalRoot() {
+  if (!portalRoot) {
+    portalRoot = document.createElement("div");
+    portalRoot.id = "publr-portal";
+    portalRoot.style.cssText =
+      "position:fixed;top:0;left:0;z-index:9999;pointer-events:none;";
+    document.body.appendChild(portalRoot);
+  }
+  return portalRoot;
+}
+
+export function portal(el) {
+  if (el._publrPortaled) return () => unportal(el);
+  el._publrPortaled = true;
+  el._publrPortalParent = el.parentNode;
+  el._publrPortalNext = el.nextSibling;
+  el.style.pointerEvents = "auto";
+  if (el.parentNode?.closest?.(".dark") && !el.classList.contains("dark")) {
+    el.classList.add("dark");
+    el._publrPortaledDark = true;
+  }
+  getPortalRoot().appendChild(el);
+  return () => unportal(el);
+}
+
+export function unportal(el) {
+  if (!el._publrPortaled) return;
+  if (el._publrPortalParent) {
+    el._publrPortalParent.insertBefore(el, el._publrPortalNext || null);
+  }
+  el.style.pointerEvents = "";
+  if (el._publrPortaledDark) {
+    el.classList.remove("dark");
+    delete el._publrPortaledDark;
+  }
+  delete el._publrPortaled;
+  delete el._publrPortalParent;
+  delete el._publrPortalNext;
+}
+
+// Portal runs AFTER the directive + structural passes so the element and its
+// subtree are fully wired before the node is relocated (bindings live on the
+// node, so they survive the move).
+function wirePortal(el) {
+  if (el._publrPortalBound) return;
+  el._publrPortalBound = true;
+  onCleanup(portal(el));
+}
+
 const DIRECTIVES = [
   ["data-p-on", wireOn],
   ["data-p-text", wireText],
@@ -1357,6 +1415,11 @@ export function hydrate(root = document) {
     for (const el of elementsWithAttr(root, attr)) {
       setup(el);
     }
+  }
+
+  // Portal pass last: element + subtree are fully wired, now relocate.
+  for (const el of elementsWithAttr(root, "data-p-portal")) {
+    wirePortal(el);
   }
 }
 
