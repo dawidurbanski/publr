@@ -340,6 +340,7 @@ pub fn Layout(props: struct {
             <script type="module" src="/static/interact/index.js"></script>
             <script type="module" src="/static/publr-interactivity-query.js"></script>
             <script type="module" src="/static/shell.js"></script>
+            <script type="module" src="/static/p/dropdown.js"></script>
         </body>
     </html>
 }

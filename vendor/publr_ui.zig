@@ -137,6 +137,68 @@ pub fn concatRt(parts: []const []const u8) []const u8 {
     return buf;
 }
 
+/// Render a component in INLINE (non-HMR) mode while forwarding any author
+/// attributes the component doesn't declare (data-p-* directives, role,
+/// tabindex, …) onto its ROOT element. `raw` is the full attribute struct the
+/// call site built; fields matching a `Props` field become props, the rest are
+/// spliced onto the rendered root. This is the inline-mode counterpart to the
+/// HMR lift's `renderForwarding`, so forwarding works in dev (HMR) AND build
+/// (inline) builds. Fast path: nothing to forward → render directly.
+pub fn renderForwarding(comptime Component: anytype, comptime Props: type, writer: anytype, raw: anytype) !void {
+    var props: Props = .{};
+    const fields = std.meta.fields(@TypeOf(raw));
+    var parts: [fields.len * 5][]const u8 = undefined;
+    var n: usize = 0;
+    inline for (fields) |f| {
+        if (@hasField(Props, f.name)) {
+            @field(props, f.name) = @field(raw, f.name);
+        } else {
+            const v: []const u8 = @field(raw, f.name);
+            parts[n] = " ";
+            parts[n + 1] = f.name;
+            parts[n + 2] = "=\"";
+            parts[n + 3] = v;
+            parts[n + 4] = "\"";
+            n += 5;
+        }
+    }
+    if (n == 0) return Component(writer, props);
+    const fwd = concatRt(parts[0..n]);
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(std.heap.page_allocator);
+    try Component(buf.writer(std.heap.page_allocator), props);
+    try spliceAttrsIntoRoot(writer, buf.items, fwd);
+}
+
+fn isTagStart(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z');
+}
+
+/// Insert `attrs` (` name="value"` run) into the first opening tag of `html`,
+/// before its closing `>` (or `/>`). Writes `html` unchanged if none found.
+fn spliceAttrsIntoRoot(writer: anytype, html: []const u8, attrs: []const u8) !void {
+    var i: usize = 0;
+    while (i < html.len) : (i += 1) {
+        if (html[i] == '<' and i + 1 < html.len and isTagStart(html[i + 1])) break;
+    }
+    if (i >= html.len) return writer.writeAll(html);
+    var j = i + 1;
+    var q: u8 = 0;
+    while (j < html.len) : (j += 1) {
+        const c = html[j];
+        if (q != 0) {
+            if (c == q) q = 0;
+        } else if (c == '"' or c == '\'') {
+            q = c;
+        } else if (c == '>') break;
+    }
+    if (j >= html.len) return writer.writeAll(html);
+    const at = if (j > 0 and html[j - 1] == '/') j - 1 else j;
+    try writer.writeAll(html[0..at]);
+    try writer.writeAll(attrs);
+    try writer.writeAll(html[at..]);
+}
+
 };
 
 pub const icons_data = struct {
@@ -2995,7 +3057,7 @@ pub const DropdownMenuProps = struct {
 };
 pub fn DropdownMenu(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuProps, _props);
-    try writer.writeAll("<div data-publr-component=\"dropdown\" data-publr-state=\"closed\" class=\"group relative inline-block ");
+    try writer.writeAll("<div data-p-store=\"local:dropdown\" data-publr-component=\"dropdown\" class=\"relative inline-block ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -3007,7 +3069,7 @@ pub const DropdownMenuTriggerProps = struct {
 };
 pub fn DropdownMenuTrigger(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuTriggerProps, _props);
-    try writer.writeAll("<button class=\"h-full\" data-publr-part=\"trigger\" aria-expanded=\"false\" aria-haspopup=\"menu\">\n");
+    try writer.writeAll("<button class=\"h-full\" data-publr-part=\"trigger\" aria-haspopup=\"menu\" data-p-bind=\"aria-expanded:open\" data-p-on=\"click:toggle;keydown.down:openMenu\">\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n</button>");
 }
@@ -3018,7 +3080,9 @@ pub const DropdownMenuContentProps = struct {
 };
 pub fn DropdownMenuContent(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" role=\"menu\" class=\"hidden group-data-[publr-state=open]:block min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ");
+    try writer.writeAll("<div data-publr-part=\"content\" data-p-show=\"open\" role=\"menu\" data-p-on=\"keydown:navKeys;click:itemClick\" data-p-portal=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\" class=\"hidden min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);

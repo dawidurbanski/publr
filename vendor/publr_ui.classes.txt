@@ -23,6 +23,7 @@ shadow-sm
 ring-blue-200
 before:border-white/10
 justify-between
+local:dropdown
 rounded-full
 flex-col
 gap-2
@@ -223,8 +224,8 @@ border-border
 py-1.5
 section-trigger
 items-center
-group
 focus-visible:ring-2
+group
 bg-border
 whitespace-nowrap
 group-data-[publr-state=open]:pointer-events-auto

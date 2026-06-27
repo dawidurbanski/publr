@@ -48,6 +48,9 @@ register('dialog', (el) => {
 
 // ── Dropdown Menu ───────────────────────────────
 register('dropdown', (el) => {
+    // Migrated to PublrJS (#151): elements with a data-p-store are driven by
+    // static/p/dropdown.js — skip them here so the two runtimes don't collide.
+    if (el.hasAttribute('data-p-store')) return;
     const trigger = el.querySelector('[data-publr-part="trigger"]');
     const content = el.querySelector('[data-publr-part="content"]');
     if (!trigger || !content) return;

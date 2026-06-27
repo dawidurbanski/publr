@@ -2068,6 +2068,10 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
     // data-p-bind="a:x;b:y" (the runtime splits the value on ';').
     var bind_acc: std.ArrayListUnmanaged(u8) = .{};
     defer bind_acc.deinit(p.allocator);
+    // Several `on*` events on one element each map to data-p-on; same as binds,
+    // accumulate into one data-p-on="click:x;keydown:y" (runtime splits on ';').
+    var on_acc: std.ArrayListUnmanaged(u8) = .{};
+    defer on_acc.deinit(p.allocator);
     for (attrs.items) |a| {
         if (a.kind == .static) {
             // Spec §10: rewrite @event / :directive names to data-p-* (+ value).
@@ -2075,6 +2079,9 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
             if (std.mem.eql(u8, md.name, "data-p-bind")) {
                 if (bind_acc.items.len > 0) try bind_acc.append(p.allocator, ';');
                 try bind_acc.appendSlice(p.allocator, md.value);
+            } else if (std.mem.eql(u8, md.name, "data-p-on")) {
+                if (on_acc.items.len > 0) try on_acc.append(p.allocator, ';');
+                try on_acc.appendSlice(p.allocator, md.value);
             } else {
                 try p.bake(' ');
                 try p.bakeSlice(md.name);
@@ -2090,6 +2097,12 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
         try p.bake(' ');
         try p.bakeSlice("data-p-bind=\"");
         try p.bakeSlice(bind_acc.items);
+        try p.bake('"');
+    }
+    if (on_acc.items.len > 0) {
+        try p.bake(' ');
+        try p.bakeSlice("data-p-on=\"");
+        try p.bakeSlice(on_acc.items);
         try p.bake('"');
     }
 

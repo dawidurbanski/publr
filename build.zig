@@ -158,6 +158,7 @@ pub fn build(b: *std.Build) void {
         .{ "static_interact_index_js", "static/interact/index.js" },
         .{ "static_interact_repeater_js", "static/interact/repeater.js" },
         .{ "static_shell_js", "static/shell.js" },
+        .{ "static_p_dropdown_js", "static/p/dropdown.js" },
         .{ "static_media_selection_js", "static/media-selection.js" },
         .{ "static_interact_websocket_js", "static/interact/websocket.js" },
         // POC reactive interactivity runtime (data-p-* stores) — second system
