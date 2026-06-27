@@ -1615,8 +1615,6 @@ pub const ButtonProps = struct {
     href: []const u8 = "",
     id: []const u8 = "",
     full_width: bool = false,
-    // Accessible name for icon-only buttons (label="" + icon=.foo). Required
-    // by WCAG when there's no visible text.
     aria_label: ?[]const u8 = null,
     class: []const u8 = "",
 };
@@ -4727,7 +4725,7 @@ pub const InputProps = struct {
 };
 pub fn Input(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputProps, _props);
-    const base = "flex rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+    const base = "flex rounded-md border bg-background px-3 py-2 text-base sm:text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 
     const border = if (props.invalid) "border-error" else "border-input";
     if (props.disabled and props.required) {
@@ -4841,7 +4839,7 @@ const props = runtime.withDefaults(TextareaProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-background px-3 py-2 text-base sm:text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(border);
         try writer.writeAll(" ");
         try writer.writeAll(props.class);
@@ -4859,7 +4857,7 @@ const props = runtime.withDefaults(TextareaProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-background px-3 py-2 text-base sm:text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(border);
         try writer.writeAll(" ");
         try writer.writeAll(props.class);

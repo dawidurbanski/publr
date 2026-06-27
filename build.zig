@@ -16,6 +16,21 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const watch_mode = b.option(bool, "watch", "Skip preBuild hooks and init_db (used by --watch rebuilds)") orelse false;
     const setup_bg_dark = b.option(bool, "setup-bg-dark", "Use dark background on setup page (comptime config demo)") orelse false;
+    // HMR mode: when true, the ZSX transpiler emits views in hmr mode
+    // (literals lifted to a `L` lookup table, per-fn `manifest_nodes`,
+    // `data-component="<view>:<Fn>"` spliced onto the root element, and a
+    // `captureProps` call at the top of every component body for prop
+    // persistence across hot swaps). The `--hmr` flag enables both
+    // `--hmr` and `--hmr-capture-props` on the underlying zsx_transpile
+    // CLI; demos that want manifest-only (no prop capture) drive
+    // zsx_transpile directly.
+    //
+    // Default: enabled in Debug optimize, disabled otherwise. Debug is
+    // the dev workflow (`zig build run -- serve --dev`), so HMR comes
+    // along for free without the user having to type `-Dhmr=true`.
+    // Release builds skip it (smaller binaries, no mutable view globals).
+    // Override either default with `-Dhmr=true` / `-Dhmr=false`.
+    const hmr = b.option(bool, "hmr", "Generate views in hmr mode (literals lifted to L, manifest_nodes exported, data-component attribute injected, captureProps emitted). Defaults to true in Debug, false otherwise.") orelse (optimize == .Debug);
     // CSS minify override. Default null = follow the optimize gate (Debug
     // unminified, Release minified). Set explicitly with -Dminify=true/false
     // to override — e.g. `zig build run -Dminify=true` for a Debug build that
@@ -61,6 +76,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .minify_css = minify_css,
+        .hmr = hmr,
     });
     const zsx = theme_pipe.zsx;
     const publr_template_module = theme_pipe.publr_template_module;
@@ -134,14 +150,21 @@ pub fn build(b: *std.Build) void {
         .{ "static_admin_js", "static/admin.js" },
         .{ "static_interact_core_js", "static/interact/core.js" },
         .{ "static_interact_toggle_js", "static/interact/toggle.js" },
+        .{ "static_interact_kv_picker_js", "static/interact/kv-picker.js" },
         .{ "static_interact_portal_js", "static/interact/portal.js" },
         .{ "static_interact_focus_trap_js", "static/interact/focus-trap.js" },
         .{ "static_interact_dismiss_js", "static/interact/dismiss.js" },
         .{ "static_interact_components_js", "static/interact/components.js" },
         .{ "static_interact_index_js", "static/interact/index.js" },
         .{ "static_interact_repeater_js", "static/interact/repeater.js" },
+        .{ "static_interact_admin_shell_js", "static/interact/admin-shell.js" },
         .{ "static_media_selection_js", "static/media-selection.js" },
         .{ "static_interact_websocket_js", "static/interact/websocket.js" },
+        // POC reactive interactivity runtime (data-p-* stores) — second system
+        // alongside interact/core.js, for the dashboard demo (#101).
+        .{ "static_publr_interactivity_js", "static/publr-interactivity.js" },
+        .{ "static_publr_interactivity_query_js", "static/publr-interactivity-query.js" },
+        .{ "static_dashboard_demo_js", "static/dashboard-demo.js" },
     };
     inline for (static_files) |sf| {
         exe.root_module.addAnonymousImport(sf[0], .{ .root_source_file = b.path(sf[1]) });
@@ -171,17 +194,113 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("vendor/zsx.zig"),
     });
 
+    // HMR module: the generated views emit `try @import("hmr").captureProps(...)`
+    // at the top of every component body when transpiled with --hmr-capture-props.
+    // src/hmr.zig is the real implementation: it persists per-render props to
+    // `.publr/hmr/<route_hash>/<view>-<seq>.zon`, keyed by the request's
+    // threadlocal RequestContext. Production builds use the same module; the
+    // module is internally gated on the dev_mode flag set by http.serve at
+    // startup, so captureProps is a no-op when --dev wasn't passed.
+    // Attr-lift runtime — separate module so src/hmr.zig can re-export
+    // its symbols (Attr, applyAttrs, parseAttr) without violating Zig's
+    // module-sandbox rule (a module's source files can't `@import` files
+    // outside the module's root path).
+    const hmr_lift_module = b.createModule(.{
+        .root_source_file = b.path("vendor/hmr.zig"),
+    });
+    const hmr_module = b.createModule(.{
+        .root_source_file = b.path("src/hmr.zig"),
+        .imports = &.{
+            .{ .name = "hmr_lift", .module = hmr_lift_module },
+        },
+    });
+
     // Single views module — generated views.zig provides namespace hierarchy
     const views = b.createModule(.{
         .root_source_file = gen_views.path(b, "views.zig"),
-        .imports = &.{.{ .name = "zsx", .module = zsx_views }},
+        .imports = &.{
+            .{ .name = "zsx", .module = zsx_views },
+            .{ .name = "hmr", .module = hmr_module },
+        },
     });
 
     // Theme module — generated from .publr templates
     const theme = b.createModule(.{
         .root_source_file = gen_theme.path(b, "views.zig"),
-        .imports = &.{.{ .name = "zsx", .module = zsx_views }},
+        .imports = &.{
+            .{ .name = "zsx", .module = zsx_views },
+            .{ .name = "hmr", .module = hmr_module },
+        },
     });
+
+    // =========================================================================
+    // View registry (task-03 of cms-hmr-fast-path)
+    // =========================================================================
+    // In HMR mode, build a tool that walks every .zsx source and emits a flat
+    // table of `(view_name → &manifest, &setL, &render-from-zon)` entries.
+    // The swap loop in task-06 consumes this table at runtime to find the
+    // view a saved .zsx belongs to in O(1) and re-render it from persisted
+    // props without a full rebuild.
+    //
+    // Inline mode (no `-Dhmr`) emits an empty stub so the runtime module
+    // compiles unchanged. registry_runtime.init() is a no-op when entries
+    // is empty.
+    const view_registry_gen = b.addExecutable(.{
+        .name = "registry_gen",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/registry_gen.zig"),
+            .target = b.graph.host,
+            .imports = &.{.{ .name = "zsx", .module = zsx }},
+        }),
+    });
+
+    const view_registry_run = b.addRunArtifact(view_registry_gen);
+    const view_registry_path = view_registry_run.addOutputFileArg("view_registry.zig");
+    if (hmr) {
+        view_registry_run.addArg("views=src/views");
+        // Register inputs for cache invalidation so editing a .zsx
+        // re-runs the codegen even if nothing else changed.
+        var vw = b.build_root.handle.openDir("src/views", .{ .iterate = true }) catch
+            @panic("cannot open src/views");
+        defer vw.close();
+        var walker = vw.walk(b.allocator) catch @panic("cannot walk src/views");
+        defer walker.deinit();
+        while (walker.next() catch @panic("walk error")) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, ".zsx")) {
+                view_registry_run.addFileInput(b.path(b.pathJoin(&.{ "src/views", entry.path })));
+            }
+        }
+    } else {
+        // Inline mode: emit an empty stub by feeding the generator an
+        // empty (or non-existent) views label. Codegen still runs but
+        // produces zero entries. Saves the conditional-compilation
+        // complexity in registry_runtime.zig.
+        const empty_dir = b.addWriteFiles();
+        const empty_path = empty_dir.getDirectory();
+        view_registry_run.addPrefixedDirectoryArg("views=", empty_path);
+    }
+
+    const view_registry_module = b.createModule(.{
+        .root_source_file = view_registry_path,
+        .imports = &.{
+            .{ .name = "zsx", .module = zsx_views },
+            .{ .name = "views", .module = views },
+            // For the `hmr.Attr` type used in the optional `setA` field's
+            // function-pointer signature. Falls through to vendor/hmr.zig
+            // for the lift runtime symbols (Attr, applyAttrs, parseAttr).
+            .{ .name = "hmr", .module = hmr_module },
+        },
+    });
+
+    const view_registry_runtime_module = b.createModule(.{
+        .root_source_file = b.path("src/view_registry_runtime.zig"),
+        .imports = &.{.{ .name = "view_registry", .module = view_registry_module }},
+    });
+    exe.root_module.addImport("view_registry_runtime", view_registry_runtime_module);
+    // The HMR middleware in src/http.zig uses `@import("hmr")` (named module)
+    // so the same file isn't pulled into the root module via a relative path
+    // and a named import simultaneously — Zig would reject the dup.
+    exe.root_module.addImport("hmr", hmr_module);
 
     // Route table generator — walks pages/, produces routes.zig
     const publr_routes_module = b.createModule(.{
@@ -268,6 +387,12 @@ pub fn build(b: *std.Build) void {
     // their entry edit page via `ContentTypeDef.editor` (default "form").
     // Built-ins live in src/editors.zig; route dispatch lands in task-03.
     _ = reg.simple("editors", "src/editors.zig", &.{ "middleware", "content_type" });
+
+    // Plugin SDK (dual-mode: native + wasm32-freestanding). Plugins import
+    // it as `@import("publr_sdk")`. The SDK selects backend by target arch;
+    // both the native exe and freestanding plugin builds use this module
+    // unchanged. Task-01 of wasm-plugin-promotion — spike surface only.
+    _ = reg.leaf("publr_sdk", "sdk/publr_sdk.zig");
 
     // Shared leaves (no deps)
     _ = reg.leaf("url", "src/url.zig");
@@ -515,6 +640,60 @@ pub fn build(b: *std.Build) void {
     });
     reg.register("sync_catchup_hooks", sync_catchup_hooks_module);
 
+    // KV variables — editor-facing named string store with comptime plugin
+    // registration. Plugins export `pub const kv_vars: []const kv.Def` and
+    // the module's collector picks them up via @hasDecl, matching the
+    // save_hooks pattern. Runtime resolves values from the `kv` table or
+    // via computed-fn dispatch.
+    const kv_module = b.createModule(.{
+        .root_source_file = b.path("src/kv/registry.zig"),
+        .imports = &.{
+            .{ .name = "plugin_registry", .module = plugins.manifest_module },
+            .{ .name = "db", .module = db_module },
+            .{ .name = "save_hooks", .module = save_hooks_module },
+            .{ .name = "publish_hooks", .module = reg.get("publish_hooks") },
+        },
+    });
+    reg.register("kv", kv_module);
+
+    // cms (src/core/content.zig) wires kv.refs.afterSave and kv.refs.dropEntryRefs
+    // into the save/delete paths. Added post-hoc here for the same reason as
+    // save_hooks below — kv_module depends on plugin_registry which is set up
+    // after plugins.load().
+    cms_module.addImport("kv", kv_module);
+
+    // The "variables" admin plugin AND the "content" admin plugin (whose
+    // render.zig injects the kv picker script + JSON onto every content
+    // edit page) both need the kv module. Plugins are discovered by
+    // plugins.load() with a fixed `plugin_imports` list; kv can't be in
+    // that list because it's created after plugins.load() (it needs
+    // plugins.manifest_module + save_hooks_module). Wire it in post-hoc.
+    for (plugins.plugins) |p| {
+        if (std.mem.eql(u8, p.name, "variables") or std.mem.eql(u8, p.name, "content")) {
+            p.module.addImport("kv", kv_module);
+        }
+    }
+
+    // Render hooks — fired pre-write to the response stream. Mirrors save_hooks
+    // (comptime plugin collector) plus a hardcoded core hook for KV live-var
+    // substitution. Defined here because it depends on kv_module above.
+    const render_hooks_module = b.createModule(.{
+        .root_source_file = b.path("src/render_hooks.zig"),
+        .imports = &.{
+            .{ .name = "db", .module = db_module },
+            .{ .name = "middleware", .module = middleware_module },
+            .{ .name = "plugin_registry", .module = plugins.manifest_module },
+            .{ .name = "kv", .module = kv_module },
+        },
+    });
+    reg.register("render_hooks", render_hooks_module);
+
+    // Router calls render_hooks.beforeWrite(...) right before sendResponse,
+    // and reads the global Db via auth_middleware.auth. Both added post-hoc
+    // because they depend on modules defined after router_module.
+    router_module.addImport("render_hooks", render_hooks_module);
+    router_module.addImport("auth_middleware", auth_middleware_module);
+
     // Outbound sync transport — calls a JS import in WASM, broadcasts via
     // websocket.registry on native (server is the relay; save_hooks here
     // capture local changes for cross-replica fanout). The websocket dep
@@ -569,6 +748,10 @@ pub fn build(b: *std.Build) void {
             defer d.close();
 
             const pv_cmd = b.addRunArtifact(zsx_transpiler);
+            // Mirror the hmr flag onto plugin-view transpiles so plugin
+            // components participate in the same hot-swap fast path as
+            // core views. Flags must precede positional args.
+            if (hmr) pv_cmd.addArgs(&.{ "--hmr", "--hmr-capture-props" });
             pv_cmd.addDirectoryArg(b.path(views_path));
             const pv_out = pv_cmd.addOutputDirectoryArg("views");
 
@@ -583,7 +766,10 @@ pub fn build(b: *std.Build) void {
 
             const pv_mod = b.createModule(.{
                 .root_source_file = pv_out.path(b, "views.zig"),
-                .imports = &.{.{ .name = "zsx", .module = zsx_views }},
+                .imports = &.{
+                    .{ .name = "zsx", .module = zsx_views },
+                    .{ .name = "hmr", .module = hmr_module },
+                },
             });
             pv_mod.addImport("publr_ui", publr_ui);
             p.module.addImport("plugin_views", pv_mod);
@@ -623,27 +809,26 @@ pub fn build(b: *std.Build) void {
 
     // Shared imports common to native exe + WASM (passed to wasm_build later).
     const shared_imports = reg.importsFor(&.{
-        "views",      "admin_api",    "auth",            "auth_middleware", "cms",
-        "csrf",       "db",           "image",           "media",           "media_handler",
-        "middleware", "schema_media", "seed",            "storage",         "svg_sanitize",
-        "tpl",        "actions",      "content_actions", "schema_registry", "schema_db_types",
-        "schemas",    "save_hooks",   "db_open_hooks",   "sync_transport",
-        "apply_remote_hooks", "sync_catchup_hooks", "editors",
+        "views",              "admin_api",    "auth",            "auth_middleware", "cms",
+        "csrf",               "db",           "image",           "media",           "media_handler",
+        "middleware",         "schema_media", "seed",            "storage",         "svg_sanitize",
+        "tpl",                "actions",      "content_actions", "schema_registry", "schema_db_types",
+        "schemas",            "save_hooks",   "db_open_hooks",   "sync_transport",  "apply_remote_hooks",
+        "sync_catchup_hooks", "editors",
     });
     reg.attachAll(exe.root_module, &.{
-        "views",             "admin_api",       "auth",             "auth_middleware", "cms",
-        "csrf",              "db",              "image",            "media",           "media_handler",
-        "middleware",        "schema_media",    "seed",             "storage",         "svg_sanitize",
-        "tpl",               "theme",           "template_context", "publish_hooks",   "publr_ui",
-        "modules",           "module_admin",    "cli_main",         "actions",         "content_actions",
+        "views",             "admin_api",       "auth",               "auth_middleware",    "cms",
+        "csrf",              "db",              "image",              "media",              "media_handler",
+        "middleware",        "schema_media",    "seed",               "storage",            "svg_sanitize",
+        "tpl",               "theme",           "template_context",   "publish_hooks",      "publr_ui",
+        "modules",           "module_admin",    "cli_main",           "actions",            "content_actions",
         // src/rest/*.zig is relative-imported by src/http.zig — these are the
         // modules the REST tree reaches for that aren't already shared.
-        "core_time",         "media_query",     "mime",             "multipart",       "taxonomy",
-        "rest_test_helpers", "router",          "url",              "field",           "content_type",
-        "schemas",           "schema_registry", "core_init",        "media_sync",
-        "websocket",         "presence",        "schema_db_types", "db_path",
-        "save_hooks",        "db_open_hooks",   "sync_transport",  "sync_token",
-        "apply_remote_hooks", "sync_catchup_hooks", "plugin_utils",
+        "core_time",         "media_query",     "mime",               "multipart",          "taxonomy",
+        "rest_test_helpers", "router",          "url",                "field",              "content_type",
+        "schemas",           "schema_registry", "core_init",          "media_sync",         "websocket",
+        "presence",          "schema_db_types", "db_path",            "save_hooks",         "db_open_hooks",
+        "sync_transport",    "sync_token",      "apply_remote_hooks", "sync_catchup_hooks", "plugin_utils",
         "editors",
     });
 
@@ -693,16 +878,15 @@ pub fn build(b: *std.Build) void {
 
     reg.register("registry", registry_module);
     reg.attachAll(exe_tests.root_module, &.{
-        "views",             "modules",      "module_admin",    "cli_main",
-        "core_time",         "media_query",  "mime",            "taxonomy",
-        "rest_test_helpers", "registry",     "admin_api",       "schema_media",
-        "core_init",         "auth",         "storage",         "svg_sanitize",
-        "media",             "media_sync",   "media_handler",   "image",
-        "multipart",         "actions",      "cms",             "entry_storage",
-        "field",             "content_type", "schema_registry", "field_types",
-        "db_path",           "save_hooks",   "db_open_hooks",   "sync_transport",
-        "sync_token",        "apply_remote_hooks", "sync_catchup_hooks",
-        "editors",
+        "views",             "modules",            "module_admin",       "cli_main",
+        "core_time",         "media_query",        "mime",               "taxonomy",
+        "rest_test_helpers", "registry",           "admin_api",          "schema_media",
+        "core_init",         "auth",               "storage",            "svg_sanitize",
+        "media",             "media_sync",         "media_handler",      "image",
+        "multipart",         "actions",            "cms",                "entry_storage",
+        "field",             "content_type",       "schema_registry",    "field_types",
+        "db_path",           "save_hooks",         "db_open_hooks",      "sync_transport",
+        "sync_token",        "apply_remote_hooks", "sync_catchup_hooks", "editors",
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
@@ -754,6 +938,170 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_publr_routes_tests = b.addRunArtifact(publr_routes_tests);
+
+    // File watcher tests (task-04 of cms-hmr-fast-path). Standalone module
+    // — no other src/ imports, no vendor libs needed. The main test exe
+    // can't see it yet because `main.zig` doesn't import it (deferred until
+    // task-08 wires the watcher into the dev event loop), so we give it
+    // its own test target wired into `zig build test` and `verify` below.
+    const watcher_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/watcher.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_watcher_tests = b.addRunArtifact(watcher_tests);
+
+    // Watcher module — exposed by name so the HMR swap loop (task-06) and
+    // task-08's dev event loop can `@import("watcher")`. Same source as
+    // the test target above; named here for non-test consumers.
+    const watcher_module = b.createModule(.{
+        .root_source_file = b.path("src/watcher.zig"),
+    });
+    // task-08: main.zig's `runDevMode` drives the watcher poll loop in
+    // process and ships events into the swap loop, so the main exe must
+    // be able to `@import("watcher")`.
+    exe.root_module.addImport("watcher", watcher_module);
+
+    // Runtime JIT module — exposes `jit.compile(allocator, theme, classes)`
+    // to dev-time recompile from rendered HTML. The same source is also
+    // used as a build-time executable in build/theme.zig (jit_compiler);
+    // here we wrap it as an importable module so the HMR loop can call
+    // into it without forking a subprocess.
+    const jit_runtime_module = b.createModule(.{
+        .root_source_file = b.path("vendor/jit/jit.zig"),
+        .imports = &.{
+            .{ .name = "zsx", .module = zsx_views },
+        },
+    });
+
+    // Themes as .zon imports so the runtime JIT merges them at comptime
+    // the same way build/theme.zig does. Keeps build-time and runtime
+    // CSS byte-identical for the same class set (no late divergence).
+    const default_theme_zon = b.createModule(.{
+        .root_source_file = b.path("vendor/jit/default-theme.zon"),
+        .imports = &.{.{ .name = "jit", .module = jit_runtime_module }},
+    });
+    const ds_theme_zon = b.createModule(.{
+        .root_source_file = b.path("vendor/jit/ds-tokens.zon"),
+        .imports = &.{.{ .name = "jit", .module = jit_runtime_module }},
+    });
+
+    // CSS JIT module — small wrapper that walks rendered HTML for
+    // `class="…"` attributes and feeds the jit compiler. Used by the
+    // HMR loop after a fast-path swap to keep DS utility classes in
+    // sync with what was just rendered (the build-time scan misses
+    // backtick-assembled class strings).
+    const css_jit_module = b.createModule(.{
+        .root_source_file = b.path("src/css_jit.zig"),
+        .imports = &.{
+            .{ .name = "jit", .module = jit_runtime_module },
+            .{ .name = "default_theme", .module = default_theme_zon },
+            .{ .name = "ds_theme", .module = ds_theme_zon },
+        },
+    });
+
+    // Runtime CSS override holder — populated by the HMR loop after a
+    // fast-path swap, read by the static handler when serving admin.css.
+    // Its own module so writer (hmr_loop) and reader (static handler in
+    // exe root) don't need a cross-module relative import.
+    const runtime_css_module = b.createModule(.{
+        .root_source_file = b.path("src/runtime_css.zig"),
+    });
+    exe.root_module.addImport("runtime_css", runtime_css_module);
+
+    // HMR swap loop (task-06 of cms-hmr-fast-path). Pulls together the
+    // watcher events, the runtime view registry, the persisted prop
+    // metadata, and the (task-07-supplied) broadcaster callback.
+    // Standalone test target wired into `zig build test` + `verify`,
+    // mirroring watcher/hmr.
+    const hmr_loop_module = b.createModule(.{
+        .root_source_file = b.path("src/hmr_loop.zig"),
+        .imports = &.{
+            .{ .name = "watcher", .module = watcher_module },
+            .{ .name = "view_registry_runtime", .module = view_registry_runtime_module },
+            .{ .name = "hmr", .module = hmr_module },
+            .{ .name = "zsx", .module = zsx_views },
+            .{ .name = "css_jit", .module = css_jit_module },
+            .{ .name = "runtime_css", .module = runtime_css_module },
+        },
+    });
+    exe.root_module.addImport("hmr_loop", hmr_loop_module);
+
+    // HMR WebSocket push channel (task-07 of cms-hmr-fast-path). The
+    // dev-only `/__hmr/ws` endpoint + the `/__hmr/render?name=<view>`
+    // refetch endpoint. Wires to the swap loop's broadcaster callback
+    // and feeds JSON messages to the inline live-reload client.
+    const hmr_ws_module = b.createModule(.{
+        .root_source_file = b.path("src/hmr_ws.zig"),
+        .imports = &.{
+            .{ .name = "router", .module = reg.get("router") },
+            .{ .name = "websocket", .module = websocket_module },
+            .{ .name = "view_registry_runtime", .module = view_registry_runtime_module },
+            .{ .name = "hmr", .module = hmr_module },
+            .{ .name = "hmr_loop", .module = hmr_loop_module },
+            .{ .name = "plugin_utils", .module = plugin_utils_module },
+        },
+    });
+    exe.root_module.addImport("hmr_ws", hmr_ws_module);
+
+    const hmr_ws_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/hmr_ws.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "router", .module = reg.get("router") },
+                .{ .name = "websocket", .module = websocket_module },
+                .{ .name = "view_registry_runtime", .module = view_registry_runtime_module },
+                .{ .name = "hmr", .module = hmr_module },
+                .{ .name = "hmr_loop", .module = hmr_loop_module },
+                .{ .name = "plugin_utils", .module = plugin_utils_module },
+            },
+        }),
+    });
+    // Same rationale as hmr_loop_tests: the runtime registry transitively
+    // touches sqlite/stb via the views tree.
+    vendors.addAll(b, hmr_ws_tests, native_vendor_opts);
+    vendors.linkStaticLibs(hmr_ws_tests, native_vendor_opts);
+    const run_hmr_ws_tests = b.addRunArtifact(hmr_ws_tests);
+
+    const hmr_loop_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/hmr_loop.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "watcher", .module = watcher_module },
+                .{ .name = "view_registry_runtime", .module = view_registry_runtime_module },
+                .{ .name = "hmr", .module = hmr_module },
+                .{ .name = "zsx", .module = zsx_views },
+                .{ .name = "css_jit", .module = css_jit_module },
+                .{ .name = "runtime_css", .module = runtime_css_module },
+            },
+        }),
+    });
+    // The runtime view_registry pulls in the generated `views` module,
+    // which transitively imports plugin modules that touch sqlite/stb.
+    // Link the vendor lib so the test exe can resolve those symbols at
+    // link time even though the swap-loop tests never call into them.
+    vendors.addAll(b, hmr_loop_tests, native_vendor_opts);
+    vendors.linkStaticLibs(hmr_loop_tests, native_vendor_opts);
+    const run_hmr_loop_tests = b.addRunArtifact(hmr_loop_tests);
+
+    // HMR prop-capture tests (task-05 of cms-hmr-fast-path). Standalone
+    // module, mirrors the watcher_tests setup — main.zig doesn't import
+    // hmr.zig (only the generated view tree does, and that's hidden behind
+    // -Dhmr), so we give it its own test target wired into `test` + `verify`.
+    const hmr_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/hmr.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_hmr_tests = b.addRunArtifact(hmr_tests);
 
     // Storage / schema test aggregator. The Zig 0.15 test runner only walks
     // the test root's import graph for test discovery, so we use a
@@ -818,6 +1166,80 @@ pub fn build(b: *std.Build) void {
     });
     const run_editor_assets_tests = b.addRunArtifact(editor_assets_tests);
 
+    // KV variables test aggregator. Mirrors storage_tests pattern: test root
+    // in src/tests/ so the schema SQL path resolves via std.fs.cwd, and Zig
+    // 0.15's test discovery walks down through the @import("kv") edge.
+    const kv_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/kv_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "kv", .module = reg.get("kv") },
+                .{ .name = "db", .module = reg.get("db") },
+                .{ .name = "publish_hooks", .module = reg.get("publish_hooks") },
+                .{ .name = "cms", .module = reg.get("cms") },
+            },
+        }),
+    });
+    vendors.addAll(b, kv_tests, native_vendor_opts);
+    vendors.linkStaticLibs(kv_tests, native_vendor_opts);
+    const run_kv_tests = b.addRunArtifact(kv_tests);
+
+    // SDK spike — task-01 of wasm-plugin-promotion. The native-target test
+    // exercises the SDK's native backend via the spike example plugin; the
+    // freestanding WASM step verifies the SAME plugin source compiles cleanly
+    // for wasm32-freestanding. WAMR-driven execution parity lands in task-02.
+    const spike_plugin_native = b.createModule(.{
+        .root_source_file = b.path("examples/plugins/spike/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "publr_sdk", .module = reg.get("publr_sdk") },
+        },
+    });
+    const sdk_spike_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/sdk_spike_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "publr_sdk", .module = reg.get("publr_sdk") },
+                .{ .name = "spike_plugin", .module = spike_plugin_native },
+            },
+        }),
+    });
+    const run_sdk_spike_tests = b.addRunArtifact(sdk_spike_tests);
+
+    // Freestanding WASM build of the same plugin source. Compiled as a
+    // dynamic library (artifact) and installed under `zig-out/plugins/`.
+    // Task-02 will load this through WAMR; for now we just need it to compile.
+    const spike_wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    const spike_plugin_wasm_module = b.createModule(.{
+        .root_source_file = b.path("examples/plugins/spike/main.zig"),
+        .target = spike_wasm_target,
+        .optimize = .ReleaseSmall,
+        .imports = &.{
+            .{ .name = "publr_sdk", .module = b.createModule(.{
+                .root_source_file = b.path("sdk/publr_sdk.zig"),
+                .target = spike_wasm_target,
+                .optimize = .ReleaseSmall,
+            }) },
+        },
+    });
+    const spike_wasm = b.addExecutable(.{
+        .name = "spike",
+        .root_module = spike_plugin_wasm_module,
+    });
+    spike_wasm.entry = .disabled;
+    spike_wasm.rdynamic = true;
+    const install_spike_wasm = b.addInstallArtifact(spike_wasm, .{
+        .dest_dir = .{ .override = .{ .custom = "plugins" } },
+    });
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_core_tests.step);
@@ -827,12 +1249,35 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publr_preprocess_tests.step);
     test_step.dependOn(&run_publr_routes_tests.step);
     test_step.dependOn(&run_storage_tests.step);
+    test_step.dependOn(&run_kv_tests.step);
+
+    // Isolated step so KV tests can be run independently of the broader test
+    // graph (useful when other unrelated targets are temporarily broken).
+    const test_kv_step = b.step("test-kv", "Run KV variable tests in isolation");
+    test_kv_step.dependOn(&run_kv_tests.step);
     test_step.dependOn(&run_editors_tests.step);
     test_step.dependOn(&run_editor_assets_tests.step);
+    test_step.dependOn(&run_sdk_spike_tests.step);
+    test_step.dependOn(&run_watcher_tests.step);
+    test_step.dependOn(&run_hmr_tests.step);
+    test_step.dependOn(&run_hmr_loop_tests.step);
+    test_step.dependOn(&run_hmr_ws_tests.step);
+
+    // Isolated step for the HMR swap loop tests. The main `test` step
+    // depends on `test-core`/`test-cli`/`test-rest` which currently fail
+    // due to user WIP elsewhere (kv refs); the swap loop tests don't
+    // need that surface and can be exercised independently.
+    const test_hmr_loop_step = b.step("test-hmr-loop", "Run HMR swap loop tests in isolation");
+    test_hmr_loop_step.dependOn(&run_hmr_loop_tests.step);
+
+    // Isolated step for the HMR WebSocket tests — same rationale.
+    const test_hmr_ws_step = b.step("test-hmr-ws", "Run HMR WebSocket tests in isolation");
+    test_hmr_ws_step.dependOn(&run_hmr_ws_tests.step);
 
     // Verify step: runs all tests + WASM build.
     const verify_step = b.step("verify", "Run tests and verify WASM build");
     verify_step.dependOn(test_step);
+    verify_step.dependOn(&install_spike_wasm.step);
 
     // =========================================================================
     // Browser WASM Build (full CMS with embedded SQLite)

@@ -608,11 +608,18 @@ register('tag-picker', (el) => {
         }
     });
 
-    // Click outside closes dropdown
-    document.addEventListener('click', (e) => {
-        if (!el.contains(e.target)) {
-            dropdown.style.display = 'none';
-        }
+    // Click-outside closing is handled once, module-wide, below — binding
+    // it per element would leak a document listener for every tag-picker
+    // (and every HMR re-init that creates a new one).
+});
+
+// Close any open tag-picker dropdown when a click lands outside it. Bound
+// ONCE at module load (not per element), so it covers every tag-picker —
+// including ones swapped in by HMR — with no listener accumulation.
+document.addEventListener('click', (e) => {
+    document.querySelectorAll('[data-publr-component="tag-picker"]').forEach((picker) => {
+        const dd = picker.querySelector('[data-publr-part="dropdown"]');
+        if (dd && !picker.contains(e.target)) dd.style.display = 'none';
     });
 });
 

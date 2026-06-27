@@ -128,3 +128,32 @@ test "ensureSeed populates taxonomies" {
     const count = stmt.columnInt(0);
     try std.testing.expect(count >= 2); // category + tag
 }
+
+test "schema creates kv table accepting a row" {
+    const Db = @import("db").Db;
+    var db = try Db.init(std.testing.allocator, ":memory:");
+    defer db.deinit();
+
+    try db.exec(@embedFile("content_schema.sql"));
+    try db.exec("INSERT INTO kv (key, value, source, mode) VALUES ('site_name', 'Publr', 'editor', 'literal-baked')");
+
+    var stmt = try db.prepare("SELECT COUNT(*) FROM kv WHERE key = 'site_name' AND value = 'Publr' AND mode = 'literal-baked'");
+    defer stmt.deinit();
+    _ = try stmt.step();
+    try std.testing.expectEqual(@as(i64, 1), stmt.columnInt(0));
+}
+
+test "schema creates kv_refs with composite PK accepting multiple field_paths per key" {
+    const Db = @import("db").Db;
+    var db = try Db.init(std.testing.allocator, ":memory:");
+    defer db.deinit();
+
+    try db.exec(@embedFile("content_schema.sql"));
+    try db.exec("INSERT INTO kv_refs (var_key, entry_id, field_path) VALUES ('site_name', 'entry-1', 'body')");
+    try db.exec("INSERT INTO kv_refs (var_key, entry_id, field_path) VALUES ('site_name', 'entry-1', 'subtitle')");
+
+    var stmt = try db.prepare("SELECT COUNT(*) FROM kv_refs WHERE var_key = 'site_name' AND entry_id = 'entry-1'");
+    defer stmt.deinit();
+    _ = try stmt.step();
+    try std.testing.expectEqual(@as(i64, 2), stmt.columnInt(0));
+}

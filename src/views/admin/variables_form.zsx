@@ -1,0 +1,167 @@
+// Variables admin form — handles both create (`/admin/variables/new`) and
+// edit (`/admin/variables/:key`). Distinguishes via `is_new` flag.
+//
+// Uses publr_ui Field / FieldLabel / Input / Textarea / Checkbox / Button
+// throughout. The single carve-out is the value textarea: it carries a
+// `data-publr-kv-picker` attribute that the (forthcoming) task-05 picker
+// JS hooks into, so we render that one as a plain HTML <textarea> until
+// publr_ui's Textarea grows a generic `data-*` attribute pass-through.
+
+const ui = @import("publr_ui");
+const PageHeader = @import("../components/page_header.zig").PageHeader;
+
+const Button = ui.button.Button;
+const Field = ui.form_field.Field;
+const FieldLabel = ui.form_field.FieldLabel;
+const FieldDescription = ui.form_field.FieldDescription;
+const Input = ui.text_input.Input;
+const Textarea = ui.text_input.Textarea;
+const Checkbox = ui.checkbox.Checkbox;
+const Flex = ui.flex.Flex;
+const Stack = ui.stack.Stack;
+const Text = ui.text.Text;
+
+pub const Props = struct {
+    csrf_token: []const u8,
+    action_url: []const u8, // POST target
+    cancel_url: []const u8, // back to list
+    delete_url: []const u8, // POST delete (empty when is_new)
+    is_new: bool,
+    can_delete: bool, // editor-owned, existing row → true
+    key_locked: bool, // true on edit (key immutable after creation)
+    mode_locked: bool, // true on edit for plugin rows
+    referencer_count: i64, // shown on edit to remind editor of usage
+
+    key: []const u8,
+    label: []const u8,
+    description: []const u8,
+    value: []const u8,
+    mode: []const u8, // "literal-baked" | "literal-live" | ...
+
+    has_error: bool,
+    error_message: []const u8, // generic error
+    cycle_path: []const u8, // formatted "a → b → a" when cycle detected; empty otherwise
+
+    /// JSON array of `{key, label, description, mode, source, value}` for the
+    /// `$` picker. Embedded as the body of `<script id="kv-vars-data">` so the
+    /// client-side picker can parse it on init.
+    vars_json: []const u8,
+};
+
+pub fn Form(props: Props) {
+    const title = if (props.is_new) "New variable" else "Edit variable";
+    <PageHeader title={title} />
+
+    {if (props.has_error) (
+        <div class="mb-4 p-3 border border-error rounded">
+            <Text size=.sm weight=.medium class="block">Could not save</Text>
+            <span class="block mt-1 text-sm">{props.error_message}</span>
+            {if (props.cycle_path.len > 0) (
+                <span class="block mt-1 text-sm font-mono">{props.cycle_path}</span>
+            )}
+        </div>
+    )}
+
+    {if (!props.is_new and props.referencer_count > 0) (
+        <div class="mb-4 p-3 border rounded">
+            <Text size=.sm color=.muted>This variable is referenced in {props.referencer_count} field(s). Changing its value will rebuild referencing pages.</Text>
+        </div>
+    )}
+
+    <form method="POST" action={props.action_url}>
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+
+        <Stack gap=.md>
+            <Field>
+                <FieldLabel html_for="kv-key" required={props.is_new}>Key</FieldLabel>
+                {if (props.key_locked) (
+                    <span class="block font-mono text-sm py-2">{props.key}</span>
+                )}
+                {if (!props.key_locked) (
+                    <Input
+                        input_type=.text
+                        id="kv-key"
+                        name="key"
+                        value={props.key}
+                        required={true}
+                    />
+                )}
+                <FieldDescription>Letters, digits, and underscores only. Max 64 characters. Cannot be changed later.</FieldDescription>
+            </Field>
+
+            <Field>
+                <FieldLabel html_for="kv-label">Label</FieldLabel>
+                <Input
+                    input_type=.text
+                    id="kv-label"
+                    name="label"
+                    value={props.label}
+                />
+                <FieldDescription>Optional human-friendly name shown in the picker and list view.</FieldDescription>
+            </Field>
+
+            <Field>
+                <FieldLabel html_for="kv-description">Description</FieldLabel>
+                <Textarea
+                    id="kv-description"
+                    name="description"
+                    value={props.description}
+                />
+            </Field>
+
+            <Field>
+                <FieldLabel html_for="kv-value">Value</FieldLabel>
+                // Plain HTML to attach the `data-publr-kv-picker` hook for task-05.
+                <textarea
+                    id="kv-value"
+                    name="value"
+                    rows="4"
+                    data-publr-kv-picker
+                    class="w-full rounded border border-border bg-background px-3 py-2 text-sm font-mono"
+                >{props.value}</textarea>
+                <FieldDescription>The string stored for this variable. Can reference other variables; the picker UI is in a follow-up task.</FieldDescription>
+            </Field>
+
+            {if (props.is_new) (
+                <Field>
+                    <Checkbox
+                        name="live_mode"
+                        value="1"
+                        label="Instant updates across site"
+                        description="Leave unchecked for build-time substitution. Check for instant propagation without rebuild."
+                    />
+                </Field>
+            )}
+
+            {if (!props.is_new) (
+                <Field>
+                    <FieldLabel>Mode</FieldLabel>
+                    <span class="block font-mono text-sm">{props.mode}</span>
+                    <FieldDescription>Mode is fixed after creation.</FieldDescription>
+                </Field>
+            )}
+
+            <Flex gap=.sm items=.center>
+                <Button label="Save" hierarchy=.primary button_type=.submit />
+                <Button label="Cancel" hierarchy=.tertiary href={props.cancel_url} />
+            </Flex>
+        </Stack>
+    </form>
+
+    {if (!props.is_new and props.can_delete) (
+        <div class="mt-12 pt-6 border-t border-border">
+            <Text size=.sm color=.muted weight=.medium class="block mb-2">Danger zone</Text>
+            <form method="POST" action={props.delete_url}>
+                <input type="hidden" name="_csrf" value={props.csrf_token} />
+                <Button label="Delete variable" hierarchy=.destructive button_type=.submit />
+            </form>
+        </div>
+    )}
+
+    // Picker data: feeds the $ picker on the value textarea. The picker
+    // itself is part of the interact runtime (loaded once via the admin
+    // layout) and binds via delegation, so no per-form script is needed —
+    // it handles these inputs whether they're on the page at load or
+    // swapped in later.
+    <script id="kv-vars-data" type="application/json">{@raw props.vars_json}</script>
+}

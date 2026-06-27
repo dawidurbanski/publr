@@ -10,6 +10,7 @@ const publish_hooks = @import("publish_hooks");
 const ssg = @import("ssg.zig");
 const tpl = @import("tpl");
 const dev = @import("dev.zig");
+const hmr = @import("hmr");
 const recompile = @import("recompile.zig");
 const core_init = @import("core_init");
 const schema_registry = @import("schema_registry");
@@ -42,9 +43,20 @@ const editor_assets = @import("http_handlers/editor_assets.zig");
 const theme_handlers = @import("http_handlers/theme.zig");
 const ws_handlers = @import("http_handlers/websocket.zig");
 const connection_handlers = @import("http_server/connection.zig");
+const hmr_ws = @import("hmr_ws");
 
-// Global shutdown flag for signal handler
-var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+// Global shutdown flag for signal handler. Exposed via `isShutdownRequested()`
+// so the dev-mode watcher loop (in main.zig's `runDevMode`) can join cleanly
+// when SIGINT/SIGTERM tears down the HTTP server thread.
+pub var shutdown_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
+pub fn isShutdownRequested() bool {
+    return shutdown_requested.load(.acquire);
+}
+
+pub fn requestShutdown() void {
+    shutdown_requested.store(true, .release);
+}
 
 // Track active connections for graceful shutdown
 var active_connections: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
@@ -150,10 +162,27 @@ pub fn serve(
     // Dev mode middleware
     if (dev_mode) {
         std.debug.print("Dev mode enabled (live reload active)\n", .{});
+        // hmr.setDevMode wipes `.publr/hmr` so stale captures from a prior
+        // session don't bleed in. captureProps inside generated views is a
+        // no-op until this flag flips on. Must run before any request is
+        // dispatched, so we set it here (rather than in main.zig) to keep
+        // the flag's lifecycle attached to `serve`.
+        hmr.setDevMode(true);
+        try router.use(hmrMiddleware);
         try router.use(dev.devMiddleware);
         try router.use(logger.requestLogger);
-        try router.get("/__dev/events", dev.eventsHandler);
         try router.get("/__dev/ready", dev.readyHandler);
+
+        // HMR push channel (task-07 of cms-hmr-fast-path). The WS
+        // subscriber list lives in `hmr_ws.zig` with its own mutex; the
+        // long-lived page allocator backs the subscriber array so
+        // entries survive the request-scoped allocator's tear-down.
+        // The `view_registry_runtime` map is already initialized in
+        // `main.zig` before `serve` runs, so the `/__hmr/render`
+        // refetch endpoint can call `lookup` directly.
+        hmr_ws.setAllocator(std.heap.page_allocator);
+        try router.get("/__hmr/ws", hmr_ws.handleHmrWs);
+        try router.get("/__hmr/render", hmr_ws.handleHmrRender);
     }
 
     // Register core routes
@@ -403,4 +432,16 @@ fn waitForConnections(timeout_ms: u64) void {
 /// Wired only when `--dev` is passed.
 fn devErrorTest(_: *Context) !void {
     return error.TestError;
+}
+
+/// Dev-only middleware: bind a per-request HMR `RequestContext` to the
+/// current thread so generated views' `captureProps` calls can persist
+/// the props they were rendered with. The route's per-route subdir under
+/// `.publr/hmr/<route_hash>/` is wiped at request entry so stale entries
+/// from prior renders don't bleed into the swap loop's input. Registered
+/// only when `--dev` is on (see `serve`).
+fn hmrMiddleware(ctx: *Context, next: router_mod.NextFn) !void {
+    _ = hmr.requestBegin(ctx.allocator, ctx.path);
+    defer hmr.requestEnd();
+    try next(ctx);
 }

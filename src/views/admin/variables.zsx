@@ -1,0 +1,178 @@
+// Variables admin list view.
+//
+// Two-section table: editor-owned vars (top, full edit affordance) and
+// plugin-registered vars (grouped by plugin, value-only edit). Per-row
+// mode badge and source tag. Computed-mode rows show `last_resolved` with
+// a refresh icon button that POSTs to /admin/variables/:key/refresh.
+
+const ui = @import("publr_ui");
+const PageHeader = @import("../components/page_header.zig").PageHeader;
+
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Button = ui.button.Button;
+const Table = ui.table.Table;
+const TableHeader = ui.table.TableHeader;
+const TableBody = ui.table.TableBody;
+const TableRow = ui.table.TableRow;
+const TableHead = ui.table.TableHead;
+const TableCell = ui.table.TableCell;
+const Empty = ui.empty.Empty;
+const EmptyTitle = ui.empty.EmptyTitle;
+const EmptyDescription = ui.empty.EmptyDescription;
+const EmptyContent = ui.empty.EmptyContent;
+const Badge = ui.badge.Badge;
+const BadgeVariant = ui.badge.Variant;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
+
+pub const Row = struct {
+    key: []const u8,
+    label: []const u8, // "" when null in DB
+    value_preview: []const u8, // pre-truncated by loader
+    mode: []const u8, // "literal-baked" | "computed-baked" | "literal-live" | "computed-live"
+    source: []const u8, // "editor" | "plugin:<name>"
+    is_editor: bool,
+    is_computed: bool,
+    edit_url: []const u8, // "/admin/variables/:key" (rendered for editor rows only — task-03 owns the form)
+    refresh_url: []const u8, // "/admin/variables/:key/refresh" (computed-baked rows only)
+};
+
+pub const Props = struct {
+    csrf_token: []const u8,
+    new_url: []const u8, // "/admin/variables/new" (task-03)
+    has_any: bool,
+    has_editor_rows: bool,
+    editor_rows: []const Row,
+    has_plugin_rows: bool,
+    plugin_rows: []const Row,
+};
+
+fn ModeBadge(props: struct { mode: []const u8 }) void {
+    // Visual coding by mode: baked = blue/neutral, live = warm, computed
+    // distinguished by the prefix. Keep it simple — same Badge component as
+    // elsewhere with mode label as the body.
+    <Badge variant=.secondary>{props.mode}</Badge>
+}
+
+fn SourceTag(props: struct { source: []const u8 }) void {
+    <Text size=.xs color=.muted>{props.source}</Text>
+}
+
+fn RefreshButton(props: struct { url: []const u8, csrf_token: []const u8 }) void {
+    <form method="post" action={props.url} class="inline">
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <Button
+            label=""
+            aria_label="Refresh computed value"
+            hierarchy=.tertiary
+            size=.sm
+            icon=.sync
+            button_type=.submit
+        />
+    </form>
+}
+
+fn RowView(props: struct { row: Row, csrf_token: []const u8 }) void {
+    <TableRow>
+        <TableCell>
+            <Flex items=.center gap=.sm>
+                <span class="font-mono text-sm">{props.row.key}</span>
+                {if (props.row.label.len > 0) (
+                    <Text size=.sm color=.muted>— {props.row.label}</Text>
+                )}
+            </Flex>
+        </TableCell>
+        <TableCell>
+            <Flex items=.center gap=.sm>
+                <Text size=.sm>{props.row.value_preview}</Text>
+                {if (props.row.is_computed) (
+                    <RefreshButton url={props.row.refresh_url} csrf_token={props.csrf_token} />
+                )}
+            </Flex>
+        </TableCell>
+        <TableCell>
+            <ModeBadge mode={props.row.mode} />
+        </TableCell>
+        <TableCell>
+            <SourceTag source={props.row.source} />
+        </TableCell>
+        <TableCell>
+            {if (props.row.is_editor) (
+                <a href={props.row.edit_url} class="text-primary hover:underline text-sm">Edit</a>
+            )}
+        </TableCell>
+    </TableRow>
+}
+
+pub fn List(props: Props) {
+    <PageHeader title="Variables" />
+    <p>Demo2</p>
+
+    <Flex items=.center justify=.between class="mb-4">
+        <input
+            type="search"
+            id="kv-filter"
+            placeholder="Filter by key or label…"
+            class="border rounded px-2 py-1 text-sm w-64"
+            oninput="window.__kvFilter(this.value)"
+        />
+        <Button label="New variable" hierarchy=.primary size=.sm icon=.plus href={props.new_url} />
+    </Flex>
+
+    {if (!props.has_any) (
+        <Empty>
+            <EmptyTitle>No variables yet</EmptyTitle>
+            <EmptyDescription>Create named values that editors can insert into content with the $ picker.</EmptyDescription>
+            <EmptyContent>
+                <Button label="Create your first variable" hierarchy=.primary href={props.new_url} />
+            </EmptyContent>
+        </Empty>
+    )}
+
+    {if (props.has_editor_rows) (
+        <div class="mb-8" data-kv-section="editor">
+            <Text size=.sm color=.muted weight=.medium class="block mb-2">Your variables</Text>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Value</TableHead>
+                        <TableHead>Mode</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead></TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {for (props.editor_rows) |row| (
+                        <RowView row={row} csrf_token={props.csrf_token} />
+                    )}
+                </TableBody>
+            </Table>
+        </div>
+    )}
+
+    {if (props.has_plugin_rows) (
+        <div data-kv-section="plugin">
+            <Text size=.sm color=.muted weight=.medium class="block mb-2">Plugin variables</Text>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Value</TableHead>
+                        <TableHead>Mode</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead></TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {for (props.plugin_rows) |row| (
+                        <RowView row={row} csrf_token={props.csrf_token} />
+                    )}
+                </TableBody>
+            </Table>
+        </div>
+    )}
+
+    // Filter script lives in a separate static asset; see task-02 wrap-up.
+}

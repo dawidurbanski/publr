@@ -3,6 +3,11 @@
 // Depends on websocket.js for connection management.
 
 import { send, on, off, connect, isConnected } from './websocket.js';
+import { feature } from './core.js';
+
+// Guard so initPresence wires its document/window/WS listeners exactly once,
+// even if the runtime's init() runs again after an HMR swap.
+let presenceInited = false;
 
 let currentEntryId = null;
 let presenceContainer = null;
@@ -41,6 +46,7 @@ const EDIT_DEBOUNCE_MS = 300;
 // =========================================================================
 
 export function initPresence() {
+    if (presenceInited) return;
     const form = document.getElementById('entry-form');
     if (!form) return;
     configureTiming(form);
@@ -53,6 +59,8 @@ export function initPresence() {
     presenceContainer = document.getElementById('presence-users');
     if (!presenceContainer) return;
 
+    // Past all early-outs — commit to a single full init.
+    presenceInited = true;
     currentEntryId = entryId;
 
     // Register WS message handlers
@@ -814,11 +822,9 @@ function cleanup() {
 }
 
 // =========================================================================
-// Auto-init on DOM ready
+// Init via the interact runtime — runs once (feature), and again-safe after
+// HMR swaps thanks to the presenceInited guard. Only does work when an
+// #entry-form is present, so it's a no-op on non-edit pages.
 // =========================================================================
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initPresence);
-} else {
-    initPresence();
-}
+feature('presence', initPresence);

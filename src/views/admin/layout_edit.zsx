@@ -109,12 +109,6 @@ pub fn LayoutEdit(props: struct {
             <script type="module" src="/static/publr-toast.js"></script>
             <script type="module" src="/static/publr-tooltip.js"></script>
             <script type="module" src="/static/interact/index.js"></script>
-            <script type="module" src="/static/interact/presence.js"></script>
-            <script src="/static/admin.js"></script>
-            <script src="/static/media-selection.js"></script>
-            <script>
-                {@raw "document.getElementById('theme-toggle').addEventListener('click',function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('publr-theme',d?'dark':'light');});"}
-            </script>
         </body>
     </html>
 }

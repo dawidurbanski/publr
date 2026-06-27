@@ -2,12 +2,14 @@
 
 const std = @import("std");
 const cms = @import("cms");
+const kv = @import("kv");
 const field_mod = @import("field");
 const content_type_mod = @import("content_type");
 const tpl = @import("tpl");
 const views = @import("views");
 const pu = @import("plugin_utils");
 const _p = @import("_platform.zig");
+const auth_middleware = @import("auth_middleware");
 
 const Allocator = std.mem.Allocator;
 const ContentTypeDef = content_type_mod.ContentTypeDef;
@@ -208,6 +210,18 @@ pub fn renderFieldsHtml(
 
     if (position == .main) {
         w.writeAll("</form>") catch {};
+
+        // KV picker: inject the vars-data JSON + the picker script. Picker
+        // auto-attaches to any text input/textarea inside #entry-form (its
+        // selector also matches `data-publr-kv-picker`, which the variables
+        // admin form uses).
+        if (auth_middleware.auth) |a| {
+            const vars_json = kv.pickerVarsJson(allocator, a.db, "", 40) catch "[]";
+            w.print(
+                \\<script id="kv-vars-data" type="application/json">{s}</script>
+                \\<script src="/static/interact/kv-picker.js"></script>
+            , .{vars_json}) catch {};
+        }
     }
 
     return buf.toOwnedSlice(allocator) catch "";

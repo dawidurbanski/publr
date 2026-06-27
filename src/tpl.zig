@@ -27,9 +27,12 @@ pub fn render(comptime func: anytype, args: anytype) []const u8 {
 }
 
 /// Render a ZSX function with no arguments.
-/// Shorthand for render(func, .{})
+/// Passes an empty struct as the props arg — every ZSX-emitted function
+/// signature is now uniformly `(writer: anytype, props: anytype) !void`
+/// (a prop-less source `pub fn Foo()` synthesises a discarded `_props`),
+/// so call sites must always supply both args.
 pub inline fn renderStatic(comptime func: anytype) []const u8 {
-    return render(func, .{});
+    return render(func, .{.{}});
 }
 
 /// Reset the thread-local arena. Call at the end of each request

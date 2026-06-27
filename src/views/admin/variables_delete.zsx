@@ -1,0 +1,66 @@
+// Variables admin — delete confirmation view.
+//
+// Shown only when the variable has referencers. Three-option dialog
+// reordered by safety: Bake (safest, preserves rendered output) first,
+// Leave (do nothing destructive to content) second, Remove (DESTRUCTIVE)
+// last with type-to-confirm.
+//
+// v1 note: Bake and Remove are disabled at the handler level because their
+// rewriter helpers were intentionally removed from cms; this template
+// presents them as disabled options with explanatory text. "Leave broken"
+// is the only currently-supported action.
+
+const ui = @import("publr_ui");
+const PageHeader = @import("../components/page_header.zig").PageHeader;
+
+const Button = ui.button.Button;
+const Flex = ui.flex.Flex;
+const Text = ui.text.Text;
+
+pub const Props = struct {
+    csrf_token: []const u8,
+    action_url: []const u8, // POST target (same as delete_url)
+    cancel_url: []const u8, // back to list
+    key: []const u8,
+    referencer_count: i64,
+    can_bake: bool, // currently false in v1 — bake helper not available
+    can_remove: bool, // currently false in v1 — remove helper not available
+};
+
+pub fn Delete(props: Props) {
+    <PageHeader title="Delete variable" />
+
+    <div class="mb-4">
+        <span class="block">
+            Deleting <span class="font-mono">{props.key}</span>. It is referenced in {props.referencer_count} field(s).
+        </span>
+        <Text size=.sm color=.muted class="block mt-2">Choose what to do with the existing references in your content:</Text>
+    </div>
+
+    <form method="POST" action={props.action_url} id="kv-delete-form" class="space-y-3">
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+
+        <label class="block p-3 border rounded cursor-pointer">
+            <input type="radio" name="action" value="bake" disabled />
+            <span class="ml-2 font-medium">Bake current value into content</span>
+            <Text size=.xs color=.muted class="block ml-6 mt-1">Replaces each [kv:{props.key}] with the literal value right now, freezing it. Currently disabled — rewriter helpers are pending implementation.</Text>
+        </label>
+
+        <label class="block p-3 border rounded cursor-pointer">
+            <input type="radio" name="action" value="leave" checked />
+            <span class="ml-2 font-medium">Leave broken</span>
+            <Text size=.xs color=.muted class="block ml-6 mt-1">Keeps [kv:{props.key}] tokens in content. Renderer will show them as unknown / empty until manually cleaned up.</Text>
+        </label>
+
+        <label class="block p-3 border rounded cursor-pointer">
+            <input type="radio" name="action" value="remove" disabled />
+            <span class="ml-2 font-medium text-destructive">Remove from all fields (destructive)</span>
+            <Text size=.xs color=.muted class="block ml-6 mt-1">Strips [kv:{props.key}] tokens from every referencing field. Currently disabled — rewriter helpers are pending implementation.</Text>
+        </label>
+
+        <Flex gap=.sm items=.center class="mt-6">
+            <Button label="Delete" hierarchy=.destructive button_type=.submit />
+            <Button label="Cancel" hierarchy=.tertiary href={props.cancel_url} />
+        </Flex>
+    </form>
+}

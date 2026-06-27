@@ -337,14 +337,7 @@ pub fn Layout(props: struct {
             <script type="module" src="/static/publr-toast.js"></script>
             <script type="module" src="/static/publr-tooltip.js"></script>
             <script type="module" src="/static/interact/index.js"></script>
-            <script src="/static/admin.js"></script>
-            <script src="/static/media-selection.js"></script>
-            <script>
-                {@raw "document.getElementById('theme-toggle').addEventListener('click',function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('publr-theme',d?'dark':'light');});"}
-            </script>
-            <script>
-                {@raw "(function(){var s=document.querySelector('[data-publr-component=\"admin-sidebar\"]');var b=document.querySelector('[data-publr-sidebar-backdrop]');var t=document.querySelector('[data-publr-sidebar-trigger]');if(!s||!b||!t)return;function open(){s.classList.remove('-translate-x-full');s.setAttribute('data-publr-sidebar-state','open');b.classList.remove('hidden');t.setAttribute('aria-expanded','true');document.body.style.overflow='hidden';}function close(){s.classList.add('-translate-x-full');s.setAttribute('data-publr-sidebar-state','closed');b.classList.add('hidden');t.setAttribute('aria-expanded','false');document.body.style.overflow='';}t.addEventListener('click',function(e){e.stopPropagation();if(s.getAttribute('data-publr-sidebar-state')==='open')close();else open();});b.addEventListener('click',close);document.addEventListener('keydown',function(e){if(e.key==='Escape'&&s.getAttribute('data-publr-sidebar-state')==='open')close();});s.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&window.matchMedia('(max-width: 1023px)').matches)close();});window.matchMedia('(min-width: 1024px)').addEventListener('change',function(ev){if(ev.matches){b.classList.add('hidden');document.body.style.overflow='';t.setAttribute('aria-expanded','false');s.setAttribute('data-publr-sidebar-state','closed');}});})();"}
-            </script>
+            <script type="module" src="/static/publr-interactivity-query.js"></script>
         </body>
     </html>
 }

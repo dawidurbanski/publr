@@ -1,6 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const mw = @import("middleware");
+const render_hooks = @import("render_hooks");
+const auth_middleware = @import("auth_middleware");
 
 // Re-export types from middleware for convenience
 pub const Context = mw.Context;
@@ -150,6 +152,7 @@ pub const Router = struct {
 
                 // Send buffered response (skip if streaming already sent headers)
                 if (!ctx.response.headers_sent) {
+                    runRenderHooks(&ctx);
                     try sendResponse(stream, &ctx.response);
                 }
                 return;
@@ -163,17 +166,32 @@ pub const Router = struct {
         if (self.not_found_handler) |handler| {
             try mw.executeChain(&ctx, self.global_middleware.items, &[_]Middleware{}, handler);
             if (!ctx.response.headers_sent) {
+                runRenderHooks(&ctx);
                 try sendResponse(stream, &ctx.response);
             }
         } else {
             try defaultNotFound(&ctx);
             if (!ctx.response.headers_sent) {
+                runRenderHooks(&ctx);
                 try sendResponse(stream, &ctx.response);
             }
         }
     }
 
 };
+
+/// Run any registered render hooks (kv live-var substitution, plugin hooks).
+/// Requires a global Db; if none (e.g., very-early startup), hooks are skipped.
+fn runRenderHooks(ctx: *mw.Context) void {
+    if (auth_middleware.auth) |a| {
+        render_hooks.beforeWrite(.{
+            .response = &ctx.response,
+            .db = a.db,
+            .allocator = ctx.allocator,
+            .path = ctx.path,
+        });
+    }
+}
 
 fn sendResponse(stream: std.net.Stream, response: *const Response) !void {
     var buf: [1024]u8 = undefined;

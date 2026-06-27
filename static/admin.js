@@ -1,14 +1,20 @@
 // Publr Admin — Component Handlers
-// Admin-specific wiring. Depends on interact modules (core, toggle, portal, focus-trap, dismiss).
-// Component handlers are registered here; tasks 03-06 add the implementations.
+// Admin page wiring, run through the interact runtime so it's idempotent and
+// re-inits after HMR swaps. Each section is a `scan` (re-runs every init,
+// guarded per root element so it only wires freshly swapped-in nodes) or a
+// `register` (per data-publr-component element). The one document-level
+// listener (folder actions) is delegation-style and bound exactly once.
 
-(function() {
+import { register, scan } from './interact/core.js';
+
+scan(function() {
     'use strict';
 
     // ── Media Upload ─────────────────────────────────────
     var fileInput = document.getElementById('media-file-input');
     var form = document.getElementById('media-upload-form');
-    if (fileInput && form) {
+    if (fileInput && form && !form.__publrMediaUploadInit) {
+        form.__publrMediaUploadInit = true;
         var folderIdField = document.getElementById('upload-folder-id');
         var progressWrap = document.getElementById('upload-progress');
         var progressBar = document.getElementById('upload-progress-bar');
@@ -349,6 +355,8 @@
         return options;
     }
 
+    if (!window.__publrFolderActionsBound) {
+    window.__publrFolderActionsBound = true;
     document.addEventListener('click', function(e) {
         var btn = e.target.closest('[data-publr-action]');
         if (!btn) return;
@@ -384,16 +392,18 @@
             if (trigger) trigger.click();
         }
     });
+    }
 
-})();
+});
 
 // ── Version Compare ──────────────────────────────
-(function() {
+scan(function() {
     'use strict';
     var toggle = document.getElementById('show-diff-only');
     var fields = document.getElementById('version-compare-fields');
     var applyBtn = document.getElementById('apply-changes-btn');
-    if (!fields) return;
+    if (!fields || fields.__publrInit) return;
+    fields.__publrInit = true;
 
     function updateApplyBtn() {
         if (!applyBtn) return;
@@ -421,13 +431,14 @@
     fields.addEventListener('change', function(e) {
         if (e.target.type === 'radio') updateApplyBtn();
     });
-})();
+});
 
 // ── Post Edit: Auto-save + Release Integration ──
-(function() {
+scan(function() {
     'use strict';
     var form = document.getElementById('entry-form');
-    if (!form) return;
+    if (!form || form.__publrEntryInit) return;
+    form.__publrEntryInit = true;
 
     var publishBtn = document.getElementById('publish-btn');
     var discardBtn = document.getElementById('discard-btn');
@@ -1092,14 +1103,15 @@
 })();
 
 // ── Recompile Nanobar ────────────────────────────
-(function() {
+scan(function() {
     'use strict';
 
     var STORAGE_KEY = 'publr_recompile';
     var bar = document.getElementById('recompile-bar');
     var barText = document.getElementById('recompile-bar-text');
     var barAction = document.getElementById('recompile-bar-action');
-    if (!bar || !barText || !barAction) return;
+    if (!bar || !barText || !barAction || bar.__publrInit) return;
+    bar.__publrInit = true;
 
     function showBar(text, state) {
         barText.textContent = text;
@@ -1247,17 +1259,18 @@
             poll(configText, startTime);
         });
     });
-})();
+});
 
 // ── Content list bulk-actions wiring ─────────────────────
 //
-// For each [data-publr-component="content-list"] container on the page:
+// Registered per [data-publr-component="content-list"] element (core guards
+// each with _publrInit, so it wires only once per element — including ones
+// swapped in by HMR):
 // - Toggle the BulkActions bar visibility based on row-checkbox selection
 // - Keep its count text in sync
 // - Master checkbox cycles checked <-> indeterminate <-> unchecked
 // - Clear button resets selection
-(function() {
-    document.querySelectorAll('[data-publr-component="content-list"]').forEach(function(list) {
+register('content-list', function(list) {
         var bulkBar = list.querySelector('[data-publr-component="bulk-actions"]');
         if (!bulkBar) return;
 
@@ -1316,6 +1329,21 @@
         }
 
         update();
-    });
-})();
+});
 
+
+// =============================================================================
+// Variables admin list — client-side filter
+// =============================================================================
+// The /admin/variables list page calls window.__kvFilter(q) from a `<input
+// oninput=...>` attribute. Toggles row visibility on case-insensitive
+// substring match against each row's combined text content (key + label +
+// value preview).
+window.__kvFilter = function(q) {
+    var needle = (q || "").toLowerCase().trim();
+    document.querySelectorAll('[data-kv-section] tbody tr').forEach(function(row) {
+        if (!needle) { row.style.display = ''; return; }
+        var text = (row.textContent || '').toLowerCase();
+        row.style.display = text.indexOf(needle) === -1 ? 'none' : '';
+    });
+};

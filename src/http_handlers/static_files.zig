@@ -8,21 +8,30 @@ pub fn setDevMode(dev_mode: bool) void {
     is_dev_mode = dev_mode;
 }
 
+// Runtime CSS override (dev-only) lives in its own module so the HMR
+// loop can write to it without depending on the static handler's wiring.
+const runtime_css = @import("runtime_css");
+
 const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
 const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
 const LogoSvg = static.Asset("logo.svg", @embedFile("static_logo_svg"));
 
 const InteractCore = static.Asset("core.js", @embedFile("static_interact_core_js"));
 const InteractToggle = static.Asset("toggle.js", @embedFile("static_interact_toggle_js"));
+const InteractKvPicker = static.Asset("kv-picker.js", @embedFile("static_interact_kv_picker_js"));
 const InteractPortal = static.Asset("portal.js", @embedFile("static_interact_portal_js"));
 const InteractFocusTrap = static.Asset("focus-trap.js", @embedFile("static_interact_focus_trap_js"));
 const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_dismiss_js"));
 const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
 const InteractIndex = static.Asset("index.js", @embedFile("static_interact_index_js"));
+const InteractAdminShell = static.Asset("admin-shell.js", @embedFile("static_interact_admin_shell_js"));
 const InteractRepeater = static.Asset("repeater.js", @embedFile("static_interact_repeater_js"));
 const MediaSelectionJs = static.Asset("media-selection.js", @embedFile("static_media_selection_js"));
 const InteractWebSocket = static.Asset("websocket.js", @embedFile("static_interact_websocket_js"));
 const InteractPresence = static.Asset("presence.js", @embedFile("static_interact_presence_js"));
+const PublrInteractivity = static.Asset("publr-interactivity.js", @embedFile("static_publr_interactivity_js"));
+const PublrInteractivityQuery = static.Asset("publr-interactivity-query.js", @embedFile("static_publr_interactivity_query_js"));
+const DashboardDemoJs = static.Asset("dashboard-demo.js", @embedFile("static_dashboard_demo_js"));
 
 const publr_ui = @import("publr_ui");
 const PreflightCss = @embedFile("static_preflight_css");
@@ -48,15 +57,20 @@ const asset_map = .{
     .{ "logo.svg", AssetEntry{ .asset = LogoSvg, .disk_path = "static/logo.svg" } },
     .{ "interact/core.js", AssetEntry{ .asset = InteractCore, .disk_path = "static/interact/core.js" } },
     .{ "interact/toggle.js", AssetEntry{ .asset = InteractToggle, .disk_path = "static/interact/toggle.js" } },
+    .{ "interact/kv-picker.js", AssetEntry{ .asset = InteractKvPicker, .disk_path = "static/interact/kv-picker.js" } },
     .{ "interact/portal.js", AssetEntry{ .asset = InteractPortal, .disk_path = "static/interact/portal.js" } },
     .{ "interact/focus-trap.js", AssetEntry{ .asset = InteractFocusTrap, .disk_path = "static/interact/focus-trap.js" } },
     .{ "interact/dismiss.js", AssetEntry{ .asset = InteractDismiss, .disk_path = "static/interact/dismiss.js" } },
     .{ "interact/components.js", AssetEntry{ .asset = InteractComponents, .disk_path = "static/interact/components.js" } },
     .{ "interact/index.js", AssetEntry{ .asset = InteractIndex, .disk_path = "static/interact/index.js" } },
+    .{ "interact/admin-shell.js", AssetEntry{ .asset = InteractAdminShell, .disk_path = "static/interact/admin-shell.js" } },
     .{ "interact/repeater.js", AssetEntry{ .asset = InteractRepeater, .disk_path = "static/interact/repeater.js" } },
     .{ "media-selection.js", AssetEntry{ .asset = MediaSelectionJs, .disk_path = "static/media-selection.js" } },
     .{ "interact/websocket.js", AssetEntry{ .asset = InteractWebSocket, .disk_path = "static/interact/websocket.js" } },
     .{ "interact/presence.js", AssetEntry{ .asset = InteractPresence, .disk_path = "static/interact/presence.js" } },
+    .{ "publr-interactivity.js", AssetEntry{ .asset = PublrInteractivity, .disk_path = "static/publr-interactivity.js" } },
+    .{ "publr-interactivity-query.js", AssetEntry{ .asset = PublrInteractivityQuery, .disk_path = "static/publr-interactivity-query.js" } },
+    .{ "dashboard-demo.js", AssetEntry{ .asset = DashboardDemoJs, .disk_path = "static/dashboard-demo.js" } },
     .{ "tokens.css", AssetEntry{ .asset = TokensCss, .disk_path = "vendor/tokens.css" } },
     .{ "publr.css", AssetEntry{ .asset = PublrCss, .disk_path = null } },
     .{ "publr-core.js", AssetEntry{ .asset = PublrCoreJs, .disk_path = null } },
@@ -75,6 +89,18 @@ pub fn handleStatic(ctx: *Context) !void {
         ctx.response.setBody("Not Found");
         return;
     };
+
+    // In dev mode, the HMR loop may have set a runtime override for
+    // admin.css after a fast-path swap (see runtime_css.set). Serve
+    // that first so just-extracted classes are covered before the next
+    // `zig build` regenerates the embedded copy.
+    if (is_dev_mode and std.mem.eql(u8, file, "admin.css")) {
+        if (try runtime_css.dupCurrent(std.heap.page_allocator)) |content| {
+            ctx.response.setContentType(static.getMimeType(file));
+            ctx.response.setBody(content);
+            return;
+        }
+    }
 
     inline for (asset_map) |entry| {
         if (std.mem.eql(u8, file, entry[0])) {

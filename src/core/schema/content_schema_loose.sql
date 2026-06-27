@@ -326,3 +326,33 @@ CREATE TABLE IF NOT EXISTS settings (
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
 );
+
+-- Variables (KV with interpolation).
+-- Editor-facing named string values, referenced inline in field content via
+-- `[kv:key]` tokens. Distinct from `settings` above (which is opaque plugin
+-- storage). `mode` is one of literal-baked / computed-baked / literal-live /
+-- computed-live. `source` is "editor" or "plugin:<id>". `last_resolved`
+-- caches the computed value for `computed-baked` rows between publishes.
+CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    label TEXT,
+    description TEXT,
+    last_resolved TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+-- Reverse index from variable keys to the (entry, field) locations that
+-- reference them. Populated by the field-save hook on text-bearing fields.
+-- Used by the publish-session cascade to enqueue referencers when a baked
+-- variable changes value.
+CREATE TABLE IF NOT EXISTS kv_refs (
+    var_key TEXT NOT NULL,
+    entry_id TEXT NOT NULL,
+    field_path TEXT NOT NULL,
+    PRIMARY KEY (var_key, entry_id, field_path)
+);
+CREATE INDEX IF NOT EXISTS idx_kv_refs_entry ON kv_refs(entry_id);
+CREATE INDEX IF NOT EXISTS idx_kv_refs_var ON kv_refs(var_key);

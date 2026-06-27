@@ -32,6 +32,7 @@ flex
 pl-2.5
 pr-1.5
 -space-y-1
+rounded-t-none
 flex-1
 text-primary
 pt-0
@@ -180,6 +181,7 @@ min-w-0
 mt-3
 grid-cols-3
 m-0
+text-base
 px-8
 pb-0
 text-foreground
@@ -254,6 +256,7 @@ empty:hidden
 gap-8
 bulk-actions
 items-baseline
+text-brand-600
 grid-cols-4
 rounded-md
 h-1.5
@@ -307,6 +310,7 @@ pr-10
 table-bulk-bar
 px-2.5
 text-3xs
+sm:text-sm
 hover:text-foreground
 object-cover
 pointer-events-auto

@@ -8,6 +8,17 @@ const publr_config = @import("publr_config");
 const build_options = @import("build_options");
 const collaboration_config = @import("collaboration_config.zig");
 const db_path_mod = @import("db_path");
+/// View registry: in HMR mode this holds the swap-loop lookup table built
+/// from `src/views/**/*.zsx`. In inline mode it's an empty no-op (see
+/// `src/view_registry_runtime.zig`), so the import is unconditional.
+const view_registry_runtime = @import("view_registry_runtime");
+/// task-08 of cms-hmr-fast-path: the in-process dev orchestrator imports
+/// the cross-platform mtime poll watcher, the HMR swap loop, and the WS
+/// push channel. Replaces the three-watchexec setup that used to live in
+/// `runWithWatchers`.
+const watcher_mod = @import("watcher");
+const hmr_loop_mod = @import("hmr_loop");
+const hmr_ws = @import("hmr_ws");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -48,7 +59,6 @@ fn runServe(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void 
     var cli_lock_timeout_ms: ?u32 = null;
     var cli_heartbeat_interval_ms: ?u32 = null;
     var dev_mode: bool = false;
-    var watch_mode: bool = false;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--port") or std.mem.eql(u8, arg, "-p")) {
@@ -86,7 +96,17 @@ fn runServe(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void 
         } else if (std.mem.eql(u8, arg, "--dev") or std.mem.eql(u8, arg, "-d")) {
             dev_mode = true;
         } else if (std.mem.eql(u8, arg, "--watch") or std.mem.eql(u8, arg, "-w")) {
-            watch_mode = true;
+            // task-08: --watch is deprecated. The new --dev runtime
+            // bundles the watcher, the HMR fast path, the rebuild
+            // trigger, and the dev middleware behind a single flag —
+            // there's no longer anything --watch can do that --dev
+            // doesn't. Alias to --dev with a one-line warning so the
+            // muscle-memory still works for one release cycle.
+            std.debug.print(
+                "[publr] --watch is deprecated; use --dev (which now includes the watch behavior plus HMR fast path)\n",
+                .{},
+            );
+            dev_mode = true;
         } else {
             std.debug.print("Unknown option: {s}\n", .{arg});
             return;
@@ -100,18 +120,41 @@ fn runServe(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void 
     const lock_timeout_ms = resolveLockTimeoutMs(cli_lock_timeout_ms);
     const heartbeat_interval_ms = resolveHeartbeatIntervalMs(cli_heartbeat_interval_ms);
 
-    if (watch_mode) {
-        if (builtin.os.tag == .windows) {
-            printWatchNotSupportedWindows();
-            return;
-        }
-        runWithWatchers(port, db_path, lock_timeout_ms, heartbeat_interval_ms, dev_mode) catch |err| {
-            if (err == error.FileNotFound) {
-                printWatchexecMissing();
-                return;
-            }
-            return err;
+    // Build the HMR view-lookup table once at startup. In inline (non-HMR)
+    // builds the registry's entries slice is empty so this just logs zero
+    // and never gets consulted. In `--dev` HMR builds task-06's swap loop
+    // consults it on .zsx save events.
+    if (dev_mode) {
+        view_registry_runtime.init(allocator) catch |err| {
+            std.log.warn("[hmr] view registry init failed: {s}", .{@errorName(err)});
         };
+
+        // If the registry is empty we're running a non-HMR binary in dev
+        // mode. Every `.zsx` save would slow-path into a `zig build`
+        // (which would then succeed-but-not-replace if the user keeps
+        // re-running this same binary, busy-looping). Refuse early with
+        // a clear message instead of letting the user discover the
+        // mismatch through "the pill stays on Rebuilding forever".
+        if (view_registry_runtime.iter().len == 0) {
+            std.debug.print(
+                \\
+                \\[publr] ERROR: --dev requires the binary to be built with -Dhmr=true.
+                \\        The view registry is empty, which means this binary was built
+                \\        without HMR codegen. HMR fast-path can never fire, and every
+                \\        .zsx save would trigger a full rebuild that doesn't replace
+                \\        the running process.
+                \\
+                \\        Re-run with:
+                \\          zig build -Dhmr=true run -- serve --dev
+                \\
+                \\
+            , .{});
+            std.process.exit(1);
+        }
+    }
+
+    if (dev_mode) {
+        try runDevMode(allocator, port, db_path, lock_timeout_ms, heartbeat_interval_ms);
         return;
     }
 
@@ -341,195 +384,290 @@ fn resolveHeartbeatIntervalMs(cli_heartbeat_interval_ms: ?u32) u32 {
     return cli_heartbeat_interval_ms orelse collaboration_config.default_heartbeat_interval_ms;
 }
 
-/// Runs the server with three watchexec processes:
-/// 1. Source watcher — watches src/, vendor/, build.zig → full `zig build -Dwatch`
-/// 2. Theme watcher — watches themes/ → `zig build -Dwatch` (same build, but scoped trigger)
-/// 3. Server watcher — watches `zig-out/bin/publr`, restarts server when binary changes
-/// The Zig build cache makes theme-only changes fast (only preprocess+transpile+link).
-fn runWithWatchers(
+// =============================================================================
+// Dev-mode orchestrator (task-08 of cms-hmr-fast-path)
+// =============================================================================
+//
+// `runDevMode` replaces the three-watchexec setup that lived in
+// `runWithWatchers`. The whole live-reload pipeline now lives in-process:
+//
+//   * `watcher_mod.Watcher` polls the same roots watchexec used (src/,
+//     themes/, vendor/, build.zig) every 200 ms via mtime polling.
+//   * `hmr_loop_mod.Loop` decides per-event whether a `.zsx` save can
+//     be hot-swapped (literals only, manifest equal) or needs a full
+//     rebuild (structural change, or non-`.zsx` file).
+//   * `hmr_ws.broadcaster()` ships swap-HTML and rebuild signals to
+//     every connected `/__hmr/ws` client.
+//   * `triggerRebuild` runs `zig build -Dhmr=true -Dminify=<resolved>`
+//     in-process; on success it `execvpe`s the freshly built binary,
+//     replacing the current process image. The injected live-reload
+//     client's auto-reconnect handles the brief WS gap (no FD handoff
+//     in v1 — accept the reconnect; matches today's watchexec UX for
+//     the slow path).
+//
+// Threading model: the HTTP server runs on a background thread; the
+// main thread drives the watcher poll loop. The HTTP server already
+// owns its own poll/accept loop and a `shutdown_requested` atomic
+// (exposed from `http.zig` for this caller), so when SIGINT/SIGTERM
+// fires the signal handler flips the atomic, both loops exit, and
+// `runDevMode` joins cleanly. Inverting it (HTTP on main, watcher on a
+// thread) would force `execvpe` to coordinate across the HTTP thread,
+// which is messier; the watcher loop is the simpler one to relocate.
+
+/// Drives the in-process dev loop: spawns the HTTP server on a thread,
+/// polls the watcher in this thread, dispatches events to the swap
+/// loop, and triggers an in-process rebuild + `execvpe` on slow-path
+/// events. Returns only when the user kills the process (SIGINT/TERM).
+fn runDevMode(
+    allocator: std.mem.Allocator,
     port: u16,
     db_path: []const u8,
     lock_timeout_ms: u32,
     heartbeat_interval_ms: u32,
-    dev_mode: bool,
 ) !void {
-    // Build command (shared by both watchers)
-    var cmd_buf: [512]u8 = undefined;
-    var cmd_offset: usize = 0;
+    // Watcher roots match the old three-watchexec layout. The watcher
+    // walks each root at every poll and only emits events for files
+    // whose extension matches the allowlist (root-relative paths only).
+    //
+    // src/ -> .zig/.zon/.zsx (CSS lives under static/ in CMS today and
+    //   gets handled by the asset-mtime branch in the loop below; if a
+    //   theme starts shipping `.css` inside src/ we'd add it here too).
+    //   `gen/` is the SSG output tree; never react to changes there or
+    //   we'd loop forever on our own writes.
+    // themes/ -> .publr templates + `.zon` (theme.zon / publr.zon).
+    //   The previous watchexec setup also ignored `themes/*/public/**`
+    //   and `themes/*/src/**`. The watcher takes root-relative prefixes
+    //   so a wildcard isn't expressible here; we filter the ignored
+    //   subtrees inside the swap-loop dispatch below via `shouldIgnore`.
+    // vendor/ -> any extension. Vendor changes are rare; treat as
+    //   rebuild events.
+    // build.zig -> single-file root, matches the watchexec server-watcher.
+    var watcher = try watcher_mod.Watcher.init(allocator, &.{
+        .{
+            .path = "src",
+            .extensions = &.{ ".zig", ".zon", ".zsx", ".css" },
+            .ignore_prefixes = &.{"gen/"},
+        },
+        .{
+            .path = "themes",
+            .extensions = &.{ ".publr", ".zon", ".zsx" },
+            .ignore_prefixes = &.{}, // wildcards filtered in shouldIgnoreEvent
+        },
+        .{
+            .path = "vendor",
+            .extensions = &.{},
+            .ignore_prefixes = &.{},
+        },
+        .{
+            .path = "build.zig",
+            .extensions = &.{},
+            .ignore_prefixes = &.{},
+        },
+    });
+    defer watcher.deinit();
 
-    if (@hasField(@TypeOf(publr_config), "dev")) {
-        if (@hasField(@TypeOf(publr_config.dev), "watchers")) {
-            inline for (publr_config.dev.watchers) |watcher| {
-                inline for (watcher.cmd, 0..) |arg, i| {
-                    if (i > 0) {
-                        @memcpy(cmd_buf[cmd_offset..][0..1], " ");
-                        cmd_offset += 1;
-                    }
-                    @memcpy(cmd_buf[cmd_offset..][0..arg.len], arg);
-                    cmd_offset += arg.len;
-                }
-                @memcpy(cmd_buf[cmd_offset..][0..4], " && ");
-                cmd_offset += 4;
+    var loop = hmr_loop_mod.Loop.init(allocator, hmr_ws.broadcaster());
+    defer loop.deinit();
+
+    // HTTP server runs on a background thread. The atomic shutdown
+    // flag in http.zig drives both loops' termination on SIGINT.
+    const server_thread = try std.Thread.spawn(.{}, runHttpServerThread, .{
+        port,
+        db_path,
+        lock_timeout_ms,
+        heartbeat_interval_ms,
+    });
+
+    // Prime the watcher snapshot — first poll always returns empty.
+    _ = try watcher.poll();
+
+    std.debug.print("[publr] dev mode active (in-process watcher + HMR fast path)\n", .{});
+
+    var poll_counter: usize = 0;
+    var rebuild_requested: bool = false;
+
+    while (!http.isShutdownRequested()) {
+        var timer = std.time.Timer.start() catch null;
+        const events = watcher.poll() catch |err| {
+            std.debug.print("[watcher] poll error: {s}\n", .{@errorName(err)});
+            std.Thread.sleep(200 * std.time.ns_per_ms);
+            continue;
+        };
+
+        // Surface the poll cost every 100 ticks so we notice regressions
+        // without spamming the log every cycle.
+        poll_counter += 1;
+        if (poll_counter % 100 == 0) {
+            if (timer) |*t| {
+                const elapsed_us = t.read() / std.time.ns_per_us;
+                std.debug.print("[watcher] poll took {d}us (tick #{d})\n", .{ elapsed_us, poll_counter });
             }
         }
-    }
 
-    // Propagate -Dminify=<resolved> so the watcher rebuild preserves the
-    // user's CSS minify choice. Without this, every file-change rebuild
-    // falls back to the optimize-based default (Debug → unminified) even
-    // when the user started the session with -Dminify=true.
-    const build_suffix = if (build_options.minify_css)
-        "zig build -Dwatch -Dminify=true"
-    else
-        "zig build -Dwatch -Dminify=false";
-    @memcpy(cmd_buf[cmd_offset..][0..build_suffix.len], build_suffix);
-    cmd_offset += build_suffix.len;
-    cmd_buf[cmd_offset] = 0;
+        if (events.len > 0) {
+            // Partition events: ignored noise (theme src/public), CSS
+            // cache-bust only, swap/rebuild candidates.
+            var any_css_only: bool = false;
+            var swap_events_buf: [64]watcher_mod.ChangeEvent = undefined;
+            var swap_events_len: usize = 0;
 
-    // Source watcher: watches core CMS files
-    const src_extensions = if (dev_mode) "zig,zon,zsx" else "zig,zon,zsx,css";
-    const build_argv = [_:null]?[*:0]const u8{
-        "watchexec",
-        "-e",
-        src_extensions,
-        "-w",
-        "src",
-        "-w",
-        "vendor",
-        "-w",
-        "build.zig",
-        "-i",
-        "src/gen/**",
-        @ptrCast(&cmd_buf),
-    };
+            for (events) |ev| {
+                if (shouldIgnoreEvent(ev)) continue;
 
-    // Theme watcher: watches theme template + asset files → rebuild.
-    // `.publr` covers content/layout templates; `.zon` covers `theme.zon`
-    // (token overrides) and `publr.zon` (theme manifest). Both are wired
-    // into the build graph as file deps so Zig re-runs the JIT step when
-    // they change, the embedded CSS is regenerated, and the server
-    // watcher restarts when the binary's mtime updates.
-    const theme_argv = [_:null]?[*:0]const u8{
-        "watchexec",
-        "-e",
-        "publr,zon",
-        "-w",
-        "themes",
-        "-i",
-        "themes/*/public/**",
-        "-i",
-        "themes/*/src/**",
-        @ptrCast(&cmd_buf),
-    };
+                // .css changes broadcast a cache-bust signal to the
+                // browser; no rebuild needed because CSS is delivered
+                // via `<link rel="stylesheet">` and the client appends
+                // `?_t=<ts>` on every link to force a fresh fetch.
+                // Note: themes embedFile CSS at build time, so if a
+                // theme's CSS pipeline writes a new asset on disk and
+                // the page references that asset via <link>, we're
+                // good. If a future feature needs an actual rebuild
+                // for CSS, route it through the rebuild path instead.
+                if (std.mem.eql(u8, ev.extension, ".css")) {
+                    any_css_only = true;
+                    continue;
+                }
 
-    // Format port as null-terminated string (u16 max = 5 digits)
-    var port_buf: [6]u8 = undefined;
-    const port_str = std.fmt.bufPrint(port_buf[0..5], "{d}", .{port}) catch unreachable;
-    port_buf[port_str.len] = 0;
+                if (swap_events_len < swap_events_buf.len) {
+                    swap_events_buf[swap_events_len] = ev;
+                    swap_events_len += 1;
+                }
+            }
 
-    const db_path_z = try std.heap.page_allocator.dupeZ(u8, db_path);
-    defer std.heap.page_allocator.free(db_path_z);
-    var lock_timeout_buf: [16]u8 = undefined;
-    const lock_timeout_str = std.fmt.bufPrint(lock_timeout_buf[0..15], "{d}", .{lock_timeout_ms}) catch unreachable;
-    lock_timeout_buf[lock_timeout_str.len] = 0;
-    var heartbeat_interval_buf: [16]u8 = undefined;
-    const heartbeat_interval_str = std.fmt.bufPrint(heartbeat_interval_buf[0..15], "{d}", .{heartbeat_interval_ms}) catch unreachable;
-    heartbeat_interval_buf[heartbeat_interval_str.len] = 0;
+            if (any_css_only) {
+                hmr_ws.broadcastCss(allocator, "") catch |err| {
+                    std.debug.print("[hmr] css broadcast failed: {s}\n", .{@errorName(err)});
+                };
+            }
 
-    // Server watcher: watches binary, restarts on change (no shell layer)
-    const dev_flag: ?[*:0]const u8 = if (dev_mode) "--dev" else null;
-    const server_argv = [_:null]?[*:0]const u8{
-        "watchexec",
-        "-r",
-        "--stop-signal=SIGINT",
-        "--stop-timeout=0",
-        "-w",
-        "zig-out/bin/publr",
-        "--",
-        "zig-out/bin/publr",
-        "serve",
-        "--port",
-        @ptrCast(&port_buf),
-        "--db",
-        db_path_z.ptr,
-        "--lock-timeout",
-        @ptrCast(&lock_timeout_buf),
-        "--heartbeat-interval",
-        @ptrCast(&heartbeat_interval_buf),
-        dev_flag,
-    };
-
-    // Fork source watcher
-    const build_pid = try std.posix.fork();
-    if (build_pid == 0) {
-        const err = std.posix.execvpeZ("watchexec", &build_argv, std.c.environ);
-        if (err == error.FileNotFound) printWatchexecMissing();
-        std.process.exit(1);
-    }
-
-    // Fork theme watcher
-    const theme_pid = std.posix.fork() catch |err| {
-        std.posix.kill(build_pid, std.posix.SIG.TERM) catch {};
-        _ = std.posix.waitpid(build_pid, 0);
-        return err;
-    };
-    if (theme_pid == 0) {
-        const err = std.posix.execvpeZ("watchexec", &theme_argv, std.c.environ);
-        if (err == error.FileNotFound) printWatchexecMissing();
-        std.process.exit(1);
-    }
-
-    // Fork server watcher
-    const server_pid = std.posix.fork() catch |err| {
-        std.posix.kill(build_pid, std.posix.SIG.TERM) catch {};
-        std.posix.kill(theme_pid, std.posix.SIG.TERM) catch {};
-        _ = std.posix.waitpid(build_pid, 0);
-        _ = std.posix.waitpid(theme_pid, 0);
-        return err;
-    };
-    if (server_pid == 0) {
-        const err = std.posix.execvpeZ("watchexec", &server_argv, std.c.environ);
-        std.debug.print("Failed to start server watcher: {s}\n", .{@errorName(err)});
-        std.process.exit(1);
-    }
-
-    // Wait for any child to exit, then clean up the others
-    const result = std.posix.waitpid(-1, 0);
-    const pids = [_]i32{ build_pid, theme_pid, server_pid };
-    for (pids) |pid| {
-        if (pid != result.pid) {
-            std.posix.kill(pid, std.posix.SIG.TERM) catch {};
-            _ = std.posix.waitpid(pid, 0);
+            if (swap_events_len > 0) {
+                // The swap loop decides per-event whether it can
+                // fast-path (literal-only `.zsx` edit) or has to
+                // slow-path (structural change, non-`.zsx`, or
+                // unregistered file). We take its verdict as the source
+                // of truth — earlier versions guessed from extension
+                // only, which missed `.zsx` structural changes and left
+                // the client's "Rebuilding" pill stuck forever.
+                const result = loop.handle(swap_events_buf[0..swap_events_len]) catch |err| blk: {
+                    std.debug.print("[hmr] loop.handle failed: {s}\n", .{@errorName(err)});
+                    // Loop errored — safest to rebuild rather than leave
+                    // the running binary out of sync with the source.
+                    break :blk hmr_loop_mod.Loop.HandleResult{ .needs_rebuild = true };
+                };
+                if (result.needs_rebuild) rebuild_requested = true;
+            }
         }
+
+        if (rebuild_requested) {
+            // Tell the HTTP server to drain — it'll flip its own
+            // shutdown atomic so the listener loop exits. The watcher
+            // loop here will fall out on the next iteration too.
+            triggerRebuild(allocator) catch |err| {
+                std.debug.print("[hmr] rebuild failed: {s} — staying on current binary\n", .{@errorName(err)});
+                rebuild_requested = false;
+                continue;
+            };
+            // triggerRebuild only returns on rebuild failure. On
+            // success, execvpe replaces the process image and we
+            // never get here. Reset and keep going on failure.
+            rebuild_requested = false;
+        }
+
+        std.Thread.sleep(200 * std.time.ns_per_ms);
     }
+
+    server_thread.join();
 }
 
-fn printWatchexecMissing() void {
-    std.debug.print(
-        \\--watch requires watchexec to be installed.
-        \\
-        \\Options:
-        \\  1. Install watchexec:
-        \\     https://github.com/watchexec/watchexec/blob/main/doc/packages.md
-        \\
-        \\  2. Use watchexec directly:
-        \\     watchexec -r -e zig "zig build run -- serve --port 8080"
-        \\
-        \\  3. Use another watcher (entr, fswatch, etc.)
-        \\
-        \\  4. Manual rebuild: Ctrl+C, then run again
-        \\
-    , .{});
+/// Wraps `http.serve` so it can run on a background thread. Errors are
+/// logged but not propagated — there's no caller to report them to once
+/// we've crossed the thread boundary, and the dev session's main loop
+/// uses `http.isShutdownRequested()` to coordinate teardown.
+fn runHttpServerThread(
+    port: u16,
+    db_path: []const u8,
+    lock_timeout_ms: u32,
+    heartbeat_interval_ms: u32,
+) void {
+    http.serve(port, db_path, lock_timeout_ms, heartbeat_interval_ms, true) catch |err| {
+        std.debug.print("[publr] HTTP server thread exited: {s}\n", .{@errorName(err)});
+    };
+    // If the HTTP server returns (clean shutdown), also flip the
+    // shutdown flag so the watcher loop in main exits its sleep cycle.
+    http.requestShutdown();
 }
 
-fn printWatchNotSupportedWindows() void {
-    std.debug.print(
-        \\--watch is not supported on Windows.
-        \\
-        \\Use watchexec directly:
-        \\  watchexec -r -e zig "zig build run -- serve --port 8080"
-        \\
-    , .{});
+/// Subtree filtering: the watcher's `ignore_prefixes` is a literal
+/// startsWith match, so wildcard patterns like `themes/*/public/**`
+/// (which the old watchexec setup used) need to be evaluated here.
+/// Path is root-relative — for the `themes` root, a `demo/public/x`
+/// path means `themes/demo/public/x`. We skip per-theme `public/` and
+/// `src/` directories because they're build outputs / theme-internal
+/// source trees that aren't part of the CMS rebuild surface.
+fn shouldIgnoreEvent(ev: watcher_mod.ChangeEvent) bool {
+    // Only the themes root needs this filtering today.
+    if (std.mem.indexOf(u8, ev.path, "/public/") != null) return true;
+    if (std.mem.indexOf(u8, ev.path, "/src/") != null) return true;
+    return false;
+}
+
+/// In-process rebuild trigger. Spawns `zig build -Dhmr=true
+/// -Dminify=<resolved>` as a child process; on exit-zero, `execvpe`s
+/// the new binary, replacing the current process image. On non-zero,
+/// logs the failure and returns so the dev session keeps running with
+/// the previous binary (a typo shouldn't kill the session).
+///
+/// FD handoff (listening socket, WS subscribers) is deferred to a
+/// follow-up — see the JIT POC's `buildInheritArg` for the pattern.
+/// v1 accepts the brief WS disconnect; the live-reload client has
+/// auto-reconnect + `pending_refetch` queueing that recovers cleanly.
+fn triggerRebuild(allocator: std.mem.Allocator) !void {
+    std.debug.print("[hmr] triggering rebuild\n", .{});
+
+    const minify_arg: []const u8 = if (build_options.minify_css) "-Dminify=true" else "-Dminify=false";
+    const argv = [_][]const u8{ "zig", "build", "-Dhmr=true", minify_arg };
+
+    var child = std.process.Child.init(&argv, allocator);
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+    try child.spawn();
+    const term = try child.wait();
+    switch (term) {
+        .Exited => |code| {
+            if (code != 0) {
+                std.debug.print("[hmr] build failed (exit {d}); keeping current binary\n", .{code});
+                return;
+            }
+        },
+        else => {
+            std.debug.print("[hmr] build terminated abnormally; keeping current binary\n", .{});
+            return;
+        },
+    }
+
+    // Build succeeded — exec the new binary in place. Re-construct
+    // argv from the original program args so the new process sees
+    // exactly what the user typed (same port, same --dev, etc.).
+    var arg_it = try std.process.argsWithAllocator(allocator);
+    defer arg_it.deinit();
+
+    var argv_buf: std.ArrayList(?[*:0]const u8) = .empty;
+    defer argv_buf.deinit(allocator);
+    while (arg_it.next()) |a| {
+        const z = try allocator.dupeZ(u8, a);
+        try argv_buf.append(allocator, z.ptr);
+    }
+    try argv_buf.append(allocator, null);
+
+    const exe_z = try allocator.dupeZ(u8, "zig-out/bin/publr");
+
+    std.debug.print("[hmr] rebuild succeeded — exec'ing new binary\n", .{});
+
+    const slice = argv_buf.items[0..argv_buf.items.len];
+    const argv_zero: [*:null]const ?[*:0]const u8 = @ptrCast(slice.ptr);
+    const err = std.posix.execvpeZ(exe_z.ptr, argv_zero, std.c.environ);
+    std.debug.print("[hmr] execvpe failed: {s}\n", .{@errorName(err)});
+    return err;
 }
 
 fn printUsage() void {
