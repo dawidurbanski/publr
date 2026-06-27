@@ -8,7 +8,7 @@ import './dismiss.js';        // Click-outside + Escape (delegated, bound once)
 import './components.js';      // All component handlers
 import './repeater.js';        // Repeater field widget
 import './kv-picker.js';       // `$` variable picker (delegated)
-import './admin-shell.js';     // Admin chrome: sidebar toggle + theme toggle
+// admin-shell.js migrated to PublrJS — static/shell.js, loaded in layout (#148)
 import '../admin.js';          // Admin page behaviors (media, forms, …)
 import '../media-selection.js'; // Media library bulk selection
 import './presence.js';        // Collaboration presence (entry form)

@@ -155,7 +155,7 @@ pub fn Layout(props: struct {
                 {@raw "(function(){var t=localStorage.getItem('publr-theme');if(t==='light')document.documentElement.classList.remove('dark');else if(t==='dark')document.documentElement.classList.add('dark');})();"}
             </script>
         </head>
-        <body class="h-full text-foreground admin">
+        <body class="h-full text-foreground admin" @store="shell" onKeydown.esc.window="close">
             <div id="recompile-bar" class="recompile-bar" style="display:none;">
                 <span id="recompile-bar-text"></span>
                 <a id="recompile-bar-action" href="#" style="display:none;"></a>
@@ -163,13 +163,14 @@ pub fn Layout(props: struct {
             <span class="hidden pl-96" aria-hidden="true"></span>
 
             <TooltipProvider>
-                <div data-publr-sidebar-backdrop
+                <div :showIf="$open" onClick="close"
                      class="fixed inset-0 z-40 bg-black/40 lg:hidden hidden"
                      aria-hidden="true"></div>
 
                 <aside data-publr-component="admin-sidebar"
+                       :class="$open == false -> -translate-x-full"
+                       onClick="navClose"
                        class="admin-sidebar-safe fixed inset-y-0 left-0 z-50 flex w-70 flex-col bg-background lg:bg-transparent text-foreground border-r border-border lg:border-r-0 -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-out"
-                       data-publr-sidebar-state="closed"
                        aria-label="Admin navigation">
                     <Flex items=.center class="gap-2.5 pt-5 pb-3 px-3.5">
                         <a href="/admin" aria-label="Publr"
@@ -292,9 +293,9 @@ pub fn Layout(props: struct {
                     <header class="sticky top-0 z-40 h-12 shrink-0 flex items-center gap-2 sm:gap-3 border-b border-border px-3 sm:px-4 lg:px-6">
                         <button
                             type="button"
-                            data-publr-sidebar-trigger
+                            onClick="toggle"
+                            :aria-expanded="$open"
                             aria-label="Open navigation"
-                            aria-expanded="false"
                             class="lg:hidden inline-flex items-center justify-center bg-transparent border-0 p-1.5 -ml-1 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
                         >
                             <Icon name=.menu_03 size={16} />
@@ -306,7 +307,7 @@ pub fn Layout(props: struct {
                         </Flex>
                         <button
                             type="button"
-                            id="theme-toggle"
+                            onClick="toggleTheme"
                             aria-label="Toggle theme"
                             class="ml-1.5 inline-flex items-center justify-center bg-transparent border-0 p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
                         >
@@ -338,6 +339,7 @@ pub fn Layout(props: struct {
             <script type="module" src="/static/publr-tooltip.js"></script>
             <script type="module" src="/static/interact/index.js"></script>
             <script type="module" src="/static/publr-interactivity-query.js"></script>
+            <script type="module" src="/static/shell.js"></script>
         </body>
     </html>
 }

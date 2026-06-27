@@ -24,7 +24,7 @@ const InteractFocusTrap = static.Asset("focus-trap.js", @embedFile("static_inter
 const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_dismiss_js"));
 const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
 const InteractIndex = static.Asset("index.js", @embedFile("static_interact_index_js"));
-const InteractAdminShell = static.Asset("admin-shell.js", @embedFile("static_interact_admin_shell_js"));
+const ShellJs = static.Asset("shell.js", @embedFile("static_shell_js"));
 const InteractRepeater = static.Asset("repeater.js", @embedFile("static_interact_repeater_js"));
 const MediaSelectionJs = static.Asset("media-selection.js", @embedFile("static_media_selection_js"));
 const InteractWebSocket = static.Asset("websocket.js", @embedFile("static_interact_websocket_js"));
@@ -63,7 +63,7 @@ const asset_map = .{
     .{ "interact/dismiss.js", AssetEntry{ .asset = InteractDismiss, .disk_path = "static/interact/dismiss.js" } },
     .{ "interact/components.js", AssetEntry{ .asset = InteractComponents, .disk_path = "static/interact/components.js" } },
     .{ "interact/index.js", AssetEntry{ .asset = InteractIndex, .disk_path = "static/interact/index.js" } },
-    .{ "interact/admin-shell.js", AssetEntry{ .asset = InteractAdminShell, .disk_path = "static/interact/admin-shell.js" } },
+    .{ "shell.js", AssetEntry{ .asset = ShellJs, .disk_path = "static/shell.js" } },
     .{ "interact/repeater.js", AssetEntry{ .asset = InteractRepeater, .disk_path = "static/interact/repeater.js" } },
     .{ "media-selection.js", AssetEntry{ .asset = MediaSelectionJs, .disk_path = "static/media-selection.js" } },
     .{ "interact/websocket.js", AssetEntry{ .asset = InteractWebSocket, .disk_path = "static/interact/websocket.js" } },

@@ -12,21 +12,3 @@ const { state } = Publr.store("demo", {
     },
   },
 });
-
-// Smoke test for the full PublrJS runtime: @model (two-way), @for (keyed list),
-// :text, and the predicate DSL (:showIf="$n == 3"). Verifies the full directive
-// surface transpiles in CMS ZSX and runs. Remove once real migrations land.
-const { state: smoke } = Publr.store("smoke", {
-  state: { draft: "", items: [], n: 0 },
-  actions: {
-    add: () => {
-      if (smoke.draft) {
-        smoke.items.push(smoke.draft);
-        smoke.draft = "";
-      }
-    },
-    bump: () => {
-      smoke.n += 1;
-    },
-  },
-});
