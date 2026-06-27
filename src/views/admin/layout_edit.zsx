@@ -42,7 +42,7 @@ pub fn LayoutEdit(props: struct {
                 {@raw "(function(){var t=localStorage.getItem('publr-theme');if(t==='light')document.documentElement.classList.remove('dark');else if(t==='dark')document.documentElement.classList.add('dark');})();"}
             </script>
         </head>
-        <body class="h-full text-foreground admin">
+        <body class="h-full text-foreground admin" @store="shell">
             <TooltipProvider>
                 <div class="admin-shell">
                     <div class="admin-card h-full flex flex-col bg-background border border-border shadow-xs overflow-hidden">
@@ -79,7 +79,7 @@ pub fn LayoutEdit(props: struct {
                             </Flex>
                             <button
                                 type="button"
-                                id="theme-toggle"
+                                onClick="toggleTheme"
                                 aria-label="Toggle theme"
                                 class="ml-1.5 inline-flex items-center justify-center bg-transparent border-0 p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
                             >
@@ -109,6 +109,8 @@ pub fn LayoutEdit(props: struct {
             <script type="module" src="/static/publr-toast.js"></script>
             <script type="module" src="/static/publr-tooltip.js"></script>
             <script type="module" src="/static/interact/index.js"></script>
+            <script type="module" src="/static/publr-interactivity-query.js"></script>
+            <script type="module" src="/static/shell.js"></script>
         </body>
     </html>
 }
