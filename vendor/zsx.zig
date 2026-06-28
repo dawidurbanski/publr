@@ -134,39 +134,6 @@ pub fn concatRt(parts: []const []const u8) []const u8 {
     return buf;
 }
 
-/// Render a component in INLINE (non-HMR) mode while forwarding any author
-/// attributes the component doesn't declare (data-p-* directives, role,
-/// tabindex, …) onto its ROOT element. `raw` is the full attribute struct the
-/// call site built; fields matching a `Props` field become props, the rest are
-/// spliced onto the rendered root. This is the inline-mode counterpart to the
-/// HMR lift's `renderForwarding`, so forwarding works in dev (HMR) AND build
-/// (inline) builds. Fast path: nothing to forward → render directly.
-pub fn renderForwarding(comptime Component: anytype, comptime Props: type, writer: anytype, raw: anytype) !void {
-    var props: Props = .{};
-    const fields = std.meta.fields(@TypeOf(raw));
-    var parts: [fields.len * 5][]const u8 = undefined;
-    var n: usize = 0;
-    inline for (fields) |f| {
-        if (@hasField(Props, f.name)) {
-            @field(props, f.name) = @field(raw, f.name);
-        } else {
-            const v: []const u8 = @field(raw, f.name);
-            parts[n] = " ";
-            parts[n + 1] = f.name;
-            parts[n + 2] = "=\"";
-            parts[n + 3] = v;
-            parts[n + 4] = "\"";
-            n += 5;
-        }
-    }
-    if (n == 0) return Component(writer, props);
-    const fwd = concatRt(parts[0..n]);
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    defer buf.deinit(std.heap.page_allocator);
-    try Component(buf.writer(std.heap.page_allocator), props);
-    try spliceAttrsIntoRoot(writer, buf.items, fwd);
-}
-
 /// Component self-forwarding — the inverse of `renderForwarding`. A component
 /// calls this from a thin wrapper so it splices its OWN non-prop "rest" attrs
 /// (data-p-* directives, data-*, aria-*, role, tabindex) onto its own root.
@@ -3955,128 +3922,9 @@ const Emitter = struct {
         try self.write(" })");
     }
 
-    /// The Props type expression for a liftable component, or null if the
-    /// component isn't liftable (not in the map).
-    fn propsExprOf(self: *const Emitter, name: []const u8) ?[]const u8 {
-        return self.props_expr.get(name);
-    }
-
-    /// True iff this invocation is eligible for the A-table lift: lift mode
-    /// is on, the component is liftable (concrete struct Props, recorded in
-    /// `props_expr`), and at least one attr is a literal/const-expr worth
-    /// swapping. Components with only expression attrs (`{someVar}`) have
-    /// nothing to lift — they fall back to the inline call and rebuild on
-    /// edit (expressions reference runtime scope, not swappable anyway).
-    fn componentLiftable(self: *const Emitter, comp: Component) bool {
-        // Call-site attr-forwarding is retired: components self-forward their
-        // rest-attrs (see runtime.forward + the emit wrapper). Always emit plain
-        // calls — pass every attr; the component splices its own onto its root.
-        _ = .{ self, comp };
-        return false;
-    }
-
-    /// Record the liftable attrs (every literal / const-expr) for this call
-    /// site and return the slot ID. `comp_index` is the flat-manifest ordinal
-    /// baked into `lift_sites` so the dev loop matches the slot to a fresh node.
-    fn pushCallSite(self: *Emitter, comp: Component, comp_index: u32) EmitError!u32 {
-        const id = self.next_call_site_id.*;
-        self.next_call_site_id.* += 1;
-        var init = CallSiteInit{ .comp_index = comp_index };
-        for (comp.attrs) |a| {
-            const kind = classifyAttr(a.value);
-            const raw: []const u8 = switch (kind) {
-                .string => a.value.string,
-                .const_expr => a.value.expr,
-                else => continue, // expr / bool_present aren't swappable
-            };
-            try init.attrs.append(self.allocator, .{ .name = a.name, .raw_value = raw });
-        }
-        try self.call_site_initials.append(self.allocator, init);
-        return id;
-    }
-
-    /// Emit the lifted props setup. Universal form (works for any concrete-
-    /// struct component — local, same-file, imported, or external):
-    ///     var __p: <PropsExpr> = @import("hmr").propsFrom(<PropsExpr>, .{ <NON-lifted attrs> });
-    ///     @import("hmr").applyAttrs(<PropsExpr>, &__p, A[N]);
-    ///
-    /// Only NON-lifted attrs (expressions referencing runtime scope, and
-    /// `bool_present` shorthands) go into the inline init — they can't live
-    /// in the A table. Every lifted literal/const-expr attr goes ONLY through
-    /// A + applyAttrs, which soft-fails (logs + keeps default) on a bad value
-    /// instead of breaking the build. That's why e.g. `as=.label` (an invalid
-    /// enum tag) degrades gracefully rather than failing to compile — putting
-    /// it in the inline init would be a hard comptime coercion error.
-    /// `propsFrom` ignores attrs the component doesn't declare (matching the
-    /// component's own `withDefaults` leniency). `children_items_expr`, when
-    /// non-null, is added as `.children = <expr>`. Caller emits the call.
-    fn emitLiftedPropsSetup(
-        self: *Emitter,
-        comp: Component,
-        slot_id: u32,
-        children_items_expr: ?[]const u8,
-    ) EmitError!void {
-        const props_expr = self.propsExprOf(comp.name) orelse unreachable;
-        try self.writeIndent();
-        try self.write("var __p: ");
-        try self.write(props_expr);
-        try self.write(" = @import(\"hmr\").propsFrom(");
-        try self.write(props_expr);
-        try self.write(", .{");
-        // Inline init: NON-lifted attrs only (exprs + bool_present). Lifted
-        // literals/const-exprs are excluded — they flow through A.
-        var wrote_any = false;
-        for (comp.attrs) |attr| {
-            const kind = classifyAttr(attr.value);
-            if (kind == .string or kind == .const_expr) continue; // lifted → A
-            if (wrote_any) try self.write(",");
-            try self.write(" .");
-            try self.write(attr.name);
-            try self.write(" = ");
-            switch (attr.value) {
-                .expr => |s| {
-                    if (s.len >= 2 and s[0] == '`' and s[s.len - 1] == '`') {
-                        try self.emitBacktickAsConcat(s[1 .. s.len - 1]);
-                    } else {
-                        try self.write(s);
-                    }
-                },
-                .bool_present => try self.write("true"),
-                .string => unreachable,
-            }
-            wrote_any = true;
-        }
-        if (children_items_expr) |cx| {
-            if (wrote_any) try self.write(",");
-            try self.write(" .children = ");
-            try self.write(cx);
-            wrote_any = true;
-        }
-        if (wrote_any) try self.write(" ");
-        try self.write("});\n");
-        try self.writeIndent();
-        try self.write("@import(\"hmr\").applyAttrs(");
-        try self.write(props_expr);
-        try self.write(", &__p, A[");
-        try appendUsize(self.allocator, self.out, slot_id);
-        try self.write("]);\n");
-        // Forwarded (non-prop) attrs — data-p-* directives etc. — that
-        // applyAttrs can't place on the concrete props struct. renderForwarding
-        // splices them onto the component root so they survive the HMR lift.
-        try self.writeIndent();
-        try self.write("const __fwd = @import(\"hmr\").forwardedAttrs(");
-        try self.write(props_expr);
-        try self.write(", A[");
-        try appendUsize(self.allocator, self.out, slot_id);
-        try self.write("]);\n");
-    }
-
     fn emitComponent(self: *Emitter, mfst: Manifest, i: *usize, comp: Component) EmitError!void {
-        // Claim this component's flat-manifest ordinal up front (pre-order),
-        // before recursing into children. Children claim larger indices;
-        // this component's lifted slot (assigned post-children) records the
-        // index captured here so the dev loop's lockstep walk matches.
-        const my_comp_index = self.next_comp_index.*;
+        // Advance the flat-manifest ordinal counter (pre-order) so any other
+        // consumers of next_comp_index stay in lockstep.
         self.next_comp_index.* += 1;
         if (comp.has_children) {
             // Pre-render children to a buffer, then call the component with
@@ -4127,89 +3975,32 @@ const Emitter = struct {
             self.popCtx();
             self.children_depth -= 1;
 
-            // Call component with children = buf.items
-            if (self.componentLiftable(comp)) {
-                const slot = try self.pushCallSite(comp, my_comp_index);
-                const children_expr = try std.fmt.allocPrint(
-                    self.allocator,
-                    "_children_buf_{s}.items",
-                    .{depth_suffix},
-                );
-                defer self.allocator.free(children_expr);
-                try self.emitLiftedPropsSetup(comp, slot, children_expr);
-                try self.writeIndent();
-                try self.write("try @import(\"hmr\").renderForwarding(");
-                try self.write(comp.name);
-                try self.write(", ");
-                try self.write(self.writerVar());
-                try self.write(", __p, __fwd);\n");
-            } else {
-                // Inline mode: forward non-prop attrs (data-p-* etc.) onto the
-                // component root via renderForwarding when we know its Props
-                // type and it carries a forwardable attr (so forwarding works in
-                // build/inline, not just HMR).
-                const fwd_props: ?[]const u8 = if (hasForwardableAttr(comp.attrs)) self.propsExprOf(comp.name) else null;
-                try self.writeIndent();
-                if (fwd_props) |props_expr| {
-                    try self.write("try @import(\"zsx\").runtime.renderForwarding(");
-                    try self.write(comp.name);
-                    try self.write(", ");
-                    try self.write(props_expr);
-                    try self.write(", ");
-                    try self.write(self.writerVar());
-                } else {
-                    try self.write("try ");
-                    try self.write(comp.name);
-                    try self.write("(");
-                    try self.write(self.writerVar());
-                }
-                try self.write(", .{");
-                try self.emitComponentProps(comp.attrs);
-                if (comp.attrs.len > 0) try self.write(",");
-                try self.write(" .children = _children_buf_");
-                try self.write(depth_suffix);
-                try self.write(".items });\n");
-            }
+            // Plain call (components self-forward their own rest-attrs).
+            try self.writeIndent();
+            try self.write("try ");
+            try self.write(comp.name);
+            try self.write("(");
+            try self.write(self.writerVar());
+            try self.write(", .{");
+            try self.emitComponentProps(comp.attrs);
+            if (comp.attrs.len > 0) try self.write(",");
+            try self.write(" .children = _children_buf_");
+            try self.write(depth_suffix);
+            try self.write(".items });\n");
 
             if (self.indent > 0) self.indent -= 1;
             try self.writeIndent();
             try self.write("}\n");
         } else {
-            if (self.componentLiftable(comp)) {
-                try self.writeIndent();
-                try self.write("{\n");
-                self.indent += 1;
-                const slot = try self.pushCallSite(comp, my_comp_index);
-                try self.emitLiftedPropsSetup(comp, slot, null);
-                try self.writeIndent();
-                try self.write("try @import(\"hmr\").renderForwarding(");
-                try self.write(comp.name);
-                try self.write(", ");
-                try self.write(self.writerVar());
-                try self.write(", __p, __fwd);\n");
-                if (self.indent > 0) self.indent -= 1;
-                try self.writeIndent();
-                try self.write("}\n");
-            } else {
-                const fwd_props: ?[]const u8 = if (hasForwardableAttr(comp.attrs)) self.propsExprOf(comp.name) else null;
-                try self.writeIndent();
-                if (fwd_props) |props_expr| {
-                    try self.write("try @import(\"zsx\").runtime.renderForwarding(");
-                    try self.write(comp.name);
-                    try self.write(", ");
-                    try self.write(props_expr);
-                    try self.write(", ");
-                    try self.write(self.writerVar());
-                } else {
-                    try self.write("try ");
-                    try self.write(comp.name);
-                    try self.write("(");
-                    try self.write(self.writerVar());
-                }
-                try self.write(", .{");
-                try self.emitComponentProps(comp.attrs);
-                try self.write(" });\n");
-            }
+            // Plain call (components self-forward their own rest-attrs).
+            try self.writeIndent();
+            try self.write("try ");
+            try self.write(comp.name);
+            try self.write("(");
+            try self.write(self.writerVar());
+            try self.write(", .{");
+            try self.emitComponentProps(comp.attrs);
+            try self.write(" });\n");
         }
     }
 
@@ -4274,18 +4065,6 @@ fn classifyAttr(value: AttrValue) AttrLiftKind {
         .bool_present => .bool_present,
         .expr => |s| if (isConstExpr(s)) .const_expr else .expr,
     };
-}
-
-/// True if any attr is one a component is unlikely to declare as a prop and so
-/// should forward onto the root: hyphenated names (data-p-* directives, data-*,
-/// aria-*) or the global `role`/`tabindex`. Gate for emitting the inline
-/// `renderForwarding` wrapper — the runtime helper still does the real
-/// prop-vs-forward split via `@hasField`.
-fn hasForwardableAttr(attrs: []const Attr) bool {
-    // Retired: components self-forward their rest-attrs (runtime.forward). Call
-    // sites always emit plain calls now and pass every attr through unchanged.
-    _ = attrs;
-    return false;
 }
 
 /// True if `s` is a pure literal — i.e., parseable at runtime without
@@ -5453,14 +5232,13 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    // Parse positional + optional `--hmr` / `--hmr-capture-props` / `--lift-attrs`
-    // flags. `--hmr-capture-props` and `--lift-attrs` both imply `--hmr`. The
+    // Parse positional + optional `--hmr` / `--hmr-capture-props`
+    // flags. `--hmr-capture-props` implies `--hmr`. The
     // data-component splice is always-on with `--hmr` (the flags travel together
     // at the CLI; the EmitOptions struct still exposes them independently for
     // callers).
     var hmr = false;
     var capture_props = false;
-    var lift_attrs = false;
     var positionals: [2][]const u8 = .{ "", "" };
     var pos_count: usize = 0;
     var ai: usize = 1;
@@ -5475,14 +5253,6 @@ pub fn main() !void {
             hmr = true;
             continue;
         }
-        if (mem.eql(u8, a, "--lift-attrs")) {
-            // Implies --hmr (lifting only makes sense in hmr mode — the
-            // A table parallels the L table and uses the same setX swap
-            // mechanism). Build graph must expose an `hmr` module.
-            lift_attrs = true;
-            hmr = true;
-            continue;
-        }
         if (pos_count < 2) {
             positionals[pos_count] = a;
             pos_count += 1;
@@ -5490,7 +5260,7 @@ pub fn main() !void {
     }
 
     if (pos_count < 2) {
-        std.debug.print("Usage: zsx_transpile [--hmr] [--hmr-capture-props] [--lift-attrs] <input_dir> <output_dir>\n", .{});
+        std.debug.print("Usage: zsx_transpile [--hmr] [--hmr-capture-props] <input_dir> <output_dir>\n", .{});
         std.process.exit(1);
     }
 
@@ -5501,7 +5271,6 @@ pub fn main() !void {
         .hmr = hmr,
         .dom_attribute = hmr, // CLI policy: --hmr implies the splice.
         .capture_props = capture_props,
-        .lift_attrs = lift_attrs,
     });
 }
 
@@ -5704,58 +5473,8 @@ fn transpileFile(
     }
     try scanComponentUsage(allocator, source, rel_path, component_registry, &component_imports);
 
-    // Decide which components are liftable and compute each one's Props
-    // TYPE EXPRESSION (spliced into the lifted call site's `var __p: <expr>`).
-    // A component is liftable iff its Props is a concrete struct, not
-    // `anytype`. Three kinds:
-    //   - same-file `fn Name`:  scan THIS source; expr = "NameProps"
-    //     (a local const the emitter generates next to the fn).
-    //   - explicit import:      scan the registry target if local, else
-    //     assume liftable (external modules like publr_ui). expr is derived
-    //     from the user's `const Name = EXPR.Name;` as `EXPR.NameProps`.
-    //   - auto-discovered:      scan the registry target; expr =
-    //     `@import("<import_path>").NameProps`.
-    // Reflection on the component fn's signature can't help (every emitted
-    // component is `fn Name(writer: anytype, _props: anytype)`), so we name
-    // the concrete `<Name>Props` type the emitter always generates.
-    if (opts.lift_attrs) {
-        for (component_imports.items) |*ci| {
-            if (sourceDeclaresFn(source, ci.name)) {
-                // Same-file sibling `fn`. Liftable iff struct props (not anytype).
-                if (sourceDeclaresPropsFor(source, ci.name)) {
-                    ci.liftable = true;
-                    ci.props_type_expr = try std.fmt.allocPrint(allocator, "{s}Props", .{ci.name});
-                }
-            } else if (component_registry.get(ci.name)) |target_rel| {
-                // Local component (registered). Scan its .zsx.
-                const target_path = try fs.path.join(allocator, &.{ input_dir, target_rel });
-                defer allocator.free(target_path);
-                const target_src = fs.cwd().readFileAlloc(allocator, target_path, 1024 * 1024) catch continue;
-                defer allocator.free(target_src);
-                if (sourceDeclaresPropsFor(target_src, ci.name)) {
-                    ci.liftable = true;
-                    if (ci.explicit) {
-                        // `const Name = EXPR.Name;` -> EXPR.NameProps.
-                        ci.props_type_expr = (try extractPropsTypeExpr(allocator, source, ci.name)) orelse {
-                            ci.liftable = false;
-                            continue;
-                        };
-                    } else {
-                        ci.props_type_expr = try std.fmt.allocPrint(allocator, "@import(\"{s}\").{s}Props", .{ ci.import_path, ci.name });
-                    }
-                }
-            } else if (ci.explicit) {
-                // External explicit import (not in the local registry, e.g.
-                // `const Button = ui.button.Button;`). Can't scan the foreign
-                // module; assume its Props follows the `<Name>Props` convention
-                // (publr_ui does). Derive `EXPR.NameProps` from the user's decl.
-                if (try extractPropsTypeExpr(allocator, source, ci.name)) |expr| {
-                    ci.liftable = true;
-                    ci.props_type_expr = expr;
-                }
-            }
-        }
-    }
+    // (Component attr-forwarding is now the component's own job — see
+    // runtime.forward / the emit wrapper. No call-site lift analysis.)
 
     // Collect CSS classes from the source (orthogonal to code generation).
     if (css_classes) |map| {
@@ -6459,49 +6178,6 @@ fn findPropsStructBody(source: []const u8, name: []const u8) ?usize {
             if (source[i] == ')') return null;
         }
         return null;
-    }
-    return null;
-}
-
-/// Derive the Props TYPE EXPRESSION from a `const Name = EXPR.Name;`
-/// declaration: the RHS with `Props` appended, since the RHS ends with the
-/// component name. Examples:
-///   `const Button = ui.button.Button;`               -> `ui.button.ButtonProps`
-///   `const PageHeader = @import("x.zig").PageHeader;` -> `@import("x.zig").PageHeaderProps`
-/// Returns null when the decl isn't found or its RHS doesn't end with
-/// `.Name` (so we don't fabricate a bogus type) — caller skips lift.
-fn extractPropsTypeExpr(allocator: Allocator, source: []const u8, name: []const u8) !?[]u8 {
-    var search_pos: usize = 0;
-    while (search_pos < source.len) {
-        const idx = mem.indexOfPos(u8, source, search_pos, name) orelse return null;
-        if (idx < 6) {
-            search_pos = idx + name.len;
-            continue;
-        }
-        // Preceded by `const ` (whitespace-tolerant)?
-        var back = idx - 1;
-        while (back > 0 and (source[back] == ' ' or source[back] == '\t')) back -= 1;
-        if (back < 4 or !mem.eql(u8, source[back - 4 .. back + 1], "const")) {
-            search_pos = idx + name.len;
-            continue;
-        }
-        // `Name = ` then capture the RHS up to `;`.
-        var p = idx + name.len;
-        while (p < source.len and (source[p] == ' ' or source[p] == '\t')) p += 1;
-        if (p >= source.len or source[p] != '=') {
-            search_pos = idx + name.len;
-            continue;
-        }
-        p += 1;
-        while (p < source.len and (source[p] == ' ' or source[p] == '\t')) p += 1;
-        const rhs_start = p;
-        const semi = mem.indexOfScalarPos(u8, source, p, ';') orelse return null;
-        const rhs = mem.trim(u8, source[rhs_start..semi], " \t\n\r");
-        // RHS must end with `.Name` so appending `Props` yields `.NameProps`.
-        if (rhs.len <= name.len + 1) return null;
-        const tail_start = rhs.len - name.len;
-        if (rhs[tail_start - 1] != '.' or !mem.eql(u8, rhs[tail_start..], name)) return null;
-        return try std.fmt.allocPrint(allocator, "{s}Props", .{rhs});
     }
     return null;
 }

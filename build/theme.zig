@@ -82,7 +82,7 @@ pub fn wire(b: *std.Build, deps: Deps) Result {
     // Run ZSX transpiler for views (cacheable: declared inputs + output directory)
     const transpile_zsx_cmd = b.addRunArtifact(zsx_transpiler);
     // Flags must precede positional <input_dir> <output_dir> args.
-    if (deps.hmr) transpile_zsx_cmd.addArgs(&.{ "--hmr", "--hmr-capture-props", "--lift-attrs" });
+    if (deps.hmr) transpile_zsx_cmd.addArgs(&.{ "--hmr", "--hmr-capture-props" });
     transpile_zsx_cmd.addDirectoryArg(b.path("src/views"));
     const gen_views = transpile_zsx_cmd.addOutputDirectoryArg("views");
 
@@ -160,7 +160,7 @@ pub fn wire(b: *std.Build, deps: Deps) Result {
 
     // Step 2: ZSX transpile synthetic .zsx → .zig
     const transpile_theme_cmd = b.addRunArtifact(zsx_transpiler);
-    if (deps.hmr) transpile_theme_cmd.addArgs(&.{ "--hmr", "--hmr-capture-props", "--lift-attrs" });
+    if (deps.hmr) transpile_theme_cmd.addArgs(&.{ "--hmr", "--hmr-capture-props" });
     transpile_theme_cmd.addDirectoryArg(theme_zsx);
     const gen_theme = transpile_theme_cmd.addOutputDirectoryArg("theme");
 

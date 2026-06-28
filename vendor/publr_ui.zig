@@ -137,39 +137,6 @@ pub fn concatRt(parts: []const []const u8) []const u8 {
     return buf;
 }
 
-/// Render a component in INLINE (non-HMR) mode while forwarding any author
-/// attributes the component doesn't declare (data-p-* directives, role,
-/// tabindex, …) onto its ROOT element. `raw` is the full attribute struct the
-/// call site built; fields matching a `Props` field become props, the rest are
-/// spliced onto the rendered root. This is the inline-mode counterpart to the
-/// HMR lift's `renderForwarding`, so forwarding works in dev (HMR) AND build
-/// (inline) builds. Fast path: nothing to forward → render directly.
-pub fn renderForwarding(comptime Component: anytype, comptime Props: type, writer: anytype, raw: anytype) !void {
-    var props: Props = .{};
-    const fields = std.meta.fields(@TypeOf(raw));
-    var parts: [fields.len * 5][]const u8 = undefined;
-    var n: usize = 0;
-    inline for (fields) |f| {
-        if (@hasField(Props, f.name)) {
-            @field(props, f.name) = @field(raw, f.name);
-        } else {
-            const v: []const u8 = @field(raw, f.name);
-            parts[n] = " ";
-            parts[n + 1] = f.name;
-            parts[n + 2] = "=\"";
-            parts[n + 3] = v;
-            parts[n + 4] = "\"";
-            n += 5;
-        }
-    }
-    if (n == 0) return Component(writer, props);
-    const fwd = concatRt(parts[0..n]);
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    defer buf.deinit(std.heap.page_allocator);
-    try Component(buf.writer(std.heap.page_allocator), props);
-    try spliceAttrsIntoRoot(writer, buf.items, fwd);
-}
-
 /// Component self-forwarding — the inverse of `renderForwarding`. A component
 /// calls this from a thin wrapper so it splices its OWN non-prop "rest" attrs
 /// (data-p-* directives, data-*, aria-*, role, tabindex) onto its own root.

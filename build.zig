@@ -754,10 +754,7 @@ pub fn build(b: *std.Build) void {
             // Mirror the hmr flag onto plugin-view transpiles so plugin
             // components participate in the same hot-swap fast path as
             // core views. Flags must precede positional args.
-            // --lift-attrs must match the core-view transpile (build/theme.zig):
-            // without it, directive attrs on DS components (onClick → data-p-on)
-            // aren't lifted into renderForwarding and get silently dropped.
-            if (hmr) pv_cmd.addArgs(&.{ "--hmr", "--hmr-capture-props", "--lift-attrs" });
+            if (hmr) pv_cmd.addArgs(&.{ "--hmr", "--hmr-capture-props" });
             pv_cmd.addDirectoryArg(b.path(views_path));
             const pv_out = pv_cmd.addOutputDirectoryArg("views");
 
