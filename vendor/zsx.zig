@@ -2676,48 +2676,11 @@ pub const AttrValue = manifest_src.AttrValue;
 pub const ComponentImport = struct {
     name: []const u8, // PascalCase name, e.g. "Dialog"
     import_path: []const u8, // relative @import path, e.g. "../components/dialog.zig"
-    /// True if the imported file exposes `pub const <Name>Props = struct{…}`.
-    /// Required for attr-lifting (lift_attrs in EmitOptions): the per-callsite
-    /// `var __p: NameProps = .{}` line needs a concrete type. Detected by the
-    /// transpiler by scanning the imported file's source. Defaults to true
-    /// for back-compat with callers that don't set it.
     /// True when the component is already in scope in the generated file —
     /// either the user wrote `const Name = @import(...)` (explicit import)
     /// or it's a sibling `fn Name` defined in the same file. The emitter
     /// then skips emitting its own `const Name = ...;` (would collide).
     explicit: bool = false,
-    /// True iff this component's invocations can be lifted into the runtime
-    /// A-table: its Props is a concrete struct, not `anytype`. Determined by
-    /// the transpiler (scan local sources; external imports assumed liftable).
-    /// When false the emitter falls back to the baked inline-attrs call and
-    /// edits trigger a rebuild.
-    liftable: bool = false,
-    /// Zig type EXPRESSION naming the component's Props struct, spliced into
-    /// the lifted call site as `var __p: <props_type_expr> = .{...}`. Forms:
-    ///   - same-file `fn`:   "NameProps"  (a local const in this file)
-    ///   - explicit import:  rhs with trailing `.Name` replaced by `Props`,
-    ///                       e.g. `const B = ui.button.Button;` -> "ui.button.ButtonProps"
-    ///   - auto-discovered:  "@import(\"<import_path>\").NameProps"
-    /// Empty when `!liftable`.
-    props_type_expr: []const u8 = "",
-};
-
-/// One component invocation eligible for the runtime A-table lift.
-/// Accumulated by the Emitter and flushed as `initial_A` at file footer.
-pub const CallSiteInit = struct {
-    attrs: std.ArrayListUnmanaged(LiftedAttr) = .{},
-    /// 0-based index of this component among all `.component` nodes in the
-    /// file's manifest, flat pre-order. Baked into `lift_sites` so the dev
-    /// loop can match this slot back to the freshly-parsed component when
-    /// rebuilding A — see hmr.LiftSite.
-    comp_index: u32 = 0,
-};
-pub const LiftedAttr = struct {
-    name: []const u8,
-    /// Source text of the attr value: for `.string`, the literal contents
-    /// (`Primary`); for `.expr` constants, the source slice (`.primary`,
-    /// `42`, `true`); for `.bool_present`, unused (not lifted).
-    raw_value: []const u8,
 };
 
 pub const EmitOptions = struct {
@@ -2753,18 +2716,6 @@ pub const EmitOptions = struct {
     /// transpiler CLI's `rel_path` so the registry, capture key, and
     /// data-component value all use the same string.
     view_name: ?[]const u8 = null,
-    /// HMR attr-lift mode: at each component invocation, lift literal
-    /// attrs (`label="X"`, `hierarchy=.primary`, `disabled={true}`) into
-    /// a per-callsite slot in a runtime-mutable `pub var A` table. The
-    /// generated call becomes:
-    ///     var __p: NameProps = .{};
-    ///     hmr.applyAttrs(NameProps, &__p, A[slot]);
-    ///     __p.expr_attr = some_expr;   // non-lifted attrs assigned inline
-    ///     try Name(writer, __p);
-    /// On every save, the comparator can swap literal-attr values without
-    /// triggering a `zig build`. Requires `hmr = true`. Generated views
-    /// import the `hmr` module: build graph must expose it.
-    lift_attrs: bool = false,
 };
 
 pub const EmitError = error{
@@ -2814,9 +2765,6 @@ pub fn emitFile(
     for (component_imports) |ci| {
         // Skip the `const Name = @import(...)` line when the component is
         // already in scope (user's explicit import, or a same-file `fn`).
-        // The lift path references the Props TYPE via `ci.props_type_expr`
-        // (e.g. `ui.button.ButtonProps`), so no separate `const NameProps`
-        // import is emitted any more.
         if (!ci.explicit) {
             try raw.appendSlice(allocator, "const ");
             try raw.appendSlice(allocator, ci.name);
@@ -2928,31 +2876,6 @@ pub fn emitFile(
         // Emit file-scoped `initial_L`, `L`, `setL`, and `manifest_nodes`.
         try emitHmrPrelude(allocator, &raw, manifests.items);
 
-        // File-wide call-site state. Shared across the per-function
-        // Emitter instances below via pointers — slot IDs are file-wide
-        // so they index into a single `A` table emitted at file footer.
-        var file_call_site_id: u32 = 0;
-        var file_call_site_initials: std.ArrayListUnmanaged(CallSiteInit) = .{};
-        defer {
-            for (file_call_site_initials.items) |*init| init.attrs.deinit(allocator);
-            file_call_site_initials.deinit(allocator);
-        }
-        // File-wide component counter — incremented for EVERY component
-        // invocation (lifted or not) in flat manifest order, so each
-        // lifted slot can record the index the dev loop uses to find the
-        // matching freshly-parsed component.
-        var file_comp_index: u32 = 0;
-
-        // Map of liftable component name -> its Props type expression
-        // (e.g. "ui.button.ButtonProps", "PageHeaderProps"). Presence in the
-        // map is componentLiftable's gate; the value is spliced into the
-        // lifted call site's `var __p: <expr> = .{...}`.
-        var props_expr_map: std.StringHashMapUnmanaged([]const u8) = .empty;
-        defer props_expr_map.deinit(allocator);
-        for (component_imports) |ci| {
-            if (ci.liftable) try props_expr_map.put(allocator, ci.name, ci.props_type_expr);
-        }
-
         // Emit chunks in source order. Functions get a per-function slot_offset
         // that accumulates the literal count of all preceding functions.
         var slot_offset: u32 = 0;
@@ -2969,11 +2892,6 @@ pub fn emitFile(
                         .capture_props = opts.capture_props,
                         .view_name = view_name,
                         .slot_offset = slot_offset,
-                        .lift_attrs = opts.lift_attrs,
-                        .props_expr = &props_expr_map,
-                        .next_call_site_id = &file_call_site_id,
-                        .call_site_initials = &file_call_site_initials,
-                        .next_comp_index = &file_comp_index,
                     };
                     try emitter.emitFunction(m, true, slice);
                     slot_offset += @intCast(m.literals.len);
@@ -2984,25 +2902,11 @@ pub fn emitFile(
             }
         }
 
-        // Flush the A-table after all function bodies have been emitted.
-        // (Skipped when lift_attrs is off, or when no eligible call sites
-        // were found — keeps the generated file lean.)
-        if (opts.lift_attrs and file_call_site_initials.items.len > 0) {
-            try emitCallSiteTable(allocator, &raw, file_call_site_initials.items);
-        }
-
         // No coalesce in hmr mode (L[N] refs aren't legally mergeable).
         return try allocator.dupe(u8, raw.items);
     }
 
     // Inline mode (default): walk and emit in one pass, then coalesce.
-    // Props-type map so inline component calls can forward non-prop attrs
-    // (data-p-* etc.) onto the root via renderForwarding — same as the hmr path.
-    var inline_props_expr: std.StringHashMapUnmanaged([]const u8) = .empty;
-    defer inline_props_expr.deinit(allocator);
-    for (component_imports) |ci| {
-        if (ci.liftable) try inline_props_expr.put(allocator, ci.name, ci.props_type_expr);
-    }
     var pos: usize = 0;
     while (pos < source.len) {
         // Skip leading whitespace.
@@ -3026,7 +2930,6 @@ pub fn emitFile(
                 .capture_props = false,
                 .view_name = "",
                 .slot_offset = 0,
-                .props_expr = &inline_props_expr,
             };
             try emitter.emitFunction(mfst, true, slice);
             pos = fn_end;
@@ -3136,64 +3039,6 @@ fn emitHmrPrelude(
         try out.appendSlice(allocator, "};\n\n");
         slot_offset += @intCast(m.literals.len);
     }
-}
-
-/// Emit the file-scoped runtime A-table + the `lift_sites` descriptor the
-/// dev loop uses to rebuild A from a fresh parse:
-///     var initial_A_<N> = [_]hmr.Attr{ … };
-///     var initial_A = [_][]const hmr.Attr{ &initial_A_0, &initial_A_1, … };
-///     pub var A: []const []const hmr.Attr = &initial_A;
-///     pub fn setA(new_A: []const []const hmr.Attr) void { A = new_A; }
-///     pub const lift_sites: []const hmr.LiftSite = &.{ … };
-fn emitCallSiteTable(
-    allocator: Allocator,
-    out: *std.ArrayListUnmanaged(u8),
-    initials: []const CallSiteInit,
-) EmitError!void {
-    for (initials, 0..) |init, idx| {
-        try out.appendSlice(allocator, "var initial_A_");
-        try appendUsize(allocator, out, @intCast(idx));
-        try out.appendSlice(allocator, " = [_]@import(\"hmr\").Attr{");
-        if (init.attrs.items.len > 0) try out.appendSlice(allocator, "\n");
-        for (init.attrs.items) |a| {
-            try out.appendSlice(allocator, "    .{ .name = \"");
-            try writeEscaped(allocator, out, a.name);
-            try out.appendSlice(allocator, "\", .value = \"");
-            try writeEscaped(allocator, out, a.raw_value);
-            try out.appendSlice(allocator, "\" },\n");
-        }
-        try out.appendSlice(allocator, "};\n");
-    }
-    try out.appendSlice(allocator, "var initial_A = [_][]const @import(\"hmr\").Attr{");
-    if (initials.len > 0) try out.appendSlice(allocator, "\n");
-    for (initials, 0..) |_, idx| {
-        try out.appendSlice(allocator, "    &initial_A_");
-        try appendUsize(allocator, out, @intCast(idx));
-        try out.appendSlice(allocator, ",\n");
-    }
-    try out.appendSlice(allocator, "};\n");
-    try out.appendSlice(allocator, "pub var A: []const []const @import(\"hmr\").Attr = &initial_A;\n");
-    try out.appendSlice(allocator, "pub fn setA(new_A: []const []const @import(\"hmr\").Attr) void { A = new_A; }\n");
-
-    // lift_sites — one entry per slot, in slot order, carrying the flat
-    // component ordinal + lifted attr names. The dev loop walks fresh
-    // manifest nodes, collects components in the same flat order, and uses
-    // comp_index + attr_names to rebuild each A slot with current values.
-    try out.appendSlice(allocator, "pub const lift_sites: []const @import(\"hmr\").LiftSite = &.{\n");
-    for (initials) |init| {
-        try out.appendSlice(allocator, "    .{ .comp_index = ");
-        try appendUsize(allocator, out, init.comp_index);
-        try out.appendSlice(allocator, ", .attr_names = &.{");
-        for (init.attrs.items, 0..) |a, k| {
-            if (k > 0) try out.appendSlice(allocator, ",");
-            try out.appendSlice(allocator, " \"");
-            try writeEscaped(allocator, out, a.name);
-            try out.appendSlice(allocator, "\"");
-        }
-        if (init.attrs.items.len > 0) try out.appendSlice(allocator, " ");
-        try out.appendSlice(allocator, "} },\n");
-    }
-    try out.appendSlice(allocator, "};\n\n");
 }
 
 fn emitManifestNode(
@@ -3336,31 +3181,6 @@ const Emitter = struct {
     /// regardless of the enclosing HTML tag depth.
     tag_depth_save: [64]i32 = undefined,
     tag_depth_save_len: usize = 0,
-
-    /// Lift mode (see EmitOptions.lift_attrs). When true, emitComponent
-    /// allocates a slot ID per qualifying invocation and emits the
-    /// `var __p; applyAttrs; try Name(writer, __p);` block instead of
-    /// the inline-attrs call.
-    lift_attrs: bool = false,
-    /// Liftable components -> their Props type expression (key is the
-    /// component name; value is e.g. "ui.button.ButtonProps"). Presence in
-    /// the map is the lift gate; the value is spliced into the call site as
-    /// `var __p: <expr> = .{...}`.
-    props_expr: *const std.StringHashMapUnmanaged([]const u8) = &empty_props_expr,
-    /// Per-file slot counter — incremented every time emitComponent
-    /// emits a lifted invocation. Lives in emitFile's scope (shared
-    /// across the per-function Emitter instances) so slot IDs are
-    /// file-wide.
-    next_call_site_id: *u32 = &dummy_call_site_id,
-    /// Per-file initials buffer — flushed as `var initial_A` at file
-    /// footer once every function body has been emitted. Same lifetime
-    /// rationale as next_call_site_id.
-    call_site_initials: *std.ArrayListUnmanaged(CallSiteInit) = &dummy_call_site_initials,
-    /// Per-file component counter — incremented at the top of every
-    /// emitComponent (flat manifest order, all components, lifted or not).
-    /// Recorded into each lifted CallSiteInit.comp_index so the dev loop
-    /// can match a slot back to the freshly-parsed component.
-    next_comp_index: *u32 = &dummy_comp_index,
 
     fn write(self: *Emitter, s: []const u8) EmitError!void {
         try self.out.appendSlice(self.allocator, s);
@@ -3923,9 +3743,6 @@ const Emitter = struct {
     }
 
     fn emitComponent(self: *Emitter, mfst: Manifest, i: *usize, comp: Component) EmitError!void {
-        // Advance the flat-manifest ordinal counter (pre-order) so any other
-        // consumers of next_comp_index stay in lockstep.
-        self.next_comp_index.* += 1;
         if (comp.has_children) {
             // Pre-render children to a buffer, then call the component with
             // `.children = buf.items` as a pre-rendered HTML string.
@@ -4038,87 +3855,6 @@ const Emitter = struct {
         }
     }
 };
-
-const empty_props_expr: std.StringHashMapUnmanaged([]const u8) = .empty;
-var dummy_call_site_id: u32 = 0;
-var dummy_call_site_initials: std.ArrayListUnmanaged(CallSiteInit) = .{};
-var dummy_comp_index: u32 = 0;
-
-/// How an attr value should be treated for the A-table lift.
-const AttrLiftKind = enum {
-    /// `.string` form — value is the raw text, lift verbatim.
-    string,
-    /// `.expr` form whose source is a constant Zig expression — enum
-    /// tag (.primary), bool (true/false), null, int (42), float (3.14).
-    /// Liftable as the source slice.
-    const_expr,
-    /// `.expr` form referencing local scope (`{someVar}`, `{props.x}`).
-    /// NOT liftable — must stay inline at the call site.
-    expr,
-    /// `<Foo disabled />` shorthand — no value to lift.
-    bool_present,
-};
-
-fn classifyAttr(value: AttrValue) AttrLiftKind {
-    return switch (value) {
-        .string => .string,
-        .bool_present => .bool_present,
-        .expr => |s| if (isConstExpr(s)) .const_expr else .expr,
-    };
-}
-
-/// True if `s` is a pure literal — i.e., parseable at runtime without
-/// reference to surrounding scope. Used to decide whether an `.expr`
-/// attr (which covers both `.primary` enum tags and `{someVar}` real
-/// expressions) is safe to lift into the A-table.
-fn isConstExpr(s: []const u8) bool {
-    if (s.len == 0) return false;
-    // Enum tag: `.primary` or `.@"error"` (with optional whitespace stripped).
-    if (s[0] == '.') {
-        if (s.len == 1) return false;
-        const rest = s[1..];
-        // `.@"foo"` form
-        if (rest.len >= 3 and rest[0] == '@' and rest[1] == '"' and rest[rest.len - 1] == '"') return true;
-        // `.identifier` — must be all alnum/_
-        for (rest) |c| if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
-        return true;
-    }
-    // true / false / null
-    if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "null")) return true;
-    // Numeric literal: optional leading -, digits, optional `.digits`.
-    var i: usize = 0;
-    if (s[0] == '-') i = 1;
-    if (i >= s.len) return false;
-    var saw_dot = false;
-    var saw_digit = false;
-    while (i < s.len) : (i += 1) {
-        const c = s[i];
-        if (std.ascii.isDigit(c)) {
-            saw_digit = true;
-        } else if (c == '.' and !saw_dot) {
-            saw_dot = true;
-        } else return false;
-    }
-    return saw_digit;
-}
-
-// Helpers
-
-fn childWriterName(idx: u8) []const u8 {
-    return switch (idx) {
-        0 => "_children_w_0",
-        1 => "_children_w_1",
-        2 => "_children_w_2",
-        3 => "_children_w_3",
-        4 => "_children_w_4",
-        5 => "_children_w_5",
-        6 => "_children_w_6",
-        7 => "_children_w_7",
-        8 => "_children_w_8",
-        9 => "_children_w_9",
-        else => "_children_w_x",
-    };
-}
 
 fn depthSuffix(d: u8) []const u8 {
     return switch (d) {
@@ -4350,6 +4086,22 @@ fn emitParams(self: *Emitter, sig: []const u8, concrete_props_param: ?[]const u8
         }
         param_pos = if (scan < trimmed.len) scan + 1 else scan;
     }
+}
+
+fn childWriterName(idx: u8) []const u8 {
+    return switch (idx) {
+        0 => "_children_w_0",
+        1 => "_children_w_1",
+        2 => "_children_w_2",
+        3 => "_children_w_3",
+        4 => "_children_w_4",
+        5 => "_children_w_5",
+        6 => "_children_w_6",
+        7 => "_children_w_7",
+        8 => "_children_w_8",
+        9 => "_children_w_9",
+        else => "_children_w_x",
+    };
 }
 
 fn writeEscaped(allocator: Allocator, out: *std.ArrayListUnmanaged(u8), text: []const u8) EmitError!void {
@@ -5467,7 +5219,6 @@ fn transpileFile(
     defer {
         for (component_imports.items) |ci| {
             if (ci.import_path.len > 0) allocator.free(ci.import_path);
-            if (ci.props_type_expr.len > 0) allocator.free(ci.props_type_expr);
         }
         component_imports.deinit(allocator);
     }

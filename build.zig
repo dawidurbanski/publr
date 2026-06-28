@@ -204,18 +204,8 @@ pub fn build(b: *std.Build) void {
     // threadlocal RequestContext. Production builds use the same module; the
     // module is internally gated on the dev_mode flag set by http.serve at
     // startup, so captureProps is a no-op when --dev wasn't passed.
-    // Attr-lift runtime — separate module so src/hmr.zig can re-export
-    // its symbols (Attr, applyAttrs, parseAttr) without violating Zig's
-    // module-sandbox rule (a module's source files can't `@import` files
-    // outside the module's root path).
-    const hmr_lift_module = b.createModule(.{
-        .root_source_file = b.path("vendor/hmr.zig"),
-    });
     const hmr_module = b.createModule(.{
         .root_source_file = b.path("src/hmr.zig"),
-        .imports = &.{
-            .{ .name = "hmr_lift", .module = hmr_lift_module },
-        },
     });
 
     // Single views module — generated views.zig provides namespace hierarchy
@@ -288,10 +278,6 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "zsx", .module = zsx_views },
             .{ .name = "views", .module = views },
-            // For the `hmr.Attr` type used in the optional `setA` field's
-            // function-pointer signature. Falls through to vendor/hmr.zig
-            // for the lift runtime symbols (Attr, applyAttrs, parseAttr).
-            .{ .name = "hmr", .module = hmr_module },
         },
     });
 

@@ -254,52 +254,21 @@ pub const Loop = struct {
             }
         }
 
-        // Decide whether this edit is fast-path-able.
-        //
-        // Non-lift files: per-function `manifestEqual` (tier-1). Any
-        // structural OR component-attr change → rebuild (component attrs
-        // are baked inline when there's no A table).
-        //
-        // Lift files (setA present): a FILE-WIDE lift-site-aware compare.
-        // It walks the baked `manifest_nodes` against the freshly-parsed
-        // file-wide nodes, tolerating value diffs ONLY for attrs that are
-        // actually lifted (their (component, attr) pair appears in
-        // `lift_sites`). A change to a non-lifted component (e.g. local
-        // `fn StatCard`) or a non-lifted field (e.g. `PageHeader.title`)
-        // is baked inline → it must rebuild, same as tier-1.
+        // Decide whether this edit is fast-path-able: per-function
+        // `manifestEqual` (tier-1). Any structural OR component-attr change
+        // → rebuild (component attrs are baked inline). A missing match
+        // (renamed or removed fn) is structural → rebuild.
         var equal_timer = try std.time.Timer.start();
-        const lift_eligible = file_entries.len > 0 and
-            file_entries[0].setA != null and
-            file_entries[0].lift_sites != null and
-            file_entries[0].file_manifest_nodes != null;
-
-        var fast_path: bool = undefined;
-        if (lift_eligible) {
-            // Concatenate fresh nodes in parseAll (source) order so the
-            // component ordinal lines up with the emitter's comp_index.
-            var fresh_file_nodes: std.ArrayListUnmanaged(zsx.manifest_mod.Node) = .empty;
-            defer fresh_file_nodes.deinit(sa);
-            for (manifests) |m| try fresh_file_nodes.appendSlice(sa, m.nodes);
-            fast_path = nodesShapeEqualLiftedSites(
-                file_entries[0].file_manifest_nodes.?,
-                fresh_file_nodes.items,
-                file_entries[0].lift_sites.?,
-            );
-        } else {
-            // Per-function strict equality. A missing match (renamed or
-            // removed fn) is structural → rebuild.
-            var strict_equal: bool = true;
-            for (file_entries, pairs) |entry, mi_opt| {
-                const mi = mi_opt orelse {
-                    strict_equal = false;
-                    break;
-                };
-                if (!zsx.manifestEqual(entry.manifest.*, manifests[mi])) {
-                    strict_equal = false;
-                    break;
-                }
+        var fast_path: bool = true;
+        for (file_entries, pairs) |entry, mi_opt| {
+            const mi = mi_opt orelse {
+                fast_path = false;
+                break;
+            };
+            if (!zsx.manifestEqual(entry.manifest.*, manifests[mi])) {
+                fast_path = false;
+                break;
             }
-            fast_path = strict_equal;
         }
         const equal_ns = equal_timer.read();
 
@@ -341,20 +310,6 @@ pub const Loop = struct {
         // pointers compare equal and the function is idempotent.
         var set_l_timer = try std.time.Timer.start();
         file_entries[0].setL(new_l);
-        // If the file has a setA, swap the attr table too. Always rebuilt
-        // from fresh — the runtime A may have drifted from baked across
-        // earlier swaps, so we can't skip even when lit-equal. Concat
-        // fresh nodes in source order so comp_index lines up with the
-        // emitter's file-wide pre-order component counter, then rebuild
-        // each slot from the baked lift_sites descriptors.
-        if (file_entries[0].setA) |setA| {
-            if (file_entries[0].lift_sites) |sites| {
-                var fresh_nodes: std.ArrayListUnmanaged(zsx.manifest_mod.Node) = .empty;
-                for (manifests) |m| try fresh_nodes.appendSlice(la, m.nodes);
-                const new_a = try buildFreshA(la, fresh_nodes.items, sites);
-                setA(new_a);
-            }
-        }
         const set_l_ns = set_l_timer.read();
 
         // For each entry: re-render every persisted prop snapshot and
@@ -494,179 +449,6 @@ fn findManifestByName(manifests: []const zsx.manifest_mod.Manifest, fn_name: []c
     return null;
 }
 
-// =============================================================================
-// Tier-2 (attr+literal swap) helpers — see vendor/hmr.zig and the lift_attrs
-// emitter mode in vendor/zsx.zig for the full design.
-// =============================================================================
-
-/// Like zsx.manifestEqual but tolerant of literal attr-value changes on
-/// component invocations. Returns true when the two node streams have
-/// the same shape (counts, kinds, names) and the same attr kinds in the
-/// same order — even when string/const-expr attr VALUES differ. Those
-/// value differences are exactly what the runtime A-table swap absorbs.
-///
-/// Real expressions (`{someVar}`, `{props.x}`) whose source text changed
-/// still force a structural mismatch — they reference local scope the A
-/// table can't capture.
-/// Lift-site-aware shape comparison over FILE-WIDE baked vs fresh nodes.
-/// Walks both in lockstep tracking each component's flat ordinal (matching
-/// the emitter's `comp_index`). A component attr value difference is only
-/// tolerated when that exact (component, attr) pair is lifted — i.e. the
-/// slot whose `comp_index` matches lists that attr name. Everything else
-/// (non-lifted components like local `fn StatCard`, non-lifted fields like
-/// `PageHeader.title`, real expression edits, structural changes) forces a
-/// mismatch → slow-path rebuild.
-///
-/// This is the fix for the "edit a non-lifted component's attr and nothing
-/// happens" bug: the old comparator ignored ALL component string-attr diffs,
-/// so a baked-inline change was wrongly judged swappable.
-fn nodesShapeEqualLiftedSites(
-    baked: []const zsx.manifest_mod.Node,
-    fresh: []const zsx.manifest_mod.Node,
-    lift_sites: []const hmr.LiftSite,
-) bool {
-    if (baked.len != fresh.len) return false;
-    var comp_ord: u32 = 0;
-    for (baked, fresh) |a, b| {
-        const Tag = std.meta.Tag(zsx.manifest_mod.Node);
-        if (@as(Tag, a) != @as(Tag, b)) return false;
-        switch (a) {
-            .component => {
-                const ac = a.component;
-                const bc = b.component;
-                const this_ord = comp_ord;
-                comp_ord += 1;
-                if (!std.mem.eql(u8, ac.name, bc.name)) return false;
-                if (ac.has_children != bc.has_children) return false;
-                if (ac.attrs.len != bc.attrs.len) return false;
-                const lifted = liftedAttrNamesFor(lift_sites, this_ord);
-                for (ac.attrs, bc.attrs) |aa, ba| {
-                    if (!std.mem.eql(u8, aa.name, ba.name)) return false;
-                    const AvTag = std.meta.Tag(zsx.manifest_mod.AttrValue);
-                    if (@as(AvTag, aa.value) != @as(AvTag, ba.value)) return false;
-                    // Lifted attr → value diff is absorbed by the A-table swap.
-                    if (attrNameInList(lifted, aa.name)) continue;
-                    // Non-lifted attr → its value is baked inline; any change
-                    // is structural and must rebuild.
-                    if (!attrValueEqual(aa.value, ba.value)) return false;
-                }
-            },
-            else => if (!zsx.manifest_mod.nodeEqual(a, b)) return false,
-        }
-    }
-    return true;
-}
-
-/// Return the lifted attr names for the slot whose `comp_index` matches
-/// `ord`, or an empty slice when no slot targets this component (i.e. it
-/// wasn't lifted — every attr value must match exactly).
-fn liftedAttrNamesFor(lift_sites: []const hmr.LiftSite, ord: u32) []const []const u8 {
-    for (lift_sites) |site| {
-        if (site.comp_index == ord) return site.attr_names;
-    }
-    return &.{};
-}
-
-fn attrNameInList(names: []const []const u8, name: []const u8) bool {
-    for (names) |n| if (std.mem.eql(u8, n, name)) return true;
-    return false;
-}
-
-fn attrValueEqual(a: zsx.manifest_mod.AttrValue, b: zsx.manifest_mod.AttrValue) bool {
-    return switch (a) {
-        .string => |s| b == .string and std.mem.eql(u8, s, b.string),
-        .expr => |s| b == .expr and std.mem.eql(u8, s, b.expr),
-        .bool_present => b == .bool_present,
-    };
-}
-
-/// Mirror of the emitter's private isConstExpr. True iff `s` is a pure
-/// literal — enum tag (`.primary`), `true`/`false`/`null`, or a numeric
-/// literal — so it's safe to lift into the A table.
-fn isConstAttrExpr(s: []const u8) bool {
-    if (s.len == 0) return false;
-    if (s[0] == '.') {
-        if (s.len == 1) return false;
-        const rest = s[1..];
-        if (rest.len >= 3 and rest[0] == '@' and rest[1] == '"' and rest[rest.len - 1] == '"') return true;
-        for (rest) |c| if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
-        return true;
-    }
-    if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "null")) return true;
-    var i: usize = 0;
-    if (s[0] == '-') i = 1;
-    if (i >= s.len) return false;
-    var saw_dot = false;
-    var saw_digit = false;
-    while (i < s.len) : (i += 1) {
-        const c = s[i];
-        if (std.ascii.isDigit(c)) {
-            saw_digit = true;
-        } else if (c == '.' and !saw_dot) {
-            saw_dot = true;
-        } else return false;
-    }
-    return saw_digit;
-}
-
-/// Rebuild the runtime A table from freshly-parsed manifest nodes, using
-/// the baked `lift_sites` descriptors so the slot layout EXACTLY matches
-/// what the emitter produced at build time. This is critical: the emitter's
-/// lift-eligibility (has_props + defaulted fields) can't be re-derived at
-/// runtime, so a heuristic walk would produce a different slot count /
-/// ordering and `applyAttrs` would read the wrong slot (silently blanking
-/// props). `lift_sites` removes the guesswork.
-///
-/// `fresh` is the file-wide concatenation of every function's manifest
-/// nodes — the same order the emitter assigned `comp_index` in. Caller
-/// owns the allocation; strings are duped so they outlive the parse.
-fn buildFreshA(
-    allocator: Allocator,
-    fresh: []const zsx.manifest_mod.Node,
-    lift_sites: []const hmr.LiftSite,
-) ![]const []const hmr.Attr {
-    // Collect fresh component nodes in flat order so comp_index lines up
-    // with the emitter's pre-order component counter.
-    var fresh_comps: std.ArrayListUnmanaged(zsx.manifest_mod.Component) = .empty;
-    defer fresh_comps.deinit(allocator);
-    for (fresh) |node| {
-        if (node == .component) try fresh_comps.append(allocator, node.component);
-    }
-
-    var slots = try allocator.alloc([]const hmr.Attr, lift_sites.len);
-    errdefer allocator.free(slots);
-
-    for (lift_sites, 0..) |site, slot_idx| {
-        var lifted: std.ArrayListUnmanaged(hmr.Attr) = .empty;
-        errdefer lifted.deinit(allocator);
-
-        // Defensive: a shape change that slipped past nodesShapeEqualLiftedSites
-        // could leave comp_index out of range. Emit an empty slot rather
-        // than crash — the next save (or rebuild) corrects it.
-        if (site.comp_index < fresh_comps.items.len) {
-            const comp = fresh_comps.items[site.comp_index];
-            for (site.attr_names) |want| {
-                for (comp.attrs) |a| {
-                    if (!std.mem.eql(u8, a.name, want)) continue;
-                    const raw: ?[]const u8 = switch (a.value) {
-                        .string => |s| s,
-                        .expr => |s| s,
-                        .bool_present => null,
-                    };
-                    if (raw) |v| {
-                        try lifted.append(allocator, .{
-                            .name = try allocator.dupe(u8, a.name),
-                            .value = try allocator.dupe(u8, v),
-                        });
-                    }
-                    break;
-                }
-            }
-        }
-        slots[slot_idx] = try lifted.toOwnedSlice(allocator);
-    }
-    return slots;
-}
 
 // =============================================================================
 // Tests
@@ -1268,101 +1050,4 @@ test "hmr_loop: concurrent handle() calls serialize via the mutex" {
     // calls, not name entries.
     try testing.expectEqual(@as(usize, 2), rec.rebuild_call_count);
     try testing.expectEqual(@as(usize, 0), rec.rebuild_calls.items.len);
-}
-
-test "nodesShapeEqualLiftedSites: non-lifted component attr change forces rebuild (StatCard regression)" {
-    const M = zsx.manifest_mod;
-    // comp 0 = StatCard (NOT lifted), comp 1 = PageHeader (subtitle lifted).
-    const sc_baked = [_]M.Attr{.{ .name = "label", .value = .{ .string = "Posts23" } }};
-    const ph_baked = [_]M.Attr{
-        .{ .name = "title", .value = .{ .string = "Dashboard" } },
-        .{ .name = "subtitle", .value = .{ .string = "old" } },
-    };
-    const baked = [_]M.Node{
-        .{ .component = .{ .name = "StatCard", .has_children = false, .attrs = &sc_baked } },
-        .{ .component = .{ .name = "PageHeader", .has_children = true, .attrs = &ph_baked } },
-    };
-    const attr_names = [_][]const u8{"subtitle"};
-    const sites = [_]hmr.LiftSite{.{ .comp_index = 1, .attr_names = &attr_names }};
-
-    // (a) StatCard.label changed → not lifted → must NOT be shape-equal.
-    {
-        const sc_fresh = [_]M.Attr{.{ .name = "label", .value = .{ .string = "Posts24" } }};
-        const fresh = [_]M.Node{
-            .{ .component = .{ .name = "StatCard", .has_children = false, .attrs = &sc_fresh } },
-            .{ .component = .{ .name = "PageHeader", .has_children = true, .attrs = &ph_baked } },
-        };
-        try testing.expect(!nodesShapeEqualLiftedSites(&baked, &fresh, &sites));
-    }
-    // (b) PageHeader.subtitle changed → lifted → shape-equal (swap).
-    {
-        const ph_fresh = [_]M.Attr{
-            .{ .name = "title", .value = .{ .string = "Dashboard" } },
-            .{ .name = "subtitle", .value = .{ .string = "new" } },
-        };
-        const fresh = [_]M.Node{
-            .{ .component = .{ .name = "StatCard", .has_children = false, .attrs = &sc_baked } },
-            .{ .component = .{ .name = "PageHeader", .has_children = true, .attrs = &ph_fresh } },
-        };
-        try testing.expect(nodesShapeEqualLiftedSites(&baked, &fresh, &sites));
-    }
-    // (c) PageHeader.title changed → NOT in lift_sites → must rebuild.
-    {
-        const ph_fresh = [_]M.Attr{
-            .{ .name = "title", .value = .{ .string = "Changed" } },
-            .{ .name = "subtitle", .value = .{ .string = "old" } },
-        };
-        const fresh = [_]M.Node{
-            .{ .component = .{ .name = "StatCard", .has_children = false, .attrs = &sc_baked } },
-            .{ .component = .{ .name = "PageHeader", .has_children = true, .attrs = &ph_fresh } },
-        };
-        try testing.expect(!nodesShapeEqualLiftedSites(&baked, &fresh, &sites));
-    }
-}
-
-test "buildFreshA: lift_sites pin the slot to the right component (regression)" {
-    // Reproduces the subtitle-disappears bug: a non-lifted component
-    // (Button) precedes the lifted one (PageHeader) in flat order. The
-    // old heuristic created a slot for Button too, shifting PageHeader's
-    // slot and blanking its props. With lift_sites the layout is exact.
-    const alloc = testing.allocator;
-    const M = zsx.manifest_mod;
-
-    // Flat node stream: comp 0 = Button (not lifted), comp 1 = PageHeader.
-    const button_attrs = [_]M.Attr{
-        .{ .name = "label", .value = .{ .string = "Export" } },
-    };
-    const ph_attrs = [_]M.Attr{
-        .{ .name = "title", .value = .{ .string = "Dashboard" } },
-        .{ .name = "subtitle", .value = .{ .string = "Fresh subtitle" } },
-    };
-    const fresh = [_]M.Node{
-        .{ .component = .{ .name = "Button", .has_children = false, .attrs = &button_attrs } },
-        .{ .component = .{ .name = "PageHeader", .has_children = true, .attrs = &ph_attrs } },
-    };
-
-    // Baked lift_sites: one slot, PageHeader (comp_index 1), only subtitle.
-    const attr_names = [_][]const u8{"subtitle"};
-    const sites = [_]hmr.LiftSite{
-        .{ .comp_index = 1, .attr_names = &attr_names },
-    };
-
-    const a = try buildFreshA(alloc, &fresh, &sites);
-    defer {
-        for (a) |slot| {
-            for (slot) |attr| {
-                alloc.free(attr.name);
-                alloc.free(attr.value);
-            }
-            alloc.free(slot);
-        }
-        alloc.free(a);
-    }
-
-    // Exactly one slot, holding PageHeader's fresh subtitle — NOT Button's
-    // label, and NOT empty.
-    try testing.expectEqual(@as(usize, 1), a.len);
-    try testing.expectEqual(@as(usize, 1), a[0].len);
-    try testing.expectEqualStrings("subtitle", a[0][0].name);
-    try testing.expectEqualStrings("Fresh subtitle", a[0][0].value);
 }

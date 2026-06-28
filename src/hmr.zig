@@ -48,25 +48,6 @@
 const std = @import("std");
 
 // =============================================================================
-// Attr-lift runtime — re-exported from vendor/hmr.zig
-// =============================================================================
-// Generated views emit `@import("hmr").applyAttrs(...)` at every lifted
-// component invocation. They see this module under the `hmr` name, so we
-// surface the lift API alongside captureProps. The vendored module is the
-// source of truth (lives next to other vendored runtime helpers); keeping
-// the API there means design-system and other consumers can reuse it
-// verbatim without dragging in the captureProps machinery below.
-const lift = @import("hmr_lift");
-pub const Attr = lift.Attr;
-pub const LiftSite = lift.LiftSite;
-pub const applyAttrs = lift.applyAttrs;
-pub const propsFrom = lift.propsFrom;
-pub const tryParseAttr = lift.tryParseAttr;
-pub const parseAttr = lift.parseAttr;
-pub const forwardedAttrs = lift.forwardedAttrs;
-pub const renderForwarding = lift.renderForwarding;
-
-// =============================================================================
 // Module state
 // =============================================================================
 

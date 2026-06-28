@@ -708,8 +708,6 @@ fn emit(
     }
 
     try w.writeAll(
-        \\const hmr = @import("hmr");
-        \\
         \\pub const Entry = struct {
         \\    /// `<dir-rel-path>:<FnName>` — matches the captureProps key.
         \\    name: []const u8,
@@ -719,20 +717,6 @@ fn emit(
         \\    manifest: *const zsx.manifest_mod.Manifest,
         \\    /// File-scoped `setL` — replaces the literal table.
         \\    setL: *const fn ([]const []const u8) void,
-        \\    /// File-scoped `setA` — replaces the runtime attr table for
-        \\    /// lifted component invocations. `null` when the view file
-        \\    /// has no liftable call sites (no A table generated).
-        \\    setA: ?*const fn ([]const []const hmr.Attr) void = null,
-        \\    /// Baked per-slot descriptors (comp_index + attr names) the dev
-        \\    /// loop uses to rebuild the A table from a fresh parse with the
-        \\    /// exact slot layout the emitter produced. `null` mirrors setA.
-        \\    lift_sites: ?[]const hmr.LiftSite = null,
-        \\    /// File-wide baked manifest nodes (every function concatenated,
-        \\    /// source order). The lift comparator walks these against the
-        \\    /// fresh parse to tell a swappable lifted-attr change from a
-        \\    /// structural one. Shared by all entries of a file. `null` when
-        \\    /// the view file wasn't built with the lift pipeline.
-        \\    file_manifest_nodes: ?[]const zsx.manifest_mod.Node = null,
         \\    /// Trampoline: ZON-parses props, calls the view. Returns
         \\    /// `error.PropTypeUnresolvable` for slow-path-only views.
         \\    render_from_zon: *const fn (
@@ -758,13 +742,9 @@ fn emit(
             .{e.name},
         );
         try writeZigStringLiteral(w, e.source_path);
-        // setA + lift_sites + file_manifest_nodes are populated via @hasDecl
-        // so files generated without lift_attrs (no `pub fn setA` /
-        // `pub const lift_sites` / `pub const manifest_nodes`) simply get
-        // `null`. Comptime-resolved per entry.
         try w.print(
-            ", .manifest = &{s}.{s}_manifest, .setL = &{s}.setL, .setA = if (@hasDecl({s}, \"setA\")) &{s}.setA else null, .lift_sites = if (@hasDecl({s}, \"lift_sites\")) {s}.lift_sites else null, .file_manifest_nodes = if (@hasDecl({s}, \"manifest_nodes\")) {s}.manifest_nodes else null, .render_from_zon = &{s} }},\n",
-            .{ e.import_path, e.fn_name, e.import_path, e.import_path, e.import_path, e.import_path, e.import_path, e.import_path, e.import_path, e.trampoline_id },
+            ", .manifest = &{s}.{s}_manifest, .setL = &{s}.setL, .render_from_zon = &{s} }},\n",
+            .{ e.import_path, e.fn_name, e.import_path, e.trampoline_id },
         );
     }
     try w.writeAll("};\n");
