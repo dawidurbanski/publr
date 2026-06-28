@@ -167,6 +167,53 @@ pub fn renderForwarding(comptime Component: anytype, comptime Props: type, write
     try spliceAttrsIntoRoot(writer, buf.items, fwd);
 }
 
+/// Component self-forwarding — the inverse of `renderForwarding`. A component
+/// calls this from a thin wrapper so it splices its OWN non-prop "rest" attrs
+/// (data-p-* directives, data-*, aria-*, role, tabindex) onto its own root.
+/// Call sites then pass every attr plainly and never need to know the
+/// component's Props type — eliminating the call-site forwarding + `liftable`
+/// analysis entirely. `body` is the component's real render fn `(writer, raw)`.
+/// Comptime-gated: with no forwardable rest attrs it renders straight through
+/// (no buffer). Conditional roots are handled by splicing the rendered output's
+/// first tag (same as renderForwarding).
+pub fn forward(comptime Props: type, writer: anytype, raw: anytype, comptime body: anytype) !void {
+    const fields = std.meta.fields(@TypeOf(raw));
+    comptime var rest = 0;
+    inline for (fields) |f| {
+        if (comptime (!@hasField(Props, f.name) and isFwdName(f.name))) rest += 1;
+    }
+    if (rest == 0) return body(writer, raw);
+
+    var parts: [fields.len * 5][]const u8 = undefined;
+    var n: usize = 0;
+    inline for (fields) |f| {
+        if (comptime (!@hasField(Props, f.name) and isFwdName(f.name))) {
+            const v: []const u8 = @field(raw, f.name);
+            parts[n] = " ";
+            parts[n + 1] = f.name;
+            parts[n + 2] = "=\"";
+            parts[n + 3] = v;
+            parts[n + 4] = "\"";
+            n += 5;
+        }
+    }
+    const fwd = concatRt(parts[0..n]);
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    defer buf.deinit(std.heap.page_allocator);
+    try body(buf.writer(std.heap.page_allocator), raw);
+    try spliceAttrsIntoRoot(writer, buf.items, fwd);
+}
+
+/// Attr names a component self-forwards: hyphenated (data-p-* / data-* / aria-*)
+/// or the bare a11y attrs role/tabindex. Non-prop fields with other names are
+/// ignored (not forwarded, not an error) so stray props can't break the build.
+fn isFwdName(comptime name: []const u8) bool {
+    if (std.mem.indexOfScalar(u8, name, '-') != null) return true;
+    if (std.mem.eql(u8, name, "role")) return true;
+    if (std.mem.eql(u8, name, "tabindex")) return true;
+    return false;
+}
+
 fn isTagStart(c: u8) bool {
     return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z');
 }
@@ -3423,28 +3470,38 @@ const Emitter = struct {
             try self.write(";\n");
         }
 
+        const sig_empty = mem.trim(u8, mfst.sig, " \t\n\r").len == 0;
+        // Bug B: a prop-less `pub fn Foo()` synthesises `_props: anytype` (+ a
+        // discard) so call sites share the 2-arg shape `try Foo(writer, .{})`.
+        const synth_props = sig_empty;
+
+        // Self-forwarding: components with a concrete Props struct wrap their
+        // body so the component splices its OWN rest-attrs (data-p-* directives,
+        // data-*, aria-*, role, tabindex) onto its root. Call sites then pass
+        // every attr plainly — no call-site renderForwarding, no `liftable`
+        // analysis, no --lift-attrs flag. The body runs inside an anonymous
+        // struct fn that forward() invokes (with the real writer, or a buffer it
+        // then splices into — conditional-root-safe). The outer wrapper uses
+        // __fw/__fp so the inner body keeps canonical writer/_<props> names.
+        const self_forward = props_info.struct_type != null and props_info.concrete_props_param != null;
+
         // Function signature.
         if (pub_prefix) try self.write("pub ");
         try self.write("fn ");
         try self.write(mfst.name);
-        try self.write("(writer: anytype");
-
-        // Walk the signature's comma-separated params and emit each as `name: anytype`.
-        const sig_empty = mem.trim(u8, mfst.sig, " \t\n\r").len == 0;
-        try emitParams(self, mfst.sig, props_info.concrete_props_param);
-
-        // Bug B fix (uniform across inline + hmr): a prop-less `pub fn Foo()`
-        // source emits `(writer: anytype, _props: anytype) !void` with a `_ = _props;`
-        // discard. This keeps call sites consistent: hmr-mode emits `try Foo(writer, .{})`
-        // for every component invocation, and CMS's `tpl.zig` was updated to pass
-        // `.{.{}}` for prop-less views via `renderStatic`. Both modes share the
-        // 2-arg call shape.
-        const synth_props = sig_empty;
-        if (synth_props) {
-            try self.write(", _props: anytype");
+        if (self_forward) {
+            try self.write("(__fw: anytype, __fp: anytype) !void {\n");
+            try self.write("    return zsx.forward(");
+            try self.write(mfst.name);
+            try self.write("Props, __fw, __fp, struct {\n        fn b(writer: anytype");
+            try emitParams(self, mfst.sig, props_info.concrete_props_param);
+            try self.write(") !void {\n");
+        } else {
+            try self.write("(writer: anytype");
+            try emitParams(self, mfst.sig, props_info.concrete_props_param);
+            if (synth_props) try self.write(", _props: anytype");
+            try self.write(") !void {\n");
         }
-
-        try self.write(") !void {\n");
 
         // capture_props (hmr-only) MUST be the first body statement. The CMS
         // consumer can also see it through compile-time grep ("captureProps"),
@@ -3492,6 +3549,10 @@ const Emitter = struct {
 
         // Body.
         try self.emitNodes(mfst);
+
+        if (self_forward) {
+            try self.write("        }\n    }.b);\n");
+        }
 
         try self.write("}\n\n");
     }
@@ -3907,12 +3968,10 @@ const Emitter = struct {
     /// nothing to lift — they fall back to the inline call and rebuild on
     /// edit (expressions reference runtime scope, not swappable anyway).
     fn componentLiftable(self: *const Emitter, comp: Component) bool {
-        if (!self.lift_attrs) return false;
-        if (!self.props_expr.contains(comp.name)) return false;
-        for (comp.attrs) |a| {
-            const kind = classifyAttr(a.value);
-            if (kind == .string or kind == .const_expr) return true;
-        }
+        // Call-site attr-forwarding is retired: components self-forward their
+        // rest-attrs (see runtime.forward + the emit wrapper). Always emit plain
+        // calls — pass every attr; the component splices its own onto its root.
+        _ = .{ self, comp };
         return false;
     }
 
@@ -4223,10 +4282,9 @@ fn classifyAttr(value: AttrValue) AttrLiftKind {
 /// `renderForwarding` wrapper — the runtime helper still does the real
 /// prop-vs-forward split via `@hasField`.
 fn hasForwardableAttr(attrs: []const Attr) bool {
-    for (attrs) |a| {
-        if (std.mem.indexOfScalar(u8, a.name, '-') != null) return true;
-        if (std.mem.eql(u8, a.name, "role") or std.mem.eql(u8, a.name, "tabindex")) return true;
-    }
+    // Retired: components self-forward their rest-attrs (runtime.forward). Call
+    // sites always emit plain calls now and pass every attr through unchanged.
+    _ = attrs;
     return false;
 }
 

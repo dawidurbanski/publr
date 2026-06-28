@@ -127,7 +127,7 @@ pub fn EditSidebar(props: struct {
     <div class="p-4 border-b border-border">
         <Heading level=.h3 size=.xs>Details</Heading>
         <Stack gap=.sm>
-            <Text size=.sm color=.muted as=.label>Publish Date</Text>
+            <Text size=.sm color=.muted as=.span>Publish Date</Text>
             <input
                 type="date"
                 id="date"
