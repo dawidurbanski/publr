@@ -1662,7 +1662,7 @@ fn parseExpression(p: *Parser) ParseError!void {
     // `.expr` node. Baked into the literal stream so it merges with surrounding
     // prose (`<strong>{$name}</strong>` → `<strong><span data-p-text="name"></span></strong>`).
     if (!is_raw and raw.len > 0 and raw[0] == '$') {
-        try p.bakeSlice("<span data-p-text=\"");
+        try p.bakeSlice("<span data-p-text=\"state.");
         try p.bakeSlice(stripDollar(raw));
         try p.bakeSlice("\"></span>");
         return;
@@ -2475,6 +2475,28 @@ fn stripDollar(value: []const u8) []const u8 {
     return t;
 }
 
+/// Append the WIRE form of an authored ref to `out`. A `$`-prefixed ref is a
+/// store-state access → `state.<path>` (explicit; the runtime strips `state.`
+/// before resolving). A bare ref — a loop variable bound by `@for`, or an
+/// action name — passes through unchanged (it resolves via the scope chain).
+fn appendWireRef(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), ref: []const u8) !void {
+    const t = std.mem.trim(u8, ref, " \t\r\n");
+    if (t.len > 0 and t[0] == '$') {
+        try out.appendSlice(allocator, "state.");
+        try out.appendSlice(allocator, t[1..]);
+    } else {
+        try out.appendSlice(allocator, t);
+    }
+}
+
+/// Owned wire form of a ref (see appendWireRef).
+fn wireRef(allocator: std.mem.Allocator, ref: []const u8) ![]u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try appendWireRef(allocator, &out, ref);
+    return out.toOwnedSlice(allocator);
+}
+
 // Parse a :showIf/:hideIf/:bind/@renderIf predicate (§10.1) into the runtime's
 // pipe wire format, evaluated without eval:
 //   $ref                 -> "ref"            (truthy)
@@ -2506,15 +2528,19 @@ fn parsePredicate(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
     // dropped) rather than introducing a new error into the parser's error set.
     for (ops) |op| {
         if (std.mem.indexOf(u8, body, op.token)) |idx| {
-            const lhs = stripDollar(std.mem.trim(u8, body[0..idx], " "));
+            const lhs = try wireRef(allocator, body[0..idx]);
+            defer allocator.free(lhs);
             const rhs = std.mem.trim(u8, body[idx + op.token.len ..], " ");
             return std.fmt.allocPrint(allocator, "{s}|{s}|{s}", .{ lhs, op.code, rhs });
         }
     }
 
-    const ref = stripDollar(body);
-    if (negated) return std.fmt.allocPrint(allocator, "not:{s}", .{ref});
-    return allocator.dupe(u8, ref);
+    const ref = try wireRef(allocator, body);
+    if (negated) {
+        defer allocator.free(ref);
+        return std.fmt.allocPrint(allocator, "not:{s}", .{ref});
+    }
+    return ref;
 }
 
 // `:class` / `:style` share an arrow shape (`lhs -> rhs[; …]`) but put the state
@@ -2542,24 +2568,31 @@ fn stripDollarArrow(allocator: std.mem.Allocator, value: []const u8, dollar_side
         defer if (lhs_owned) |s| allocator.free(s);
         const rhs_owned: ?[]const u8 = if (dollar_side == .rhs and predicate) try parsePredicate(allocator, rhs_raw) else null;
         defer if (rhs_owned) |s| allocator.free(s);
-        const lhs = lhs_owned orelse (if (dollar_side == .lhs) stripDollar(lhs_raw) else lhs_raw);
-        const rhs = rhs_owned orelse (if (dollar_side == .rhs) stripDollar(rhs_raw) else rhs_raw);
-        try out.appendSlice(allocator, lhs);
+        // LHS: for :class it's the state predicate/ref (wire form, `state.`);
+        // for :style it's the CSS property name (verbatim).
+        if (lhs_owned) |s| {
+            try out.appendSlice(allocator, s);
+        } else if (dollar_side == .lhs) {
+            try appendWireRef(allocator, &out, lhs_raw);
+        } else {
+            try out.appendSlice(allocator, lhs_raw);
+        }
         try out.appendSlice(allocator, "->");
-        // For :class (state on the LHS) the RHS is a class LIST — join the
-        // tokens with '+' so one group is a single '+'-delimited run (runtime
-        // splits on '+'). For :style (value on the RHS) it's a single value
-        // ref, emitted verbatim.
+        // RHS: for :class it's the class LIST — join tokens with '+' so one group
+        // is a single '+'-delimited run (runtime splits on '+'). For :style it's
+        // the state value ref (wire form).
         if (dollar_side == .lhs) {
-            var cls = std.mem.tokenizeAny(u8, rhs, " \t\r\n");
+            var cls = std.mem.tokenizeAny(u8, rhs_raw, " \t\r\n");
             var first_cls = true;
             while (cls.next()) |c| {
                 if (!first_cls) try out.append(allocator, '+');
                 first_cls = false;
                 try out.appendSlice(allocator, c);
             }
+        } else if (rhs_owned) |s| {
+            try out.appendSlice(allocator, s);
         } else {
-            try out.appendSlice(allocator, rhs);
+            try appendWireRef(allocator, &out, rhs_raw);
         }
     }
     return out.toOwnedSlice(allocator);
@@ -2570,7 +2603,8 @@ fn stripDollarForOf(allocator: std.mem.Allocator, value: []const u8) ![]const u8
     const sep = " of ";
     if (std.mem.indexOf(u8, value, sep)) |idx| {
         const lhs = std.mem.trim(u8, value[0..idx], " ");
-        const rhs = stripDollar(value[idx + sep.len ..]);
+        const rhs = try wireRef(allocator, value[idx + sep.len ..]);
+        defer allocator.free(rhs);
         return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ lhs, sep, rhs });
     }
     return allocator.dupe(u8, std.mem.trim(u8, value, " "));
@@ -2613,12 +2647,11 @@ fn mapDirectiveAttr(allocator: std.mem.Allocator, name: []const u8, value: []con
         // @model[.mod...] — two-way binding (§11.3): strip $, fold dot-modifiers
         // into "path|mod1|mod2". Modifier semantics live in the runtime.
         if (std.mem.startsWith(u8, d, "model") and (d.len == 5 or d[5] == '.')) {
-            const stripped = stripDollar(value);
-            if (d.len == 5) return .{ .name = "data-p-model", .value = try allocator.dupe(u8, stripped) };
+            if (d.len == 5) return .{ .name = "data-p-model", .value = try wireRef(allocator, value) };
             const mods = d[6..];
             var out: std.ArrayListUnmanaged(u8) = .empty;
             defer out.deinit(allocator);
-            try out.appendSlice(allocator, stripped);
+            try appendWireRef(allocator, &out, value);
             try out.append(allocator, '|');
             for (mods) |c| try out.append(allocator, if (c == '.') '|' else c);
             return .{ .name = "data-p-model", .value = try out.toOwnedSlice(allocator) };
@@ -2629,10 +2662,10 @@ fn mapDirectiveAttr(allocator: std.mem.Allocator, name: []const u8, value: []con
         const d = name[1..];
         if (std.mem.eql(u8, d, "showIf")) return .{ .name = "data-p-show", .value = try parsePredicate(allocator, value) };
         if (std.mem.eql(u8, d, "hideIf")) return .{ .name = "data-p-hide", .value = try parsePredicate(allocator, value) };
-        if (std.mem.eql(u8, d, "text")) return .{ .name = "data-p-text", .value = try allocator.dupe(u8, stripDollar(value)) };
+        if (std.mem.eql(u8, d, "text")) return .{ .name = "data-p-text", .value = try wireRef(allocator, value) };
         if (std.mem.eql(u8, d, "class")) return .{ .name = "data-p-class", .value = try stripDollarArrow(allocator, value, .lhs, true) };
         if (std.mem.eql(u8, d, "style")) return .{ .name = "data-p-style", .value = try stripDollarArrow(allocator, value, .rhs, false) };
-        if (std.mem.eql(u8, d, "key")) return .{ .name = "data-p-key", .value = try allocator.dupe(u8, stripDollar(value)) };
+        if (std.mem.eql(u8, d, "key")) return .{ .name = "data-p-key", .value = try wireRef(allocator, value) };
         // Any other :attr is a bind. The value may use the predicate DSL
         // (e.g. :disabled="$step == 1"); parsePredicate strips $ from the path.
         const pv = try parsePredicate(allocator, value);

@@ -713,28 +713,39 @@ function elementsWithAttr(root, attr) {
 }
 
 function resolveRef(ref, el) {
+  // `state.` is the wire prefix for a store-state ref (`$x` -> `state.x`); strip
+  // it and resolve the bare path through the scope chain, exactly as before.
+  // Bare refs (loop vars bound by @for, action names) carry no prefix.
+  const bare = stripStatePrefix(ref);
   const chain = storeChain(el);
-  const topSegment = ref.split(".")[0];
+  const topSegment = bare.split(".")[0];
 
   for (const store of chain) {
     if (store.state && topSegment in store.state) {
-      return { store, rest: ref };
+      return { store, rest: bare };
     }
 
-    if (store.actions && (ref in store.actions || topSegment in store.actions)) {
-      return { store, rest: ref };
+    if (store.actions && (bare in store.actions || topSegment in store.actions)) {
+      return { store, rest: bare };
     }
   }
 
-  if (ref.indexOf(".") < 0) {
-    const store = sharedStores.get(ref);
+  if (bare.indexOf(".") < 0) {
+    const store = sharedStores.get(bare);
 
     if (store) {
-      return { store, rest: ref };
+      return { store, rest: bare };
     }
   }
 
-  return { store: chain[0] || null, rest: ref };
+  return { store: chain[0] || null, rest: bare };
+}
+
+// Strip the explicit `state.` wire prefix, if present. The transpiler emits it
+// for `$`-refs so the wire reads as a store-state access; resolution works on
+// the bare path.
+function stripStatePrefix(path) {
+  return path.startsWith("state.") ? path.slice(6) : path;
 }
 
 function resolvePath(root, path) {
@@ -744,7 +755,8 @@ function resolvePath(root, path) {
     .reduce((obj, key) => obj?.[key], root);
 }
 
-function resolveValuePath(store, path) {
+function resolveValuePath(store, rawPath) {
+  const path = stripStatePrefix(rawPath);
   const topSegment = path.split(".")[0];
 
   if (store.state && topSegment in store.state) {
@@ -1272,7 +1284,9 @@ function setupFor(tpl) {
     let previousNode = tpl;
 
     items.forEach((item, index) => {
-      const key = keyAttr ? item[keyAttr] : index;
+      // `:key="item.id"` is a path relative to the loop alias; resolve it
+      // against a scope binding the alias to the current item.
+      const key = keyAttr ? resolvePath({ [alias]: item }, stripStatePrefix(keyAttr)) : index;
       liveKeys.add(key);
       let entry = rendered.get(key);
 
