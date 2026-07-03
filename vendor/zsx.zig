@@ -2545,7 +2545,7 @@ fn stripDollarArrow(allocator: std.mem.Allocator, value: []const u8, dollar_side
         const lhs = lhs_owned orelse (if (dollar_side == .lhs) stripDollar(lhs_raw) else lhs_raw);
         const rhs = rhs_owned orelse (if (dollar_side == .rhs) stripDollar(rhs_raw) else rhs_raw);
         try out.appendSlice(allocator, lhs);
-        try out.appendSlice(allocator, " -> ");
+        try out.appendSlice(allocator, "->");
         try out.appendSlice(allocator, rhs);
     }
     return out.toOwnedSlice(allocator);
