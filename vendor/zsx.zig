@@ -1439,7 +1439,7 @@ fn parseInnerCtx(p: *Parser, term: Term, is_body: bool) ParseError!void {
             const is_jsx_lt = c == '<' and p.i + 1 < p.src.len and
                 (isAlpha(p.src[p.i + 1]) or p.src[p.i + 1] == '!');
             const is_jsx_expr = c == '{' and p.i + 1 < p.src.len and
-                (p.src[p.i + 1] == '`' or isAlpha(p.src[p.i + 1]) or p.src[p.i + 1] == '@');
+                (p.src[p.i + 1] == '`' or isAlpha(p.src[p.i + 1]) or p.src[p.i + 1] == '@' or p.src[p.i + 1] == '$');
             if (!is_jsx_lt and !is_jsx_expr) {
                 try p.flushLiteral();
                 try parseZigPassthrough(p, term);
@@ -1655,6 +1655,18 @@ fn parseExpression(p: *Parser) ParseError!void {
     if (depth != 0) return ParseError.UnmatchedBrace;
     const raw = std.mem.trim(u8, p.src[start..p.i], " \t\r\n");
     p.i += 1; // skip '}'
+
+    // PublrJS reactive text hole: `{$path}` becomes a `<span data-p-text="path">`
+    // anchor the runtime fills on hydration. `$` marks a store ref (never a valid
+    // Zig identifier), so there's nothing to render — emit literal HTML, not an
+    // `.expr` node. Baked into the literal stream so it merges with surrounding
+    // prose (`<strong>{$name}</strong>` → `<strong><span data-p-text="name"></span></strong>`).
+    if (!is_raw and raw.len > 0 and raw[0] == '$') {
+        try p.bakeSlice("<span data-p-text=\"");
+        try p.bakeSlice(stripDollar(raw));
+        try p.bakeSlice("\"></span>");
+        return;
+    }
 
     // Detect children slot.
     if (!is_raw and std.mem.eql(u8, raw, "props.children")) {
