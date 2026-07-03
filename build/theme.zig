@@ -42,6 +42,10 @@ pub const Result = struct {
     gen_theme: std.Build.LazyPath,
     /// Captured stdout of the admin JIT compiler.
     jit_css_output: std.Build.LazyPath,
+    /// The admin JIT run step — surfaced so the plugin loop can feed each
+    /// plugin's `css_classes.txt` as an extra class manifest (plugin views
+    /// transpile after this returns, so their classes can't be added here).
+    jit_cmd: *std.Build.Step.Run,
     /// Captured stdout of the theme JIT compiler.
     theme_jit_css_output: std.Build.LazyPath,
     /// Resolved minify gate (option override > optimize-mode default).
@@ -226,6 +230,7 @@ pub fn wire(b: *std.Build, deps: Deps) Result {
         .gen_views = gen_views,
         .gen_theme = gen_theme,
         .jit_css_output = jit_css_output,
+        .jit_cmd = jit_cmd,
         .theme_jit_css_output = theme_jit_css_output,
         .should_minify = should_minify,
         .build_opts = build_opts,

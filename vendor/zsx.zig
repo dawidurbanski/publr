@@ -2086,6 +2086,14 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
     // accumulate into one data-p-on="click:x;keydown:y" (runtime splits on ';').
     var on_acc: std.ArrayListUnmanaged(u8) = .{};
     defer on_acc.deinit(p.allocator);
+    // Several `:class` / `:style` binds on one element each map to
+    // data-p-class / data-p-style (arrow shape `state -> a b; …`). HTML keeps
+    // only the FIRST duplicate attribute, so accumulate each into one value
+    // joined by ';' — exactly what the runtime's parseBindings splits on.
+    var class_acc: std.ArrayListUnmanaged(u8) = .{};
+    defer class_acc.deinit(p.allocator);
+    var style_acc: std.ArrayListUnmanaged(u8) = .{};
+    defer style_acc.deinit(p.allocator);
     for (attrs.items) |a| {
         if (a.kind == .static) {
             // Spec §10: rewrite @event / :directive names to data-p-* (+ value).
@@ -2096,6 +2104,12 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
             } else if (std.mem.eql(u8, md.name, "data-p-on")) {
                 if (on_acc.items.len > 0) try on_acc.append(p.allocator, ';');
                 try on_acc.appendSlice(p.allocator, md.value);
+            } else if (std.mem.eql(u8, md.name, "data-p-class")) {
+                if (class_acc.items.len > 0) try class_acc.append(p.allocator, ';');
+                try class_acc.appendSlice(p.allocator, md.value);
+            } else if (std.mem.eql(u8, md.name, "data-p-style")) {
+                if (style_acc.items.len > 0) try style_acc.append(p.allocator, ';');
+                try style_acc.appendSlice(p.allocator, md.value);
             } else {
                 try p.bake(' ');
                 try p.bakeSlice(md.name);
@@ -2117,6 +2131,18 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
         try p.bake(' ');
         try p.bakeSlice("data-p-on=\"");
         try p.bakeSlice(on_acc.items);
+        try p.bake('"');
+    }
+    if (class_acc.items.len > 0) {
+        try p.bake(' ');
+        try p.bakeSlice("data-p-class=\"");
+        try p.bakeSlice(class_acc.items);
+        try p.bake('"');
+    }
+    if (style_acc.items.len > 0) {
+        try p.bake(' ');
+        try p.bakeSlice("data-p-style=\"");
+        try p.bakeSlice(style_acc.items);
         try p.bake('"');
     }
 
@@ -4966,6 +4992,8 @@ pub fn coalesceWriteAlls(allocator: Allocator, input: []const u8) ![]u8 {
 
 const testing = std.testing;
 
+// data-component splice + capture_props + bug-fix tests
+
 };
 
 pub const transpile = struct {
@@ -5485,8 +5513,51 @@ fn collectCssClassesFromSource(
     component_class_patterns: ?*const std.StringHashMapUnmanaged([]const ClassPattern),
 ) !void {
     try collectClassAttributes(allocator, source, css_map);
+    try collectClassBindingAttributes(allocator, source, css_map);
     try collectComponentEnumPropClasses(allocator, source, css_map, component_class_patterns);
     try harvestZigStringClasses(allocator, source, css_map);
+}
+
+/// Walk the source for `:class="…"` reactive bindings and harvest the utility
+/// tokens on the RHS of each `state -> classes` group. These tokens live ONLY
+/// inside the binding (never a static `class="…"`), so collectClassAttributes
+/// misses them — without this the JIT emits no CSS for a class that only ever
+/// appears in a `:class`. Dynamic `:class={expr}` values are skipped (their
+/// classes aren't statically known).
+fn collectClassBindingAttributes(allocator: Allocator, source: []const u8, css_map: *std.StringHashMapUnmanaged(void)) !void {
+    var i: usize = 0;
+    while (i < source.len) {
+        const idx = mem.indexOfPos(u8, source, i, ":class") orelse break;
+        const after = idx + ":class".len;
+        // Attribute position: preceded by whitespace, immediately followed by `="`.
+        const preceded_ok = idx > 0 and (source[idx - 1] == ' ' or source[idx - 1] == '\t' or source[idx - 1] == '\n' or source[idx - 1] == '\r');
+        if (!preceded_ok or after + 1 >= source.len or source[after] != '=' or source[after + 1] != '"') {
+            i = after;
+            continue;
+        }
+        const val_start = after + 2;
+        var end = val_start;
+        while (end < source.len and source[end] != '"') : (end += 1) {
+            if (source[end] == '\\' and end + 1 < source.len) end += 1;
+        }
+        if (end >= source.len) break;
+        try addClassBindingTokens(allocator, css_map, source[val_start..end]);
+        i = end + 1;
+    }
+}
+
+/// Harvest class tokens from a `:class` / `data-p-class` value of the form
+/// `<state> -> a b[; <state2> -> c d]`. Splits on the arrow (raw `->` in
+/// source, or the HTML-escaped `-&gt;` in rendered output), drops the leading
+/// state ref, and for each group takes the classes up to the `;` separator.
+fn addClassBindingTokens(allocator: Allocator, css_map: *std.StringHashMapUnmanaged(void), value: []const u8) !void {
+    const arrow: []const u8 = if (mem.indexOf(u8, value, "-&gt;") != null) "-&gt;" else "->";
+    var segs = mem.splitSequence(u8, value, arrow);
+    _ = segs.next(); // leading state ref before the first arrow
+    while (segs.next()) |seg| {
+        const classes = if (mem.indexOfScalar(u8, seg, ';')) |semi| seg[0..semi] else seg;
+        try addClassTokens(allocator, css_map, classes);
+    }
 }
 
 /// Tokenize a whitespace-separated class string and add each token to css_map.

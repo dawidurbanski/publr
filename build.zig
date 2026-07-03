@@ -744,6 +744,11 @@ pub fn build(b: *std.Build) void {
             pv_cmd.addDirectoryArg(b.path(views_path));
             const pv_out = pv_cmd.addOutputDirectoryArg("views");
 
+            // Feed this plugin's class manifest into the admin JIT compile so
+            // classes that only exist in plugin views (incl. `:class` reactive
+            // bindings) get real CSS rules — build-time, same as core views.
+            theme_pipe.jit_cmd.addFileArg(pv_out.path(b, "css_classes.txt"));
+
             // Register .zsx files for content-based cache invalidation.
             var walker = d.walk(b.allocator) catch @panic("walk plugin views");
             defer walker.deinit();
