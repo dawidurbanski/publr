@@ -5244,7 +5244,11 @@ fn transpileFile(
     const output_path = try std.fmt.allocPrint(allocator, "{s}/{s}.zig", .{ output_dir, zig_name });
     defer allocator.free(output_path);
 
-    const source = try fs.cwd().readFileAlloc(allocator, input_path, 1024 * 1024);
+    const raw_source = try fs.cwd().readFileAlloc(allocator, input_path, 1024 * 1024);
+    defer allocator.free(raw_source);
+    // Desugar `:class="…{$path:Enum}…"` into predicate `:class` attrs up front,
+    // so parse + CSS collection + emit all see the expanded form.
+    const source = try expandEnumClassBindings(allocator, raw_source);
     defer allocator.free(source);
 
     // Skip Zig generation if output is newer than input, but always collect CSS classes
@@ -5570,6 +5574,128 @@ fn addClassBindingTokens(allocator: Allocator, css_map: *std.StringHashMapUnmana
         const classes = if (mem.indexOfScalar(u8, seg, ';')) |semi| seg[0..semi] else seg;
         try addClassTokens(allocator, css_map, classes);
     }
+}
+
+fn isIdentChar(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '_';
+}
+
+const EnumMap = std.StringHashMapUnmanaged([]const []const u8);
+
+/// Scan top-level `const <Name> = enum[(T)] { a, b = 1, c };` decls into a map
+/// Name -> tag names. Powers the `{$path:Name}` class-interpolation desugar:
+/// the enum is a build-time DOMAIN declaration (its tag names must equal the
+/// runtime store's string values). Caller owns the map + each tag slice.
+fn scanEnumDecls(allocator: Allocator, source: []const u8) !EnumMap {
+    var map: EnumMap = .empty;
+    errdefer freeEnumMap(allocator, &map);
+    var i: usize = 0;
+    while (mem.indexOfPos(u8, source, i, "= enum")) |kw| {
+        i = kw + "= enum".len;
+        // Decl name: the identifier immediately before ` = enum`.
+        var ne = kw;
+        while (ne > 0 and source[ne - 1] == ' ') ne -= 1;
+        var ns = ne;
+        while (ns > 0 and isIdentChar(source[ns - 1])) ns -= 1;
+        const name = source[ns..ne];
+        if (name.len == 0) continue;
+        const brace = mem.indexOfScalarPos(u8, source, kw, '{') orelse continue;
+        const close = mem.indexOfScalarPos(u8, source, brace, '}') orelse continue;
+        var tags: std.ArrayListUnmanaged([]const u8) = .{};
+        var it = mem.splitScalar(u8, source[brace + 1 .. close], ',');
+        while (it.next()) |raw| {
+            var t = mem.trim(u8, raw, " \t\r\n");
+            if (mem.indexOfScalar(u8, t, '=')) |eq| t = mem.trim(u8, t[0..eq], " \t\r\n");
+            if (t.len == 0) continue;
+            var ok = true;
+            for (t) |c| if (!isIdentChar(c)) {
+                ok = false;
+                break;
+            };
+            if (ok) try tags.append(allocator, t);
+        }
+        if (tags.items.len > 0) {
+            try map.put(allocator, name, try tags.toOwnedSlice(allocator));
+        } else tags.deinit(allocator);
+        i = close + 1;
+    }
+    return map;
+}
+
+fn freeEnumMap(allocator: Allocator, map: *EnumMap) void {
+    var it = map.iterator();
+    while (it.next()) |e| allocator.free(e.value_ptr.*);
+    map.deinit(allocator);
+}
+
+/// If `value` is an enum-typed class-interpolation template — one hole of the
+/// form `{$path:EnumName}` with `EnumName` in `enums` — return the desugared
+/// run of predicate `:class` attrs (one per enum tag), else null. E.g.
+///   value = `bg-{$color:Color}-400`, Color = {red,blue}
+///   -> `:class="$color == red -> bg-red-400" :class="$color == blue -> bg-blue-400"`
+/// Caller owns the returned slice.
+fn expandEnumClassTemplate(allocator: Allocator, value: []const u8, enums: *const EnumMap) !?[]u8 {
+    const hole = mem.indexOf(u8, value, "{$") orelse return null;
+    const close = mem.indexOfScalarPos(u8, value, hole, '}') orelse return null;
+    const inner = value[hole + 2 .. close]; // e.g. "color:Color"
+    const colon = mem.indexOfScalar(u8, inner, ':') orelse return null; // no `:Enum` → not our form
+    const path = mem.trim(u8, inner[0..colon], " \t");
+    const enum_name = mem.trim(u8, inner[colon + 1 ..], " \t");
+    const tags = enums.get(enum_name) orelse return null;
+    if (path.len == 0) return null;
+    const prefix = value[0..hole];
+    const suffix = value[close + 1 ..];
+
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    errdefer buf.deinit(allocator);
+    for (tags, 0..) |tag, idx| {
+        if (idx > 0) try buf.append(allocator, ' ');
+        try buf.appendSlice(allocator, ":class=\"$");
+        try buf.appendSlice(allocator, path);
+        try buf.appendSlice(allocator, " == ");
+        try buf.appendSlice(allocator, tag);
+        try buf.appendSlice(allocator, " -> ");
+        try buf.appendSlice(allocator, prefix);
+        try buf.appendSlice(allocator, tag);
+        try buf.appendSlice(allocator, suffix);
+        try buf.append(allocator, '"');
+    }
+    return try buf.toOwnedSlice(allocator);
+}
+
+/// Source-level desugar: rewrite every `:class="…{$path:Enum}…"` into the
+/// equivalent run of predicate `:class` attrs, using the file's enum decls as
+/// the value domain. Runs before parse + CSS collection, so the whole existing
+/// pipeline (multi-:class merge, predicate wiring, JIT harvest) handles it with
+/// no downstream changes. Returns a fresh allocation (a dupe when nothing to do).
+pub fn expandEnumClassBindings(allocator: Allocator, source: []const u8) ![]u8 {
+    var enums = try scanEnumDecls(allocator, source);
+    defer freeEnumMap(allocator, &enums);
+    if (enums.count() == 0) return allocator.dupe(u8, source);
+
+    var out: std.ArrayListUnmanaged(u8) = .{};
+    errdefer out.deinit(allocator);
+    var i: usize = 0;
+    while (i < source.len) {
+        if (mem.startsWith(u8, source[i..], ":class=\"")) {
+            const val_start = i + ":class=\"".len;
+            if (mem.indexOfScalarPos(u8, source, val_start, '"')) |val_end| {
+                const value = source[val_start..val_end];
+                if (try expandEnumClassTemplate(allocator, value, &enums)) |expanded| {
+                    defer allocator.free(expanded);
+                    try out.appendSlice(allocator, expanded);
+                    i = val_end + 1;
+                    continue;
+                }
+                try out.appendSlice(allocator, source[i .. val_end + 1]);
+                i = val_end + 1;
+                continue;
+            }
+        }
+        try out.append(allocator, source[i]);
+        i += 1;
+    }
+    return try out.toOwnedSlice(allocator);
 }
 
 /// Tokenize a whitespace-separated class string and add each token to css_map.
