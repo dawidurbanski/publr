@@ -1,6 +1,6 @@
 // PublrJS plugin — Positioning (opt-in companion module, #150).
 // Place a floating element relative to an anchor with viewport flip. Components
-// that need anchoring `import { position } from "./publr-interactivity-position.js"`;
+// that need anchoring `import { position } from "./publr-position.js"`;
 // the browser's module cache dedupes it to one load per page regardless of how
 // many components use it. Ported from design-system/src/js/publr-position.js
 // (no runtime dependency — pure DOM math).

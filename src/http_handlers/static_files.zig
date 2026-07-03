@@ -30,10 +30,10 @@ const InteractRepeater = static.Asset("repeater.js", @embedFile("static_interact
 const MediaSelectionJs = static.Asset("media-selection.js", @embedFile("static_media_selection_js"));
 const InteractWebSocket = static.Asset("websocket.js", @embedFile("static_interact_websocket_js"));
 const InteractPresence = static.Asset("presence.js", @embedFile("static_interact_presence_js"));
-const PublrInteractivity = static.Asset("publr-interactivity.js", @embedFile("static_publr_interactivity_js"));
-const PublrInteractivityQuery = static.Asset("publr-interactivity-query.js", @embedFile("static_publr_interactivity_query_js"));
-const PublrInteractivityPosition = static.Asset("publr-interactivity-position.js", @embedFile("static_publr_interactivity_position_js"));
-const PublrInteractivityFocus = static.Asset("publr-interactivity-focus.js", @embedFile("static_publr_interactivity_focus_js"));
+const PublrCore = static.Asset("publr.js", @embedFile("static_publr_js"));
+const PublrQuery = static.Asset("publr-query.js", @embedFile("static_publr_query_js"));
+const PublrPosition = static.Asset("publr-position.js", @embedFile("static_publr_position_js"));
+const PublrFocus = static.Asset("publr-focus.js", @embedFile("static_publr_focus_js"));
 const DashboardDemoJs = static.Asset("dashboard-demo.js", @embedFile("static_dashboard_demo_js"));
 
 const publr_ui = @import("publr_ui");
@@ -72,10 +72,10 @@ const asset_map = .{
     .{ "media-selection.js", AssetEntry{ .asset = MediaSelectionJs, .disk_path = "static/media-selection.js" } },
     .{ "interact/websocket.js", AssetEntry{ .asset = InteractWebSocket, .disk_path = "static/interact/websocket.js" } },
     .{ "interact/presence.js", AssetEntry{ .asset = InteractPresence, .disk_path = "static/interact/presence.js" } },
-    .{ "publr-interactivity.js", AssetEntry{ .asset = PublrInteractivity, .disk_path = "static/publr-interactivity.js" } },
-    .{ "publr-interactivity-query.js", AssetEntry{ .asset = PublrInteractivityQuery, .disk_path = "static/publr-interactivity-query.js" } },
-    .{ "publr-interactivity-position.js", AssetEntry{ .asset = PublrInteractivityPosition, .disk_path = "static/publr-interactivity-position.js" } },
-    .{ "publr-interactivity-focus.js", AssetEntry{ .asset = PublrInteractivityFocus, .disk_path = "static/publr-interactivity-focus.js" } },
+    .{ "publr.js", AssetEntry{ .asset = PublrCore, .disk_path = "static/publr.js" } },
+    .{ "publr-query.js", AssetEntry{ .asset = PublrQuery, .disk_path = "static/publr-query.js" } },
+    .{ "publr-position.js", AssetEntry{ .asset = PublrPosition, .disk_path = "static/publr-position.js" } },
+    .{ "publr-focus.js", AssetEntry{ .asset = PublrFocus, .disk_path = "static/publr-focus.js" } },
     .{ "dashboard-demo.js", AssetEntry{ .asset = DashboardDemoJs, .disk_path = "static/dashboard-demo.js" } },
     .{ "tokens.css", AssetEntry{ .asset = TokensCss, .disk_path = "vendor/tokens.css" } },
     .{ "publr.css", AssetEntry{ .asset = PublrCss, .disk_path = null } },

@@ -604,7 +604,7 @@ export const Publr = {
 
 /**
  * Internal extension surface used by the query plugin
- * (`publr-interactivity-query.js`). Not part of the public API — treat as private.
+ * (`publr-query.js`). Not part of the public API — treat as private.
  */
 Publr._internals = {
   reactive,

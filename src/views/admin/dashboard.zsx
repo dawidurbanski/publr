@@ -117,7 +117,7 @@ pub const Props = struct {
 };
 
 pub fn Dashboard(props: Props) {
-    <PageHeader title="Dashboard" subtitle="Welcome back. Here's what's happening on your site.">
+    <PageHeader title="Dashboard" subtitle="Welcome back. Here's the latest on your site.">
         <Button hierarchy=.secondary size=.sm icon=.upload label="Export" />
         <Button hierarchy=.primary size=.sm icon=.plus label="New post" />
     </PageHeader>
@@ -132,10 +132,10 @@ pub fn Dashboard(props: Props) {
 
         <Card>
             <div class="p-4" @store="demo">
-                <Heading level=.h2 size=.sm class="m-0 mb-3">Interactivity demo</Heading>
+                <Heading level=.h2 size=.sm class="m-0 mb-3">PublrJS demo</Heading>
                 <Button label="Toggle message" hierarchy=.primary size=.md onClick="toggle" />
                 <p class="hidden mt-4 text-sm text-muted-foreground" :showIf="shown">
-                    Hello from the Publr interactivity API — a DS Button (with a forwarded onClick) toggling this text via the reactive data-p-* store, live in CMS admin.
+                    Hello from PublrJS — a DS Button (with a forwarded onClick) toggling this text via the reactive data-p-* store, live in CMS admin.
                 </p>
                 <script type="module" src="/static/dashboard-demo.js"></script>
             </div>

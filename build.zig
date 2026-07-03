@@ -161,12 +161,12 @@ pub fn build(b: *std.Build) void {
         .{ "static_p_dropdown_js", "static/p/dropdown.js" },
         .{ "static_media_selection_js", "static/media-selection.js" },
         .{ "static_interact_websocket_js", "static/interact/websocket.js" },
-        // POC reactive interactivity runtime (data-p-* stores) — second system
+        // PublrJS runtime (data-p-* stores) — second system
         // alongside interact/core.js, for the dashboard demo (#101).
-        .{ "static_publr_interactivity_js", "static/publr-interactivity.js" },
-        .{ "static_publr_interactivity_query_js", "static/publr-interactivity-query.js" },
-        .{ "static_publr_interactivity_position_js", "static/publr-interactivity-position.js" },
-        .{ "static_publr_interactivity_focus_js", "static/publr-interactivity-focus.js" },
+        .{ "static_publr_js", "static/publr.js" },
+        .{ "static_publr_query_js", "static/publr-query.js" },
+        .{ "static_publr_position_js", "static/publr-position.js" },
+        .{ "static_publr_focus_js", "static/publr-focus.js" },
         .{ "static_dashboard_demo_js", "static/dashboard-demo.js" },
     };
     inline for (static_files) |sf| {

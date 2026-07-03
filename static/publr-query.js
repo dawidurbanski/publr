@@ -1,4 +1,4 @@
-import { Publr } from "./publr-interactivity.js";
+import { Publr } from "./publr.js";
 
 const {
   reactive,

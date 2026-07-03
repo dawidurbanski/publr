@@ -4,7 +4,7 @@
 // carries the directives (@store="shell", :showIf, :class, @click, :aria-*).
 // The pre-paint theme guard stays inline in layout.zsx's <head> (it must run
 // before first paint, which a deferred module can't).
-import { Publr, effect } from "/static/publr-interactivity.js";
+import { Publr, effect } from "/static/publr.js";
 
 const { state: shell } = Publr.store("shell", {
   state: { open: false },

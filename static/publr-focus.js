@@ -1,7 +1,7 @@
 // PublrJS plugin — Focus trap (opt-in companion module, #150).
 // Trap Tab/Shift+Tab within a container, save + restore previous focus.
 // Components that need it (dialog) `import { trapFocus } from
-// "./publr-interactivity-focus.js"`; deduped to one load per page by the module
+// "./publr-focus.js"`; deduped to one load per page by the module
 // cache. Ported from design-system/src/js/publr-focus.js (no runtime dependency).
 
 const FOCUSABLE =

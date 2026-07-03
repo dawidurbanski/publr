@@ -9,8 +9,8 @@
 // (src/components/dropdown/dropdown.js) once PublrJS is a shared vendored package
 // (deferred #74); until then the CMS-absolute import paths below keep it working
 // in the real admin.
-import { Publr } from "/static/publr-interactivity.js";
-import { position } from "/static/publr-interactivity-position.js";
+import { Publr } from "/static/publr.js";
+import { position } from "/static/publr-position.js";
 
 Publr.store("dropdown", () => {
   const state = Publr.reactive({ open: false });
