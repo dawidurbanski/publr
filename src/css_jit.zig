@@ -79,13 +79,15 @@ pub fn extractClasses(
     }
 }
 
-/// Tokenize a whitespace-separated class string into `out` (deduped, duped).
+/// Tokenize a class string into `out` (deduped, duped). Splits on whitespace
+/// AND '+' — the latter is the `data-p-class` group wire format (`a+b`); no
+/// utility token contains a literal '+' outside bracketed arbitrary values.
 fn addTokens(
     allocator: std.mem.Allocator,
     out: *std.StringHashMapUnmanaged(void),
     value: []const u8,
 ) !void {
-    var it = std.mem.tokenizeAny(u8, value, " \t\r\n");
+    var it = std.mem.tokenizeAny(u8, value, " \t\r\n+");
     while (it.next()) |tok| {
         if (tok.len == 0) continue;
         const gop = try out.getOrPut(allocator, tok);
@@ -143,8 +145,9 @@ test "extractClasses: harvests reactive tokens from data-p-class (escaped arrow)
         while (it.next()) |k| testing.allocator.free(k.*);
         seen.deinit(testing.allocator);
     }
-    // Rendered HTML: arrow escaped to `-&gt;`, two groups joined by ';'.
-    const html = "<div data-p-class=\"vivid -&gt; bg-fuchsia-500 text-yellow-200; outlined -&gt; ring-4 ring-emerald-400\" class=\"base p-8\">x</div>";
+    // Rendered HTML: compact arrow escaped to `-&gt;`, groups by ';', classes
+    // within a group joined by '+' (the transpiler wire format).
+    const html = "<div data-p-class=\"vivid-&gt;bg-fuchsia-500+text-yellow-200;outlined-&gt;ring-4+ring-emerald-400\" class=\"base p-8\">x</div>";
     try extractClasses(testing.allocator, html, &seen);
     // RHS class tokens from both groups are picked up…
     try testing.expect(seen.contains("bg-fuchsia-500"));

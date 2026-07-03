@@ -961,7 +961,9 @@ function wireShow(el) {
 
 function wireClass(el) {
   for (const [refSpec, classList] of parseBindings(el.getAttribute("data-p-class"), "->")) {
-    const classes = classList.split(/\s+/).filter(Boolean);
+    // Classes in one group are joined by '+' (transpiler wire format); tolerate
+    // whitespace too so hand-authored data-p-class still works.
+    const classes = classList.split(/[+\s]+/).filter(Boolean);
 
     if (!classes.length) {
       continue;

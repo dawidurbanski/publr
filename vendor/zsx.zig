@@ -2546,7 +2546,21 @@ fn stripDollarArrow(allocator: std.mem.Allocator, value: []const u8, dollar_side
         const rhs = rhs_owned orelse (if (dollar_side == .rhs) stripDollar(rhs_raw) else rhs_raw);
         try out.appendSlice(allocator, lhs);
         try out.appendSlice(allocator, "->");
-        try out.appendSlice(allocator, rhs);
+        // For :class (state on the LHS) the RHS is a class LIST — join the
+        // tokens with '+' so one group is a single '+'-delimited run (runtime
+        // splits on '+'). For :style (value on the RHS) it's a single value
+        // ref, emitted verbatim.
+        if (dollar_side == .lhs) {
+            var cls = std.mem.tokenizeAny(u8, rhs, " \t\r\n");
+            var first_cls = true;
+            while (cls.next()) |c| {
+                if (!first_cls) try out.append(allocator, '+');
+                first_cls = false;
+                try out.appendSlice(allocator, c);
+            }
+        } else {
+            try out.appendSlice(allocator, rhs);
+        }
     }
     return out.toOwnedSlice(allocator);
 }
