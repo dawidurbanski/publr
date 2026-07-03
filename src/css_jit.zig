@@ -80,21 +80,42 @@ pub fn extractClasses(
 }
 
 /// Tokenize a class string into `out` (deduped, duped). Splits on whitespace
-/// AND '+' — the latter is the `data-p-class` group wire format (`a+b`); no
-/// utility token contains a literal '+' outside bracketed arbitrary values.
+/// AND '+' (the `data-p-class` group wire format, `a+b`) — but NEVER inside
+/// `[...]`, so bracketed arbitrary values keep their internal '+'/spaces
+/// (e.g. `w-[calc(100%+1rem)]` stays one token).
 fn addTokens(
     allocator: std.mem.Allocator,
     out: *std.StringHashMapUnmanaged(void),
     value: []const u8,
 ) !void {
-    var it = std.mem.tokenizeAny(u8, value, " \t\r\n+");
-    while (it.next()) |tok| {
-        if (tok.len == 0) continue;
-        const gop = try out.getOrPut(allocator, tok);
-        if (!gop.found_existing) {
-            gop.key_ptr.* = try allocator.dupe(u8, tok);
+    var depth: usize = 0;
+    var start: usize = 0;
+    var i: usize = 0;
+    while (i < value.len) : (i += 1) {
+        switch (value[i]) {
+            '[' => depth += 1,
+            ']' => {
+                if (depth > 0) depth -= 1;
+            },
+            ' ', '\t', '\r', '\n', '+' => {
+                if (depth == 0) {
+                    if (i > start) try addOneToken(allocator, out, value[start..i]);
+                    start = i + 1;
+                }
+            },
+            else => {},
         }
     }
+    if (value.len > start) try addOneToken(allocator, out, value[start..value.len]);
+}
+
+fn addOneToken(
+    allocator: std.mem.Allocator,
+    out: *std.StringHashMapUnmanaged(void),
+    tok: []const u8,
+) !void {
+    const gop = try out.getOrPut(allocator, tok);
+    if (!gop.found_existing) gop.key_ptr.* = try allocator.dupe(u8, tok);
 }
 
 /// One-shot: extract classes from `html`, compile against the merged
@@ -160,6 +181,21 @@ test "extractClasses: harvests reactive tokens from data-p-class (escaped arrow)
     // …and the state refs (LHS) are NOT treated as classes.
     try testing.expect(!seen.contains("vivid"));
     try testing.expect(!seen.contains("outlined"));
+}
+
+test "extractClasses: '+' split is bracket-aware (arbitrary values survive)" {
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    defer {
+        var it = seen.keyIterator();
+        while (it.next()) |k| testing.allocator.free(k.*);
+        seen.deinit(testing.allocator);
+    }
+    // A '+' INSIDE brackets must not split; a '+' between classes must.
+    const html = "<div data-p-class=\"on-&gt;w-[calc(100%+1rem)]+text-red-500\" class=\"grid-cols-[repeat(2,1fr)]\">x</div>";
+    try extractClasses(testing.allocator, html, &seen);
+    try testing.expect(seen.contains("w-[calc(100%+1rem)]")); // internal '+' preserved
+    try testing.expect(seen.contains("text-red-500")); // group '+' split
+    try testing.expect(seen.contains("grid-cols-[repeat(2,1fr)]")); // static class intact
 }
 
 test "extractClasses: deduplicates across attributes" {

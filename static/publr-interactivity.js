@@ -959,11 +959,38 @@ function wireShow(el) {
   });
 }
 
+// Split a data-p-class group's class list on '+' (the wire delimiter) and
+// whitespace, but NEVER inside `[...]` — so bracketed arbitrary values like
+// `w-[calc(100%+1rem)]` survive intact.
+function splitClassGroup(s) {
+  const out = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i <= s.length; i++) {
+    if (i < s.length && s[i] === "[") {
+      depth++;
+      continue;
+    }
+    if (i < s.length && s[i] === "]") {
+      if (depth > 0) depth--;
+      continue;
+    }
+    const delim =
+      i === s.length ||
+      (depth === 0 && (s[i] === "+" || s[i] === " " || s[i] === "\t" || s[i] === "\n" || s[i] === "\r"));
+    if (delim) {
+      if (i > start) out.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
 function wireClass(el) {
   for (const [refSpec, classList] of parseBindings(el.getAttribute("data-p-class"), "->")) {
-    // Classes in one group are joined by '+' (transpiler wire format); tolerate
-    // whitespace too so hand-authored data-p-class still works.
-    const classes = classList.split(/[+\s]+/).filter(Boolean);
+    // Classes in one group are joined by '+' (transpiler wire format); split
+    // bracket-aware so arbitrary values keep their internal '+'.
+    const classes = splitClassGroup(classList).filter(Boolean);
 
     if (!classes.length) {
       continue;
