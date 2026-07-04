@@ -1,0 +1,43 @@
+// Repeater field control — an array of sub-field groups, with add/move/remove
+// controls and a <template> for cloning new items. Driven by the
+// data-widget="repeater" JS (interact/repeater.js).
+//
+// The adapter owns all the dynamic composition (JSON array parsing, the
+// `{name}.{idx}.{sub}` / `{name}.__INDEX__.{sub}` name contract, buffering each
+// item's sub-fields) and passes pre-rendered HTML: `items_html` (the existing
+// items) and `template_html` (one blank item for the <template>). Bare marker
+// attributes (data-repeater-*) use `?={true}` so they emit without ="true".
+
+pub fn RepeaterItem(props: struct {
+    children: []const u8 = "",
+}) {
+    <div class="field-repeater-item">
+        <div class="field-repeater-item-controls">
+            <button type="button" class="btn btn-sm btn-icon" title="Move up" data-repeater-up?={true}>&uarr;</button>
+            <button type="button" class="btn btn-sm btn-icon" title="Move down" data-repeater-down?={true}>&darr;</button>
+            <button type="button" class="btn btn-sm btn-icon btn-ghost" title="Remove" data-repeater-remove?={true}>&times;</button>
+        </div>
+        <div class="field-repeater-item-content">{@raw props.children}</div>
+    </div>
+}
+
+pub fn Repeater(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    required: bool = false,
+    item_count: usize = 0,
+    min: ?[]const u8 = null,
+    max: ?[]const u8 = null,
+    items_html: []const u8 = "",
+    template_html: []const u8 = "",
+    errors: []const []const u8 = &.{},
+}) {
+    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} kind=.no_for errors={props.errors}>
+        <div class="field-repeater" data-widget="repeater" data-field={props.name} data-min?={props.min} data-max?={props.max}>
+            <input type="hidden" name={`${props.name}._count`} value={props.item_count} data-repeater-count?={true} />
+            <div class="field-repeater-items">{@raw props.items_html}</div>
+            <template data-repeater-template?={true}>{@raw props.template_html}</template>
+            <button type="button" class="btn btn-sm" data-repeater-add?={true}>Add</button>
+        </div>
+    </FieldLabelRow>
+}

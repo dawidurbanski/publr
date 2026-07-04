@@ -1,0 +1,20 @@
+// Group field control — a <fieldset> wrapping nested sub-fields (a nested JSON
+// object). Does NOT use FieldLabelRow (it's a fieldset with its own legend, not
+// a form-group). `children` is the pre-rendered sub-fields HTML, composed by the
+// adapter (which owns JSON parsing + the `{name}.{sub}` name contract).
+// data-publr-component="toggle" makes the legend collapse the content.
+
+// The fieldset is the `group` state-holder; the content collapses via the
+// group-data variant — visible when the group is `open`, hidden otherwise
+// (the toggle JS flips data-publr-state). admin.css previously only rotated
+// the legend arrow and never hid the content, so this wires up the collapse.
+pub fn FieldGroup(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    children: []const u8 = "",
+}) {
+    <fieldset class="field-group group" data-publr-component="toggle" data-publr-state="open" data-field={props.name}>
+        <legend class="field-group-legend" data-publr-part="trigger">{props.display_name}</legend>
+        <div class="field-group-content hidden group-data-[publr-state=open]:block" data-publr-part="content">{@raw props.children}</div>
+    </fieldset>
+}

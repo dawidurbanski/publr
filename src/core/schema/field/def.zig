@@ -1,13 +1,13 @@
 //! FieldDef + shared helpers used by every builder in `field/`.
 //!
-//! Three helpers absorb most of the repetition the scalar builders
-//! used to ship inline:
-//!   - `writeFieldLabelRow` writes the `form-group` opener + label row.
-//!     Three variants are needed (label-with-for, label-no-for, span)
-//!     because Boolean and Repeater diverge from the rest.
+//! Two helpers absorb repetition the builders used to ship inline:
 //!   - `requiredCheck` is the "if opts.required and empty, fail" check
 //!     that ran in 13 of the builders verbatim.
 //!   - `humanize` capitalizes snake_case at comptime.
+//!
+//! (The label-row HTML is now emitted by the FieldLabelRow ZSX component; the
+//! former `writeFieldLabelRow` + `FieldLabelKind` were removed once every field
+//! renders through its ZSX component — see epic #191 / A5.)
 
 const std = @import("std");
 
@@ -141,54 +141,6 @@ pub fn noRender(_: std.io.AnyWriter, _: RenderContext) !void {}
 // =============================================================================
 // Render helpers shared across builders
 // =============================================================================
-
-/// Which label markup the field's label-row should emit. Most fields use
-/// `label_with_for` (a `<label for="{name}">`). Boolean uses `span` because
-/// its actual input lives inside its own wrapping `<label class="form-check">`.
-/// Repeater uses `label_no_for` because its caption isn't tied to a single
-/// input element.
-pub const FieldLabelKind = enum {
-    label_with_for,
-    label_no_for,
-    span,
-};
-
-/// Emit the `form-group` opener + label row that 14 builders used to inline.
-/// Output ends with `</div>\n` (the closing of `form-label-row`); the caller
-/// then writes its input markup with 2-space indent and closes the
-/// surrounding `</div>` for `form-group`.
-pub fn writeFieldLabelRow(
-    writer: std.io.AnyWriter,
-    ctx: RenderContext,
-    kind: FieldLabelKind,
-) !void {
-    try writer.print("<div class=\"form-group\" data-field=\"{s}\">\n", .{ctx.name});
-    try writer.writeAll("  <div class=\"form-label-row\">\n");
-
-    switch (kind) {
-        .label_with_for => try writer.print(
-            "    <label class=\"form-label\" for=\"{s}\">{s}</label>\n",
-            .{ ctx.name, ctx.display_name },
-        ),
-        .label_no_for => try writer.print(
-            "    <label class=\"form-label\">{s}</label>\n",
-            .{ctx.display_name},
-        ),
-        .span => try writer.print(
-            "    <span class=\"form-label\">{s}</span>\n",
-            .{ctx.display_name},
-        ),
-    }
-
-    try writer.print(
-        "    <div class=\"field-check-row\">\n" ++
-            "      <span class=\"field-editor-badge\" data-field=\"{s}\"></span>\n" ++
-            "      <label class=\"switch-label field-publish-switch\"><input type=\"checkbox\" class=\"switch-input field-publish-check\" data-field=\"{s}\" checked /><span class=\"switch-track\" role=\"switch\" aria-checked=\"true\"><span class=\"switch-thumb\"></span></span></label>\n" ++
-            "    </div>\n" ++
-            "  </div>\n",
-        .{ ctx.name, ctx.name },
-    );
-}
 
 /// The "if required and empty" check that 13 scalar builders ran verbatim.
 /// Returns the canonical error message; pass a different one via

@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const def = @import("def.zig");
+const views = @import("views");
 
 const FieldDef = def.FieldDef;
 const RenderContext = def.RenderContext;
@@ -28,17 +29,16 @@ pub fn Slug(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <input type=\"text\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"\n" ++
-                    "         data-widget=\"slug\"",
-                .{ ctx.name, ctx.name, ctx.value orelse "" },
-            );
-            if (opts.source) |src| {
-                try writer.print(" data-source=\"{s}\"", .{src});
-            }
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(" />\n</div>\n");
+            try views.components.fields.input.Input(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .input_type = "text",
+                .widget = "slug",
+                .source = opts.source,
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 
@@ -79,22 +79,14 @@ pub fn Ref(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                \\  <div data-widget="ref-picker" data-ref-type="{s}" data-ref-many="{s}"
-                \\       data-name="{s}" data-value="{s}">
-                \\    <input type="hidden" name="{s}" value="{s}" />
-                \\    <button type="button" class="btn btn-sm">Select {s}</button>
-                \\  </div>
-                \\</div>
-            , .{
-                opts.to,
-                if (opts.many) "true" else "false",
-                ctx.name,
-                ctx.value orelse "",
-                ctx.name,
-                ctx.value orelse "",
-                opts.to,
+            try views.components.fields.ref.Ref(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .to = opts.to,
+                .many = opts.many,
+                .errors = ctx.errors orelse &.{},
             });
         }
     };

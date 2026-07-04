@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const def = @import("def.zig");
+const views = @import("views");
 
 const FieldDef = def.FieldDef;
 const RenderContext = def.RenderContext;
@@ -22,22 +23,15 @@ pub fn Taxonomy(comptime taxonomy_id: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                \\  <div data-widget="taxonomy-picker" data-taxonomy="{s}" data-many="{s}"
-                \\       data-name="{s}" data-value="{s}">
-                \\    <input type="hidden" name="{s}" value="{s}" />
-                \\    <button type="button" class="btn btn-sm">Select {s}</button>
-                \\  </div>
-                \\</div>
-            , .{
-                taxonomy_id,
-                if (opts.many) "true" else "false",
-                ctx.name,
-                ctx.value orelse "",
-                ctx.name,
-                ctx.value orelse "",
-                humanized_taxonomy,
+            try views.components.fields.taxonomy.Taxonomy(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .taxonomy_id = taxonomy_id,
+                .many = opts.many,
+                .label = humanized_taxonomy,
+                .errors = ctx.errors orelse &.{},
             });
         }
     };

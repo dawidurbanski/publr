@@ -1,0 +1,17 @@
+// VersionHistory — the version-history sidebar list (was editor_json.zig::buildVersionHistoryHtml).
+// The adapter runs the DB query, computes relative times + compare/flow URLs, and pre-renders
+// each row's collaborator-avatar fragment ({@raw avatars_html}); this renders the sidebar
+// chrome + per-version rows with the original zero-whitespace inline layout.
+pub fn VersionHistory(props: struct {
+    rows: []const struct {
+        is_current: bool = false,
+        avatars_html: []const u8 = "",
+        version_type: []const u8 = "",
+        release_name: ?[]const u8 = null,
+        time_str: []const u8 = "",
+        compare_url: []const u8 = "",
+        flow_url: []const u8 = "",
+    } = &.{},
+}) {<div class="edit-sidebar-section">
+  <h3 class="edit-sidebar-title">Version History</h3>
+  <div class="version-list">{for (props.rows) |r| (<div class={r.is_current ? "version-item version-history-item version-current" : "version-item version-history-item"}>{@raw r.avatars_html}<span class="version-info"><span class="version-type">{r.version_type}</span>{if (r.release_name != null) (<span class="version-release">{r.release_name.?}</span>)}<span class="version-time">{r.time_str}</span></span><span class="version-item-actions">{if (!r.is_current) (<a href={r.compare_url} class="version-action">Compare</a>)}<a href={r.flow_url} class="version-action">Flow</a>{if (r.is_current) (<span class="version-badge">current</span>)}</span></div>)}</div></div>}

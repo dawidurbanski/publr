@@ -1,0 +1,39 @@
+// Image field control — media-library picker.
+//
+// Preserves the LIVE `data-publr-component="image-picker"` contract that
+// interact/components.js binds to (66 refs): data-publr-state plus the
+// value / preview / trigger / remove / alt parts. (The renderDefaultField
+// `data-widget="media-picker"` fallback is dead and gets dropped in A5/#196.)
+//
+// `has_value` is computed by the adapter (value.len > 0); the ternaries below
+// pick the state, preview, button label, and the remove button's visibility.
+
+pub fn Image(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    value: []const u8 = "",
+    has_value: bool = false,
+    required: bool = false,
+    errors: []const []const u8 = &.{},
+}) {
+    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
+        <div class="image-picker" data-publr-component="image-picker" data-publr-state={props.has_value ? "selected" : "empty"}>
+            <input type="hidden" name={props.name} value={props.value} data-publr-part="value" />
+            <div class="image-picker-preview" data-publr-part="preview">
+                {if (props.has_value) (
+                    <img src={`/admin/media/picker/thumb/${props.value}`} alt="" class="image-picker-thumb" />
+                ) else (
+                    <div class="image-picker-placeholder">
+                        <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <span>No image selected</span>
+                    </div>
+                )}
+            </div>
+            <div class="image-picker-actions">
+                <button type="button" class="btn btn-sm" data-publr-part="trigger">{props.has_value ? "Change Image" : "Select Image"}</button>
+                <button type="button" class={props.has_value ? "btn btn-sm btn-ghost" : "btn btn-sm btn-ghost hidden"} data-publr-part="remove">Remove</button>
+            </div>
+            <div class="image-picker-alt" data-publr-part="alt"></div>
+        </div>
+    </FieldLabelRow>
+}

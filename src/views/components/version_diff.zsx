@@ -1,0 +1,24 @@
+// VersionDiff — field-level diff between two JSON versions (was version.zig::diffVersions).
+// The adapter parses JSON and builds the entry list; this renders the markup.
+// On a parse error it renders a single <p class="diff-error">, else the .diff grid.
+const std = @import("std");
+
+pub fn VersionDiff(props: struct {
+    error_msg: ?[]const u8 = null,
+    entries: []const struct { status: []const u8, key: []const u8, old_val: []const u8, new_val: []const u8 } = &.{},
+}) {
+    {if (props.error_msg != null) (
+        <p class="diff-error">{props.error_msg.?}</p>
+    ) else (
+        <div class="diff">
+            {for (props.entries) |e| (
+                <div class={`diff-field diff-${e.status}`}>
+                    <span class="diff-key">{e.key}</span>
+                    <span class="diff-badge">{e.status}</span>
+                    {if (!std.mem.eql(u8, e.status, "added")) (<div class="diff-val diff-old">{e.old_val}</div>)}
+                    {if (!std.mem.eql(u8, e.status, "removed")) (<div class="diff-val diff-new">{e.new_val}</div>)}
+                </div>
+            )}
+        </div>
+    )}
+}

@@ -26,13 +26,11 @@ pub const MetaValueType = def.MetaValueType;
 pub const Position = def.Position;
 pub const TranslatableMode = def.TranslatableMode;
 pub const FieldDef = def.FieldDef;
-pub const FieldLabelKind = def.FieldLabelKind;
 
 // Helpers
 pub const humanize = def.humanize;
 pub const noValidation = def.noValidation;
 pub const noRender = def.noRender;
-pub const writeFieldLabelRow = def.writeFieldLabelRow;
 pub const requiredCheck = def.requiredCheck;
 
 // Scalar builders
@@ -301,7 +299,7 @@ test "Group render emits fieldset" {
     });
 
     const html = buf.items;
-    try std.testing.expect(std.mem.indexOf(u8, html, "<fieldset class=\"field-group\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<fieldset class=\"field-group") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "data-field=\"seo\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "SEO") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "name=\"seo.meta_title\"") != null);

@@ -1,0 +1,14 @@
+// VersionSidebar — the edit-sidebar chrome shared by the version compare and flow views
+// (was the inline sidebar builders in versions.zig): a "Back to Editor" action plus the
+// pre-rendered version-history HTML slot.
+pub fn VersionSidebar(props: struct {
+    back_url: []const u8 = "",
+    history_html: []const u8 = "",
+}) {
+    <div class="edit-sidebar-section">
+        <div class="edit-sidebar-actions">
+            <a href={props.back_url} class="btn btn-full">Back to Editor</a>
+        </div>
+    </div>
+    {@raw props.history_html}
+}

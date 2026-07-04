@@ -1,0 +1,14 @@
+// VersionFlowAudit — flow-history audit events for a single version (was
+// editor_json.zig::buildVersionFlowAuditHtml). The adapter runs the DB query and computes the
+// per-event action label, optional "Step N -> M" text, "<timestamp> UTC" title, relative time
+// and actor; this renders the audit container + per-event rows with the original zero-whitespace
+// inline layout. The adapter returns "" when there are no events, so this always has >=1 event.
+pub fn VersionFlowAudit(props: struct {
+    events: []const struct {
+        action_label: []const u8 = "",
+        step_text: ?[]const u8 = null,
+        time_title: []const u8 = "",
+        relative: []const u8 = "",
+        actor: []const u8 = "",
+    } = &.{},
+}) {<div class="version-flow-audit">{for (props.events) |e| (<div class="version-flow-event"><span class="version-flow-action">{e.action_label}</span>{if (e.step_text != null) (<span class="version-flow-step">{@raw e.step_text.?}</span>)}<span class="version-flow-time" title={e.time_title}>{e.relative} · {e.actor}</span></div>)}</div>}

@@ -1,0 +1,78 @@
+// VersionCompare — side-by-side field compare + restore form (was versions.zig::versionCompareFor).
+// All data (avatars, labels, relative time, field comparisons) is computed by the adapter;
+// this renders the form chrome, the two column headers, the diff-only toolbar, and the
+// per-field radio rows. Pre-rendered avatar fragments come in as {@raw} slots.
+pub fn VersionCompare(props: struct {
+    csrf_token: []const u8 = "",
+    type_id: []const u8 = "",
+    entry_id: []const u8 = "",
+    version_id: []const u8 = "",
+    old_avatar_url: ?[]const u8 = null,
+    old_avatar_title: []const u8 = "",
+    old_prefix: []const u8 = "",
+    author_str: []const u8 = "",
+    time_str: []const u8 = "",
+    current_avatars_html: []const u8 = "",
+    current_title: []const u8 = "",
+    changed_count: []const u8 = "0",
+    back_url: []const u8 = "",
+    entries: []const struct {
+        key: []const u8,
+        changed: bool,
+        changed_by: ?[]const u8,
+        old_value: []const u8,
+        new_value: []const u8,
+        radio_name: []const u8,
+    } = &.{},
+}) {
+    <form method="POST" action="/admin/action" class="version-compare">
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="content.restore" />
+        <input type="hidden" name="type" value={props.type_id} />
+        <input type="hidden" name="entry_id" value={props.entry_id} />
+        <input type="hidden" name="version_id" value={props.version_id} />
+        <input type="hidden" name="_partial" value="1" />
+        <div class="version-compare-header">
+            <div class="version-compare-col-old">
+                <span class="version-compare-col-title">{if (props.old_avatar_url != null) (<img src={props.old_avatar_url.?} alt="" title={props.old_avatar_title} class="version-avatar" />{@raw " "})}{props.old_prefix}{props.author_str}{@raw " &middot; "}{props.time_str}</span>
+                <a href="#" id="select-all-old" class="version-compare-select-all">Select all from this version</a>
+            </div>
+            <div class="version-compare-col-current">
+                <span class="version-compare-col-title">{@raw props.current_avatars_html}{props.current_title}</span>
+            </div>
+        </div>
+        <div class="version-compare-toolbar">
+            <label class="version-compare-toggle">
+                <input type="checkbox" id="show-diff-only" />
+                Show only differences ({props.changed_count})
+            </label>
+        </div>
+        <div class="version-compare-fields" id="version-compare-fields">
+            {for (props.entries) |e| (
+                <div class="version-compare-row" data-field-status={e.changed ? "changed" : "unchanged"}>
+                    <div class="version-compare-label">
+                        {e.key}
+                        {if (e.changed) ({@raw " "}<span class="version-compare-badge">changed</span>)}
+                        {if (e.changed and e.changed_by != null) ({@raw " "}<span class="version-compare-author">by {e.changed_by.?}</span>)}
+                    </div>
+                    <div class="version-compare-cell version-compare-cell-old">
+                        <label class="version-compare-radio">
+                            <input type="radio" name={e.radio_name} value="old" disabled?={!e.changed} />
+                            <span class={e.changed ? "version-compare-value version-compare-value-old" : "version-compare-value"}>{if (e.old_value.len > 0) ({e.old_value}) else (<em class="version-compare-empty">(empty)</em>)}</span>
+                        </label>
+                    </div>
+                    <div class="version-compare-cell version-compare-cell-current">
+                        <label class="version-compare-radio">
+                            <input type="radio" name={e.radio_name} value="current" checked?={true} disabled?={!e.changed} />
+                            <span class={e.changed ? "version-compare-value version-compare-value-current" : "version-compare-value"}>{if (e.new_value.len > 0) ({e.new_value}) else (<em class="version-compare-empty">(empty)</em>)}</span>
+                        </label>
+                    </div>
+                </div>
+            )}
+        </div>
+        <div class="version-compare-actions">
+            <a href={props.back_url} class="btn">Cancel</a>
+            <button type="submit" class="btn btn-primary" id="apply-changes-btn" disabled?={true}>Apply changes</button>
+        </div>
+    </form>
+}

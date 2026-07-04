@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const def = @import("def.zig");
+const views = @import("views");
 
 const FieldDef = def.FieldDef;
 const RenderContext = def.RenderContext;
@@ -34,16 +35,19 @@ pub fn String(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <input type=\"text\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"",
-                .{ ctx.name, ctx.name, ctx.value orelse "" },
-            );
-            if (opts.max_length) |max| {
-                try writer.print(" maxlength=\"{}\"", .{max});
-            }
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(" />\n</div>\n");
+            const max_str: ?[]const u8 = if (opts.max_length) |m|
+                std.fmt.comptimePrint("{d}", .{m})
+            else
+                null;
+            try views.components.fields.input.Input(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .input_type = "text",
+                .maxlength = max_str,
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 
@@ -77,13 +81,14 @@ pub fn Text(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <textarea class=\"form-control\" id=\"{s}\" name=\"{s}\" rows=\"{}\"",
-                .{ ctx.name, ctx.name, opts.rows },
-            );
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.print(">{s}</textarea>\n</div>\n", .{ctx.value orelse ""});
+            try views.components.fields.text.TextArea(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .rows = opts.rows,
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 

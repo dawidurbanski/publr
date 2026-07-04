@@ -158,7 +158,6 @@ pub fn build(b: *std.Build) void {
         .{ "static_interact_index_js", "static/interact/index.js" },
         .{ "static_interact_repeater_js", "static/interact/repeater.js" },
         .{ "static_shell_js", "static/shell.js" },
-        .{ "static_p_dropdown_js", "static/p/dropdown.js" },
         .{ "static_media_selection_js", "static/media-selection.js" },
         .{ "static_interact_websocket_js", "static/interact/websocket.js" },
         // PublrJS runtime (data-p-* stores) — second system
@@ -348,6 +347,11 @@ pub fn build(b: *std.Build) void {
 
     // Schemas
     const field_module = reg.leaf("field", "src/core/schema/field.zig");
+    // Field builders render through ZSX field components (src/views/admin/fields/*)
+    // instead of writing HTML to a writer. `views` is a leaf-ish generated module
+    // (imports only zsx/hmr/publr_ui — never `field`), so this edge is acyclic and
+    // already wasm-safe (src/wasm/main.zig imports `views` too).
+    field_module.addImport("views", views);
     _ = reg.simple("content_type", "src/core/schema/content_type.zig", &.{ "field", "middleware" });
     _ = reg.simple("field_types", "src/core/schema/field_types.zig", &.{"field"});
     _ = reg.simple("schema_db_types", "src/core/schema/db_types.zig", &.{ "db", "field", "content_type" });
@@ -429,7 +433,12 @@ pub fn build(b: *std.Build) void {
     const time_util_module = reg.leaf("time_util", "src/time_util.zig");
     const core_time_module = reg.leaf("core_time", "src/core/time.zig");
     const db_path_module = reg.leaf("db_path", "src/db_path.zig");
-    _ = reg.simple("version", "src/core/version.zig", &.{ "db", "time_util", "field", "schema_registry", "id_gen" });
+    // version.zig renders diff HTML through ZSX (views.components.version_diff).
+    // `views` is wired directly (it isn't in the registry at finalize() time),
+    // mirroring field_module above; the edge is acyclic (views never imports
+    // version) and wasm-safe.
+    const version_module = reg.simple("version", "src/core/version.zig", &.{ "db", "time_util", "field", "schema_registry", "id_gen" });
+    version_module.addImport("views", views);
     _ = reg.simple("release", "src/core/release.zig", &.{ "db", "id_gen", "time_util", "version" });
     _ = reg.simple("query", "src/core/query.zig", &.{ "db", "entry", "schema_registry", "content_type" });
     _ = reg.leaf("entry", "src/core/entry.zig");

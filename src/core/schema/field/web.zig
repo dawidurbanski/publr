@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const def = @import("def.zig");
+const views = @import("views");
 
 const FieldDef = def.FieldDef;
 const RenderContext = def.RenderContext;
@@ -22,14 +23,15 @@ pub fn RichText(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <textarea class=\"form-control\" id=\"{s}\" name=\"{s}\" rows=\"12\"\n" ++
-                    "            data-widget=\"richtext\"",
-                .{ ctx.name, ctx.name },
-            );
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.print(">{s}</textarea>\n</div>\n", .{ctx.value orelse ""});
+            try views.components.fields.text.TextArea(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .rows = 12,
+                .widget = "richtext",
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 
@@ -71,13 +73,14 @@ pub fn Email(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <input type=\"email\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"",
-                .{ ctx.name, ctx.name, ctx.value orelse "" },
-            );
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(" />\n</div>\n");
+            try views.components.fields.input.Input(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .input_type = "email",
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 
@@ -123,14 +126,15 @@ pub fn Url(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <input type=\"url\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"\n" ++
-                    "         placeholder=\"https://\"",
-                .{ ctx.name, ctx.name, ctx.value orelse "" },
-            );
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(" />\n</div>\n");
+            try views.components.fields.input.Input(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .input_type = "url",
+                .placeholder = "https://",
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 

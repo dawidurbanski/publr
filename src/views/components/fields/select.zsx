@@ -1,0 +1,24 @@
+// Select field control — a <select> of fixed options, wrapped in FieldLabelRow.
+// `current` is the selected value (value orelse default, resolved by the
+// adapter). `std.mem.eql` drives the per-option `selected?=` presence attribute.
+const std = @import("std");
+
+pub fn Select(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    current: []const u8 = "",
+    required: bool = false,
+    options: []const []const u8,
+    errors: []const []const u8 = &.{},
+}) {
+    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
+        <select class="form-control" id={props.name} name={props.name} required?={props.required}>
+            {if (!props.required) (
+                <option value="">-- Select --</option>
+            )}
+            {for (props.options) |opt| (
+                <option value={opt} selected?={std.mem.eql(u8, props.current, opt)}>{opt}</option>
+            )}
+        </select>
+    </FieldLabelRow>
+}

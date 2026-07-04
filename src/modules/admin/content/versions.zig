@@ -126,174 +126,81 @@ pub fn versionCompareFor(def: *const ContentTypeDef, ctx: *Context) !void {
 
     const time_str = cms.formatRelativeTime(ctx.allocator, version.created_at) catch "Unknown";
     const author_str = version.authorLabel();
-    var buf: std.ArrayList(u8) = .{};
-    const w = buf.writer(ctx.allocator);
 
-    try w.writeAll("<form method=\"POST\" action=\"/admin/action\" class=\"version-compare\">");
-    try w.writeAll("<input type=\"hidden\" name=\"_csrf\" value=\"");
-    try w.writeAll(csrf_token);
-    try w.writeAll("\"/>");
-    try w.writeAll("<input type=\"hidden\" name=\"action\" value=\"content.restore\"/>");
-    try w.writeAll("<input type=\"hidden\" name=\"type\" value=\"");
-    try w.writeAll(def.type_id);
-    try w.writeAll("\"/>");
-    try w.writeAll("<input type=\"hidden\" name=\"entry_id\" value=\"");
-    try w.writeAll(entry_id);
-    try w.writeAll("\"/>");
-    try w.writeAll("<input type=\"hidden\" name=\"version_id\" value=\"");
-    try w.writeAll(version_id);
-    try w.writeAll("\"/>");
-    try w.writeAll("<input type=\"hidden\" name=\"_partial\" value=\"1\"/>");
-
-    try w.writeAll(
-        \\<div class="version-compare-header">
-        \\  <div class="version-compare-col-old">
-        \\    <span class="version-compare-col-title">
-    );
+    // Old-version column: gravatar avatar + optional "Published by " prefix.
+    var old_avatar_url: ?[]const u8 = null;
+    var old_avatar_title: []const u8 = "";
     if (version.author_email) |email| {
-        const old_avatar = gravatar.url(email, 24);
-        try w.writeAll("<img src=\"");
-        try w.writeAll(old_avatar.slice());
-        try w.writeAll("\" alt=\"\" title=\"");
-        try cms.writeEscaped(w, version.authorLabel());
-        try w.writeAll("\" class=\"version-avatar\" /> ");
+        old_avatar_url = ctx.allocator.dupe(u8, gravatar.url(email, 24).slice()) catch null;
+        old_avatar_title = version.authorLabel();
     }
-    if (std.mem.eql(u8, version.version_type, "published")) {
-        try w.writeAll("Published by ");
-    }
-    try w.writeAll(author_str);
-    try w.writeAll(" &middot; ");
-    try w.writeAll(time_str);
-    try w.writeAll(
-        \\</span>
-        \\    <a href="#" id="select-all-old" class="version-compare-select-all">Select all from this version</a>
-        \\  </div>
-        \\  <div class="version-compare-col-current">
-        \\    <span class="version-compare-col-title">
-    );
+    const old_prefix: []const u8 = if (std.mem.eql(u8, version.version_type, "published")) "Published by " else "";
+
+    // Current-version column: collaborator avatars (pre-rendered) + title text.
+    var current_avatars_html: []const u8 = "";
     if (current_data) |cd| {
-        try editor_json.writeCollaboratorAvatars(w, ctx.allocator, cd.collaborators, cd.author_email, cd.authorLabel());
-        try w.writeByte(' ');
+        var ab: std.ArrayList(u8) = .{};
+        editor_json.writeCollaboratorAvatars(ab.writer(ctx.allocator).any(), ctx.allocator, cd.collaborators, cd.author_email, cd.authorLabel()) catch {};
+        ab.append(ctx.allocator, ' ') catch {};
+        current_avatars_html = ab.toOwnedSlice(ctx.allocator) catch "";
     }
+    var current_title: []const u8 = "Current version";
     if (current_data) |cd| {
         if (std.mem.eql(u8, cd.version_type, "published")) {
-            try w.writeAll("Published by ");
-            try cms.writeEscaped(w, cd.authorLabel());
-        } else {
-            try w.writeAll("Current version");
+            current_title = std.fmt.allocPrint(ctx.allocator, "Published by {s}", .{cd.authorLabel()}) catch "Published by";
         }
-    } else {
-        try w.writeAll("Current version");
     }
-    try w.writeAll(
-        \\</span>
-        \\  </div>
-        \\</div>
-    );
 
-    try w.writeAll(
-        \\<div class="version-compare-toolbar">
-        \\  <label class="version-compare-toggle">
-        \\    <input type="checkbox" id="show-diff-only" />
-        \\    Show only differences (
-    );
-    try w.print("{d}", .{changed_count});
-    try w.writeAll(
-        \\)
-        \\  </label>
-        \\</div>
-    );
+    const changed_count_str = std.fmt.allocPrint(ctx.allocator, "{d}", .{changed_count}) catch "0";
 
-    try w.writeAll("<div class=\"version-compare-fields\" id=\"version-compare-fields\">");
-
+    // Per-field radio rows.
+    const Row = struct {
+        key: []const u8,
+        changed: bool,
+        changed_by: ?[]const u8,
+        old_value: []const u8,
+        new_value: []const u8,
+        radio_name: []const u8,
+    };
+    var rows: std.ArrayList(Row) = .{};
     for (fields) |f| {
-        const status_attr: []const u8 = if (f.changed) "changed" else "unchanged";
-
-        try w.writeAll("<div class=\"version-compare-row\" data-field-status=\"");
-        try w.writeAll(status_attr);
-        try w.writeAll("\">");
-
-        try w.writeAll("<div class=\"version-compare-label\">");
-        try cms.writeEscaped(w, f.key);
-        if (f.changed) {
-            try w.writeAll(" <span class=\"version-compare-badge\">changed</span>");
-            if (f.changed_by) |email| {
-                try w.writeAll(" <span class=\"version-compare-author\">by ");
-                try cms.writeEscaped(w, email);
-                try w.writeAll("</span>");
-            }
-        }
-        try w.writeAll("</div>");
-
-        try w.writeAll("<div class=\"version-compare-cell version-compare-cell-old\">");
-        try w.writeAll("<label class=\"version-compare-radio\">");
-        try w.writeAll("<input type=\"radio\" name=\"field_");
-        try cms.writeEscaped(w, f.key);
-        try w.writeAll("\" value=\"old\"");
-        if (!f.changed) try w.writeAll(" disabled");
-        try w.writeAll(" />");
-        try w.writeAll("<span class=\"version-compare-value");
-        if (f.changed) try w.writeAll(" version-compare-value-old");
-        try w.writeAll("\">");
-        if (f.old_value.len > 0) {
-            try cms.writeEscaped(w, f.old_value);
-        } else {
-            try w.writeAll("<em class=\"version-compare-empty\">(empty)</em>");
-        }
-        try w.writeAll("</span></label></div>");
-
-        try w.writeAll("<div class=\"version-compare-cell version-compare-cell-current\">");
-        try w.writeAll("<label class=\"version-compare-radio\">");
-        try w.writeAll("<input type=\"radio\" name=\"field_");
-        try cms.writeEscaped(w, f.key);
-        try w.writeAll("\" value=\"current\" checked");
-        if (!f.changed) try w.writeAll(" disabled");
-        try w.writeAll(" />");
-        try w.writeAll("<span class=\"version-compare-value");
-        if (f.changed) try w.writeAll(" version-compare-value-current");
-        try w.writeAll("\">");
-        if (f.new_value.len > 0) {
-            try cms.writeEscaped(w, f.new_value);
-        } else {
-            try w.writeAll("<em class=\"version-compare-empty\">(empty)</em>");
-        }
-        try w.writeAll("</span></label></div>");
-
-        try w.writeAll("</div>");
+        const radio_name = std.fmt.allocPrint(ctx.allocator, "field_{s}", .{f.key}) catch "field_";
+        rows.append(ctx.allocator, .{
+            .key = f.key,
+            .changed = f.changed,
+            .changed_by = f.changed_by,
+            .old_value = f.old_value,
+            .new_value = f.new_value,
+            .radio_name = radio_name,
+        }) catch {};
     }
 
-    try w.writeAll("</div>");
-
-    try w.writeAll(
-        \\<div class="version-compare-actions">
-        \\  <a href="
-    );
-    try w.writeAll(back_url);
-    try w.writeAll(
-        \\" class="btn">Cancel</a>
-        \\  <button type="submit" class="btn btn-primary" id="apply-changes-btn" disabled>Apply changes</button>
-        \\</div>
-        \\</form>
-    );
-
+    var buf: std.ArrayList(u8) = .{};
+    views.components.version_compare.VersionCompare(buf.writer(ctx.allocator).any(), .{
+        .csrf_token = csrf_token,
+        .type_id = def.type_id,
+        .entry_id = entry_id,
+        .version_id = version_id,
+        .old_avatar_url = old_avatar_url,
+        .old_avatar_title = old_avatar_title,
+        .old_prefix = old_prefix,
+        .author_str = author_str,
+        .time_str = time_str,
+        .current_avatars_html = current_avatars_html,
+        .current_title = current_title,
+        .changed_count = changed_count_str,
+        .back_url = back_url,
+        .entries = rows.items,
+    }) catch {};
     const preview_content = buf.toOwnedSlice(ctx.allocator) catch "";
 
     const history_html = editor_json.buildVersionHistoryHtml(ctx.allocator, db, entry_id, base_url) catch "";
     const sidebar_html = blk: {
         var sb: std.ArrayList(u8) = .{};
-        const sw = sb.writer(ctx.allocator);
-        try sw.writeAll(
-            \\<div class="edit-sidebar-section">
-            \\  <div class="edit-sidebar-actions">
-            \\    <a href="
-        );
-        try sw.writeAll(back_url);
-        try sw.writeAll(
-            \\" class="btn btn-full">Back to Editor</a>
-            \\  </div>
-            \\</div>
-        );
-        try sw.writeAll(history_html);
+        views.components.version_sidebar.VersionSidebar(sb.writer(ctx.allocator).any(), .{
+            .back_url = back_url,
+            .history_html = history_html,
+        }) catch {};
         break :blk sb.toOwnedSlice(ctx.allocator) catch "";
     };
 
@@ -353,57 +260,23 @@ pub fn versionFlowFor(def: *const ContentTypeDef, ctx: *Context) !void {
     const flow_html = flow_html_opt orelse "";
 
     var buf: std.ArrayList(u8) = .{};
-    const w = buf.writer(ctx.allocator);
-    try w.writeAll(
-        \\<div class="version-flow-view">
-        \\  <div class="version-preview-header">
-        \\    <div class="version-preview-meta">
-        \\      <span class="version-preview-author">
-    );
-    try cms.writeEscaped(w, author_str);
-    try w.writeAll("</span><span class=\"version-preview-time\">");
-    try cms.writeEscaped(w, time_str);
-    try w.writeAll(" · ");
-    try cms.writeEscaped(w, version.version_type);
-    try w.writeAll(
-        \\</span>
-        \\    </div>
-    );
-    if (version.is_current) {
-        try w.writeAll("<span class=\"badge-current\">Current version</span>");
-    } else {
-        try w.writeAll("<a href=\"");
-        try w.writeAll(compare_url);
-        try w.writeAll("\" class=\"btn btn-sm\">Compare</a>");
-    }
-    try w.writeAll(
-        \\  </div>
-        \\  <h3 class="version-preview-subtitle">Flow history</h3>
-    );
-    if (flow_html.len > 0) {
-        try w.writeAll(flow_html);
-    } else {
-        try w.writeAll("<p class=\"diff-error\">No flow events recorded for this version.</p>");
-    }
-    try w.writeAll("</div>");
+    views.components.version_flow.VersionFlow(buf.writer(ctx.allocator).any(), .{
+        .author_str = author_str,
+        .time_str = time_str,
+        .version_type = version.version_type,
+        .is_current = version.is_current,
+        .compare_url = compare_url,
+        .flow_html = flow_html,
+    }) catch {};
     const flow_content = buf.toOwnedSlice(ctx.allocator) catch "";
 
     const history_html = editor_json.buildVersionHistoryHtml(ctx.allocator, db, entry_id, base_url) catch "";
     const sidebar_html = blk: {
         var sb: std.ArrayList(u8) = .{};
-        const sw = sb.writer(ctx.allocator);
-        try sw.writeAll(
-            \\<div class="edit-sidebar-section">
-            \\  <div class="edit-sidebar-actions">
-            \\    <a href="
-        );
-        try sw.writeAll(back_url);
-        try sw.writeAll(
-            \\" class="btn btn-full">Back to Editor</a>
-            \\  </div>
-            \\</div>
-        );
-        try sw.writeAll(history_html);
+        views.components.version_sidebar.VersionSidebar(sb.writer(ctx.allocator).any(), .{
+            .back_url = back_url,
+            .history_html = history_html,
+        }) catch {};
         break :blk sb.toOwnedSlice(ctx.allocator) catch "";
     };
 
@@ -413,7 +286,6 @@ pub fn versionFlowFor(def: *const ContentTypeDef, ctx: *Context) !void {
         .sidebar = sidebar_html,
     }));
     _ = tpl;
-    _ = views;
 }
 
 pub fn restoreFor(def: *const ContentTypeDef, ctx: *Context) !void {

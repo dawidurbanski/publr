@@ -1,0 +1,51 @@
+// The content editor's sidebar chrome (was render.zig::renderSidebarHtml):
+// publish/discard actions, an optional Details section holding the `.side`
+// fields (pre-rendered by the adapter), the version-history slot, and the
+// danger/delete form. Publish label + disabled state and the discard button's
+// visibility are computed by the adapter and passed in; the release/history/
+// side-fields HTML come in as {@raw} slots.
+pub fn EntrySidebar(props: struct {
+    publish_label: ?[]const u8 = null,
+    publish_disabled: bool = false,
+    show_discard: bool = false,
+    discard_hidden: bool = false,
+    release_html: []const u8 = "",
+    has_side_fields: bool = false,
+    side_fields_html: []const u8 = "",
+    history_html: []const u8 = "",
+    entry_id: []const u8 = "",
+    csrf_token: []const u8 = "",
+    type_id: []const u8 = "",
+    display_name: []const u8 = "",
+}) {
+    <div class="edit-sidebar-section">
+        <div class="edit-sidebar-actions">
+            <div class="autosave-status" id="autosave-status"></div>
+            {if (props.publish_label != null) (
+                <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn" disabled?={props.publish_disabled}>{props.publish_label.?}</button>
+            )}
+            {if (props.show_discard) (
+                <button type="button" class={props.discard_hidden ? "btn btn-ghost btn-full hidden" : "btn btn-ghost btn-full"} id="discard-btn">Discard Changes</button>
+            )}
+            {@raw props.release_html}
+        </div>
+    </div>
+    {if (props.has_side_fields) (
+        <div class="edit-sidebar-section">
+            <h3 class="edit-sidebar-title">Details</h3>
+            {@raw props.side_fields_html}
+        </div>
+    )}
+    {@raw props.history_html}
+    {if (props.entry_id.len > 0) (
+        <div class="edit-sidebar-section edit-sidebar-danger">
+            <form method="POST" action="/admin/action" onsubmit={`return confirm('Delete this ${props.display_name} permanently?')`}>
+                <input type="hidden" name="_csrf" value={props.csrf_token} />
+                <input type="hidden" name="action" value="content.delete" />
+                <input type="hidden" name="type" value={props.type_id} />
+                <input type="hidden" name="entry_id" value={props.entry_id} />
+                <button type="submit" class="btn btn-danger btn-sm btn-full">Delete</button>
+            </form>
+        </div>
+    )}
+}

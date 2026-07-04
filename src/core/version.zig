@@ -11,6 +11,7 @@ const Db = db_mod.Db;
 const field_mod = @import("field");
 const registry = @import("schema_registry");
 const id_gen = @import("id_gen");
+const views = @import("views");
 
 const Allocator = std.mem.Allocator;
 
@@ -434,24 +435,29 @@ pub fn restoreVersionWithData(
 
 /// Compute a field-level diff between two JSON data strings.
 /// Returns HTML showing changes per field.
+/// One field-level change row for the VersionDiff component.
+const DiffEntry = struct {
+    status: []const u8,
+    key: []const u8,
+    old_val: []const u8,
+    new_val: []const u8,
+};
+
 pub fn diffVersions(allocator: Allocator, old_data: []const u8, new_data: []const u8) ![]const u8 {
     // Parse both JSON objects
     const old_parsed = std.json.parseFromSlice(std.json.Value, allocator, old_data, .{}) catch
-        return try allocator.dupe(u8, "<p class=\"diff-error\">Could not parse old version data</p>");
+        return renderDiff(allocator, "Could not parse old version data", &.{});
     defer old_parsed.deinit();
 
     const new_parsed = std.json.parseFromSlice(std.json.Value, allocator, new_data, .{}) catch
-        return try allocator.dupe(u8, "<p class=\"diff-error\">Could not parse new version data</p>");
+        return renderDiff(allocator, "Could not parse new version data", &.{});
     defer new_parsed.deinit();
 
     const old_obj = if (old_parsed.value == .object) old_parsed.value.object else return try allocator.dupe(u8, "");
     const new_obj = if (new_parsed.value == .object) new_parsed.value.object else return try allocator.dupe(u8, "");
 
-    var buf: std.ArrayList(u8) = .{};
-    errdefer buf.deinit(allocator);
-    const w = buf.writer(allocator);
-
-    try w.writeAll("<div class=\"diff\">");
+    var entries: std.ArrayListUnmanaged(DiffEntry) = .{};
+    defer entries.deinit(allocator);
 
     // Check fields in new version (changed + added)
     var new_it = new_obj.iterator();
@@ -463,21 +469,9 @@ pub fn diffVersions(allocator: Allocator, old_data: []const u8, new_data: []cons
         if (old_val.len == 0 and new_val.len == 0) continue;
 
         if (!old_obj.contains(key)) {
-            // Added field
-            try w.writeAll("<div class=\"diff-field diff-added\"><span class=\"diff-key\">");
-            try w.writeAll(key);
-            try w.writeAll("</span><span class=\"diff-badge\">added</span><div class=\"diff-val diff-new\">");
-            try writeEscaped(w, new_val);
-            try w.writeAll("</div></div>");
+            try entries.append(allocator, .{ .status = "added", .key = key, .old_val = "", .new_val = new_val });
         } else if (!std.mem.eql(u8, old_val, new_val)) {
-            // Changed field
-            try w.writeAll("<div class=\"diff-field diff-changed\"><span class=\"diff-key\">");
-            try w.writeAll(key);
-            try w.writeAll("</span><span class=\"diff-badge\">changed</span><div class=\"diff-val diff-old\">");
-            try writeEscaped(w, old_val);
-            try w.writeAll("</div><div class=\"diff-val diff-new\">");
-            try writeEscaped(w, new_val);
-            try w.writeAll("</div></div>");
+            try entries.append(allocator, .{ .status = "changed", .key = key, .old_val = old_val, .new_val = new_val });
         }
     }
 
@@ -487,16 +481,21 @@ pub fn diffVersions(allocator: Allocator, old_data: []const u8, new_data: []cons
         const key = entry.key_ptr.*;
         if (!new_obj.contains(key)) {
             const old_val = jsonValueToString(allocator, entry.value_ptr.*) catch "";
-            try w.writeAll("<div class=\"diff-field diff-removed\"><span class=\"diff-key\">");
-            try w.writeAll(key);
-            try w.writeAll("</span><span class=\"diff-badge\">removed</span><div class=\"diff-val diff-old\">");
-            try writeEscaped(w, old_val);
-            try w.writeAll("</div></div>");
+            try entries.append(allocator, .{ .status = "removed", .key = key, .old_val = old_val, .new_val = "" });
         }
     }
 
-    try w.writeAll("</div>");
+    return renderDiff(allocator, null, entries.items);
+}
 
+/// Render the VersionDiff component into a caller-owned buffer.
+fn renderDiff(allocator: Allocator, error_msg: ?[]const u8, entries: []const DiffEntry) ![]const u8 {
+    var buf: std.ArrayList(u8) = .{};
+    errdefer buf.deinit(allocator);
+    views.components.version_diff.VersionDiff(buf.writer(allocator).any(), .{
+        .error_msg = error_msg,
+        .entries = entries,
+    }) catch {};
     return buf.toOwnedSlice(allocator);
 }
 

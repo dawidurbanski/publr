@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const def = @import("def.zig");
+const views = @import("views");
 
 const FieldDef = def.FieldDef;
 const RenderContext = def.RenderContext;
@@ -34,19 +35,18 @@ pub fn Integer(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <input type=\"number\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"",
-                .{ ctx.name, ctx.name, ctx.value orelse "" },
-            );
-            if (opts.min) |min| {
-                try writer.print(" min=\"{}\"", .{min});
-            }
-            if (opts.max) |max| {
-                try writer.print(" max=\"{}\"", .{max});
-            }
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(" />\n</div>\n");
+            const min_str: ?[]const u8 = if (opts.min) |m| std.fmt.comptimePrint("{d}", .{m}) else null;
+            const max_str: ?[]const u8 = if (opts.max) |m| std.fmt.comptimePrint("{d}", .{m}) else null;
+            try views.components.fields.input.Input(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .input_type = "number",
+                .min = min_str,
+                .max = max_str,
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 
@@ -92,24 +92,20 @@ pub fn Number(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <input type=\"number\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"",
-                .{ ctx.name, ctx.name, ctx.value orelse "" },
-            );
-            if (opts.min) |min| {
-                try writer.print(" min=\"{d}\"", .{min});
-            }
-            if (opts.max) |max| {
-                try writer.print(" max=\"{d}\"", .{max});
-            }
-            if (opts.step) |step| {
-                try writer.print(" step=\"{d}\"", .{step});
-            } else {
-                try writer.writeAll(" step=\"any\"");
-            }
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(" />\n</div>\n");
+            const min_str: ?[]const u8 = if (opts.min) |m| std.fmt.comptimePrint("{d}", .{m}) else null;
+            const max_str: ?[]const u8 = if (opts.max) |m| std.fmt.comptimePrint("{d}", .{m}) else null;
+            const step_str: []const u8 = if (opts.step) |s| std.fmt.comptimePrint("{d}", .{s}) else "any";
+            try views.components.fields.input.Input(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .input_type = "number",
+                .min = min_str,
+                .max = max_str,
+                .step = step_str,
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 

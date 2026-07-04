@@ -1,0 +1,17 @@
+// Boolean checkbox control. Uses FieldLabelRow's `span` label kind because the
+// real input lives inside its own <label class="form-check"> (so there's no
+// single control for a `for=`). `checked?=` toggles the presence attribute.
+
+pub fn Checkbox(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    checked: bool = false,
+    errors: []const []const u8 = &.{},
+}) {
+    <FieldLabelRow name={props.name} display_name={props.display_name} kind=.span errors={props.errors}>
+        <label class="form-check">
+            <input type="checkbox" class="form-check-input" name={props.name} value="true" checked?={props.checked} />
+            <span class="form-check-label">{props.display_name}</span>
+        </label>
+    </FieldLabelRow>
+}

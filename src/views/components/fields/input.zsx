@@ -1,0 +1,30 @@
+// Generic single-line field control — wraps FieldLabelRow around one <input>.
+// Used by String, Slug, DateTime, Integer, Number, Email, Url. Every
+// type-specific attribute is optional and emitted via the `name?={expr}`
+// conditional-attribute syntax, so one component covers them all:
+//   input_type   the <input type="…">
+//   maxlength / min / max / step   pre-formatted to strings by the adapter
+//                                  (step is "any" for floats)
+//   placeholder  e.g. Url's "https://"
+//   widget       data-widget="…"  (Slug → "slug")
+//   source       data-source="…"  (Slug's source field)
+
+pub fn Input(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    value: []const u8 = "",
+    required: bool = false,
+    input_type: []const u8 = "text",
+    maxlength: ?[]const u8 = null,
+    min: ?[]const u8 = null,
+    max: ?[]const u8 = null,
+    step: ?[]const u8 = null,
+    placeholder: ?[]const u8 = null,
+    widget: ?[]const u8 = null,
+    source: ?[]const u8 = null,
+    errors: []const []const u8 = &.{},
+}) {
+    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
+        <input type={props.input_type} class="form-control" id={props.name} name={props.name} value={props.value} maxlength?={props.maxlength} min?={props.min} max?={props.max} step?={props.step} placeholder?={props.placeholder} data-widget?={props.widget} data-source?={props.source} required?={props.required} />
+    </FieldLabelRow>
+}

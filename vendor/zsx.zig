@@ -64,6 +64,33 @@ pub fn render(writer: anytype, value: anytype) !void {
     }
 }
 
+/// Emit a conditionally-present HTML attribute — the runtime side of the
+/// `name?={expr}` syntax. Dispatches on the value's type at comptime:
+///   - `bool`      → ` name` (bare presence attribute) when true, else nothing.
+///                   For HTML boolean attrs (required/checked/disabled/…).
+///   - optional `?T` → ` name="<value>"` when non-null, else nothing.
+///                   For attrs that vanish when unset (maxlength/min/step/…).
+///   - anything else → ` name="<value>"` (always present) — a degenerate but
+///                   safe fallback so `?=` never surprises with wrong output.
+/// The leading space is emitted here (callers bake no space before it), so the
+/// attribute slots cleanly after the tag name / prior attributes. Values are
+/// HTML-escaped via `render`, matching a normal `name={expr}` attribute.
+pub fn attrCond(writer: anytype, comptime name: []const u8, value: anytype) !void {
+    switch (@typeInfo(@TypeOf(value))) {
+        .bool => if (value) try writer.writeAll(" " ++ name),
+        .optional => if (value) |inner| {
+            try writer.writeAll(" " ++ name ++ "=\"");
+            try render(writer, inner);
+            try writer.writeAll("\"");
+        },
+        else => {
+            try writer.writeAll(" " ++ name ++ "=\"");
+            try render(writer, value);
+            try writer.writeAll("\"");
+        },
+    }
+}
+
 /// Compute return type for withDefaults: if all Defaults fields exist in Raw,
 /// return Raw directly (preserving original types); otherwise return Defaults.
 fn WithDefaultsReturn(comptime Defaults: type, comptime Raw: type) type {
@@ -185,14 +212,15 @@ fn isTagStart(c: u8) bool {
     return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z');
 }
 
-/// Insert `attrs` (` name="value"` run) into the first opening tag of `html`,
-/// before its closing `>` (or `/>`). Writes `html` unchanged if none found.
-fn spliceAttrsIntoRoot(writer: anytype, html: []const u8, attrs: []const u8) !void {
+/// Byte offset in `html` where extra attributes can be inserted — just before
+/// the first opening tag's closing `>` (or the `/` of `/>`). Null if no opening
+/// tag is found. Quote-aware so `>` inside an attribute value doesn't fool it.
+fn rootAttrInsertPos(html: []const u8) ?usize {
     var i: usize = 0;
     while (i < html.len) : (i += 1) {
         if (html[i] == '<' and i + 1 < html.len and isTagStart(html[i + 1])) break;
     }
-    if (i >= html.len) return writer.writeAll(html);
+    if (i >= html.len) return null;
     var j = i + 1;
     var q: u8 = 0;
     while (j < html.len) : (j += 1) {
@@ -203,11 +231,36 @@ fn spliceAttrsIntoRoot(writer: anytype, html: []const u8, attrs: []const u8) !vo
             q = c;
         } else if (c == '>') break;
     }
-    if (j >= html.len) return writer.writeAll(html);
-    const at = if (j > 0 and html[j - 1] == '/') j - 1 else j;
+    if (j >= html.len) return null;
+    return if (j > 0 and html[j - 1] == '/') j - 1 else j;
+}
+
+/// Insert `attrs` (` name="value"` run) into the first opening tag of `html`,
+/// before its closing `>` (or `/>`). Writes `html` unchanged if none found.
+fn spliceAttrsIntoRoot(writer: anytype, html: []const u8, attrs: []const u8) !void {
+    const at = rootAttrInsertPos(html) orelse return writer.writeAll(html);
     try writer.writeAll(html[0..at]);
     try writer.writeAll(attrs);
     try writer.writeAll(html[at..]);
+}
+
+/// asChild slot: return `child` HTML with `attrs` (a ` name="value"` run)
+/// spliced onto its root element's opening tag. Lets a wrapper component (a
+/// menu Trigger, tooltip anchor, …) merge its own behavior attributes —
+/// `data-p-*` directives, `aria-*` — straight onto the caller's child element,
+/// with no wrapper node (the Radix `asChild` pattern). The string form of the
+/// splice `forward` already does for self-forwarding; returns a value so it can
+/// be used in `{@raw zsx.slot(children, attrs)}` positions. Allocates
+/// short-lived from page_allocator like `concatRt` (freed on arena reset).
+/// Returns `child` unchanged when there are no attrs or no root tag.
+pub fn slot(child: []const u8, attrs: []const u8) []const u8 {
+    if (attrs.len == 0) return child;
+    const at = rootAttrInsertPos(child) orelse return child;
+    const buf = std.heap.page_allocator.alloc(u8, child.len + attrs.len) catch return child;
+    @memcpy(buf[0..at], child[0..at]);
+    @memcpy(buf[at .. at + attrs.len], attrs);
+    @memcpy(buf[at + attrs.len ..], child[at..]);
+    return buf;
 }
 
 };
@@ -1036,15 +1089,25 @@ pub const Literal = struct {
     slot: u32,
 };
 
-pub const ExprKind = enum { plain, raw, ternary, elvis, backtick };
+pub const ExprKind = enum { plain, raw, ternary, elvis, backtick, cond_attr };
 
 pub const Expr = struct {
     kind: ExprKind,
     source: []const u8,
 };
 
+/// A static string-valued attribute. `value` is the literal text (used for
+/// inline-mode emit and debugging); `slot` is its index into the file-scoped
+/// HMR literal table (`L`). In `--hmr` mode the call site emits `L[slot]`
+/// instead of the baked literal, so editing the value hot-swaps via `setL`
+/// with no rebuild. In inline mode `slot` is unused.
+pub const StringAttr = struct {
+    value: []const u8,
+    slot: u32 = 0,
+};
+
 pub const AttrValue = union(enum) {
-    string: []const u8,
+    string: StringAttr,
     expr: []const u8,
     bool_present,
 };
@@ -1112,7 +1175,7 @@ fn freeNode(allocator: Allocator, node: Node) void {
             for (c.attrs) |a| {
                 allocator.free(a.name);
                 switch (a.value) {
-                    .string => |s| allocator.free(s),
+                    .string => |s| allocator.free(s.value),
                     .expr => |s| allocator.free(s),
                     .bool_present => {},
                 }
@@ -1173,7 +1236,13 @@ fn attrEqual(a: Attr, b: Attr) bool {
     const TagT = std.meta.Tag(AttrValue);
     if (@as(TagT, a.value) != @as(TagT, b.value)) return false;
     return switch (a.value) {
-        .string => |s| std.mem.eql(u8, s, b.value.string),
+        // String attr VALUES are swappable — same treatment as `.literal`
+        // node content (nodeEqual returns true for `.literal`). A value edit
+        // (class=, label=, data-p-*) rides the L table and hot-swaps via
+        // setL, so name + presence match is enough to stay on the fast path.
+        // Adding/removing an attr changes the attr count (checked above) or
+        // the name → unequal → rebuild. `.expr`/`.bool_present` compare fully.
+        .string => true,
         .expr => |s| std.mem.eql(u8, s, b.value.expr),
         .bool_present => true,
     };
@@ -1965,7 +2034,7 @@ fn parseDoctypeOrComment(p: *Parser) ParseError!void {
 // up front then bake statics-then-dynamics, matching the existing transpiler's
 // emit order. The dynamic-attr expression is stored as a borrowed source slice
 // — we re-walk it when baking to produce the correct Node.
-const HtmlAttrKind = enum { static, dynamic, enum_lit, boolean };
+const HtmlAttrKind = enum { static, dynamic, enum_lit, boolean, conditional };
 const HtmlAttr = struct {
     name: []const u8,
     kind: HtmlAttrKind,
@@ -2007,6 +2076,50 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
         while (p.i < p.src.len and isAttrIdentChar(p.src[p.i])) : (p.i += 1) {}
         if (p.i == attr_name_start) return ParseError.MalformedAttribute;
         const attr_name = p.src[attr_name_start..p.i];
+
+        // Conditional/presence attribute: `name?={expr}`. `expr` must be a
+        // `{…}` value; the runtime (`zsx.attrCond`) decides at comptime whether
+        // to emit ` name` (bool), ` name="…"` (optional), or nothing.
+        if (p.peek() == @as(?u8, '?') and p.peekAt(1) == @as(?u8, '=')) {
+            p.i += 2; // consume `?=`
+            if (p.i >= p.src.len or p.src[p.i] != '{') return ParseError.MalformedAttribute;
+            p.i += 1; // '{'
+            const val_start = p.i;
+            var depth: usize = 1;
+            while (p.i < p.src.len and depth > 0) {
+                const c = p.src[p.i];
+                switch (c) {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    '"' => {
+                        p.i += 1;
+                        try skipStringLiteral(p, '"');
+                        continue;
+                    },
+                    '\'' => {
+                        p.i += 1;
+                        try skipStringLiteral(p, '\'');
+                        continue;
+                    },
+                    '`' => {
+                        p.i += 1;
+                        try skipBacktick(p);
+                        continue;
+                    },
+                    else => {},
+                }
+                if (depth > 0) p.i += 1;
+            }
+            if (depth != 0) return ParseError.UnmatchedBrace;
+            const val_raw = std.mem.trim(u8, p.src[val_start..p.i], " \t\r\n");
+            p.i += 1; // '}'
+            try attrs.append(p.allocator, .{
+                .name = attr_name,
+                .kind = .conditional,
+                .value = val_raw,
+            });
+            continue;
+        }
 
         if (p.peek() == @as(?u8, '=')) {
             p.i += 1;
@@ -2172,6 +2285,15 @@ fn parseHtmlTag(p: *Parser) ParseError!void {
                 try p.bake(' ');
                 try p.bakeSlice(a.name);
             },
+            .conditional => {
+                // `name?={expr}` → `try zsx.attrCond(writer, "name", expr);`.
+                // No surrounding literal: attrCond emits the leading space,
+                // the name, and (for optionals) the `="value"` itself, or
+                // nothing when the value is false/null.
+                try p.flushLiteral();
+                const src_copy = try std.fmt.allocPrint(p.allocator, "\"{s}\", {s}", .{ a.name, a.value });
+                try p.nodes.append(p.allocator, .{ .expr = .{ .kind = .cond_attr, .source = src_copy } });
+            },
             .dynamic, .enum_lit => {
                 try p.bake(' ');
                 try p.bakeSlice(directiveName(a.name) orelse a.name); // map @data/@store/:class… (value stays dynamic)
@@ -2237,7 +2359,7 @@ fn parseComponent(p: *Parser) ParseError!void {
         for (attrs.items) |a| {
             p.allocator.free(a.name);
             switch (a.value) {
-                .string => |s| p.allocator.free(s),
+                .string => |s| p.allocator.free(s.value),
                 .expr => |s| p.allocator.free(s),
                 .bool_present => {},
             }
@@ -2278,7 +2400,7 @@ fn parseComponent(p: *Parser) ParseError!void {
                 if (p.i >= p.src.len) return ParseError.UnterminatedString;
                 const val = try p.allocator.dupe(u8, p.src[vs..p.i]);
                 p.i += 1;
-                value = .{ .string = val };
+                value = .{ .string = .{ .value = val } };
             } else if (vc == '{') {
                 p.i += 1;
                 const vs = p.i;
@@ -2326,12 +2448,12 @@ fn parseComponent(p: *Parser) ParseError!void {
         // Spec §10: rewrite @event / :directive names to data-p-* (+ value).
         var final_name = attr_name_slice;
         switch (value) {
-            .string => |s| {
-                const md = try mapDirectiveAttr(p.allocator, attr_name_slice, s);
+            .string => |sa| {
+                const md = try mapDirectiveAttr(p.allocator, attr_name_slice, sa.value);
                 final_name = md.name;
-                if (md.value.ptr != s.ptr) {
-                    p.allocator.free(s); // mapping reallocated; release the orphaned dupe
-                    value = .{ .string = md.value };
+                if (md.value.ptr != sa.value.ptr) {
+                    p.allocator.free(sa.value); // mapping reallocated; release the orphaned dupe
+                    value = .{ .string = .{ .value = md.value } };
                 }
             },
             else => {},
@@ -2349,17 +2471,34 @@ fn parseComponent(p: *Parser) ParseError!void {
             const a = attrs.items[i];
             if (std.meta.activeTag(a.value) == .string and std.mem.eql(u8, a.name, "data-p-bind")) {
                 if (first) |fi| {
-                    const merged = try std.fmt.allocPrint(p.allocator, "{s};{s}", .{ attrs.items[fi].value.string, a.value.string });
-                    p.allocator.free(attrs.items[fi].value.string);
-                    p.allocator.free(a.value.string);
+                    const merged = try std.fmt.allocPrint(p.allocator, "{s};{s}", .{ attrs.items[fi].value.string.value, a.value.string.value });
+                    p.allocator.free(attrs.items[fi].value.string.value);
+                    p.allocator.free(a.value.string.value);
                     p.allocator.free(a.name);
-                    attrs.items[fi].value = .{ .string = merged };
+                    attrs.items[fi].value = .{ .string = .{ .value = merged } };
                     _ = attrs.orderedRemove(i);
                     continue; // don't advance: the next entry shifted into i
                 }
                 first = i;
             }
             i += 1;
+        }
+    }
+
+    // Lift each string-attr value into the file-scoped literal table so a
+    // value edit (class=, label=, data-p-*) hot-swaps via setL instead of
+    // forcing a rebuild — the same mechanism plain text literals use. Done
+    // after directive-mapping + data-p-bind merge so the final value is what
+    // lands in L. The caller flushed any pending text literal before invoking
+    // parseComponent, so these slots follow preceding text in source order;
+    // the component's children are parsed afterwards and get later slots.
+    // Each attr keeps its own `value` dupe (for inline emit / manifest_nodes);
+    // L holds an independent copy the parser owns.
+    for (attrs.items) |*a| {
+        if (a.value == .string) {
+            const owned = try p.allocator.dupe(u8, a.value.string.value);
+            try p.literals.append(p.allocator, owned);
+            a.value.string.slot = @intCast(p.literals.items.len - 1);
         }
     }
 
@@ -2417,7 +2556,7 @@ fn freeNodeFromList(allocator: Allocator, node: Node) void {
             for (c.attrs) |a| {
                 allocator.free(a.name);
                 switch (a.value) {
-                    .string => |s| allocator.free(s),
+                    .string => |s| allocator.free(s.value),
                     .expr => |s| allocator.free(s),
                     .bool_present => {},
                 }
@@ -3159,9 +3298,15 @@ fn emitManifestNode(
                 try out.appendSlice(allocator, "\", .value = ");
                 switch (a.value) {
                     .string => |s| {
-                        try out.appendSlice(allocator, ".{ .string = \"");
-                        try writeEscaped(allocator, out, s);
-                        try out.appendSlice(allocator, "\" }");
+                        // Baked into manifest_nodes for structural comparison
+                        // only; attrEqual treats `.string` values as swappable
+                        // (ignores value + slot), so this is informational. Slot
+                        // is offset to match the file-wide L index for parity.
+                        try out.appendSlice(allocator, ".{ .string = .{ .value = \"");
+                        try writeEscaped(allocator, out, s.value);
+                        try out.appendSlice(allocator, "\", .slot = ");
+                        try appendUsize(allocator, out, s.slot + slot_offset);
+                        try out.appendSlice(allocator, " } }");
                     },
                     .expr => |s| {
                         try out.appendSlice(allocator, ".{ .expr = \"");
@@ -3658,6 +3803,16 @@ const Emitter = struct {
                 try self.write(e.source);
                 try self.write(");\n");
             },
+            .cond_attr => {
+                // `name?={expr}` → `try zsx.attrCond(<writer>, "name", expr);`.
+                // `e.source` is the pre-built `"name", expr` argument tail.
+                try self.writeIndent();
+                try self.write("try zsx.attrCond(");
+                try self.write(self.writerVar());
+                try self.write(", ");
+                try self.write(e.source);
+                try self.write(");\n");
+            },
             .ternary => try self.emitTernaryOrElvis(e.source, .ternary, false),
             .elvis => try self.emitTernaryOrElvis(e.source, .elvis, false),
             .backtick => {
@@ -3921,9 +4076,24 @@ const Emitter = struct {
             try self.write(" = ");
             switch (attr.value) {
                 .string => |s| {
-                    try self.write("\"");
-                    try self.write(s);
-                    try self.write("\"");
+                    if (self.hmr) {
+                        // Route the value through the file-scoped L table so a
+                        // string-attr edit hot-swaps via setL (see parser's
+                        // slot lift). The value is a runtime `[]const u8`;
+                        // forward() routes by comptime field name, so this is a
+                        // drop-in for the baked literal. Forwarded directives
+                        // (data-p-*, aria-*) swap too, for free.
+                        const idx = s.slot + self.slot_offset;
+                        try self.write("L[");
+                        var buf: [16]u8 = undefined;
+                        const n = std.fmt.bufPrint(&buf, "{d}", .{idx}) catch return;
+                        try self.write(n);
+                        try self.write("]");
+                    } else {
+                        try self.write("\"");
+                        try self.write(s.value);
+                        try self.write("\"");
+                    }
                 },
                 .expr => |s| {
                     if (s.len >= 2 and s[0] == '`' and s[s.len - 1] == '`') {

@@ -1,0 +1,49 @@
+// FieldLabelRow — the shared form-group wrapper every scalar/choice/number/web
+// field opens with. Ports core/schema/field/def.zig::writeFieldLabelRow into ZSX.
+//
+// Props:
+//   name          field name (also the input id / data-field key)
+//   display_name  human label text
+//   required      reflected onto the control by the caller, not here
+//   kind          which label element to emit (with_for | no_for | span)
+//   errors        validation messages; rendered in the new hint/error slot
+//   children      the control markup (input/select/textarea), pre-rendered
+//
+// The control is placed AFTER the label row, inside form-group — matching the
+// original writer output. The error slot is net-new (RenderContext.errors was
+// plumbed but never rendered before) and uses utility classes so it needs no
+// admin.css.
+pub fn FieldLabelRow(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    required: bool = false,
+    kind: enum { with_for, no_for, span } = .with_for,
+    errors: []const []const u8 = &.{},
+    children: []const u8 = "",
+}) {
+    <div class="form-group" data-field={props.name}>
+        <div class="form-label-row">
+            {if (props.kind == .with_for) (
+                <label class="form-label" for={props.name}>{props.display_name}</label>
+            ) else (
+                {if (props.kind == .no_for) (
+                    <label class="form-label">{props.display_name}</label>
+                ) else (
+                    <span class="form-label">{props.display_name}</span>
+                )}
+            )}
+            <div class="field-check-row">
+                <span class="field-editor-badge" data-field={props.name}></span>
+                <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field={props.name} checked="checked" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
+            </div>
+        </div>
+        {@raw props.children}
+        {if (props.errors.len > 0) (
+            <div class="mt-1 flex flex-col gap-1" data-field-errors={props.name}>
+                {for (props.errors) |err| (
+                    <span class="text-sm text-destructive">{err}</span>
+                )}
+            </div>
+        )}
+    </div>
+}

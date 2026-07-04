@@ -1,0 +1,18 @@
+// Multi-line field control — a <textarea>, wrapped in FieldLabelRow.
+// Used by Text and RichText. `rows` and the optional `widget` (data-widget,
+// "richtext" for the rich editor) are the only differences between them.
+// (Single-line inputs live in input.zsx; String moved there in A2/#193.)
+
+pub fn TextArea(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    value: []const u8 = "",
+    required: bool = false,
+    rows: u8 = 5,
+    widget: ?[]const u8 = null,
+    errors: []const []const u8 = &.{},
+}) {
+    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
+        <textarea class="form-control" id={props.name} name={props.name} rows={props.rows} data-widget?={props.widget} required?={props.required}>{props.value}</textarea>
+    </FieldLabelRow>
+}

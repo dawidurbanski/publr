@@ -3,6 +3,7 @@
 const std = @import("std");
 const def = @import("def.zig");
 const zt = @import("zig_type.zig");
+const views = @import("views");
 
 const FieldDef = def.FieldDef;
 const RenderContext = def.RenderContext;
@@ -40,12 +41,11 @@ pub fn Group(comptime name: []const u8, comptime config: struct {
             }
             defer if (parsed_result) |*pr| pr.deinit();
 
-            try writer.print(
-                \\<fieldset class="field-group" data-field="{s}" data-publr-component="toggle" data-publr-state="open">
-                \\  <legend class="field-group-legend" data-publr-part="trigger">{s}</legend>
-                \\  <div class="field-group-content" data-publr-part="content">
-                \\
-            , .{ ctx.name, ctx.display_name });
+            // Buffer the sub-fields' HTML (rendered through each field's ZSX
+            // component), then hand it to FieldGroup as `{@raw children}`. The
+            // `{name}.{sub}` name contract stays here — it's data, not HTML.
+            var children: std.ArrayListUnmanaged(u8) = .{};
+            defer children.deinit(alloc);
 
             inline for (sub_fields) |sf| {
                 const sub_value: ?[]const u8 = if (obj) |o| blk: {
@@ -56,7 +56,7 @@ pub fn Group(comptime name: []const u8, comptime config: struct {
                 } else null;
 
                 const dotted = std.fmt.allocPrint(alloc, "{s}.{s}", .{ ctx.name, sf.name }) catch sf.name;
-                sf.render(writer, .{
+                sf.render(children.writer(alloc).any(), .{
                     .name = dotted,
                     .display_name = sf.display_name,
                     .value = sub_value,
@@ -65,11 +65,11 @@ pub fn Group(comptime name: []const u8, comptime config: struct {
                 }) catch {};
             }
 
-            try writer.writeAll(
-                \\  </div>
-                \\</fieldset>
-                \\
-            );
+            try views.components.fields.field_group.FieldGroup(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .children = children.items,
+            });
         }
     };
 
@@ -127,68 +127,50 @@ pub fn Repeater(comptime name: []const u8, comptime config: struct {
             defer if (parsed_result) |*pr| pr.deinit();
 
             const item_count = if (arr) |a| a.items.len else 0;
+            const min_str: ?[]const u8 = if (config.min) |m| std.fmt.comptimePrint("{d}", .{m}) else null;
+            const max_str: ?[]const u8 = if (config.max) |m| std.fmt.comptimePrint("{d}", .{m}) else null;
 
-            try def.writeFieldLabelRow(writer, ctx, .label_no_for);
-            try writer.print(
-                \\<div class="field-repeater" data-field="{s}" data-widget="repeater"
-            , .{ctx.name});
-            if (config.min) |m| try writer.print(" data-min=\"{d}\"", .{m});
-            if (config.max) |m| try writer.print(" data-max=\"{d}\"", .{m});
-            try writer.writeAll(">\n");
-
-            try writer.print(
-                \\  <input type="hidden" name="{s}._count" value="{d}" data-repeater-count />
-                \\
-            , .{ ctx.name, item_count });
-
-            try writer.writeAll("  <div class=\"field-repeater-items\">\n");
-
+            // Buffer the existing items: each item's sub-fields (with the
+            // `{name}.{idx}.{sub}` name contract) wrapped in a RepeaterItem.
+            var items: std.ArrayListUnmanaged(u8) = .{};
+            defer items.deinit(alloc);
             if (arr) |a| {
                 for (a.items, 0..) |item, idx| {
-                    try writeItemStart(writer);
-                    writeSubFields(writer, alloc, ctx.name, item, idx);
-                    try writeItemEnd(writer);
+                    var sub: std.ArrayListUnmanaged(u8) = .{};
+                    defer sub.deinit(alloc);
+                    writeItemSubFields(sub.writer(alloc).any(), alloc, ctx.name, item, idx);
+                    views.components.fields.repeater.RepeaterItem(
+                        items.writer(alloc).any(),
+                        .{ .children = sub.items },
+                    ) catch {};
                 }
             }
 
-            try writer.writeAll("  </div>\n");
+            // Buffer the blank <template> item (`{name}.__INDEX__.{sub}` names).
+            var tsub: std.ArrayListUnmanaged(u8) = .{};
+            defer tsub.deinit(alloc);
+            writeTemplateSubFields(tsub.writer(alloc).any(), alloc, ctx.name);
+            var titem: std.ArrayListUnmanaged(u8) = .{};
+            defer titem.deinit(alloc);
+            views.components.fields.repeater.RepeaterItem(
+                titem.writer(alloc).any(),
+                .{ .children = tsub.items },
+            ) catch {};
 
-            try writer.writeAll("  <template data-repeater-template>\n");
-            try writeItemStart(writer);
-            writeTemplateSubFields(writer, alloc, ctx.name);
-            try writeItemEnd(writer);
-            try writer.writeAll("  </template>\n");
-
-            try writer.writeAll(
-                \\  <button type="button" class="btn btn-sm" data-repeater-add>Add</button>
-                \\</div>
-                \\</div>
-                \\
-            );
+            try views.components.fields.repeater.Repeater(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .required = ctx.required,
+                .item_count = item_count,
+                .min = min_str,
+                .max = max_str,
+                .items_html = items.items,
+                .template_html = titem.items,
+                .errors = ctx.errors orelse &.{},
+            });
         }
 
-        fn writeItemStart(writer: std.io.AnyWriter) !void {
-            try writer.writeAll(
-                \\    <div class="field-repeater-item">
-                \\      <div class="field-repeater-item-controls">
-                \\        <button type="button" class="btn btn-sm btn-icon" data-repeater-up title="Move up">&uarr;</button>
-                \\        <button type="button" class="btn btn-sm btn-icon" data-repeater-down title="Move down">&darr;</button>
-                \\        <button type="button" class="btn btn-sm btn-icon btn-ghost" data-repeater-remove title="Remove">&times;</button>
-                \\      </div>
-                \\      <div class="field-repeater-item-content">
-                \\
-            );
-        }
-
-        fn writeItemEnd(writer: std.io.AnyWriter) !void {
-            try writer.writeAll(
-                \\      </div>
-                \\    </div>
-                \\
-            );
-        }
-
-        fn writeSubFields(writer: std.io.AnyWriter, alloc: std.mem.Allocator, base_name: []const u8, item_value: std.json.Value, idx: usize) void {
+        fn writeItemSubFields(writer: std.io.AnyWriter, alloc: std.mem.Allocator, base_name: []const u8, item_value: std.json.Value, idx: usize) void {
             var obj: ?std.json.ObjectMap = null;
             if (item_value == .object) obj = item_value.object;
 

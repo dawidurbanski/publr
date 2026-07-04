@@ -1,0 +1,21 @@
+// Reference field control — links to another content entry via the
+// `data-widget="ref-picker"` widget (dispatched by interact/core.js's generic
+// [data-widget] registry). The hidden input carries the entry id; the button
+// opens the picker. `many` → data-ref-many "true"/"false".
+
+pub fn Ref(props: struct {
+    name: []const u8,
+    display_name: []const u8,
+    value: []const u8 = "",
+    required: bool = false,
+    to: []const u8,
+    many: bool = false,
+    errors: []const []const u8 = &.{},
+}) {
+    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
+        <div data-widget="ref-picker" data-ref-type={props.to} data-ref-many={props.many ? "true" : "false"} data-name={props.name} data-value={props.value}>
+            <input type="hidden" name={props.name} value={props.value} />
+            <button type="button" class="btn btn-sm">Select {props.to}</button>
+        </div>
+    </FieldLabelRow>
+}

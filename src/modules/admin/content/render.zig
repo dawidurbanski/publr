@@ -10,6 +10,7 @@ const views = @import("views");
 const pu = @import("plugin_utils");
 const _p = @import("_platform.zig");
 const auth_middleware = @import("auth_middleware");
+const field_render = @import("field_render.zig");
 
 const Allocator = std.mem.Allocator;
 const ContentTypeDef = content_type_mod.ContentTypeDef;
@@ -31,100 +32,6 @@ pub const SidebarOptions = struct {
     base_url: []const u8 = "",
 };
 
-/// Fallback renderer for fields loaded from the DB (parseFields assigns
-/// a noopRender stub — see db_types.zig). Mirrors the comptime builders'
-/// HTML shape but ignores per-field options (max_length, rows, etc.) that
-/// don't round-trip through the DB schema yet.
-fn renderDefaultField(
-    w: std.io.AnyWriter,
-    fd: field_mod.FieldDef,
-    ctx: field_mod.RenderContext,
-) !void {
-    try field_mod.writeFieldLabelRow(w, ctx, .label_with_for);
-    const value = ctx.value orelse "";
-    const required_attr: []const u8 = if (ctx.required) " required" else "";
-
-    if (std.mem.eql(u8, fd.field_type_id, "text") or std.mem.eql(u8, fd.field_type_id, "richtext")) {
-        try w.print(
-            "  <textarea class=\"form-control\" id=\"{s}\" name=\"{s}\" rows=\"5\"{s}>{s}</textarea>\n</div>\n",
-            .{ ctx.name, ctx.name, required_attr, value },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "boolean")) {
-        const checked: []const u8 = if (std.mem.eql(u8, value, "true")) " checked" else "";
-        try w.print(
-            "  <label class=\"switch-label\"><input type=\"checkbox\" class=\"switch-input\" id=\"{s}\" name=\"{s}\" value=\"true\"{s} /><span class=\"switch-track\" role=\"switch\"><span class=\"switch-thumb\"></span></span></label>\n</div>\n",
-            .{ ctx.name, ctx.name, checked },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "datetime")) {
-        try w.print(
-            "  <input type=\"datetime-local\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
-            .{ ctx.name, ctx.name, value, required_attr },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "integer") or std.mem.eql(u8, fd.field_type_id, "number")) {
-        const step: []const u8 = if (std.mem.eql(u8, fd.field_type_id, "integer")) "1" else "any";
-        try w.print(
-            "  <input type=\"number\" step=\"{s}\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
-            .{ step, ctx.name, ctx.name, value, required_attr },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "email")) {
-        try w.print(
-            "  <input type=\"email\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
-            .{ ctx.name, ctx.name, value, required_attr },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "url")) {
-        try w.print(
-            "  <input type=\"url\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
-            .{ ctx.name, ctx.name, value, required_attr },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "image")) {
-        try w.print(
-            "  <div data-widget=\"media-picker\" data-name=\"{s}\" data-value=\"{s}\">\n" ++
-                "    <input type=\"hidden\" name=\"{s}\" value=\"{s}\" />\n" ++
-                "    <button type=\"button\" class=\"btn btn-sm\">Select image</button>\n" ++
-                "  </div>\n</div>\n",
-            .{ ctx.name, value, ctx.name, value },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "reference")) {
-        try w.print(
-            "  <input type=\"text\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\" placeholder=\"Entry ID\"{s} />\n</div>\n",
-            .{ ctx.name, ctx.name, value, required_attr },
-        );
-    } else if (std.mem.eql(u8, fd.field_type_id, "taxonomy")) {
-        const tax = fd.taxonomy_id orelse fd.name;
-        const many: []const u8 = if (fd.multi) "true" else "false";
-        try w.print(
-            "  <div data-widget=\"taxonomy-picker\" data-taxonomy=\"{s}\" data-many=\"{s}\" data-name=\"{s}\" data-value=\"{s}\">\n" ++
-                "    <input type=\"hidden\" name=\"{s}\" value=\"{s}\" />\n" ++
-                "    <button type=\"button\" class=\"btn btn-sm\">Select {s}</button>\n" ++
-                "  </div>\n</div>\n",
-            .{ tax, many, ctx.name, value, ctx.name, value, fd.display_name },
-        );
-    } else {
-        // string, slug, select, and any unknown type fall back to a text input.
-        try w.print(
-            "  <input type=\"text\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"{s} />\n</div>\n",
-            .{ ctx.name, ctx.name, value, required_attr },
-        );
-    }
-}
-
-/// Escape a string for safe use in an HTML attribute value.
-pub fn htmlAttrEscape(allocator: Allocator, input: []const u8) []const u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    const w = buf.writer(allocator);
-    for (input) |c| {
-        switch (c) {
-            '"' => w.writeAll("&quot;") catch return "",
-            '&' => w.writeAll("&amp;") catch return "",
-            '<' => w.writeAll("&lt;") catch return "",
-            '>' => w.writeAll("&gt;") catch return "",
-            '\'' => w.writeAll("&#39;") catch return "",
-            else => w.writeByte(c) catch return "",
-        }
-    }
-    return buf.toOwnedSlice(allocator) catch "";
-}
-
 /// Render fields HTML for a given position (main editor or sidebar).
 pub fn renderFieldsHtml(
     def: *const ContentTypeDef,
@@ -135,58 +42,12 @@ pub fn renderFieldsHtml(
     position: field_mod.Position,
     opts: FormOptions,
 ) []const u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    const w = buf.writer(allocator);
+    _ = action_url;
 
-    if (position == .main) {
-        _ = action_url;
-        w.print(
-            \\<form method="POST" action="/admin/action" id="entry-form" class="form"
-            \\ data-base-url="/admin/content/{s}"
-        , .{def.type_id}) catch return "";
-
-        if (opts.entry_id.len > 0) {
-            w.print(
-                \\ data-entry-id="{s}"
-            , .{opts.entry_id}) catch {};
-        }
-        if (opts.status.len > 0) {
-            w.print(
-                \\ data-entry-status="{s}"
-            , .{opts.status}) catch {};
-        }
-        if (opts.published_data) |pd| {
-            const escaped = htmlAttrEscape(allocator, pd);
-            w.print(
-                \\ data-published-state="{s}"
-            , .{escaped}) catch {};
-        }
-
-        const fir_escaped = htmlAttrEscape(allocator, opts.fields_in_releases);
-        const fe_escaped = htmlAttrEscape(allocator, opts.field_editors);
-        w.print(
-            \\ data-fields-in-releases="{s}"
-            \\ data-field-editors="{s}"
-        , .{ fir_escaped, fe_escaped }) catch {};
-        w.print(
-            \\ data-lock-timeout-ms="{d}"
-            \\ data-heartbeat-interval-ms="{d}"
-        , .{
-            presence.getLockTimeoutMs(),
-            presence.getHeartbeatIntervalMs(),
-        }) catch {};
-
-        w.writeAll(">") catch return "";
-
-        w.print(
-            \\  <input type="hidden" name="_csrf" value="{s}" />
-            \\  <input type="hidden" name="action" value="content.update" />
-            \\  <input type="hidden" name="type" value="{s}" />
-            \\  <input type="hidden" name="entry_id" value="{s}" />
-            \\  <input type="hidden" name="fields" id="publish-fields" value="" />
-        , .{ csrf_token, def.type_id, opts.entry_id }) catch return "";
-    }
-
+    // Buffer this position's fields (each via its ZSX component render; a
+    // DB-loaded stub falls through to the field_render registry).
+    var fields: std.ArrayListUnmanaged(u8) = .{};
+    const fw = fields.writer(allocator);
     for (def.fields) |fd| {
         if (fd.position == position) {
             const value = fieldMapValueToString(allocator, data.*, fd.name);
@@ -197,34 +58,39 @@ pub fn renderFieldsHtml(
                 .required = fd.required,
                 .allocator = allocator,
             };
-            const before = buf.items.len;
-            fd.render(w.any(), ctx) catch {};
-            if (buf.items.len == before) {
-                // The field's render fn produced nothing — typically a
-                // db-loaded FieldDef with a stub renderer. Fall back to
-                // a field_type_id-dispatched default.
-                renderDefaultField(w.any(), fd, ctx) catch {};
+            const before = fields.items.len;
+            fd.render(fw.any(), ctx) catch {};
+            if (fields.items.len == before) {
+                field_render.renderField(fw.any(), fd, ctx) catch {};
             }
         }
     }
 
-    if (position == .main) {
-        w.writeAll("</form>") catch {};
+    // Non-main positions carry no form chrome — return just the fields.
+    if (position != .main) return fields.items;
 
-        // KV picker: inject the vars-data JSON + the picker script. Picker
-        // auto-attaches to any text input/textarea inside #entry-form (its
-        // selector also matches `data-publr-kv-picker`, which the variables
-        // admin form uses).
-        if (auth_middleware.auth) |a| {
-            const vars_json = kv.pickerVarsJson(allocator, a.db, "", 40) catch "[]";
-            w.print(
-                \\<script id="kv-vars-data" type="application/json">{s}</script>
-                \\<script src="/static/interact/kv-picker.js"></script>
-            , .{vars_json}) catch {};
-        }
+    // KV picker vars (auth-gated); the component renders the script tags.
+    var vars_json: ?[]const u8 = null;
+    if (auth_middleware.auth) |a| {
+        vars_json = kv.pickerVarsJson(allocator, a.db, "", 40) catch "[]";
     }
 
-    return buf.toOwnedSlice(allocator) catch "";
+    var out: std.ArrayListUnmanaged(u8) = .{};
+    views.components.entry_form.EntryForm(out.writer(allocator).any(), .{
+        .type_id = def.type_id,
+        .entry_id = opts.entry_id,
+        .entry_id_attr = if (opts.entry_id.len > 0) opts.entry_id else null,
+        .status_attr = if (opts.status.len > 0) opts.status else null,
+        .published_state = opts.published_data,
+        .fields_in_releases = opts.fields_in_releases,
+        .field_editors = opts.field_editors,
+        .lock_timeout_ms = presence.getLockTimeoutMs(),
+        .heartbeat_interval_ms = presence.getHeartbeatIntervalMs(),
+        .csrf_token = csrf_token,
+        .fields_html = fields.items,
+        .vars_json = vars_json,
+    }) catch return "";
+    return out.toOwnedSlice(allocator) catch "";
 }
 
 /// Extract a string representation of a FieldMap value for form rendering.
@@ -256,47 +122,20 @@ pub fn renderSidebarHtml(
     status: []const u8,
     opts: SidebarOptions,
 ) []const u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    const w = buf.writer(allocator);
+    _ = delete_url;
 
     const is_draft = std.mem.eql(u8, status, "draft") or status.len == 0;
     const is_published = std.mem.eql(u8, status, "published");
     const is_changed = std.mem.eql(u8, status, "changed");
 
-    w.writeAll(
-        \\<div class="edit-sidebar-section">
-        \\  <div class="edit-sidebar-actions">
-        \\    <div class="autosave-status" id="autosave-status"></div>
-    ) catch return "";
-
-    if (is_draft) {
-        w.writeAll(
-            \\    <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn">Publish</button>
-        ) catch {};
-    } else if (is_changed) {
-        w.writeAll(
-            \\    <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn">Publish Changes</button>
-        ) catch {};
-    } else if (is_published) {
-        w.writeAll(
-            \\    <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn" disabled>Published</button>
-        ) catch {};
-    }
-
-    if (!is_draft) {
-        w.print(
-            \\    <button type="button" class="{s}" id="discard-btn">Discard Changes</button>
-        , .{if (is_changed) "btn btn-ghost btn-full" else "btn btn-ghost btn-full hidden"}) catch {};
-    }
-
-    if (opts.release_html.len > 0) {
-        w.writeAll(opts.release_html) catch {};
-    }
-
-    w.writeAll(
-        \\  </div>
-        \\</div>
-    ) catch {};
+    const publish_label: ?[]const u8 = if (is_draft)
+        "Publish"
+    else if (is_changed)
+        "Publish Changes"
+    else if (is_published)
+        "Published"
+    else
+        null;
 
     var has_side_fields = false;
     for (def.fields) |fd| {
@@ -306,12 +145,11 @@ pub fn renderSidebarHtml(
         }
     }
 
+    // Buffer the .side fields, each patched with form="entry-form" so its
+    // controls submit to the main editor form.
+    var side_fields: std.ArrayListUnmanaged(u8) = .{};
     if (has_side_fields) {
-        w.writeAll(
-            \\<div class="edit-sidebar-section">
-            \\  <h3 class="edit-sidebar-title">Details</h3>
-        ) catch {};
-
+        const sw = side_fields.writer(allocator);
         for (def.fields) |fd| {
             if (fd.position == .side) {
                 const value = fieldMapValueToString(allocator, data.*, fd.name);
@@ -323,40 +161,32 @@ pub fn renderSidebarHtml(
                     .allocator = allocator,
                 };
                 var field_buf: std.ArrayListUnmanaged(u8) = .{};
-                const fw = field_buf.writer(allocator);
-                fd.render(fw.any(), ctx) catch {};
+                const fbw = field_buf.writer(allocator);
+                fd.render(fbw.any(), ctx) catch {};
                 if (field_buf.items.len == 0) {
-                    renderDefaultField(fw.any(), fd, ctx) catch {};
+                    field_render.renderField(fbw.any(), fd, ctx) catch {};
                 }
-                const field_html = field_buf.toOwnedSlice(allocator) catch "";
-                const patched = injectFormAttr(allocator, field_html, "entry-form");
-                w.writeAll(patched) catch {};
+                sw.writeAll(injectFormAttr(allocator, field_buf.items, "entry-form")) catch {};
             }
         }
-
-        w.writeAll("</div>") catch {};
     }
 
-    if (opts.history_html.len > 0) {
-        w.writeAll(opts.history_html) catch {};
-    }
-
-    _ = delete_url;
-    if (opts.entry_id.len > 0) {
-        w.print(
-            \\<div class="edit-sidebar-section edit-sidebar-danger">
-            \\  <form method="POST" action="/admin/action" onsubmit="return confirm('Delete this {s} permanently?')">
-            \\    <input type="hidden" name="_csrf" value="{s}" />
-            \\    <input type="hidden" name="action" value="content.delete" />
-            \\    <input type="hidden" name="type" value="{s}" />
-            \\    <input type="hidden" name="entry_id" value="{s}" />
-            \\    <button type="submit" class="btn btn-danger btn-sm btn-full">Delete</button>
-            \\  </form>
-            \\</div>
-        , .{ def.display_name, csrf_token, def.type_id, opts.entry_id }) catch {};
-    }
-
-    return buf.toOwnedSlice(allocator) catch "";
+    var out: std.ArrayListUnmanaged(u8) = .{};
+    views.components.entry_sidebar.EntrySidebar(out.writer(allocator).any(), .{
+        .publish_label = publish_label,
+        .publish_disabled = is_published,
+        .show_discard = !is_draft,
+        .discard_hidden = !is_changed,
+        .release_html = opts.release_html,
+        .has_side_fields = has_side_fields,
+        .side_fields_html = side_fields.items,
+        .history_html = opts.history_html,
+        .entry_id = opts.entry_id,
+        .csrf_token = csrf_token,
+        .type_id = def.type_id,
+        .display_name = def.display_name,
+    }) catch return "";
+    return out.toOwnedSlice(allocator) catch "";
 }
 
 pub fn injectFormAttr(allocator: Allocator, html: []const u8, form_id: []const u8) []const u8 {

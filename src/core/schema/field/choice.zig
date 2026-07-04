@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const def = @import("def.zig");
+const views = @import("views");
 
 const FieldDef = def.FieldDef;
 const RenderContext = def.RenderContext;
@@ -30,25 +31,14 @@ pub fn Select(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <select class=\"form-control\" id=\"{s}\" name=\"{s}\"",
-                .{ ctx.name, ctx.name },
-            );
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(">\n");
-
-            if (!ctx.required) {
-                try writer.writeAll("    <option value=\"\">-- Select --</option>\n");
-            }
-
-            const current = ctx.value orelse opts.default_value orelse "";
-            inline for (opts.options) |opt| {
-                const selected = if (std.mem.eql(u8, current, opt)) " selected" else "";
-                try writer.print("    <option value=\"{s}\"{s}>{s}</option>\n", .{ opt, selected, opt });
-            }
-
-            try writer.writeAll("  </select>\n</div>\n");
+            try views.components.fields.select.Select(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .current = ctx.value orelse opts.default_value orelse "",
+                .required = ctx.required,
+                .options = opts.options,
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 
@@ -84,17 +74,11 @@ pub fn Boolean(comptime name: []const u8, comptime opts: struct {
             else
                 opts.default_value;
 
-            try def.writeFieldLabelRow(writer, ctx, .span);
-            try writer.print(
-                \\  <label class="form-check">
-                \\    <input type="checkbox" class="form-check-input" name="{s}" value="true"{s} />
-                \\    <span class="form-check-label">{s}</span>
-                \\  </label>
-                \\</div>
-            , .{
-                ctx.name,
-                if (checked) " checked" else "",
-                ctx.display_name,
+            try views.components.fields.checkbox.Checkbox(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .checked = checked,
+                .errors = ctx.errors orelse &.{},
             });
         }
     };
@@ -126,13 +110,14 @@ pub fn DateTime(comptime name: []const u8, comptime opts: struct {
         }
 
         pub fn render(writer: std.io.AnyWriter, ctx: RenderContext) !void {
-            try def.writeFieldLabelRow(writer, ctx, .label_with_for);
-            try writer.print(
-                "  <input type=\"datetime-local\" class=\"form-control\" id=\"{s}\" name=\"{s}\" value=\"{s}\"",
-                .{ ctx.name, ctx.name, ctx.value orelse "" },
-            );
-            if (ctx.required) try writer.writeAll(" required");
-            try writer.writeAll(" />\n</div>\n");
+            try views.components.fields.input.Input(writer, .{
+                .name = ctx.name,
+                .display_name = ctx.display_name,
+                .value = ctx.value orelse "",
+                .required = ctx.required,
+                .input_type = "datetime-local",
+                .errors = ctx.errors orelse &.{},
+            });
         }
     };
 
