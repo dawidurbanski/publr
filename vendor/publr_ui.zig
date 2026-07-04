@@ -67,6 +67,33 @@ pub fn render(writer: anytype, value: anytype) !void {
     }
 }
 
+/// Emit a conditionally-present HTML attribute — the runtime side of the
+/// `name?={expr}` syntax. Dispatches on the value's type at comptime:
+///   - `bool`      → ` name` (bare presence attribute) when true, else nothing.
+///                   For HTML boolean attrs (required/checked/disabled/…).
+///   - optional `?T` → ` name="<value>"` when non-null, else nothing.
+///                   For attrs that vanish when unset (maxlength/min/step/…).
+///   - anything else → ` name="<value>"` (always present) — a degenerate but
+///                   safe fallback so `?=` never surprises with wrong output.
+/// The leading space is emitted here (callers bake no space before it), so the
+/// attribute slots cleanly after the tag name / prior attributes. Values are
+/// HTML-escaped via `render`, matching a normal `name={expr}` attribute.
+pub fn attrCond(writer: anytype, comptime name: []const u8, value: anytype) !void {
+    switch (@typeInfo(@TypeOf(value))) {
+        .bool => if (value) try writer.writeAll(" " ++ name),
+        .optional => if (value) |inner| {
+            try writer.writeAll(" " ++ name ++ "=\"");
+            try render(writer, inner);
+            try writer.writeAll("\"");
+        },
+        else => {
+            try writer.writeAll(" " ++ name ++ "=\"");
+            try render(writer, value);
+            try writer.writeAll("\"");
+        },
+    }
+}
+
 /// Compute return type for withDefaults: if all Defaults fields exist in Raw,
 /// return Raw directly (preserving original types); otherwise return Defaults.
 fn WithDefaultsReturn(comptime Defaults: type, comptime Raw: type) type {
@@ -188,14 +215,15 @@ fn isTagStart(c: u8) bool {
     return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z');
 }
 
-/// Insert `attrs` (` name="value"` run) into the first opening tag of `html`,
-/// before its closing `>` (or `/>`). Writes `html` unchanged if none found.
-fn spliceAttrsIntoRoot(writer: anytype, html: []const u8, attrs: []const u8) !void {
+/// Byte offset in `html` where extra attributes can be inserted — just before
+/// the first opening tag's closing `>` (or the `/` of `/>`). Null if no opening
+/// tag is found. Quote-aware so `>` inside an attribute value doesn't fool it.
+fn rootAttrInsertPos(html: []const u8) ?usize {
     var i: usize = 0;
     while (i < html.len) : (i += 1) {
         if (html[i] == '<' and i + 1 < html.len and isTagStart(html[i + 1])) break;
     }
-    if (i >= html.len) return writer.writeAll(html);
+    if (i >= html.len) return null;
     var j = i + 1;
     var q: u8 = 0;
     while (j < html.len) : (j += 1) {
@@ -206,11 +234,36 @@ fn spliceAttrsIntoRoot(writer: anytype, html: []const u8, attrs: []const u8) !vo
             q = c;
         } else if (c == '>') break;
     }
-    if (j >= html.len) return writer.writeAll(html);
-    const at = if (j > 0 and html[j - 1] == '/') j - 1 else j;
+    if (j >= html.len) return null;
+    return if (j > 0 and html[j - 1] == '/') j - 1 else j;
+}
+
+/// Insert `attrs` (` name="value"` run) into the first opening tag of `html`,
+/// before its closing `>` (or `/>`). Writes `html` unchanged if none found.
+fn spliceAttrsIntoRoot(writer: anytype, html: []const u8, attrs: []const u8) !void {
+    const at = rootAttrInsertPos(html) orelse return writer.writeAll(html);
     try writer.writeAll(html[0..at]);
     try writer.writeAll(attrs);
     try writer.writeAll(html[at..]);
+}
+
+/// asChild slot: return `child` HTML with `attrs` (a ` name="value"` run)
+/// spliced onto its root element's opening tag. Lets a wrapper component (a
+/// menu Trigger, tooltip anchor, …) merge its own behavior attributes —
+/// `data-p-*` directives, `aria-*` — straight onto the caller's child element,
+/// with no wrapper node (the Radix `asChild` pattern). The string form of the
+/// splice `forward` already does for self-forwarding; returns a value so it can
+/// be used in `{@raw zsx.slot(children, attrs)}` positions. Allocates
+/// short-lived from page_allocator like `concatRt` (freed on arena reset).
+/// Returns `child` unchanged when there are no attrs or no root tag.
+pub fn slot(child: []const u8, attrs: []const u8) []const u8 {
+    if (attrs.len == 0) return child;
+    const at = rootAttrInsertPos(child) orelse return child;
+    const buf = std.heap.page_allocator.alloc(u8, child.len + attrs.len) catch return child;
+    @memcpy(buf[0..at], child[0..at]);
+    @memcpy(buf[at .. at + attrs.len], attrs);
+    @memcpy(buf[at + attrs.len ..], child[at..]);
+    return buf;
 }
 
 };
@@ -1740,6 +1793,8 @@ pub const button = struct {
 ///   - destructive: solid destructive (alias for primary destructive)
 ///   - secondary_destructive: surface with destructive ring
 ///   - tertiary_destructive: transparent, destructive on hover
+///   - unstyled: no visual chrome — keeps button semantics + icon/label
+///     slots + disabled behavior, all appearance driven by `class`
 ///
 /// Size variants: sm, md, lg, xl. Padding, gap, and text size scale per UI
 /// reference; icons are size-5 across all sizes.
@@ -1764,8 +1819,9 @@ pub const Hierarchy = enum {
     destructive,
     secondary_destructive,
     tertiary_destructive,
+    unstyled,
 };
-pub const Size = enum { sm, md, lg, xl };
+pub const Size = enum { xs, sm, md, lg, xl, xxl };
 pub const Type = enum { button, submit, reset };
 pub const ButtonProps = struct {
     label: []const u8 = "",
@@ -1790,6 +1846,7 @@ const props = runtime.withDefaults(ButtonProps, _props);
         or props.hierarchy == .secondary_destructive
         or props.hierarchy == .tertiary_destructive;
     const is_link = props.hierarchy == .link or props.hierarchy == .link_gray;
+    const is_unstyled = props.hierarchy == .unstyled;
     const has_label = props.label.len > 0;
     const is_icon_only = !has_label and (props.icon != null or props.icon_trailing != null);
     const is_disabled = props.disabled or props.loading;
@@ -1797,27 +1854,48 @@ const props = runtime.withDefaults(ButtonProps, _props);
     const has_id = props.id.len > 0;
     const state = if (props.loading) "loading" else "idle";
 
-    const base = "group relative inline-flex h-max cursor-pointer items-center whitespace-nowrap font-semibold transition duration-100 ease-linear focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+    const base = if (is_unstyled)
+        "group inline-flex items-center cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+    else
+        "group relative inline-flex h-max cursor-pointer items-center whitespace-nowrap font-semibold transition duration-100 ease-linear focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-    const justify = if (is_link) "justify-normal" else "justify-center";
+    const justify = if (is_unstyled) "" else if (is_link) "justify-normal" else "justify-center";
 
-    const outline = if (is_destructive) "outline-destructive" else "outline-ring";
+    const outline = if (is_unstyled) "" else if (is_destructive) "outline-destructive" else "outline-ring";
 
-    const size_classes = if (is_link) switch (props.size) {
-        .sm => "gap-1 text-sm rounded",
-        .md => "gap-1 text-sm rounded",
-        .lg => "gap-1.5 text-md rounded",
-        .xl => "gap-1.5 text-md rounded",
+    // Font size scales monotonically across every size — applied to all
+    // variants including `unstyled`, so `size` always changes the type scale.
+    const text_size = switch (props.size) {
+        .xs => "text-xs",
+        .sm => "text-sm",
+        .md => "text-base",
+        .lg => "text-lg",
+        .xl => "text-xl",
+        .xxl => "text-2xl",
+    };
+
+    // Padding / gap / radius chrome — omitted for `unstyled` (appearance-free).
+    const size_classes = if (is_unstyled) "" else if (is_link) switch (props.size) {
+        .xs => "gap-1 rounded",
+        .sm => "gap-1 rounded",
+        .md => "gap-1 rounded",
+        .lg => "gap-1.5 rounded",
+        .xl => "gap-1.5 rounded",
+        .xxl => "gap-2 rounded",
     } else if (is_icon_only) switch (props.size) {
-        .sm => "rounded-lg p-2 text-sm",
-        .md => "rounded-lg p-2.5 text-sm",
-        .lg => "rounded-lg p-3 text-md",
-        .xl => "rounded-lg p-3.5 text-md",
+        .xs => "rounded-md p-1.5",
+        .sm => "rounded-lg p-2",
+        .md => "rounded-lg p-2.5",
+        .lg => "rounded-lg p-3",
+        .xl => "rounded-lg p-3.5",
+        .xxl => "rounded-xl p-4",
     } else switch (props.size) {
-        .sm => "gap-1 rounded-lg px-3 py-2 text-sm",
-        .md => "gap-1 rounded-lg px-3.5 py-2.5 text-sm",
-        .lg => "gap-1.5 rounded-lg px-4 py-2.5 text-md",
-        .xl => "gap-1.5 rounded-lg px-4.5 py-3 text-md",
+        .xs => "gap-1 rounded-md px-2.5 py-1.5",
+        .sm => "gap-1 rounded-lg px-3 py-2",
+        .md => "gap-1 rounded-lg px-3.5 py-2.5",
+        .lg => "gap-1.5 rounded-lg px-4 py-2.5",
+        .xl => "gap-1.5 rounded-lg px-4.5 py-3",
+        .xxl => "gap-2 rounded-xl px-5 py-3.5",
     };
 
     const hierarchy_classes = switch (props.hierarchy) {
@@ -1843,19 +1921,22 @@ const props = runtime.withDefaults(ButtonProps, _props);
             "hover:bg-destructive/10 data-[loading=true]:bg-destructive/10",
         .tertiary_destructive =>
             "text-destructive hover:bg-destructive/10 data-[loading=true]:bg-destructive/10",
+        .unstyled => "",
     };
 
     const icon_class = switch (props.hierarchy) {
         .primary, .destructive =>
-            "size-5 shrink-0 text-primary-foreground/70 group-hover:text-primary-foreground/80",
+            "size-5 shrink-0 group-hover:text-primary-foreground/80",
         .secondary, .tertiary =>
-            "size-5 shrink-0 text-muted-foreground group-hover:text-foreground",
+            "size-5 shrink-0 group-hover:text-foreground",
         .secondary_destructive, .tertiary_destructive =>
-            "size-5 shrink-0 text-destructive",
+            "size-5 shrink-0",
         .link =>
-            "size-5 shrink-0 text-primary group-hover:text-primary/80",
+            "size-5 shrink-0 group-hover:text-primary/80",
         .link_gray =>
-            "size-5 shrink-0 text-muted-foreground group-hover:text-foreground",
+            "size-5 shrink-0 group-hover:text-foreground",
+        .unstyled =>
+            "size-5 shrink-0",
     };
 
     const text_class = switch (props.hierarchy) {
@@ -1863,6 +1944,7 @@ const props = runtime.withDefaults(ButtonProps, _props);
             "px-0.5 underline decoration-transparent underline-offset-4 group-hover:decoration-current empty:hidden",
         .link_gray =>
             "px-0.5 underline decoration-transparent underline-offset-4 group-hover:decoration-current empty:hidden",
+        .unstyled => "empty:hidden",
         else => "px-0.5 empty:hidden",
     };
 
@@ -1888,6 +1970,8 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(outline);
         try writer.writeAll(" ");
         try writer.writeAll(size_classes);
+        try writer.writeAll(" ");
+        try writer.writeAll(text_size);
         try writer.writeAll(" ");
         try writer.writeAll(hierarchy_classes);
         try writer.writeAll(" ");
@@ -1934,6 +2018,8 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(outline);
         try writer.writeAll(" ");
         try writer.writeAll(size_classes);
+        try writer.writeAll(" ");
+        try writer.writeAll(text_size);
         try writer.writeAll(" ");
         try writer.writeAll(hierarchy_classes);
         try writer.writeAll(" ");
@@ -1982,6 +2068,8 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(outline);
         try writer.writeAll(" ");
         try writer.writeAll(size_classes);
+        try writer.writeAll(" ");
+        try writer.writeAll(text_size);
         try writer.writeAll(" ");
         try writer.writeAll(hierarchy_classes);
         try writer.writeAll(" ");
@@ -2574,7 +2662,7 @@ const props = runtime.withDefaults(CheckboxProps, _props);
     const is_checked = props.checked == .checked;
     const is_indeterminate = props.checked == .indeterminate;
     if (props.disabled and is_checked) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" data-publr-state=\"");
+        try writer.writeAll("<label data-p-store=\"local:checkbox\" data-publr-component=\"checkbox\" data-p-on=\"change:sync\" data-publr-state=\"");
         try runtime.render(writer, state);
         try writer.writeAll("\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50 ");
         try writer.writeAll(props.class);
@@ -2608,7 +2696,7 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         }
         try writer.writeAll("\n</label>");
     } else if (props.disabled and is_indeterminate) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" data-publr-state=\"");
+        try writer.writeAll("<label data-p-store=\"local:checkbox\" data-publr-component=\"checkbox\" data-p-on=\"change:sync\" data-publr-state=\"");
         try runtime.render(writer, state);
         try writer.writeAll("\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50 ");
         try writer.writeAll(props.class);
@@ -2640,7 +2728,7 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         }
         try writer.writeAll("\n</label>");
     } else if (props.disabled) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" data-publr-state=\"");
+        try writer.writeAll("<label data-p-store=\"local:checkbox\" data-publr-component=\"checkbox\" data-p-on=\"change:sync\" data-publr-state=\"");
         try runtime.render(writer, state);
         try writer.writeAll("\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50 ");
         try writer.writeAll(props.class);
@@ -2672,7 +2760,7 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         }
         try writer.writeAll("\n</label>");
     } else if (is_checked) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" data-publr-state=\"");
+        try writer.writeAll("<label data-p-store=\"local:checkbox\" data-publr-component=\"checkbox\" data-p-on=\"change:sync\" data-publr-state=\"");
         try runtime.render(writer, state);
         try writer.writeAll("\" class=\"flex items-start gap-2 cursor-pointer ");
         try writer.writeAll(props.class);
@@ -2704,7 +2792,7 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         }
         try writer.writeAll("\n</label>");
     } else if (is_indeterminate) {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" data-publr-state=\"");
+        try writer.writeAll("<label data-p-store=\"local:checkbox\" data-publr-component=\"checkbox\" data-p-on=\"change:sync\" data-publr-state=\"");
         try runtime.render(writer, state);
         try writer.writeAll("\" class=\"flex items-start gap-2 cursor-pointer ");
         try writer.writeAll(props.class);
@@ -2734,7 +2822,7 @@ const props = runtime.withDefaults(CheckboxProps, _props);
         }
         try writer.writeAll("\n</label>");
     } else {
-        try writer.writeAll("<label data-publr-component=\"checkbox\" data-publr-state=\"");
+        try writer.writeAll("<label data-p-store=\"local:checkbox\" data-publr-component=\"checkbox\" data-p-on=\"change:sync\" data-publr-state=\"");
         try runtime.render(writer, state);
         try writer.writeAll("\" class=\"flex items-start gap-2 cursor-pointer ");
         try writer.writeAll(props.class);
@@ -2864,7 +2952,7 @@ pub fn Dialog(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(DialogProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogProps, _props);
-    try writer.writeAll("<div data-publr-component=\"dialog\" data-publr-state=\"closed\" data-publr-id=\"");
+    try writer.writeAll("<div data-p-store=\"local:dialog\" data-publr-component=\"dialog\" data-publr-state=\"closed\" data-publr-id=\"");
     try runtime.render(writer, props.id);
     try writer.writeAll("\" data-publr-dismissable=\"");
     try runtime.render(writer, if (props.dismissable) "true" else "false");
@@ -2877,6 +2965,10 @@ const props = runtime.withDefaults(DialogProps, _props);
     }.b);
 }
 
+// Trigger is a non-button wrapper (a `<button>` here would nest inside the
+// composed `<Button>` — invalid HTML the browser reparents, orphaning the real
+// control). The click bubbles from the child Button to this span's handler; the
+// span carries aria-expanded (mirrors the Popover trigger pattern).
 pub const DialogTriggerProps = struct {
     children: []const u8 = "",
 };
@@ -2884,9 +2976,9 @@ pub fn DialogTrigger(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(DialogTriggerProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogTriggerProps, _props);
-    try writer.writeAll("<button class=\"h-full\" data-publr-part=\"trigger\" aria-expanded=\"false\">\n");
+    try writer.writeAll("<span class=\"inline-block\" data-publr-part=\"trigger\" aria-expanded=\"false\" aria-haspopup=\"dialog\" data-p-on=\"click:open\">\n");
     try writer.writeAll(props.children);
-    try writer.writeAll("\n</button>");
+    try writer.writeAll("\n</span>");
         }
     }.b);
 }
@@ -2899,7 +2991,7 @@ pub fn DialogOverlay(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(DialogOverlayProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogOverlayProps, _props);
-    try writer.writeAll("<div data-publr-part=\"overlay\" class=\"fixed inset-0 z-50 flex items-center justify-center bg-black/50 opacity-0 pointer-events-none transition-opacity group-data-[publr-state=open]:opacity-100 group-data-[publr-state=open]:pointer-events-auto ");
+    try writer.writeAll("<div data-publr-part=\"overlay\" data-p-on=\"click:overlayClick\" class=\"fixed inset-0 z-50 flex items-center justify-center bg-black/50 opacity-0 pointer-events-none transition-opacity group-data-[publr-state=open]:opacity-100 group-data-[publr-state=open]:pointer-events-auto ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -2932,7 +3024,7 @@ pub fn DialogClose(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(DialogCloseProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DialogCloseProps, _props);
-    try writer.writeAll("<span data-publr-part=\"close\">\n");
+    try writer.writeAll("<span data-publr-part=\"close\" data-p-on=\"click:close\">\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n</span>");
         }
@@ -3063,7 +3155,7 @@ const props = runtime.withDefaults(DialogDemoProps, _props);
                         try Button(_children_w_3, .{ .hierarchy = .secondary,  .label = "Cancel" });
                         try DialogClose(_children_w_2, .{ .children = _children_buf_3.items });
                     }
-                    try _children_w_2.writeAll("\n<span data-publr-part=\"confirm\">");
+                    try _children_w_2.writeAll("\n<span data-publr-part=\"confirm\" data-p-on=\"click:close\">");
                     try Button(_children_w_2, .{ .hierarchy = .primary,  .label = "Save" });
                     try _children_w_2.writeAll("</span>\n</div>\n");
                     try DialogContent(_children_w_1, .{ .children = _children_buf_2.items });
@@ -3135,7 +3227,7 @@ const props = runtime.withDefaults(DialogDemoProps, _props);
                         try Button(_children_w_3, .{ .hierarchy = .secondary,  .label = "Cancel" });
                         try DialogClose(_children_w_2, .{ .children = _children_buf_3.items });
                     }
-                    try _children_w_2.writeAll("\n<span data-publr-part=\"confirm\">");
+                    try _children_w_2.writeAll("\n<span data-publr-part=\"confirm\" data-p-on=\"click:close\">");
                     try Button(_children_w_2, .{ .hierarchy = .destructive,  .label = "Delete" });
                     try _children_w_2.writeAll("</span>\n</div>\n");
                     try DialogContent(_children_w_1, .{ .children = _children_buf_2.items });
@@ -3197,7 +3289,7 @@ const props = runtime.withDefaults(DialogDemoProps, _props);
                         try _children_w_3.writeAll("Please read the terms and conditions before continuing.");
                         try DialogDescription(_children_w_2, .{ .children = _children_buf_3.items });
                     }
-                    try _children_w_2.writeAll("\n<div class=\"flex justify-end gap-3 mt-6\">\n<span data-publr-part=\"confirm\">");
+                    try _children_w_2.writeAll("\n<div class=\"flex justify-end gap-3 mt-6\">\n<span data-publr-part=\"confirm\" data-p-on=\"click:close\">");
                     try Button(_children_w_2, .{ .hierarchy = .primary,  .label = "I understand" });
                     try _children_w_2.writeAll("</span>\n</div>\n");
                     try DialogContent(_children_w_1, .{ .children = _children_buf_2.items });
@@ -3262,16 +3354,39 @@ const props = runtime.withDefaults(DropdownMenuProps, _props);
     }.b);
 }
 
+// PublrJS wire form of the trigger directives used in the default branch below
+// (`onClick`→data-p-on, `:aria-expanded`→data-p-bind). In asChild mode these are
+// spliced straight onto the caller's child via `runtime.slot`. Kept honest by the
+// dropdown spec: if the transpiler's wire format ever drifts from this literal,
+// the asChild demo stops opening and the behavior test fails.
+//
+// NOTE: the data-p-on handler separator is written `\x3b` (an escaped ';') on
+// purpose — the ZSX transpiler's const passthrough splits statements on a raw
+// ';' even inside a string literal, so a literal ';' here would truncate the
+// value. Zig decodes `\x3b` back to ';' at compile time.
+pub const trigger_fwd_attrs = " data-p-on=\"click:toggle\x3bkeydown.down:openMenu\" data-p-bind=\"aria-expanded:state.open\" aria-haspopup=\"menu\"";
 pub const DropdownMenuTriggerProps = struct {
+    as_child: bool = false,
     children: []const u8 = "",
 };
 pub fn DropdownMenuTrigger(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(DropdownMenuTriggerProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuTriggerProps, _props);
-    try writer.writeAll("<button class=\"h-full\" data-publr-part=\"trigger\" aria-haspopup=\"menu\" data-p-bind=\"aria-expanded:open\" data-p-on=\"click:toggle;keydown.down:openMenu\">\n");
-    try writer.writeAll(props.children);
-    try writer.writeAll("\n</button>");
+    // Radix `asChild`: when set, merge the trigger's behavior attributes straight
+    // onto the caller's child element (a <Button>, an avatar button, …) with no
+    // wrapper of our own — the child stays the real, focusable control. Otherwise
+    // render a default `<div class="inline-block">` element carrying the handlers
+    // (a <div> holds any child with no button-in-button parse break). Either way
+    // the store anchors the menu to the root element and click/keydown bubble to
+    // the handler-bearing node.
+    if (props.as_child) {
+        try writer.writeAll(runtime.slot(props.children, trigger_fwd_attrs));
+    } else {
+        try writer.writeAll("<div class=\"inline-block\" aria-haspopup=\"menu\" data-p-bind=\"aria-expanded:state.open\" data-p-on=\"click:toggle;keydown.down:openMenu\">\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n</div>");
+    }
         }
     }.b);
 }
@@ -3284,7 +3399,7 @@ pub fn DropdownMenuContent(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(DropdownMenuContentProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(DropdownMenuContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" data-p-show=\"open\" role=\"menu\" data-p-on=\"keydown:navKeys;click:itemClick\" data-p-portal=\"");
+    try writer.writeAll("<div data-publr-part=\"content\" data-p-show=\"state.open\" role=\"menu\" data-p-on=\"keydown:navKeys;click:itemClick\" data-p-portal=\"");
     try runtime.render(writer, true);
     try writer.writeAll("\" class=\"hidden min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ");
     try writer.writeAll(props.class);
@@ -3479,7 +3594,7 @@ const props = runtime.withDefaults(DropdownMenuSeparatorProps, _props);
 
 // ── Gallery Demo ────────────────────────────────────
 pub const DropdownDemoProps = struct {
-    demo: enum { basic, with_icons, destructive } = .basic,
+    demo: enum { basic, with_icons, destructive, as_child } = .basic,
 };
 pub fn DropdownDemo(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(DropdownDemoProps, __fw, __fp, struct {
@@ -3632,7 +3747,7 @@ const props = runtime.withDefaults(DropdownDemoProps, _props);
             try _children_w_0.writeAll("\n");
             try DropdownMenu(writer, .{ .children = _children_buf_0.items });
         }
-    } else {
+    } else if (props.demo == .destructive) {
         {
             var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
             const _children_alloc_0 = @import("std").heap.page_allocator;
@@ -3702,6 +3817,80 @@ const props = runtime.withDefaults(DropdownDemoProps, _props);
                     try Icon(_children_w_2, .{ .name = .trash,  .size = 16,  .class = "" });
                     try _children_w_2.writeAll(" Delete");
                     try DropdownMenuItem(_children_w_1, .{ .variant = .destructive,  .shortcut = "⌫", .children = _children_buf_2.items });
+                }
+                try _children_w_1.writeAll("\n");
+                try DropdownMenuContent(_children_w_0, .{ .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            try DropdownMenu(writer, .{ .children = _children_buf_0.items });
+        }
+    } else {
+        // asChild: the Button IS the trigger — the handlers merge onto it, no
+        // wrapper element of our own.
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
+            _ = &_children_w_0;
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n");
+                try Button(_children_w_1, .{ .hierarchy = .secondary,  .label = "Actions",  .icon = .chevron_down,  .size = .sm });
+                try _children_w_1.writeAll("\n");
+                try DropdownMenuTrigger(_children_w_0, .{ .as_child = true, .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
+                    _ = &_children_w_2;
+                    try _children_w_2.writeAll("Actions");
+                    try DropdownMenuLabel(_children_w_1, .{ .children = _children_buf_2.items });
+                }
+                try _children_w_1.writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
+                    _ = &_children_w_2;
+                    try _children_w_2.writeAll("Edit");
+                    try DropdownMenuItem(_children_w_1, .{ .children = _children_buf_2.items });
+                }
+                try _children_w_1.writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
+                    _ = &_children_w_2;
+                    try _children_w_2.writeAll("Duplicate");
+                    try DropdownMenuItem(_children_w_1, .{ .children = _children_buf_2.items });
+                }
+                try _children_w_1.writeAll("\n");
+                {
+                    var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
+                    const _children_alloc_2 = @import("std").heap.page_allocator;
+                    defer _children_buf_2.deinit(_children_alloc_2);
+                    const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
+                    _ = &_children_w_2;
+                    try _children_w_2.writeAll("Archive");
+                    try DropdownMenuItem(_children_w_1, .{ .disabled = true, .children = _children_buf_2.items });
                 }
                 try _children_w_1.writeAll("\n");
                 try DropdownMenuContent(_children_w_0, .{ .children = _children_buf_1.items });
@@ -5923,6 +6112,7 @@ pub const popover = struct {
 ///       </PopoverContent>
 ///   </Popover>
 pub const Button = root.button.Button;
+pub const Icon = root.icon.Icon;
 // ── Sub-components ──────────────────────────────────
 pub const PopoverProps = struct {
     modal: bool = false,
@@ -5933,9 +6123,9 @@ pub fn Popover(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(PopoverProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverProps, _props);
-    try writer.writeAll("<div data-publr-component=\"popover\" data-publr-state=\"closed\" data-publr-modal=\"");
+    try writer.writeAll("<div data-p-store=\"local:popover\" data-publr-component=\"popover\" data-publr-modal=\"");
     try runtime.render(writer, props.modal);
-    try writer.writeAll("\" class=\"group relative inline-block ");
+    try writer.writeAll("\" class=\"relative inline-block ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -5951,7 +6141,7 @@ pub fn PopoverTrigger(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(PopoverTriggerProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverTriggerProps, _props);
-    try writer.writeAll("<span data-publr-part=\"trigger\" aria-expanded=\"false\" aria-haspopup=\"dialog\">\n");
+    try writer.writeAll("<span data-publr-part=\"trigger\" aria-haspopup=\"dialog\" data-p-bind=\"aria-expanded:state.open\" data-p-on=\"click:toggle\">\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n</span>");
         }
@@ -5973,7 +6163,9 @@ pub fn PopoverContent(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(PopoverContentProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" role=\"dialog\" data-publr-side=\"");
+    try writer.writeAll("<div data-publr-part=\"content\" data-p-show=\"state.open\" role=\"dialog\" data-p-portal=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\" data-publr-side=\"");
     try runtime.render(writer, props.side);
     try writer.writeAll("\" data-publr-align=\"");
     try runtime.render(writer, props.align_to);
@@ -5983,7 +6175,7 @@ const props = runtime.withDefaults(PopoverContentProps, _props);
     try runtime.render(writer, props.align_offset);
     try writer.writeAll("\" data-publr-avoid-collisions=\"");
     try runtime.render(writer, props.avoid_collisions);
-    try writer.writeAll("\" class=\"hidden group-data-[publr-state=open]:block w-72 rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md ");
+    try writer.writeAll("\" class=\"hidden w-72 rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -6051,7 +6243,7 @@ pub fn PopoverClose(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(PopoverCloseProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(PopoverCloseProps, _props);
-    try writer.writeAll("<button data-publr-part=\"close\" aria-label=\"Close\" class=\"text-muted-foreground hover:text-foreground transition-colors ");
+    try writer.writeAll("<button data-publr-part=\"close\" type=\"button\" aria-label=\"Close\" data-p-on=\"click:close\" class=\"text-muted-foreground hover:text-foreground transition-colors ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -6202,7 +6394,17 @@ const props = runtime.withDefaults(PopoverDemoProps, _props);
                         try PopoverTitle(_children_w_2, .{ .children = _children_buf_3.items });
                     }
                     try _children_w_2.writeAll("\n");
-                    try PopoverHeader(_children_w_1, .{ .children = _children_buf_2.items });
+                    {
+                        var _children_buf_3: @import("std").ArrayListUnmanaged(u8) = .{};
+                        const _children_alloc_3 = @import("std").heap.page_allocator;
+                        defer _children_buf_3.deinit(_children_alloc_3);
+                        const _children_w_3 = _children_buf_3.writer(_children_alloc_3);
+                        _ = &_children_w_3;
+                        try Icon(_children_w_3, .{ .name = .x_close,  .size = 16,  .class = "" });
+                        try PopoverClose(_children_w_2, .{ .children = _children_buf_3.items });
+                    }
+                    try _children_w_2.writeAll("\n");
+                    try PopoverHeader(_children_w_1, .{ .class = "flex items-center justify-between", .children = _children_buf_2.items });
                 }
                 try _children_w_1.writeAll("\n");
                 {
@@ -6262,7 +6464,7 @@ const props = runtime.withDefaults(RadioGroupProps, _props);
 
     const has_legend = props.legend.len > 0;
     if (props.disabled) {
-        try writer.writeAll("<fieldset data-publr-component=\"radio-group\" data-publr-name=\"");
+        try writer.writeAll("<fieldset data-p-store=\"local:radio-group\" data-publr-component=\"radio-group\" data-p-on=\"change:sync\" data-publr-name=\"");
         try runtime.render(writer, props.name);
         try writer.writeAll("\" class=\"space-y-3 ");
         try writer.writeAll(props.class);
@@ -6280,7 +6482,7 @@ const props = runtime.withDefaults(RadioGroupProps, _props);
         try writer.writeAll(props.children);
         try writer.writeAll("\n</div>\n</fieldset>");
     } else {
-        try writer.writeAll("<fieldset data-publr-component=\"radio-group\" data-publr-name=\"");
+        try writer.writeAll("<fieldset data-p-store=\"local:radio-group\" data-publr-component=\"radio-group\" data-p-on=\"change:sync\" data-publr-name=\"");
         try runtime.render(writer, props.name);
         try writer.writeAll("\" class=\"space-y-3 ");
         try writer.writeAll(props.class);
@@ -6481,9 +6683,9 @@ pub fn Select(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(SelectProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectProps, _props);
-    try writer.writeAll("<div data-publr-component=\"select\" data-publr-state=\"closed\" data-publr-default-value=\"");
+    try writer.writeAll("<div data-p-store=\"local:select\" data-publr-component=\"select\" data-publr-default-value=\"");
     try runtime.render(writer, props.default_value);
-    try writer.writeAll("\" class=\"inline-block ");
+    try writer.writeAll("\" class=\"relative inline-block ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n<input type=\"hidden\" data-publr-part=\"value\" name=\"");
     try runtime.render(writer, props.name);
@@ -6519,7 +6721,7 @@ const props = runtime.withDefaults(SelectTriggerProps, _props);
         try Icon(writer, .{ .name = .chevron_down,  .size = 14,  .class = "text-muted-foreground shrink-0" });
         try writer.writeAll("\n</button>");
     } else {
-        try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" aria-expanded=\"false\" class=\"");
+        try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" data-p-bind=\"aria-expanded:state.open\" data-p-on=\"click:toggle;keydown.down:openList\" class=\"");
         try writer.writeAll(base);
         try writer.writeAll(" ");
         try writer.writeAll(props.class);
@@ -6558,7 +6760,9 @@ pub fn SelectContent(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(SelectContentProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" role=\"listbox\" class=\"hidden min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ");
+    try writer.writeAll("<div data-publr-part=\"content\" data-p-show=\"state.open\" role=\"listbox\" data-p-on=\"keydown:navKeys;click:optionClick\" data-p-portal=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\" class=\"hidden min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -7664,7 +7868,7 @@ const props = runtime.withDefaults(SwitchProps, _props);
     else
         "inline-flex items-center gap-2 cursor-pointer";
     if (props.disabled and props.checked) {
-        try writer.writeAll("<label data-publr-component=\"switch\" data-publr-size=\"");
+        try writer.writeAll("<label data-p-store=\"local:switch\" data-publr-component=\"switch\" data-p-on=\"change:sync\" data-publr-size=\"");
         try runtime.render(writer, props.size);
         try writer.writeAll("\" data-publr-state=\"");
         try runtime.render(writer, state);
@@ -7690,7 +7894,7 @@ const props = runtime.withDefaults(SwitchProps, _props);
         try runtime.render(writer, props.label);
         try writer.writeAll("</span>\n</label>");
     } else if (props.disabled) {
-        try writer.writeAll("<label data-publr-component=\"switch\" data-publr-size=\"");
+        try writer.writeAll("<label data-p-store=\"local:switch\" data-publr-component=\"switch\" data-p-on=\"change:sync\" data-publr-size=\"");
         try runtime.render(writer, props.size);
         try writer.writeAll("\" data-publr-state=\"");
         try runtime.render(writer, state);
@@ -7714,7 +7918,7 @@ const props = runtime.withDefaults(SwitchProps, _props);
         try runtime.render(writer, props.label);
         try writer.writeAll("</span>\n</label>");
     } else if (props.checked) {
-        try writer.writeAll("<label data-publr-component=\"switch\" data-publr-size=\"");
+        try writer.writeAll("<label data-p-store=\"local:switch\" data-publr-component=\"switch\" data-p-on=\"change:sync\" data-publr-size=\"");
         try runtime.render(writer, props.size);
         try writer.writeAll("\" data-publr-state=\"");
         try runtime.render(writer, state);
@@ -7738,7 +7942,7 @@ const props = runtime.withDefaults(SwitchProps, _props);
         try runtime.render(writer, props.label);
         try writer.writeAll("</span>\n</label>");
     } else {
-        try writer.writeAll("<label data-publr-component=\"switch\" data-publr-size=\"");
+        try writer.writeAll("<label data-p-store=\"local:switch\" data-publr-component=\"switch\" data-p-on=\"change:sync\" data-publr-size=\"");
         try runtime.render(writer, props.size);
         try writer.writeAll("\" data-publr-state=\"");
         try runtime.render(writer, state);
@@ -8571,7 +8775,7 @@ pub fn Tabs(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TabsProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TabsProps, _props);
-    try writer.writeAll("<div data-publr-component=\"tabs\" data-publr-default-value=\"");
+    try writer.writeAll("<div data-p-store=\"local:tabs\" data-publr-component=\"tabs\" data-publr-default-value=\"");
     try runtime.render(writer, props.default_value);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -8594,7 +8798,7 @@ const props = runtime.withDefaults(TabsListProps, _props);
         "inline-flex items-center gap-0 border-b border-border"
     else
         "inline-flex items-center gap-1 rounded-lg bg-muted p-1";
-    try writer.writeAll("<div data-publr-part=\"list\" role=\"tablist\" data-publr-variant=\"");
+    try writer.writeAll("<div data-publr-part=\"list\" role=\"tablist\" data-p-on=\"click:tabClick;keydown:navKeys\" data-publr-variant=\"");
     try runtime.render(writer, props.variant);
     try writer.writeAll("\" class=\"");
     try writer.writeAll(list_class);
@@ -9019,7 +9223,7 @@ const props = runtime.withDefaults(ToastProps, _props);
         .@"error" => "border-error/30",
         .warning => "border-warning/30",
     };
-    try writer.writeAll("<div data-publr-component=\"toast\" data-publr-variant=\"");
+    try writer.writeAll("<div data-p-store=\"local:toast\" data-publr-component=\"toast\" data-publr-variant=\"");
     try runtime.render(writer, props.variant);
     try writer.writeAll("\" class=\"pointer-events-auto ");
     try writer.writeAll(props.class);
@@ -9042,7 +9246,7 @@ const props = runtime.withDefaults(ToastProps, _props);
         try runtime.render(_children_w_0, props.message);
         try _children_w_0.writeAll("</p>\n");
         if (props.show_close) {
-            try _children_w_0.writeAll("<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
+            try _children_w_0.writeAll("<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\" data-p-on=\"click:dismiss\">\n");
             try Icon(_children_w_0, .{ .name = .x_close,  .size = 14,  .class = "" });
             try _children_w_0.writeAll("\n</button>");
         }
@@ -9187,7 +9391,7 @@ pub fn Tooltip(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TooltipProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TooltipProps, _props);
-    try writer.writeAll("<div data-publr-component=\"tooltip\" data-publr-state=\"");
+    try writer.writeAll("<div data-p-store=\"local:tooltip\" data-publr-component=\"tooltip\" data-publr-state=\"");
     try runtime.render(writer, if (props.default_open) "open" else "closed");
     try writer.writeAll("\" data-publr-delay=\"");
     try runtime.render(writer, props.delay_duration);
@@ -9209,7 +9413,7 @@ pub fn TooltipTrigger(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TooltipTriggerProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TooltipTriggerProps, _props);
-    try writer.writeAll("<span data-publr-part=\"trigger\" data-state=\"closed\">\n");
+    try writer.writeAll("<span data-publr-part=\"trigger\" data-state=\"closed\" data-p-on=\"mouseenter:show;mouseleave:hide;focusin:show;focusout:hide;keydown.escape:dismiss\">\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n</span>");
         }
@@ -9248,7 +9452,9 @@ pub fn TooltipContent(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TooltipContentProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TooltipContentProps, _props);
-    try writer.writeAll("<div data-publr-part=\"content\" data-state=\"closed\" role=\"tooltip\" data-publr-side=\"");
+    try writer.writeAll("<div data-publr-part=\"content\" data-p-show=\"state.open\" data-state=\"closed\" role=\"tooltip\" data-p-on=\"mouseenter:keepOpen;mouseleave:hide\" data-p-portal=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\" data-publr-side=\"");
     try runtime.render(writer, props.side);
     try writer.writeAll("\" data-publr-align=\"");
     try runtime.render(writer, props.alignment);
@@ -9377,32 +9583,32 @@ pub const css =
 ;
 
 pub const checkbox_js =
-    \\import{r as n,i as a}from"./publr-core.js";n("checkbox",i=>{const e=i.querySelector('input[type="checkbox"]');if(!e)return;e.dataset.publrIndeterminate==="true"&&(e.indeterminate=!0);function r(){const t=e.indeterminate?"indeterminate":e.checked?"checked":"unchecked";i.dataset.publrState=t,e.dataset.publrIndeterminate=t==="indeterminate"?"true":"false",t==="indeterminate"?e.setAttribute("aria-checked","mixed"):e.setAttribute("aria-checked",e.checked?"true":"false")}r(),e.addEventListener("change",r)});a();
+    \\import{Publr as a}from"/static/publr.js";a.store("checkbox",()=>{let r=null,e=null;const n=()=>{if(!r||!e)return;const t=e.indeterminate?"indeterminate":e.checked?"checked":"unchecked";r.dataset.publrState=t,e.dataset.publrIndeterminate=t==="indeterminate"?"true":"false",e.setAttribute("aria-checked",t==="indeterminate"?"mixed":e.checked?"true":"false")};return{actions:{sync:n},setup:({el:t})=>{r=t,e=t.querySelector('input[type="checkbox"]'),(e==null?void 0:e.dataset.publrIndeterminate)==="true"&&(e.indeterminate=!0),n()}}});
     \\
 ;
 
 pub const core_js =
-    \\const a=new Map;function i(t,e){a.set(t,e)}function r(t=document){t.querySelectorAll("[data-publr-component]").forEach(e=>{const o=e.dataset.publrComponent,n=a.get(o);n&&!e._publrInit&&(e._publrInit=!0,n(e))})}document.addEventListener("publr:init",t=>r(t.target));function u(t){return t.dataset.publrState==="open"}function s(t){t.dataset.publrState="open";const e=t.querySelector('[data-publr-part="trigger"]');e&&e.setAttribute("aria-expanded","true")}function d(t){t.dataset.publrState="closed";const e=t.querySelector('[data-publr-part="trigger"]');e&&e.setAttribute("aria-expanded","false"),t._publrOnClose&&(t._publrOnClose(),delete t._publrOnClose)}function c(t){u(t)?d(t):s(t)}i("toggle",t=>{const e=t.querySelector('[data-publr-part="trigger"]');e&&e.addEventListener("click",()=>c(t))});document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>r()):r();export{u as a,d as c,r as i,s as o,i as r};
+    \\const a=new Map;function i(t,e){a.set(t,e)}function r(t=document){t.querySelectorAll("[data-publr-component]").forEach(e=>{const o=e.dataset.publrComponent,n=a.get(o);n&&!e._publrInit&&(e._publrInit=!0,n(e))})}document.addEventListener("publr:init",t=>r(t.target));function u(t){return t.dataset.publrState==="open"}function d(t){t.dataset.publrState="open";const e=t.querySelector('[data-publr-part="trigger"]');e&&e.setAttribute("aria-expanded","true")}function s(t){t.dataset.publrState="closed";const e=t.querySelector('[data-publr-part="trigger"]');e&&e.setAttribute("aria-expanded","false"),t._publrOnClose&&(t._publrOnClose(),delete t._publrOnClose)}function p(t){u(t)?s(t):d(t)}i("toggle",t=>{const e=t.querySelector('[data-publr-part="trigger"]');e&&e.addEventListener("click",()=>p(t))});document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>r()):r();export{r as i,i as r};
     \\
 ;
 
 pub const dialog_js =
-    \\import{r as g,o as m,c as q,i as S}from"./publr-core.js";import{t as v}from"./publr-focus.js";import{o as E}from"./publr-dismiss.js";let k=0;g("dialog",t=>{const s=t.querySelector('[data-publr-part="trigger"]'),c=t.querySelector('[data-publr-part="overlay"]'),a=t.querySelector('[data-publr-part="content"]'),i=t.querySelector('[data-publr-part="close"]'),o=t.querySelector('[data-publr-part="confirm"]'),n=t.querySelector('[data-publr-part="title"]'),u=t.querySelector('[data-publr-part="description"]');if(!s||!c||!a)return;const d=s.querySelector("button")||s,p=(i==null?void 0:i.querySelector("button"))||i,f=(o==null?void 0:o.querySelector("button"))||o,b=t.dataset.publrId||`publr-dialog-${++k}`;t.dataset.publrId=b,n?(n.id=`${b}-title`,a.setAttribute("aria-labelledby",n.id)):a.removeAttribute("aria-labelledby"),u?(u.id=`${b}-description`,a.setAttribute("aria-describedby",u.id)):a.removeAttribute("aria-describedby");let e=null,r=null;function l(){e&&(e(),e=null),r&&(r(),r=null),q(t),d.focus()}d.addEventListener("click",()=>{m(t),e=v(a),r=E(t,l),t._publrOnClose=()=>{e&&(e(),e=null),r&&(r(),r=null),d.focus()}}),p&&p.addEventListener("click",l),f&&f.addEventListener("click",()=>{l()}),c.addEventListener("click",y=>{y.target===c&&t.dataset.publrDismissable!=="false"&&l()})});S();
+    \\import{Publr as b}from"/static/publr.js";import{trapFocus as v}from"/static/publr-focus.js";let S=0;b.store("dialog",()=>{const a=b.reactive({open:!1});let f=null,o=null,s=null,n=null,t=null,u=!0,r=null,l=null;return{state:a,actions:{open:()=>{a.open=!0},close:()=>{a.open=!1},overlayClick:(e,i)=>{i.event.target===n&&u&&(a.open=!1)}},setup:({el:e})=>{if(f=e,o=e.querySelector('[data-publr-part="trigger"]'),n=e.querySelector('[data-publr-part="overlay"]'),t=e.querySelector('[data-publr-part="content"]'),!o||!n||!t)return;s=o.querySelector("button")||o,u=e.dataset.publrDismissable!=="false";const i=e.querySelector('[data-publr-part="title"]'),d=e.querySelector('[data-publr-part="description"]'),p=e.dataset.publrId||`publr-dialog-${++S}`;return e.dataset.publrId=p,i?(i.id=`${p}-title`,t.setAttribute("aria-labelledby",i.id)):t.removeAttribute("aria-labelledby"),d?(d.id=`${p}-description`,t.setAttribute("aria-describedby",d.id)):t.removeAttribute("aria-describedby"),b.effect(()=>{const c=a.open;if(f.dataset.publrState=c?"open":"closed",o.setAttribute("aria-expanded",c?"true":"false"),c){if(r||(r=v(t)),u&&!l){const y=m=>{m.key==="Escape"&&(m.preventDefault(),a.open=!1)};document.addEventListener("keydown",y,!0),l=()=>{document.removeEventListener("keydown",y,!0),l=null}}}else l&&l(),r&&(r(),r=null,s==null||s.focus())}),()=>{l&&l(),r&&r()}}}});
     \\
 ;
 
 pub const dismiss_js =
-    \\function c(t,r,n=[]){function e(i){if(!t.contains(i.target)){for(const o of n)if(o&&o.contains(i.target))return;r()}}return requestAnimationFrame(()=>{document.addEventListener("click",e,!0)}),function(){document.removeEventListener("click",e,!0)}}function a(t,r){function n(e){e.key==="Escape"&&t.dataset.publrDismissable!=="false"&&r()}return document.addEventListener("keydown",n),function(){document.removeEventListener("keydown",n)}}export{c as a,a as o};
+    \\
     \\
 ;
 
 pub const dropdown_js =
-    \\import{r as k,a as y,c as v,o as g,i as w}from"./publr-core.js";import{p as h}from"./publr-portal.js";import{p as D}from"./publr-position.js";import{a as E,o as A}from"./publr-dismiss.js";k("dropdown",n=>{const c=n.querySelector('[data-publr-part="trigger"]'),r=n.querySelector('[data-publr-part="content"]');if(!c||!r)return;let o=null,s=null,i=null;function b(){return[...r.querySelectorAll('[data-publr-part="item"]')].filter(t=>!t.disabled&&!t.hasAttribute("aria-disabled"))}function u(t,e){var a;t.forEach((l,d)=>{l.tabIndex=d===e?0:-1}),(a=t[e])==null||a.focus()}function f(){s&&(s(),s=null),i&&(i(),i=null),r.style.display="",o&&(o(),o=null),v(n),(c.querySelector("button")||c).focus()}function m(){g(n),o=h(r),r.style.display="block",D(r,c,{placement:"bottom-start",offset:12}),s=E(n,f,[r]),i=A(n,f);const t=b();t.length&&u(t,0),n._publrOnClose=()=>{s&&(s(),s=null),i&&(i(),i=null),r.style.display="",o&&(o(),o=null)}}c.addEventListener("click",()=>{y(n)?f():m()}),c.addEventListener("keydown",t=>{(t.key==="ArrowDown"||t.key==="Enter"||t.key===" ")&&!y(n)&&(t.preventDefault(),m())}),r.addEventListener("keydown",t=>{const e=b();if(!e.length)return;const a=e.indexOf(document.activeElement);switch(t.key){case"ArrowDown":{t.preventDefault();const l=a<e.length-1?a+1:0;u(e,l);break}case"ArrowUp":{t.preventDefault();const l=a>0?a-1:e.length-1;u(e,l);break}case"Home":{t.preventDefault(),u(e,0);break}case"End":{t.preventDefault(),u(e,e.length-1);break}case"Enter":case" ":{t.preventDefault(),a>=0&&(e[a].click(),f());break}case"Tab":{t.preventDefault(),f();break}default:if(t.key.length===1&&!t.ctrlKey&&!t.metaKey&&!t.altKey){const l=t.key.toLowerCase(),d=e.find(p=>p.textContent.trim().toLowerCase().startsWith(l));if(d){const p=e.indexOf(d);u(e,p)}}}}),r.addEventListener("click",t=>{const e=t.target.closest('[data-publr-part="item"]');e&&!e.disabled&&e.getAttribute("aria-disabled")!=="true"&&f()})});w();
+    \\import{Publr as u}from"/static/publr.js";import{position as v}from"/static/publr-position.js";u.store("dropdown",()=>{const o=u.reactive({open:!1});let c=null,a=null,l=null;const f=()=>a?[...a.querySelectorAll('[data-publr-part="item"]')].filter(r=>!r.disabled&&r.getAttribute("aria-disabled")!=="true"):[],i=(r,n)=>{var e;r.forEach((t,s)=>{t.tabIndex=s===n?0:-1}),(e=r[n])==null||e.focus()},d=()=>{a&&a.contains(document.activeElement)&&(c.querySelector("button")||c).focus()};return{state:o,actions:{toggle:()=>{o.open=!o.open},openMenu:(r,n)=>{n.event.preventDefault(),o.open=!0},close:()=>{o.open=!1},navKeys:(r,n)=>{const e=n.event,t=f();if(!t.length)return;const s=t.indexOf(document.activeElement);switch(e.key){case"ArrowDown":e.preventDefault(),i(t,s<t.length-1?s+1:0);break;case"ArrowUp":e.preventDefault(),i(t,s>0?s-1:t.length-1);break;case"Home":e.preventDefault(),i(t,0);break;case"End":e.preventDefault(),i(t,t.length-1);break;case"Enter":case" ":e.preventDefault(),s>=0&&(t[s].click(),o.open=!1);break;case"Escape":case"Tab":e.preventDefault(),o.open=!1;break;default:if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){const m=e.key.toLowerCase(),p=t.find(b=>b.textContent.trim().toLowerCase().startsWith(m));p&&i(t,t.indexOf(p))}}},itemClick:(r,n)=>{const e=n.event.target.closest('[data-publr-part="item"]');e&&!e.disabled&&e.getAttribute("aria-disabled")!=="true"&&(o.open=!1)}},setup:({el:r})=>(c=r,a=r.querySelector('[data-publr-part="content"]'),u.effect(()=>{if(o.open){if(requestAnimationFrame(()=>{if(!o.open||!a||!c)return;v(a,c,{placement:"bottom-start",offset:8});const n=f();n.length&&i(n,0)}),!l){const n=e=>{!c.contains(e.target)&&!(a&&a.contains(e.target))&&(o.open=!1)};document.addEventListener("mousedown",n,!0),l=()=>{document.removeEventListener("mousedown",n,!0),l=null}}}else d(),l&&l()}),()=>{l&&l()})}});
     \\
 ;
 
 pub const focus_js =
-    \\const a='a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';function r(n,o={}){const i=()=>n.querySelectorAll(a),c=i();if(!c.length)return()=>{};const s=document.activeElement;o.initialFocus?o.initialFocus.focus():c[0].focus();function u(e){if(e.key!=="Tab")return;const t=i();if(!t.length)return;const l=t[0],f=t[t.length-1];e.shiftKey&&document.activeElement===l?(e.preventDefault(),f.focus()):!e.shiftKey&&document.activeElement===f&&(e.preventDefault(),l.focus())}return n.addEventListener("keydown",u),function(){n.removeEventListener("keydown",u),s&&s.focus&&s.focus()}}export{r as t};
+    \\
     \\
 ;
 
@@ -9412,27 +9618,27 @@ pub const keyboard_js =
 ;
 
 pub const popover_js =
-    \\import{r as y,a as v,c as g,o as O,i as S}from"./publr-core.js";import{p as C}from"./publr-portal.js";import{p as k}from"./publr-position.js";import{t as q}from"./publr-focus.js";import{a as x,o as E}from"./publr-dismiss.js";y("popover",e=>{const i=e.querySelector('[data-publr-part="trigger"]'),t=e.querySelector('[data-publr-part="content"]');if(!i||!t)return;let o=null,s=null,l=null,n=null;function r(){n&&(n(),n=null),s&&(s(),s=null),l&&(l(),l=null),t.style.display="",o&&(o(),o=null),g(e),(i.querySelector("button")||i).focus()}function p(){O(e),o=C(t),t.style.display="block";const a=t.dataset.publrSide||"bottom",c=t.dataset.publrAlign||"center",d=parseInt(t.dataset.publrSideOffset||"0",10),f=t.dataset.publrAvoidCollisions!=="false",b=e.dataset.publrModal==="true",m=c==="center"?a:`${a}-${c}`;if(k(t,i,{placement:m,offset:d||12,flip:f}),s=x(e,r,[t]),l=E(e,r),b)n=q(t);else{const u=t.querySelector('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');u&&u.focus()}e._publrOnClose=()=>{n&&(n(),n=null),s&&(s(),s=null),l&&(l(),l=null),t.style.display="",o&&(o(),o=null)}}i.addEventListener("click",()=>{v(e)?r():p()})});S();
+    \\import{Publr as d}from"/static/publr.js";import{position as b}from"/static/publr-position.js";import{trapFocus as v}from"/static/publr-focus.js";d.store("popover",()=>{const t=d.reactive({open:!1});let u=null,o=null,e=null,n=null,l=null;const f=()=>{const s=(o==null?void 0:o.querySelector("button"))||o;s==null||s.focus()};return{state:t,actions:{toggle:()=>{t.open=!t.open},close:()=>{t.open=!1}},setup:({el:s})=>{if(u=s,o=s.querySelector('[data-publr-part="trigger"]'),e=s.querySelector('[data-publr-part="content"]'),!(!o||!e))return d.effect(()=>{if(t.open){if(requestAnimationFrame(()=>{if(!t.open||!e||!o)return;const a=e.dataset.publrSide||"bottom",i=e.dataset.publrAlign||"center",r=parseInt(e.dataset.publrSideOffset||"0",10),p=e.dataset.publrAvoidCollisions!=="false",m=i==="center"?a:`${a}-${i}`;if(b(e,o,{placement:m,offset:r||12,flip:p}),u.dataset.publrModal==="true")l=v(e);else{const c=e.querySelector('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');c==null||c.focus()}}),!n){const a=r=>{!u.contains(r.target)&&!(e&&e.contains(r.target))&&(t.open=!1)},i=r=>{r.key==="Escape"&&(r.preventDefault(),t.open=!1)};document.addEventListener("mousedown",a,!0),document.addEventListener("keydown",i,!0),n=()=>{document.removeEventListener("mousedown",a,!0),document.removeEventListener("keydown",i,!0),n=null}}}else l&&(l(),l=null),n&&(n(),f())}),()=>{l&&l(),n&&n()}}}});
     \\
 ;
 
 pub const portal_js =
-    \\let r=null;function a(){return r||(r=document.createElement("div"),r.id="publr-portal",r.style.cssText="position:fixed;top:0;left:0;z-index:9999;pointer-events:none;",document.body.appendChild(r)),r}function o(t){var n,e;return t._publrOriginalParent=t.parentNode,t._publrOriginalNext=t.nextSibling,t.style.pointerEvents="auto",(e=(n=t.parentNode)==null?void 0:n.closest)!=null&&e.call(n,".dark")&&!t.classList.contains("dark")&&(t.classList.add("dark"),t._publrPortaledDark=!0),a().appendChild(t),()=>i(t)}function i(t){t._publrOriginalParent&&(t._publrOriginalParent.insertBefore(t,t._publrOriginalNext),delete t._publrOriginalParent,delete t._publrOriginalNext,t.style.pointerEvents="",t._publrPortaledDark&&(t.classList.remove("dark"),delete t._publrPortaledDark))}export{o as p,i as u};
+    \\
     \\
 ;
 
 pub const position_js =
-    \\const h={"top-start":{primary:"top",align:"start"},top:{primary:"top",align:"center"},"top-end":{primary:"top",align:"end"},"bottom-start":{primary:"bottom",align:"start"},bottom:{primary:"bottom",align:"center"},"bottom-end":{primary:"bottom",align:"end"},"left-start":{primary:"left",align:"start"},left:{primary:"left",align:"center"},"left-end":{primary:"left",align:"end"},"right-start":{primary:"right",align:"start"},right:{primary:"right",align:"center"},"right-end":{primary:"right",align:"end"}},u={top:"bottom",bottom:"top",left:"right",right:"left"};function y(t,e,i,s,r){let l,o;return i==="bottom"?l=t.bottom+r:i==="top"?l=t.top-e.height-r:i==="left"?o=t.left-e.width-r:o=t.right+r,i==="top"||i==="bottom"?s==="start"?o=t.left:s==="end"?o=t.right-e.width:o=t.left+(t.width-e.width)/2:s==="start"?l=t.top:s==="end"?l=t.bottom-e.height:l=t.top+(t.height-e.height)/2,{top:l,left:o}}function b(t,e){return t.top<0||t.left<0||t.top+e.height>window.innerHeight||t.left+e.width>window.innerWidth}function C(t,e,i={}){const s=i.placement||"bottom-start",r=i.offset??4,l=i.flip!==!1,o=h[s]||h["bottom-start"],f=e.getBoundingClientRect();t.style.position="fixed",t.style.visibility="hidden",t.style.top="0",t.style.left="0";const p=t.getBoundingClientRect();t.style.visibility="";let{primary:n,align:m}=o,d=y(f,p,n,m,r);if(l&&b(d,p)){const a=u[n],g=y(f,p,a,m,r);b(g,p)||(n=a,d=g)}return t.style.top=`${d.top}px`,t.style.left=`${d.left}px`,m==="center"?n:`${n}-${m}`}export{C as p};
+    \\
     \\
 ;
 
 pub const radio_group_js =
-    \\import{r as i,i as s}from"./publr-core.js";i("radio-group",t=>{const r=t.dataset.publrName||"",a=[...t.querySelectorAll('[data-publr-part="item"]')],o=a.map(e=>e.querySelector('input[type="radio"]')).filter(Boolean);r&&o.forEach(e=>{e.name||(e.name=r)});function c(){a.forEach(e=>{const n=e.querySelector('input[type="radio"]');n&&(e.dataset.publrState=n.checked?"checked":"unchecked")})}c(),o.forEach(e=>e.addEventListener("change",c))});s();
+    \\import{Publr as u}from"/static/publr.js";u.store("radio-group",()=>{let r=null;const a=()=>r?[...r.querySelectorAll('[data-publr-part="item"]')]:[],c=()=>{a().forEach(t=>{const e=t.querySelector('input[type="radio"]');e&&(t.dataset.publrState=e.checked?"checked":"unchecked")})};return{actions:{sync:c},setup:({el:t})=>{r=t;const e=t.dataset.publrName||"";e&&a().forEach(n=>{const o=n.querySelector('input[type="radio"]');o&&!o.name&&(o.name=e)}),c()}}});
     \\
 ;
 
 pub const select_js =
-    \\import{r as S,a as x,c as w,o as C,i as A}from"./publr-core.js";import{p as q}from"./publr-portal.js";import{p as I}from"./publr-position.js";import{a as K,o as V}from"./publr-dismiss.js";S("select",n=>{var h;const i=n.querySelector('[data-publr-part="trigger"]'),l=n.querySelector('[data-publr-part="content"]'),d=n.querySelector('[data-publr-part="value"]'),s=n.querySelector('[data-publr-part="label"]');if(!i||!l)return;const L=((h=s==null?void 0:s.textContent)==null?void 0:h.trim())||"";let f=null,p=null,b=null;function g(t){return t.hasAttribute("aria-disabled")||t.dataset.publrState==="disabled"}function m(){return[...l.querySelectorAll('[data-publr-part="option"]')].filter(t=>!g(t))}function D(t){var e,a;return((a=(e=t.querySelector('[data-publr-part="option-label"]'))==null?void 0:e.textContent)==null?void 0:a.trim())||t.textContent.trim()}function c(t,e){var a;t.forEach((o,r)=>{o.tabIndex=r===e?0:-1,o.classList.toggle("bg-accent",r===e),o.classList.toggle("text-accent-foreground",r===e)}),(a=t[e])==null||a.focus()}function v(t,{closeAfter:e=!0}={}){if(!t||g(t))return;const a=t.dataset.value,o=D(t);d&&(d.value=a),s&&(s.textContent=o,s.classList.remove("text-muted-foreground"),s.classList.add("text-foreground")),l.querySelectorAll('[data-publr-part="option"]').forEach(r=>{r.setAttribute("aria-selected",r===t?"true":"false"),r.dataset.publrState=r===t?"selected":g(r)?"disabled":"unselected"}),e&&u()}function u(){p&&(p(),p=null),b&&(b(),b=null),l.style.display="",f&&(f(),f=null),w(n),i.focus()}function y(){C(n),f=q(l),l.style.display="block",I(l,i,{placement:"bottom-start",offset:4}),p=K(n,u,[l]),b=V(n,u);const t=m(),e=t.findIndex(a=>a.getAttribute("aria-selected")==="true");t.length&&c(t,e>=0?e:0)}i.addEventListener("click",()=>{x(n)?u():y()}),i.addEventListener("keydown",t=>{(t.key==="ArrowDown"||t.key==="Enter"||t.key===" ")&&!x(n)&&(t.preventDefault(),y())}),l.addEventListener("keydown",t=>{const e=m();if(!e.length)return;const a=e.indexOf(document.activeElement);switch(t.key){case"ArrowDown":{t.preventDefault(),c(e,a<e.length-1?a+1:0);break}case"ArrowUp":{t.preventDefault(),c(e,a>0?a-1:e.length-1);break}case"Home":{t.preventDefault(),c(e,0);break}case"End":{t.preventDefault(),c(e,e.length-1);break}case"Enter":case" ":{t.preventDefault(),a>=0&&v(e[a]);break}case"Tab":{t.preventDefault(),u();break}default:if(t.key.length===1&&!t.ctrlKey&&!t.metaKey&&!t.altKey){const o=t.key.toLowerCase(),r=e.find(O=>O.textContent.trim().toLowerCase().startsWith(o));r&&c(e,e.indexOf(r))}}}),l.addEventListener("click",t=>{const e=t.target.closest('[data-publr-part="option"]');e&&!g(e)&&v(e)});const E=n.dataset.publrDefaultValue,k=m().find(t=>t.dataset.value===E);k?v(k,{closeAfter:!1}):s&&(d&&(d.value=""),s.textContent=L,s.classList.add("text-muted-foreground"),s.classList.remove("text-foreground"))});A();
+    \\import{Publr as g}from"/static/publr.js";import{position as w}from"/static/publr-position.js";g.store("select",()=>{const s=g.reactive({open:!1});let h=null,i=null,l=null,d=null,o=null,x="",c=null;const f=e=>e.hasAttribute("aria-disabled")||e.dataset.publrState==="disabled",m=()=>l?[...l.querySelectorAll('[data-publr-part="option"]')]:[],b=()=>m().filter(e=>!f(e)),y=e=>{var a,t;return((t=(a=e.querySelector('[data-publr-part="option-label"]'))==null?void 0:a.textContent)==null?void 0:t.trim())||e.textContent.trim()},u=(e,a)=>{var t;e.forEach((n,r)=>{n.tabIndex=r===a?0:-1}),(t=e[a])==null||t.focus()},k=()=>m().find(e=>e.getAttribute("aria-selected")==="true")||null,v=e=>{!e||f(e)||(d&&(d.value=e.dataset.value),o&&(o.textContent=y(e),o.classList.remove("text-muted-foreground"),o.classList.add("text-foreground")),m().forEach(a=>{const t=a===e;a.setAttribute("aria-selected",t?"true":"false"),a.dataset.publrState=t?"selected":f(a)?"disabled":"unselected"}))};return{state:s,actions:{toggle:()=>{s.open=!s.open},openList:(e,a)=>{a.event.preventDefault(),s.open=!0},close:()=>{s.open=!1},navKeys:(e,a)=>{const t=a.event,n=b();if(!n.length)return;const r=n.indexOf(document.activeElement);switch(t.key){case"ArrowDown":t.preventDefault(),u(n,r<n.length-1?r+1:0);break;case"ArrowUp":t.preventDefault(),u(n,r>0?r-1:n.length-1);break;case"Home":t.preventDefault(),u(n,0);break;case"End":t.preventDefault(),u(n,n.length-1);break;case"Enter":case" ":t.preventDefault(),r>=0&&(v(n[r]),s.open=!1);break;case"Escape":case"Tab":t.preventDefault(),s.open=!1;break;default:if(t.key.length===1&&!t.ctrlKey&&!t.metaKey&&!t.altKey){const p=t.key.toLowerCase(),D=n.find(L=>y(L).toLowerCase().startsWith(p));D&&u(n,n.indexOf(D))}}},optionClick:(e,a)=>{const t=a.event.target.closest('[data-publr-part="option"]');t&&!f(t)&&(v(t),s.open=!1)}},setup:({el:e})=>{var t;h=e,i=e.querySelector('[data-publr-part="trigger"]'),l=e.querySelector('[data-publr-part="content"]'),d=e.querySelector('[data-publr-part="value"]'),o=e.querySelector('[data-publr-part="label"]'),x=((t=o==null?void 0:o.textContent)==null?void 0:t.trim())||"";const a=b().find(n=>n.dataset.value===e.dataset.publrDefaultValue);return a?v(a):o&&(d&&(d.value=""),o.textContent=x,o.classList.add("text-muted-foreground"),o.classList.remove("text-foreground")),g.effect(()=>{if(s.open){if(requestAnimationFrame(()=>{if(!s.open||!l||!i)return;w(l,i,{placement:"bottom-start",offset:4});const n=b();if(!n.length)return;const r=k(),p=r?n.indexOf(r):-1;u(n,p>=0?p:0)}),!c){const n=r=>{!h.contains(r.target)&&!(l&&l.contains(r.target))&&(s.open=!1)};document.addEventListener("mousedown",n,!0),c=()=>{document.removeEventListener("mousedown",n,!0),c=null}}}else l&&l.contains(document.activeElement)&&(i==null||i.focus()),c&&c()}),()=>{c&&c()}}}});
     \\
 ;
 
@@ -9442,22 +9648,22 @@ pub const sidebar_js =
 ;
 
 pub const switch_js =
-    \\import{r as n,i}from"./publr-core.js";n("switch",t=>{const e=t.querySelector('input[type="checkbox"]');if(!e)return;function c(){t.dataset.publrState=e.checked?"checked":"unchecked"}c(),e.addEventListener("change",c)});i();
+    \\import{Publr as u}from"/static/publr.js";u.store("switch",()=>{let t=null,e=null;const c=()=>{t&&e&&(t.dataset.publrState=e.checked?"checked":"unchecked")};return{actions:{sync:c},setup:({el:r})=>{t=r,e=r.querySelector('input[type="checkbox"]'),c()}}});
     \\
 ;
 
 pub const tabs_js =
-    \\import{r as b,i as o}from"./publr-core.js";b("tabs",n=>{const l=n.querySelector('[data-publr-part="list"]');if(!l)return;function s(){return[...l.querySelectorAll('[data-publr-part="trigger"]')].filter(t=>!t.disabled)}function i(t){if(!t||t.disabled)return;const a=t.dataset.publrTab;n.querySelectorAll('[data-publr-part="trigger"]').forEach(e=>{e.dataset.publrState="inactive",e.setAttribute("aria-selected","false"),e.tabIndex=-1}),n.querySelectorAll('[data-publr-part="content"]').forEach(e=>{e.dataset.publrState="inactive",e.hidden=!0}),t.dataset.publrState="active",t.setAttribute("aria-selected","true"),t.tabIndex=0;const r=n.querySelector(`[data-publr-part="content"][data-publr-tab="${a}"]`);r&&(r.dataset.publrState="active",r.hidden=!1)}l.addEventListener("click",t=>{const a=t.target.closest('[data-publr-part="trigger"]');a&&!a.disabled&&i(a)}),l.addEventListener("keydown",t=>{const a=s(),r=a.indexOf(document.activeElement);if(r===-1)return;let e=r;switch(t.key){case"ArrowRight":t.preventDefault(),e=r<a.length-1?r+1:0;break;case"ArrowLeft":t.preventDefault(),e=r>0?r-1:a.length-1;break;case"Home":t.preventDefault(),e=0;break;case"End":t.preventDefault(),e=a.length-1;break;default:return}a[e].focus(),i(a[e])});const u=s(),c=n.dataset.publrDefaultValue,d=u.find(t=>t.dataset.publrTab===c)||u[0];d&&i(d)});o();
+    \\import{Publr as i}from"/static/publr.js";i.store("tabs",()=>{let s=null,u=null;const d=()=>u?[...u.querySelectorAll('[data-publr-part="trigger"]')].filter(a=>!a.disabled):[],c=a=>{if(!a||a.disabled)return;const r=a.dataset.publrTab;s.querySelectorAll('[data-publr-part="trigger"]').forEach(e=>{e.dataset.publrState="inactive",e.setAttribute("aria-selected","false"),e.tabIndex=-1}),s.querySelectorAll('[data-publr-part="content"]').forEach(e=>{e.dataset.publrState="inactive",e.hidden=!0}),a.dataset.publrState="active",a.setAttribute("aria-selected","true"),a.tabIndex=0;const t=s.querySelector(`[data-publr-part="content"][data-publr-tab="${r}"]`);t&&(t.dataset.publrState="active",t.hidden=!1)};return{actions:{tabClick:(a,r)=>{const t=r.event.target.closest('[data-publr-part="trigger"]');t&&!t.disabled&&c(t)},navKeys:(a,r)=>{const t=r.event,e=d(),l=e.indexOf(document.activeElement);if(l===-1)return;let n=l;switch(t.key){case"ArrowRight":t.preventDefault(),n=l<e.length-1?l+1:0;break;case"ArrowLeft":t.preventDefault(),n=l>0?l-1:e.length-1;break;case"Home":t.preventDefault(),n=0;break;case"End":t.preventDefault(),n=e.length-1;break;default:return}e[n].focus(),c(e[n])}},setup:({el:a})=>{if(s=a,u=a.querySelector('[data-publr-part="list"]'),!u)return;const r=d(),t=r.find(e=>e.dataset.publrTab===a.dataset.publrDefaultValue)||r[0];t&&c(t)}}});
     \\
 ;
 
 pub const toast_js =
-    \\import{r as d,i as p}from"./publr-core.js";let f=0;function m(){return document.getElementById("publr-toast-region")}function y(t,o={}){const a=o.variant||"default",n=o.duration??4e3,s=++f,r=m();if(!r)return console.warn("publr.toast: no #publr-toast-region found. Add <ToastRegion /> to your layout."),null;const i=r.querySelector(`template[data-publr-toast-template="${a}"]`);if(!i)return console.warn(`publr.toast: no template for variant "${a}"`),null;const e=i.content.firstElementChild.cloneNode(!0);e.dataset.toastId=s;const l=e.querySelector('[data-publr-part="message"]');l&&(l.textContent=t);const u=e.querySelector('[data-publr-part="close"]');return u&&u.addEventListener("click",()=>c(e)),r.appendChild(e),requestAnimationFrame(()=>{e.style.opacity="1",e.style.transform="translateY(0)"}),n>0&&n!==1/0&&setTimeout(()=>c(e),n),s}function c(t){t.style.opacity="0",t.style.transform="translateY(8px)",setTimeout(()=>t.remove(),200)}typeof window<"u"&&(window.publr=window.publr||{},window.publr.toast=y);d("toast",t=>{const o=t.querySelector('[data-publr-part="close"]');o&&o.addEventListener("click",()=>{t.style.opacity="0",t.style.transform="translateY(8px)",t.style.transition="opacity 0.2s, transform 0.2s",setTimeout(()=>{t.style.display="none"},200)})});p();
+    \\import{Publr as c}from"/static/publr.js";let p=0;function f(){return document.getElementById("publr-toast-region")}function r(t,{remove:o=!0}={}){t.style.transition="opacity 0.2s, transform 0.2s",t.style.opacity="0",t.style.transform="translateY(8px)",setTimeout(()=>{o?t.remove():t.style.display="none"},200)}function m(t,o={}){const n=o.variant||"default",s=o.duration??4e3,i=++p,a=f();if(!a)return console.warn("publr.toast: no #publr-toast-region found. Add <ToastRegion /> to your layout."),null;const l=a.querySelector(`template[data-publr-toast-template="${n}"]`);if(!l)return console.warn(`publr.toast: no template for variant "${n}"`),null;const e=l.content.firstElementChild.cloneNode(!0);e.dataset.toastId=i;const u=e.querySelector('[data-publr-part="message"]');u&&(u.textContent=t);const d=e.querySelector('[data-publr-part="close"]');return d&&d.addEventListener("click",()=>r(e)),a.appendChild(e),requestAnimationFrame(()=>{e.style.opacity="1",e.style.transform="translateY(0)"}),s>0&&s!==1/0&&setTimeout(()=>r(e),s),i}typeof window<"u"&&(window.publr=window.publr||{},window.publr.toast=m);c.store("toast",()=>({actions:{dismiss:(t,o)=>{const n=o.el.closest('[data-publr-component="toast"]');n&&r(n,{remove:!1})}}}));
     \\
 ;
 
 pub const tooltip_js =
-    \\import{r as T,o as q,c as v,i as A}from"./publr-core.js";import{p as D,u as d}from"./publr-portal.js";import{p as H}from"./publr-position.js";const I={instant:0,fast:200,default:700,slow:1e3};let u=0;T("tooltip-provider",()=>{});T("tooltip",t=>{const s=t.querySelector('[data-publr-part="trigger"]'),a=t.querySelector('[data-publr-part="portal"]'),e=t.querySelector('[data-publr-part="content"]');if(!s||!e)return;const o=t.closest('[data-publr-component="tooltip-provider"]'),E=t.dataset.publrDelay||o&&o.dataset.publrDelay||"default",S=I[E]??700,L=o?parseInt(o.dataset.publrSkipDelay||"300",10):300,g=(t.dataset.publrDisableHoverableContent||o&&o.dataset.publrDisableHoverableContent)==="true";let p=null,l=null,i=!1;function r(n){t.dataset.publrState=n,s.dataset.state=n,e.dataset.state=n}function f(n){clearTimeout(l);const m=Date.now()-u<L?0:S;r(m>0?"delayed-open":"instant-open"),p=setTimeout(()=>{q(t),r("instant-open"),a?D(a):D(e),i=!0,e.style.display="block";const b=e.dataset.publrSide||"top",y=e.dataset.publrAlign||"center",k=parseInt(e.dataset.publrSideOffset||"0",10),C=e.dataset.publrAvoidCollisions!=="false",h=y==="center"?b:`${b}-${y}`;H(e,s,{placement:h,offset:k||6,flip:C})},m)}function c(){clearTimeout(p),l=setTimeout(()=>{e.style.display="",i&&(a?d(a):d(e),i=!1),v(t),r("closed"),u=Date.now()},100)}function w(){clearTimeout(p),clearTimeout(l),e.style.display="",i&&(a?d(a):d(e),i=!1),v(t),r("closed"),u=Date.now()}s.addEventListener("mouseenter",()=>f()),s.addEventListener("mouseleave",c),s.addEventListener("focusin",()=>f()),s.addEventListener("focusout",c),g||(e.addEventListener("mouseenter",()=>clearTimeout(l)),e.addEventListener("mouseleave",c)),s.addEventListener("keydown",n=>{n.key==="Escape"&&w()})});A();
+    \\import{Publr as u}from"/static/publr.js";import{position as w}from"/static/publr-position.js";const p={instant:0,fast:200,default:700,slow:1e3};let d=0;u.store("tooltip",()=>{const l=u.reactive({open:!1});let i=null,o=null,a=null,c=p.default,f=300,b=!1,n=null,s=null;const r=e=>{o&&(o.dataset.state=e),a&&(a.dataset.state=e),i&&(i.dataset.publrState=e==="closed"?"closed":"open")};return{state:l,actions:{show:()=>{clearTimeout(s);const t=Date.now()-d<f?0:c;r(t>0?"delayed-open":"instant-open"),n=setTimeout(()=>{l.open=!0,r("instant-open")},t)},hide:()=>{clearTimeout(n),s=setTimeout(()=>{l.open=!1,r("closed"),d=Date.now()},100)},keepOpen:()=>{b||clearTimeout(s)},dismiss:(e,t)=>{t.event.key==="Escape"&&(clearTimeout(n),clearTimeout(s),l.open=!1,r("closed"),d=Date.now())}},setup:({el:e})=>{if(i=e,o=e.querySelector('[data-publr-part="trigger"]'),a=e.querySelector('[data-publr-part="content"]'),!o||!a)return;const t=e.closest('[data-publr-component="tooltip-provider"]'),T=e.dataset.publrDelay||(t==null?void 0:t.dataset.publrDelay)||"default";return c=p[T]??p.default,f=t?parseInt(t.dataset.publrSkipDelay||"300",10):300,b=(e.dataset.publrDisableHoverableContent||(t==null?void 0:t.dataset.publrDisableHoverableContent))==="true",e.dataset.publrState==="open"&&(l.open=!0),u.effect(()=>{l.open&&requestAnimationFrame(()=>{if(!l.open||!a||!o)return;const m=a.dataset.publrSide||"top",y=a.dataset.publrAlign||"center",D=parseInt(a.dataset.publrSideOffset||"0",10),S=a.dataset.publrAvoidCollisions!=="false",g=y==="center"?m:`${m}-${y}`;w(a,o,{placement:g,offset:D||6,flip:S})})}),()=>{clearTimeout(n),clearTimeout(s)}}}});
     \\
 ;
 
