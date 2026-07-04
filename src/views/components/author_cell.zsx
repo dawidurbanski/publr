@@ -1,0 +1,20 @@
+// AuthorCell — the author column for the content list (was authors.zig::renderAuthorCell).
+// Three shapes: System (no authors), a single author (avatar + label), or a stacked-avatar
+// group with a "+N" overflow chip and an "N authors" count. The adapter computes gravatar
+// URLs + labels; the ` ` spaces the original wrote literally are emitted with {@raw " "}
+// so ZSX doesn't collapse them.
+pub fn AuthorCell(props: struct {
+    authors: []const struct { avatar_url: []const u8, label: []const u8 } = &.{},
+    total: usize = 0,
+    overflow: usize = 0,
+}) {
+    {if (props.total == 0) (
+        <span class="text-tertiary">System</span>
+    ) else (
+        {if (props.total == 1) (
+            {for (props.authors) |a| (<img src={a.avatar_url} alt="" title={a.label} class="version-avatar" />{@raw " "}{a.label})}
+        ) else (
+            <span class="version-avatars">{for (props.authors) |a| (<img src={a.avatar_url} alt="" title={a.label} class="version-avatar version-avatar-stacked" />)}{if (props.overflow > 0) (<span class="version-avatar version-avatar-overflow">+{props.overflow}</span>)}</span>{@raw " "}{props.total}{@raw " authors"}
+        )}
+    )}
+}

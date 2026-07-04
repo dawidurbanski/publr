@@ -71,64 +71,50 @@ fn render500Prod() []const u8 {
 }
 
 /// Render 500 page for dev mode (with error details and stack trace)
-fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
-    const S = struct {
-        var trace_buf: [24576]u8 = undefined;
-    };
+const Frame = struct { symbol: ?[]const u8, location: ?[]const u8, raw: ?[]const u8 };
 
+fn render500Dev(err: anyerror, trace: ?*std.builtin.StackTrace) []const u8 {
     const error_name = @errorName(err);
 
-    // Build trace section HTML (conditionally)
-    var trace_section: []const u8 = "";
+    // Arena for symbol lookup + frame strings. Must outlive tpl.render below
+    // (frames hold pointers into it), so it lives at function scope.
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    // Build the stack-trace frames as data; the ZSX component renders the HTML.
+    var frames: std.ArrayListUnmanaged(Frame) = .{};
+    const has_trace = trace != null;
 
     if (trace) |t| {
-        var fbs = std.io.fixedBufferStream(&S.trace_buf);
-        const writer = fbs.writer();
-
-        // Write section header
-        writer.writeAll(
-            \\<div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-top: 15px;">
-            \\    <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Stack Trace</h2>
-            \\    <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0; font-size: 12px; line-height: 1.6;">
-        ) catch {};
-
-        // Try to get debug info for symbol resolution
         const debug_info = std.debug.getSelfDebugInfo() catch null;
         const addrs = t.instruction_addresses[0..@min(t.index, t.instruction_addresses.len)];
 
-        // Need an allocator for symbol lookup
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const alloc = arena.allocator();
-
         for (addrs) |addr| {
+            var handled = false;
             if (debug_info) |di| {
                 if (di.getModuleForAddress(addr)) |module| {
                     if (module.getSymbolAtAddress(alloc, addr)) |symbol| {
-                        writer.print("<span style=\"color: #e74c3c;\">{s}</span>", .{symbol.name}) catch {};
-                        if (symbol.source_location) |loc| {
-                            writer.print("\n    <span style=\"color: #7f8c8d;\">at {s}:{d}</span>\n", .{ loc.file_name, loc.line }) catch {};
-                        } else {
-                            writer.writeAll("\n") catch {};
-                        }
-                    } else |_| {
-                        writer.print("0x{x:0>16}\n", .{addr}) catch {};
-                    }
-                } else |_| {
-                    writer.print("0x{x:0>16}\n", .{addr}) catch {};
-                }
-            } else {
-                writer.print("0x{x:0>16}\n", .{addr}) catch {};
+                        const location: ?[]const u8 = if (symbol.source_location) |loc|
+                            (std.fmt.allocPrint(alloc, "{s}:{d}", .{ loc.file_name, loc.line }) catch null)
+                        else
+                            null;
+                        frames.append(alloc, .{ .symbol = symbol.name, .location = location, .raw = null }) catch {};
+                        handled = true;
+                    } else |_| {}
+                } else |_| {}
+            }
+            if (!handled) {
+                const raw = std.fmt.allocPrint(alloc, "0x{x:0>16}", .{addr}) catch continue;
+                frames.append(alloc, .{ .symbol = null, .location = null, .raw = raw }) catch {};
             }
         }
-
-        writer.writeAll("</pre>\n</div>") catch {};
-        trace_section = fbs.getWritten();
     }
 
     const content = tpl.render(views.@"error".error_500_dev.Error500Dev, .{.{
         .error_name = error_name,
-        .trace_section = trace_section,
+        .has_trace = has_trace,
+        .frames = frames.items,
     }});
 
     return wrapWithBase(content);

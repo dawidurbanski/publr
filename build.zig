@@ -1282,6 +1282,23 @@ pub fn build(b: *std.Build) void {
     verify_step.dependOn(test_step);
     verify_step.dependOn(&install_spike_wasm.step);
 
+    // HTML-in-Zig guard (epic #191): fail the build if a production .zig file
+    // writes an HTML tag literal to a writer — all html-like output must live in
+    // .zsx components. has_side_effects keeps it uncached so it always runs.
+    const html_guard_exe = b.addExecutable(.{
+        .name = "html_guard",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/html_guard.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    const html_guard_run = b.addRunArtifact(html_guard_exe);
+    html_guard_run.setCwd(b.path("."));
+    html_guard_run.addArg("src");
+    html_guard_run.has_side_effects = true;
+    verify_step.dependOn(&html_guard_run.step);
+    b.getInstallStep().dependOn(&html_guard_run.step);
+
     // =========================================================================
     // Browser WASM Build (full CMS with embedded SQLite)
     // =========================================================================

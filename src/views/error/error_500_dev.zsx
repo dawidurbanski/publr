@@ -1,7 +1,11 @@
-// 500 error page template (development mode with details)
+// 500 error page template (development mode with details).
+// The stack trace is built here from frame data (render500Dev used to build the
+// HTML in Zig). Inside the <pre>, whitespace is significant, so the newlines and
+// indent between frames/spans are emitted explicitly with {@raw "\n"} etc.
 pub fn Error500Dev(props: struct {
     error_name: []const u8,
-    trace_section: []const u8,
+    has_trace: bool = false,
+    frames: []const struct { symbol: ?[]const u8, location: ?[]const u8, raw: ?[]const u8 } = &.{},
 }) {
     <div
         style="padding: 40px 20px; font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 0 auto;"
@@ -22,7 +26,12 @@ pub fn Error500Dev(props: struct {
                 error.{props.error_name}
             </pre>
         </div>
-        {@raw props.trace_section}
+        {if (props.has_trace) (
+            <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-top: 15px;">
+                <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #495057;">Stack Trace</h2>
+                <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; margin: 0; font-size: 12px; line-height: 1.6;">{for (props.frames) |f| ({if (f.raw != null) ({f.raw.?}{@raw "\n"}) else (<span style="color: #e74c3c;">{f.symbol.?}</span>{if (f.location != null) ({@raw "\n    "}<span style="color: #7f8c8d;">at {f.location.?}</span>)}{@raw "\n"})})}</pre>
+            </div>
+        )}
         <div style="margin-top: 30px; text-align: center;">
             <a href="/" style="color: #3498db; text-decoration: none;">&#x2190; Back to Home</a>
         </div>

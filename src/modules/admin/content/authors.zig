@@ -2,8 +2,8 @@
 
 const std = @import("std");
 const db_mod = @import("db");
-const cms = @import("cms");
 const gravatar = @import("gravatar");
+const views = @import("views");
 
 const Allocator = std.mem.Allocator;
 const Db = db_mod.Db;
@@ -112,43 +112,28 @@ pub fn findAuthorsForEntry(all: []const EntryAuthors, entry_id: []const u8) []co
 }
 
 pub fn renderAuthorCell(allocator: Allocator, authors: []const AuthorInfo) []const u8 {
-    var buf: std.ArrayList(u8) = .{};
-    const w = buf.writer(allocator);
-
-    if (authors.len == 0) {
-        w.writeAll("<span class=\"text-tertiary\">System</span>") catch return "System";
-        return buf.toOwnedSlice(allocator) catch "System";
-    }
-
-    if (authors.len == 1) {
-        const a = authors[0];
-        const avatar = gravatar.url(a.email, 24);
-        w.writeAll("<img src=\"") catch return a.label();
-        w.writeAll(avatar.slice()) catch return a.label();
-        w.writeAll("\" alt=\"\" title=\"") catch return a.label();
-        cms.writeEscaped(w, a.label()) catch return a.label();
-        w.writeAll("\" class=\"version-avatar\" /> ") catch return a.label();
-        cms.writeEscaped(w, a.label()) catch return a.label();
-        return buf.toOwnedSlice(allocator) catch a.label();
-    }
-
-    w.writeAll("<span class=\"version-avatars\">") catch return "Multiple authors";
     const max_show: usize = 3;
-    const show_count = @min(authors.len, max_show);
+    // Single author shows just itself; groups show up to `max_show`. Dupe the
+    // gravatar URL — `avatar.slice()` points into a loop-local that dies each
+    // iteration, so it must be copied to outlive the component call.
+    const Shown = struct { avatar_url: []const u8, label: []const u8 };
+    const show_count = if (authors.len == 1) @as(usize, 1) else @min(authors.len, max_show);
+    var shown: std.ArrayListUnmanaged(Shown) = .{};
     for (authors[0..show_count]) |a| {
         const avatar = gravatar.url(a.email, 24);
-        w.writeAll("<img src=\"") catch continue;
-        w.writeAll(avatar.slice()) catch continue;
-        w.writeAll("\" alt=\"\" title=\"") catch continue;
-        cms.writeEscaped(w, a.label()) catch continue;
-        w.writeAll("\" class=\"version-avatar version-avatar-stacked\" />") catch continue;
+        shown.append(allocator, .{
+            .avatar_url = allocator.dupe(u8, avatar.slice()) catch continue,
+            .label = a.label(),
+        }) catch continue;
     }
-    if (authors.len > max_show) {
-        w.print("<span class=\"version-avatar version-avatar-overflow\">+{d}</span>", .{authors.len - max_show}) catch {};
-    }
-    w.writeAll("</span> ") catch {};
-    w.print("{d} authors", .{authors.len}) catch {};
-    return buf.toOwnedSlice(allocator) catch "Multiple authors";
+
+    var buf: std.ArrayList(u8) = .{};
+    views.components.author_cell.AuthorCell(buf.writer(allocator).any(), .{
+        .authors = shown.items,
+        .total = authors.len,
+        .overflow = if (authors.len > max_show) authors.len - max_show else 0,
+    }) catch return "System";
+    return buf.toOwnedSlice(allocator) catch "System";
 }
 
 pub fn getAvailableAuthors(allocator: Allocator, db: *Db, content_type_id: []const u8) []const AuthorInfo {
