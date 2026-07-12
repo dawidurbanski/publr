@@ -186,10 +186,17 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("theme_static", theme_static_module);
 
+    // Shared UI icons — a pinned, checked-in Zig adapter from publr-icons.
+    // CMS builds remain npm-free, submodule-free, and fully offline.
+    const publr_icons = b.createModule(.{
+        .root_source_file = b.path("vendor/publr_icons.zig"),
+    });
+
     // Design system amalgamation — components, CSS, JS as string constants
     const publr_ui = b.createModule(.{
         .root_source_file = b.path("vendor/publr_ui.zig"),
     });
+    publr_ui.addImport("publr_icons", publr_icons);
 
     // ZSX runtime for views (same amalgamation, views only use .runtime)
     const zsx_views = b.createModule(.{

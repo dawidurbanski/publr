@@ -42,6 +42,7 @@ pub fn main() !void {
     try copyDir(alloc, gen_views_dir, out_dir, "src/gen/views", &.{".zig"});
     try copyFile("vendor/zsx.zig", out_dir, "vendor/zsx.zig");
     try copyFile("vendor/publr_ui.zig", out_dir, "vendor/publr_ui.zig");
+    try copyFile("vendor/publr_icons.zig", out_dir, "vendor/publr_icons.zig");
 
     // 3. Compile C to .o and pre-compile WASI libc
     std.debug.print("  Compiling C dependencies...\n", .{});

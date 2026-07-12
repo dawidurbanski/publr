@@ -38,7 +38,7 @@ zig build test
 
 **Completed:**
 - `build.zig` with SQLite compilation and static asset embedding
-- `vendor/` with SQLite amalgamation and stb_image headers
+- `vendor/` with SQLite/stb and pinned internal Zig UI artifacts
 - `src/main.zig` with CLI (serve command, --port, --dev flags, PORT env var)
 - `src/http.zig` with HTTP server (/, /admin, /static/*)
 - Graceful shutdown on SIGINT/SIGTERM
@@ -48,6 +48,19 @@ zig build test
 1. Add router with path parameters
 2. Add middleware pattern
 3. Build admin authentication
+
+### Shared UI icons
+
+CMS consumes [`publr-icons`](https://github.com/publr-org/publr-icons) through
+the checked-in `vendor/publr_icons.zig` adapter. There is no npm package,
+submodule, build-time network access, or runtime fetch. Upgrades are explicit:
+
+```sh
+./scripts/update-icons.sh
+zig build test
+```
+
+The updater pins both a Git revision and SHA-256 checksum.
 
 ## Resources
 

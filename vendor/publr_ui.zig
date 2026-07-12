@@ -4953,7 +4953,9 @@ pub const icon = struct {
 ///   <Icon name=.home />
 ///   <Icon name=.settings size={Size.sm} />
 ///   <Icon name=.edit size={Size.xl} class="text-brand-600" />
-pub const icons = root.icons_data;
+// UI artwork is linked as a separate Zig module from publr-icons. Consumers
+// register the checked-in adapter as `publr_icons`; no npm or runtime fetch.
+pub const icons = @import("publr_icons");
 pub const Name = icons.Name;
 pub const Size = struct {
     pub const sm: u16 = 16;
@@ -9666,4 +9668,3 @@ pub const tooltip_js =
     \\import{Publr as u}from"/static/publr.js";import{position as w}from"/static/publr-position.js";const p={instant:0,fast:200,default:700,slow:1e3};let d=0;u.store("tooltip",()=>{const l=u.reactive({open:!1});let i=null,o=null,a=null,c=p.default,f=300,b=!1,n=null,s=null;const r=e=>{o&&(o.dataset.state=e),a&&(a.dataset.state=e),i&&(i.dataset.publrState=e==="closed"?"closed":"open")};return{state:l,actions:{show:()=>{clearTimeout(s);const t=Date.now()-d<f?0:c;r(t>0?"delayed-open":"instant-open"),n=setTimeout(()=>{l.open=!0,r("instant-open")},t)},hide:()=>{clearTimeout(n),s=setTimeout(()=>{l.open=!1,r("closed"),d=Date.now()},100)},keepOpen:()=>{b||clearTimeout(s)},dismiss:(e,t)=>{t.event.key==="Escape"&&(clearTimeout(n),clearTimeout(s),l.open=!1,r("closed"),d=Date.now())}},setup:({el:e})=>{if(i=e,o=e.querySelector('[data-publr-part="trigger"]'),a=e.querySelector('[data-publr-part="content"]'),!o||!a)return;const t=e.closest('[data-publr-component="tooltip-provider"]'),T=e.dataset.publrDelay||(t==null?void 0:t.dataset.publrDelay)||"default";return c=p[T]??p.default,f=t?parseInt(t.dataset.publrSkipDelay||"300",10):300,b=(e.dataset.publrDisableHoverableContent||(t==null?void 0:t.dataset.publrDisableHoverableContent))==="true",e.dataset.publrState==="open"&&(l.open=!0),u.effect(()=>{l.open&&requestAnimationFrame(()=>{if(!l.open||!a||!o)return;const m=a.dataset.publrSide||"top",y=a.dataset.publrAlign||"center",D=parseInt(a.dataset.publrSideOffset||"0",10),S=a.dataset.publrAvoidCollisions!=="false",g=y==="center"?m:`${m}-${y}`;w(a,o,{placement:g,offset:D||6,flip:S})})}),()=>{clearTimeout(n),clearTimeout(s)}}}});
     \\
 ;
-
