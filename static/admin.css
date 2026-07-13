@@ -42,13 +42,6 @@ a:not([class]):hover {
     text-decoration: underline;
 }
 
-/* Admin sidebar items — paired with inline styles in layout.zsx.
- * Hover swaps the inactive item to the accent background, mirroring the design. */
-.sidebar-item[data-active="false"]:hover {
-    background: var(--accent) !important;
-    color: var(--foreground) !important;
-}
-
 :focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
@@ -78,31 +71,6 @@ a:not([class]):hover {
 .text-tertiary { color: var(--muted-foreground); }
 
 /* ── Section sidebar nav (server-rendered) ─────────── */
-
-.section-nav-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    margin: 0 0.25rem;
-    color: var(--muted-foreground);
-    text-decoration: none;
-    font-size: 0.875rem;
-    border-radius: calc(var(--radius) * 0.8);
-    transition: background 0.15s, color 0.15s;
-}
-
-.section-nav-item:hover {
-    color: var(--foreground);
-    background: var(--accent);
-    text-decoration: none;
-}
-
-.section-nav-item.active {
-    color: var(--foreground);
-    font-weight: 600;
-    background: var(--accent);
-}
 
 .nav-icon {
     width: 18px;
@@ -512,32 +480,6 @@ a:not([class]):hover {
     border-bottom-color: var(--primary);
 }
 
-/* ── Avatar (topbar) ───────────────────────────────── */
-
-.avatar-trigger {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    border: none;
-    border-radius: 9999px;
-    background: transparent;
-    cursor: pointer;
-}
-
-.avatar-trigger:hover {
-    box-shadow: 0 0 0 2px var(--input);
-}
-
-.avatar-img {
-    width: 32px;
-    height: 32px;
-    border-radius: 9999px;
-    object-fit: cover;
-}
-
 /* ── Buttons (legacy — media/edit pages) ───────────── */
 
 .btn {
@@ -761,12 +703,6 @@ select.form-control {
     font-weight: 600;
     color: var(--muted-foreground);
     margin: 0 0 0.5rem 0;
-}
-
-.edit-sidebar-field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
 }
 
 .edit-sidebar-danger {
@@ -2161,14 +2097,6 @@ select.form-control {
     font-size: 0.875rem;
 }
 
-.recompile-bar.recompile-bar-success {
-    background: var(--success);
-}
-
-.recompile-bar.recompile-bar-error {
-    background: var(--destructive);
-}
-
 .recompile-bar a {
     color: #fff;
     font-weight: 600;
@@ -2179,3 +2107,434 @@ body.admin.has-recompile-bar {
     padding-top: 36px;
 }
 
+/* ── Admin shell layout ────────────────────────────── */
+
+/* Ambient background mesh — a scatter of soft radial gradients over a base
+ * fill. Exposed as a custom property so `body.admin` can reference it and the
+ * dark theme can swap the whole palette in one place. */
+/* :root {
+    --admin-shell-bg:
+        radial-gradient(ellipse 70% 65% at 10% 10%, rgba(181, 207, 210, 0.45) 0%, transparent 70%),
+        radial-gradient(ellipse 55% 55% at 45% 8%, rgba(197, 204, 184, 0.35) 0%, transparent 70%),
+        radial-gradient(ellipse 65% 60% at 85% 12%, rgba(224, 207, 163, 0.5) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 80% 45%, rgba(221, 208, 171, 0.4) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 45% at 50% 50%, rgba(200, 196, 168, 0.3) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 15% 45%, rgba(168, 191, 194, 0.4) 0%, transparent 70%),
+        radial-gradient(ellipse 55% 50% at 12% 88%, rgba(184, 176, 138, 0.4) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 45% at 45% 90%, rgba(200, 192, 160, 0.3) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 82% 85%, rgba(213, 207, 192, 0.35) 0%, transparent 70%),
+        radial-gradient(ellipse 35% 35% at 70% 25%, rgba(237, 220, 184, 0.35) 0%, transparent 65%),
+        #f6f4f1;
+}
+
+.dark {
+    --admin-shell-bg:
+        radial-gradient(ellipse 70% 65% at 10% 10%, rgba(40, 65, 68, 0.5) 0%, transparent 70%),
+        radial-gradient(ellipse 55% 55% at 45% 8%, rgba(50, 55, 42, 0.4) 0%, transparent 70%),
+        radial-gradient(ellipse 65% 60% at 85% 12%, rgba(80, 65, 35, 0.5) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 80% 45%, rgba(70, 58, 30, 0.45) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 45% at 50% 50%, rgba(55, 52, 38, 0.35) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 15% 45%, rgba(35, 55, 58, 0.45) 0%, transparent 70%),
+        radial-gradient(ellipse 55% 50% at 12% 88%, rgba(50, 46, 28, 0.45) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 45% at 45% 90%, rgba(45, 42, 30, 0.35) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 82% 85%, rgba(48, 44, 35, 0.4) 0%, transparent 70%),
+        radial-gradient(ellipse 35% 35% at 70% 25%, rgba(90, 72, 35, 0.4) 0%, transparent 65%),
+        #141310;
+} */
+
+/* Outer shell — full-viewport padding that respects safe-area insets, with
+ * room for the fixed sidebar on large screens. */
+.admin-shell {
+    padding-left: max(0.375rem, env(safe-area-inset-left));
+    height: 100dvh;
+}
+
+@media (min-width: 1024px) {
+    .admin-shell {
+        padding-left: max(17.5rem, env(safe-area-inset-left));
+    }
+}
+
+/* Edit screens (layout_edit) have no left nav — drop the reserved gutter so
+   the editor runs full screen (the small safe-area inset stays). */
+.admin-shell.admin-shell--flush {
+    padding-left: max(0.375rem, env(safe-area-inset-left));
+}
+
+.admin-sidebar-safe {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.admin-content-pad {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 640px) {
+    .admin-content-pad {
+        padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+    }
+}
+
+@media (min-width: 1024px) {
+    .admin-content-pad {
+        padding-bottom: 1.75rem;
+    }
+}
+
+
+/* ── Media picker modal (JS-rendered in interact/components.js) ──
+   The image-picker field widget and PublrAdmin.pickMedia() share this
+   modal; its markup is built in JS, so the ZSX utility scan never sees
+   these classes — they need real rules here.
+   TODO(#174): migrate the modal to publr_ui dialog + utilities. */
+
+.image-picker-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: none;
+    background: rgba(0, 0, 0, 0.5);
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+}
+
+.image-picker-modal.open {
+    display: flex;
+}
+
+.image-picker-modal-content {
+    background: var(--popover);
+    color: var(--popover-foreground);
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) + 4px);
+    box-shadow: 0 20px 50px -12px color-mix(in oklch, var(--foreground) 35%, transparent);
+    width: 100%;
+    max-width: 1000px;
+    height: 85vh;
+    min-height: 500px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.image-picker-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.image-picker-modal-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.image-picker-modal-close {
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 0;
+    border-radius: var(--radius);
+    font-size: 1.25rem;
+    line-height: 1;
+    color: var(--muted-foreground);
+    cursor: pointer;
+}
+
+.image-picker-modal-close:hover {
+    background: var(--accent);
+    color: var(--accent-foreground);
+}
+
+.image-picker-modal-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.image-picker-modal-sidebar {
+    width: 13rem;
+    flex-shrink: 0;
+    overflow-y: auto;
+    padding: 0.75rem;
+    border-right: 1px solid var(--border);
+    background: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+
+.image-picker-modal-section + .image-picker-modal-section {
+    margin-top: 1rem;
+}
+
+.image-picker-modal-section-title {
+    margin: 0 0 0.375rem;
+    padding: 0 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-folders {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.image-picker-modal-folder {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.5rem;
+    border-radius: var(--radius);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    color: var(--foreground);
+}
+
+.image-picker-modal-folder:hover {
+    background: var(--accent);
+    color: var(--accent-foreground);
+}
+
+.image-picker-modal-folder.active {
+    background: var(--accent);
+    color: var(--accent-foreground);
+    font-weight: 600;
+}
+
+.image-picker-modal-folder .icon {
+    flex-shrink: 0;
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-folder-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.image-picker-modal-folder-count,
+.image-picker-modal-tag-count {
+    font-size: 0.6875rem;
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0 0.25rem;
+}
+
+.image-picker-modal-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    background: var(--background);
+    font-size: 0.75rem;
+    color: var(--foreground);
+    cursor: pointer;
+}
+
+.image-picker-modal-tag:hover {
+    border-color: var(--ring);
+}
+
+.image-picker-modal-tag.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+}
+
+.image-picker-modal-tag.active .image-picker-modal-tag-count {
+    color: color-mix(in oklch, var(--primary-foreground) 70%, transparent);
+}
+
+.image-picker-modal-empty-hint {
+    display: block;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.image-picker-modal-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.image-picker-modal-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+
+.image-picker-modal-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    background: var(--muted);
+    font-size: 0.75rem;
+    color: var(--foreground);
+    cursor: pointer;
+}
+
+.image-picker-modal-filter-chip:hover {
+    border-color: var(--ring);
+}
+
+.image-picker-modal-filter-chip-label {
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-filter-chip-remove {
+    font-size: 0.875rem;
+    line-height: 1;
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-search {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+    padding: 0 0.625rem;
+    border: 1px solid var(--input);
+    border-radius: var(--radius);
+    background: var(--background);
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-search:focus-within {
+    border-color: var(--ring);
+    outline: 2px solid color-mix(in oklch, var(--ring) 25%, transparent);
+    outline-offset: 0;
+}
+
+.image-picker-modal-search input {
+    width: 13rem;
+    height: 2.25rem;
+    border: 0;
+    background: none;
+    font-size: 0.8125rem;
+    color: var(--foreground);
+    outline: none;
+}
+
+.image-picker-modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.25rem;
+}
+
+.image-picker-modal-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: 0.75rem;
+}
+
+.image-picker-modal-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.375rem;
+    border: 2px solid transparent;
+    border-radius: var(--radius);
+    background: none;
+    cursor: pointer;
+    text-align: left;
+}
+
+.image-picker-modal-item:hover {
+    border-color: var(--border);
+}
+
+.image-picker-modal-item.selected {
+    border-color: var(--primary);
+    background: color-mix(in oklch, var(--primary) 8%, transparent);
+}
+
+.image-picker-modal-item img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--muted);
+}
+
+.image-picker-modal-item-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--muted);
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-item-name {
+    font-size: 0.6875rem;
+    color: var(--muted-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.image-picker-modal-loading,
+.image-picker-modal-empty {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 3rem 0;
+    color: var(--muted-foreground);
+    font-size: 0.8125rem;
+}
+
+.image-picker-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid var(--border);
+}
+
+.image-picker-modal-info {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+}
+
+.image-picker-modal-actions {
+    display: flex;
+    gap: 0.5rem;
+}

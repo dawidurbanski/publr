@@ -704,11 +704,17 @@ function getImagePickerModal() {
         if (e.target === modal) closeImagePickerModal();
     });
 
+    // Capture phase: embedded hosts (the block editor's canvas chrome) stop
+    // keydown propagation at bubble time, so a bubble listener can miss
+    // Escape while focus is still inside the host. Closing also consumes the
+    // event so the page underneath doesn't react to the same press.
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && modal.classList.contains('open')) {
+            e.preventDefault();
+            e.stopPropagation();
             closeImagePickerModal();
         }
-    });
+    }, true);
 
     selectBtn.addEventListener('click', () => {
         const selected = grid.querySelector('.selected');
