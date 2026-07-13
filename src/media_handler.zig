@@ -117,11 +117,14 @@ fn parseImageParams(ctx: *Context) ?image.ImageParams {
 
     const output_format = image.negotiateFormat(accept, mime_type);
 
-    // Need processing if resize requested or format changes
+    // Process only when a resize is requested — WebP negotiation rides along
+    // with it. Format negotiation alone must NOT trigger processing: browsers
+    // send `Accept: image/webp` on every image request, so it would re-encode
+    // the FULL-SIZE original synchronously on first view (a multi-second
+    // stall for a multi-MB photo). Originals serve as stored; the wasm
+    // handler already has these semantics.
     const needs_resize = width != null or height != null;
-    const needs_conversion = output_format != sourceFormat(mime_type);
-
-    if (!needs_resize and !needs_conversion) return null;
+    if (!needs_resize) return null;
 
     // Parse fit mode and quality
     const fit = parseFitParam(ctx.query);
