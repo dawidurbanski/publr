@@ -115,7 +115,14 @@ pub fn build(b: *std.Build) void {
     const plugin_prescan = plugins_mod.preScan(b, &.{"plugins"});
     const native_vendor_opts = withPluginSqliteOverride(collectPluginVendor(b, false), plugin_prescan);
     const wasm_vendor_opts = withPluginSqliteOverride(collectPluginVendor(b, true), plugin_prescan);
-    const vendor_lib = vendors.library(b, target, optimize, native_vendor_opts);
+    // Vendored C (SQLite, stb_image, libwebp) always compiles optimized —
+    // it's stable third-party code nobody steps through, it's compiled once
+    // and cached, and at -O0 image decode/resize/encode is 10-50x slower
+    // (multi-second thumbnail generation in dev builds). The wasm vendor lib
+    // below already pins its own mode (.ReleaseSmall) for the same reason.
+    const vendor_optimize: std.builtin.OptimizeMode =
+        if (optimize == .Debug) .ReleaseFast else optimize;
+    const vendor_lib = vendors.library(b, target, vendor_optimize, native_vendor_opts);
     exe.linkLibC();
     exe.addIncludePath(b.path("vendor")); // for @cImport headers
     exe.linkLibrary(vendor_lib);
