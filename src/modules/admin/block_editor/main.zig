@@ -99,6 +99,14 @@ const takeover_css =
     \\/* The adopted sidebar drops its own width/border — the host panel
     \\   provides the frame. (Class list mirrors layout_edit.zsx.) */
     \\[data-host-panel] > div > aside { width: 100% !important; border: 0 !important; }
+    \\/* Canvas content baseline (v0): themes give replaced elements a
+    \\   responsive default via their preflight (see jit preflight:
+    \\   max-width + auto height — the width/height ATTRIBUTES then only
+    \\   reserve aspect ratio). The admin ships no site CSS into the canvas
+    \\   yet, so without this an uploaded photo keeps its pixel height while
+    \\   max-w-full squeezes the width — a giant distorted box. Scoped to
+    \\   canvas content; drop when the admin wires real theme CSS (E3). */
+    \\#pbe-shell .pbe-canvas img, #pbe-shell .pbe-canvas svg, #pbe-shell .pbe-canvas video, #pbe-shell .pbe-canvas canvas { max-width: 100%; height: auto; }
 ;
 
 const boot_js =
