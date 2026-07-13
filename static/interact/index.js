@@ -14,5 +14,10 @@ import '../media-selection.js'; // Media library bulk selection
 import './presence.js';        // Collaboration presence (entry form)
 
 // Re-export for programmatic use
-export { toast } from './components.js';
+export { toast, pickMedia } from './components.js';
 export { init };
+
+// Global handle for embedded tools that can't import this module (the block
+// editor's bootstrap script builds its media adapter on pickMedia).
+import { pickMedia } from './components.js';
+window.PublrAdmin = Object.assign(window.PublrAdmin || {}, { pickMedia });

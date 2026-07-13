@@ -45,6 +45,9 @@ fn setup(app: *admin.PageApp) void {
     // POST verbs migrated to the action dispatcher (see content_actions.zig
     // pattern). `media_id` / `folder_id` etc. live as form fields now.
     app.action("media.upload", crud.handleUpload);
+    // JSON twin of media.upload for fetch() callers (the block editor's
+    // media adapter) — returns the stored record instead of redirecting.
+    app.action("media.upload_json", api.handleUploadJson);
     if (!is_wasm) {
         app.action("media.sync", api.handleSync);
         app.action("media.scan", api.handleScan);

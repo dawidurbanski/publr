@@ -1,0 +1,40 @@
+// Block editor bootstrap — the main-pane fragment for a content type with
+// `.editor = "block"` (the built-in PublrEditor, src/modules/admin/block_editor/).
+//
+// The form carries ONLY the hidden inputs of the standard save path
+// (`content.update` via /admin/action) — the visible interface is the editor
+// shell, mounted in the sibling #pbe-shell div (the shell replaces its
+// container's innerHTML, so it must not wrap the form). The sidebar's
+// publish/discard buttons reference `form="entry-form"`, which works from
+// anywhere in the document — including after the sidebar is adopted into a
+// shell panel by the boot script.
+//
+// takeover_css / boot_js are authored next to the bootstrap logic in
+// src/modules/admin/block_editor/main.zig and passed through raw.
+
+pub fn BlockEditorBootstrap(props: struct {
+    type_id: []const u8,
+    entry_id: []const u8,
+    entry_status: []const u8,
+    csrf_token: []const u8,
+    content: []const u8,
+    content_editing: []const u8,
+    takeover_css: []const u8,
+    boot_js: []const u8,
+}) {
+    <form method="POST" action="/admin/action" id="entry-form" class="form pbe-form"
+          data-base-url={`/admin/content/${props.type_id}`}
+          data-entry-id={props.entry_id}
+          data-entry-status={props.entry_status}>
+        <input type="hidden" name="_csrf" value={props.csrf_token} />
+        <input type="hidden" name="action" value="content.update" />
+        <input type="hidden" name="type" value={props.type_id} />
+        <input type="hidden" name="entry_id" value={props.entry_id} />
+        <input type="hidden" name="fields" id="publish-fields" value="" />
+        <input type="hidden" name="content" id="pbe-content-value" value={props.content} />
+        <input type="hidden" name="content_editing" id="pbe-editing-value" value={props.content_editing} />
+    </form>
+    <div id="pbe-shell"></div>
+    <style>{@raw props.takeover_css}</style>
+    <script>{@raw props.boot_js}</script>
+}

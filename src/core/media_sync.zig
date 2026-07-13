@@ -427,8 +427,11 @@ fn countNewInDir(
     }
 }
 
-/// Detect image dimensions from raw data using stb_image
-fn detectImageDimensions(data: []const u8) struct { width: ?i64, height: ?i64 } {
+/// Detect image dimensions from raw data using stb_image. Public: the admin
+/// upload path (modules/admin/media/crud.zig) reuses it so interactive
+/// uploads store width/height like synced files do. Native-only — the wasm
+/// build doesn't link stb_image (callers conditional-import this module).
+pub fn detectImageDimensions(data: []const u8) struct { width: ?i64, height: ?i64 } {
     const c = @cImport({
         @cInclude("stb_image.h");
     });

@@ -15,6 +15,9 @@ const multipart = @import("multipart");
 const builtin = @import("builtin");
 const is_wasm = builtin.target.cpu.arch == .wasm32;
 
+// Conditional import: media_sync uses filesystem APIs + stb_image (native-only)
+const media_sync = if (is_wasm) struct {} else @import("media_sync");
+
 const h = @import("helpers.zig");
 
 pub fn handleEdit(ctx: *Context) !void {
@@ -130,55 +133,41 @@ pub fn handleEdit(ctx: *Context) !void {
     ctx.html(admin.renderWithLayout(page_reg.id, page_reg.title, ctx, content, ""));
 }
 
-pub fn handleUpload(ctx: *Context) !void {
-    const db = if (auth_middleware.auth) |a| a.db else {
-        h.redirect(ctx, "/admin/media");
-        return;
-    };
+/// Parse a multipart request body and store the file in the media library:
+/// validate, detect image dimensions (native), upload through the storage
+/// backend, and honor an optional `folder_id` field. Shared by the media
+/// page's redirecting form upload (`media.upload`) and the block editor's
+/// JSON upload (`media.upload_json`, api.zig).
+pub fn uploadFromMultipart(ctx: *Context, db: *db_mod.Db) !media.MediaRecord {
+    const body_content = ctx.body orelse return error.BadRequest;
+    const content_type = ctx.getRequestHeader("Content-Type") orelse return error.BadRequest;
+    const boundary = multipart.parseMultipartBoundary(content_type) orelse return error.BadRequest;
+    const file_data = multipart.parseMultipartFile(ctx.allocator, body_content, boundary) orelse
+        return error.BadRequest;
 
-    const body_content = ctx.body orelse {
-        h.redirect(ctx, "/admin/media");
-        return;
-    };
-
-    // Get Content-Type header to extract boundary
-    const content_type = ctx.getRequestHeader("Content-Type") orelse {
-        h.redirect(ctx, "/admin/media");
-        return;
-    };
-
-    // Parse multipart boundary
-    const boundary = multipart.parseMultipartBoundary(content_type) orelse {
-        h.redirect(ctx, "/admin/media");
-        return;
-    };
-
-    // Parse file from multipart form data
-    const file_data = multipart.parseMultipartFile(ctx.allocator, body_content, boundary) orelse {
-        h.redirect(ctx, "/admin/media");
-        return;
-    };
-
-    // Detect image dimensions if applicable
-    const width: ?i64 = null;
-    const height: ?i64 = null;
-    if (std.mem.startsWith(u8, file_data.content_type, "image/")) {
-        // Image dimension detection would go here — requires stb_image
-        // For now, leave as null; dimensions are optional
+    // Image dimensions via stb_image — native only; the wasm build stores
+    // null (stb isn't linked there — same split as the sync path). The
+    // comptime-known `!is_wasm` stands alone so the wasm build never
+    // analyzes the media_sync call against the empty stand-in struct.
+    var width: ?i64 = null;
+    var height: ?i64 = null;
+    if (!is_wasm) {
+        if (std.mem.startsWith(u8, file_data.content_type, "image/")) {
+            const dims = media_sync.detectImageDimensions(file_data.data);
+            width = dims.width;
+            height = dims.height;
+        }
     }
 
     // Upload: validate, store, create DB record
-    const record = media.uploadMedia(ctx.allocator, db, h.getBackend(), .{
+    const record = try media.uploadMedia(ctx.allocator, db, h.getBackend(), .{
         .filename = file_data.filename,
         .mime_type = file_data.content_type,
         .data = file_data.data,
         .width = width,
         .height = height,
-    }) catch |err| {
-        std.debug.print("Upload error: {}\n", .{err});
-        h.redirect(ctx, "/admin/media");
-        return;
-    };
+        .max_size = storage.admin_upload_max_size,
+    });
 
     // Assign to folder if specified
     const folder_id = multipart.parseMultipartField(ctx.allocator, body_content, boundary, "folder_id");
@@ -187,6 +176,20 @@ pub fn handleUpload(ctx: *Context) !void {
             media.addTermToMedia(db, record.id, fid) catch {};
         }
     }
+    return record;
+}
+
+pub fn handleUpload(ctx: *Context) !void {
+    const db = if (auth_middleware.auth) |a| a.db else {
+        h.redirect(ctx, "/admin/media");
+        return;
+    };
+
+    _ = uploadFromMultipart(ctx, db) catch |err| {
+        std.debug.print("Upload error: {}\n", .{err});
+        h.redirect(ctx, "/admin/media");
+        return;
+    };
 
     h.redirect(ctx, "/admin/media");
 }

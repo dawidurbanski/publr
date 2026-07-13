@@ -48,8 +48,8 @@ register('dialog', (el) => {
 
 // ── Dropdown Menu ───────────────────────────────
 register('dropdown', (el) => {
-    // Migrated to PublrJS (#151): elements with a data-p-store are driven by
-    // static/p/dropdown.js — skip them here so the two runtimes don't collide.
+    // Migrated to PublrJS (#151): elements with a data-p-store are driven by the
+    // DS-built /static/publr-dropdown.js — skip them here so the runtimes don't collide.
     if (el.hasAttribute('data-p-store')) return;
     const trigger = el.querySelector('[data-publr-part="trigger"]');
     const content = el.querySelector('[data-publr-part="content"]');
@@ -629,6 +629,11 @@ document.addEventListener('click', (e) => {
 // ── Image Picker ───────────────────────────────
 let imagePickerModal = null;
 let currentImagePicker = null;
+// Promise mode (pickMedia): when set, a pick resolves this callback with the
+// media record instead of writing into a form-field picker. Every close path
+// funnels through closeImagePickerModal, which resolves a pending promise
+// with null (cancel).
+let pickerResolve = null;
 let pickerActiveFolder = '';
 let pickerActiveFolderName = '';
 let pickerActiveTags = [];
@@ -707,13 +712,7 @@ function getImagePickerModal() {
 
     selectBtn.addEventListener('click', () => {
         const selected = grid.querySelector('.selected');
-        if (selected && currentImagePicker) {
-            const mediaId = selected.dataset.mediaId;
-            const thumbUrl = selected.dataset.thumbUrl;
-            const altText = selected.dataset.altText || '';
-            selectImage(currentImagePicker, mediaId, thumbUrl, altText);
-            closeImagePickerModal();
-        }
+        if (selected) pickItem(selected);
     });
 
     let searchTimer = null;
@@ -787,30 +786,61 @@ function getImagePickerModal() {
     // Double-click to select immediately
     grid.addEventListener('dblclick', (e) => {
         const item = e.target.closest('.image-picker-modal-item');
-        if (!item || !currentImagePicker) return;
-
-        const mediaId = item.dataset.mediaId;
-        const thumbUrl = item.dataset.thumbUrl;
-        const altText = item.dataset.altText || '';
-        selectImage(currentImagePicker, mediaId, thumbUrl, altText);
-        closeImagePickerModal();
+        if (item) pickItem(item);
     });
 
     return modal;
 }
 
+// A grid item was picked (Select button or double-click): resolve the promise
+// (pickMedia mode) or write into the owning form-field picker, then close.
+// The resolve callback is cleared BEFORE closing so the close path's
+// cancel-resolve doesn't fire.
+function pickItem(item) {
+    if (pickerResolve) {
+        const resolve = pickerResolve;
+        pickerResolve = null;
+        resolve({
+            id: item.dataset.mediaId,
+            url: item.dataset.url || '',
+            thumb_url: item.dataset.thumbUrl || '',
+            alt_text: item.dataset.altText || '',
+            width: item.dataset.width ? Number(item.dataset.width) : null,
+            height: item.dataset.height ? Number(item.dataset.height) : null,
+            filename: item.dataset.filename || '',
+        });
+        closeImagePickerModal();
+        return;
+    }
+    if (currentImagePicker) {
+        selectImage(currentImagePicker, item.dataset.mediaId, item.dataset.thumbUrl, item.dataset.altText || '');
+        closeImagePickerModal();
+    }
+}
+
 // Accept filter for file type restrictions (e.g., "image/*")
 let pickerAcceptFilter = '';
 
-function openImagePickerModal(picker) {
-    currentImagePicker = picker;
+// HTML-escape a string for interpolation into the modal's template literals
+// (filenames and alt text are user-controlled).
+function escAttr(s) {
+    return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+// Reset filters/search and show the modal. Callers set the pick sink first
+// (currentImagePicker for form fields, pickerResolve for promise mode).
+function resetAndOpenPicker(accept) {
     pickerActiveFolder = '';
     pickerActiveFolderName = '';
     pickerActiveTags = [];
     pickerActiveTagNames = {};
     pickerSearchTerm = '';
-    // Read accept filter from the picker component (e.g., data-publr-accept="image/*")
-    pickerAcceptFilter = picker.dataset.publrAccept || '';
+    pickerAcceptFilter = accept || '';
     const modal = getImagePickerModal();
     modal.classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -826,7 +856,34 @@ function openImagePickerModal(picker) {
     setTimeout(() => searchInput.focus(), 100);
 }
 
+function openImagePickerModal(picker) {
+    currentImagePicker = picker;
+    // Read accept filter from the picker component (e.g., data-publr-accept="image/*")
+    resetAndOpenPicker(picker.dataset.publrAccept || '');
+}
+
+// Programmatic media picker — opens the same modal and resolves with the
+// picked media record `{id, url, thumb_url, alt_text, width, height,
+// filename}`, or null on cancel (close button, Escape, backdrop). Exposed as
+// window.PublrAdmin.pickMedia (see index.js) for embedded tools like the
+// block editor's media adapter.
+export function pickMedia({ accept } = {}) {
+    return new Promise((resolve) => {
+        // A pending promise from a previous open (shouldn't happen — the
+        // modal is singular) resolves as cancelled rather than dangling.
+        if (pickerResolve) pickerResolve(null);
+        currentImagePicker = null;
+        pickerResolve = resolve;
+        resetAndOpenPicker(accept || '');
+    });
+}
+
 function closeImagePickerModal() {
+    if (pickerResolve) {
+        const resolve = pickerResolve;
+        pickerResolve = null;
+        resolve(null);
+    }
     if (imagePickerModal) {
         imagePickerModal.classList.remove('open');
         document.body.style.overflow = '';
@@ -973,14 +1030,18 @@ function loadMediaItems(search) {
                 <button type="button" class="image-picker-modal-item"
                         data-media-id="${item.id}"
                         data-thumb-url="${item.thumb_url}"
-                        data-alt-text="${item.alt_text || ''}">
+                        data-url="${item.url || ''}"
+                        data-width="${item.width ?? ''}"
+                        data-height="${item.height ?? ''}"
+                        data-filename="${escAttr(item.filename || '')}"
+                        data-alt-text="${escAttr(item.alt_text || '')}">
                     ${item.is_image
-                        ? `<img src="${item.thumb_url}" alt="${item.alt_text || item.filename}" loading="lazy" />`
+                        ? `<img src="${item.thumb_url}" alt="${escAttr(item.alt_text || item.filename)}" loading="lazy" />`
                         : `<div class="image-picker-modal-item-icon">
                             <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M14 2.26946V6.4C14 6.96005 14 7.24008 14.109 7.45399C14.2049 7.64215 14.3578 7.79513 14.546 7.89101C14.7599 8 15.0399 8 15.6 8H19.7305M20 9.98822V17.2C20 18.8802 20 19.7202 19.673 20.362C19.3854 20.9265 18.9265 21.3854 18.362 21.673C17.7202 22 16.8802 22 15.2 22H8.8C7.11984 22 6.27976 22 5.63803 21.673C5.07354 21.3854 4.6146 20.9265 4.32698 20.362C4 19.7202 4 18.8802 4 17.2V6.8C4 5.11984 4 4.27976 4.32698 3.63803C4.6146 3.07354 5.07354 2.6146 5.63803 2.32698C6.27976 2 7.11984 2 8.8 2H12.0118C12.7455 2 13.1124 2 13.4577 2.08289C13.7638 2.15638 14.0564 2.27759 14.3249 2.44208C14.6276 2.6276 14.887 2.88703 15.4059 3.40589L18.5941 6.59411C19.113 7.11297 19.3724 7.3724 19.5579 7.67515C19.7224 7.94356 19.8436 8.2362 19.9171 8.5423C20 8.88757 20 9.25445 20 9.98822Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                            </div>`
                     }
-                    <div class="image-picker-modal-item-name">${item.filename}</div>
+                    <div class="image-picker-modal-item-name">${escAttr(item.filename)}</div>
                 </button>
             `).join('');
         })

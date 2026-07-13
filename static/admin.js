@@ -1100,7 +1100,12 @@ scan(function() {
             }
         }
     });
-})();
+// This closes the `scan(function() {` opened at the top of the Post Edit
+// section. The old trailing `()` (an IIFE leftover) invoked scan's undefined
+// return value — a top-level TypeError that aborted module evaluation for
+// everything interact/index.js imports after admin.js (media-selection,
+// presence, and index.js's own exports).
+});
 
 // ── Recompile Nanobar ────────────────────────────
 scan(function() {

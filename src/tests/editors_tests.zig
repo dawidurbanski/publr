@@ -96,3 +96,40 @@ test "gutenberg.render: content without comments passes through" {
     try renderGutenberg("<p>just html</p>", &buf);
     try std.testing.expectEqualStrings("<p>just html</p>", buf.items);
 }
+
+// =============================================================================
+// built-in block editor (src/modules/admin/block_editor) — accessed via the
+// public registry interface
+// =============================================================================
+
+test "registry: built-in block editor is aggregated" {
+    const ed = editors.get("block") orelse return error.BlockEditorMissing;
+    try std.testing.expectEqualStrings("block", ed.id);
+    try std.testing.expectEqual(@as(usize, 2), ed.assets.len);
+    // No render override: the editor stores the clean frontend HTML in the
+    // `content` field directly (the editor's own "data" downcast), so themes
+    // emit {entry.content} as-is.
+    try std.testing.expectEqual(@as(?editors.RenderFn, null), ed.render);
+}
+
+test "block editor: assets are the vendored bundle + chrome stylesheet" {
+    const ed = editors.get("block") orelse return error.BlockEditorMissing;
+    var found_js = false;
+    var found_css = false;
+    for (ed.assets) |asset| {
+        if (std.mem.eql(u8, asset.name, "editor.js")) {
+            found_js = true;
+            try std.testing.expectEqualStrings("application/javascript", asset.content_type);
+            // The bundle must be batteries-included: the bootstrap script
+            // calls registerCoreBlocks(), which only exists if the library
+            // build re-exports the core block set.
+            try std.testing.expect(std.mem.indexOf(u8, asset.content, "registerCoreBlocks") != null);
+        }
+        if (std.mem.eql(u8, asset.name, "editor.css")) {
+            found_css = true;
+            try std.testing.expectEqualStrings("text/css", asset.content_type);
+        }
+    }
+    try std.testing.expect(found_js);
+    try std.testing.expect(found_css);
+}

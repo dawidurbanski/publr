@@ -399,6 +399,11 @@ pub fn validateSize(size: usize, max_bytes: usize) bool {
 /// Default max upload size: 1MB
 pub const default_max_size: usize = 1024 * 1024;
 
+/// Max upload size for the admin surfaces (media library form + the block
+/// editor's media adapter): 10MB. The REST API keeps `default_max_size`
+/// unless the caller overrides `UploadInput.max_size`.
+pub const admin_upload_max_size: usize = 10 * 1024 * 1024;
+
 /// Allowed file extensions (lowercase, with dot).
 pub const allowed_extensions = [_][]const u8{
     // Images

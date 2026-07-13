@@ -13,6 +13,7 @@ const is_wasm = builtin.target.cpu.arch == .wasm32;
 const media_sync = if (is_wasm) struct {} else @import("media_sync");
 
 const h = @import("helpers.zig");
+const crud = @import("crud.zig");
 
 /// JSON endpoint for image picker modal - lists media items for selection
 pub fn handlePickerList(ctx: *Context) !void {
@@ -70,7 +71,9 @@ pub fn handlePickerList(ctx: *Context) !void {
     // Start JSON object
     writer.writeAll("{") catch {};
 
-    // Items array (limited to 50 for display)
+    // Items array (limited to 50 for display). User-controlled strings
+    // (filename, alt text) are JSON-encoded via std.json.fmt — never printed
+    // raw into the payload.
     writer.writeAll("\"items\":[") catch {};
     const display_limit: usize = @min(entries.len, 50);
     for (entries[0..display_limit], 0..) |entry, i| {
@@ -78,21 +81,31 @@ pub fn handlePickerList(ctx: *Context) !void {
 
         const is_image = std.mem.startsWith(u8, entry.mime_type, "image/");
         const alt_text = entry.data.alt_text orelse "";
+        const url = std.fmt.allocPrint(ctx.allocator, "/media/{s}", .{entry.storage_key}) catch "";
         const thumb_url = if (is_image)
             std.fmt.allocPrint(ctx.allocator, "/media/{s}?w=150", .{entry.storage_key}) catch ""
         else
             "";
 
         writer.print(
-            \\{{"id":"{s}","filename":"{s}","mime_type":"{s}","is_image":{s},"thumb_url":"{s}","alt_text":"{s}"}}
+            \\{{"id":{f},"filename":{f},"mime_type":{f},"is_image":{s},"thumb_url":{f},"url":{f},"alt_text":{f},
         , .{
-            entry.id,
-            entry.filename,
-            entry.mime_type,
+            std.json.fmt(entry.id, .{}),
+            std.json.fmt(entry.filename, .{}),
+            std.json.fmt(entry.mime_type, .{}),
             if (is_image) "true" else "false",
-            thumb_url,
-            alt_text,
+            std.json.fmt(thumb_url, .{}),
+            std.json.fmt(url, .{}),
+            std.json.fmt(alt_text, .{}),
         }) catch {};
+        if (entry.width) |wv|
+            writer.print("\"width\":{d},", .{wv}) catch {}
+        else
+            writer.writeAll("\"width\":null,") catch {};
+        if (entry.height) |hv|
+            writer.print("\"height\":{d}}}", .{hv}) catch {}
+        else
+            writer.writeAll("\"height\":null}") catch {};
     }
     writer.writeAll("],") catch {};
 
@@ -103,9 +116,9 @@ pub fn handlePickerList(ctx: *Context) !void {
     for (folders) |folder| {
         writer.writeAll(",") catch {};
         const count = media.countFolderInContext(ctx.allocator, db, folder.id, active_tag_ids, search_pattern, null, null, accept_filter) catch 0;
-        writer.print("{{\"id\":\"{s}\",\"name\":\"{s}\",\"parent_id\":\"{s}\",\"count\":{d}}}", .{
+        writer.print("{{\"id\":\"{s}\",\"name\":{f},\"parent_id\":\"{s}\",\"count\":{d}}}", .{
             folder.id,
-            folder.name,
+            std.json.fmt(folder.name, .{}),
             folder.parent_id orelse "",
             count,
         }) catch {};
@@ -117,9 +130,9 @@ pub fn handlePickerList(ctx: *Context) !void {
     for (tags, 0..) |tag, i| {
         if (i > 0) writer.writeAll(",") catch {};
         const count = media.countTagInContext(ctx.allocator, db, tag.id, folder_filter, active_tag_ids, search_pattern, null, null, accept_filter) catch 0;
-        writer.print("{{\"id\":\"{s}\",\"name\":\"{s}\",\"count\":{d}}}", .{
+        writer.print("{{\"id\":\"{s}\",\"name\":{f},\"count\":{d}}}", .{
             tag.id,
-            tag.name,
+            std.json.fmt(tag.name, .{}),
             count,
         }) catch {};
     }
@@ -137,6 +150,65 @@ pub fn handlePickerList(ctx: *Context) !void {
     writer.writeAll("}") catch {};
 
     ctx.response.setHeader("Content-Type", "application/json");
+    ctx.response.setBody(json.items);
+}
+
+/// JSON upload action (`media.upload_json`) — the block editor's media
+/// adapter posts multipart FormData via fetch() and needs the stored record
+/// back as JSON, not the form flow's redirect. CSRF rides as a multipart
+/// `_csrf` field (validated by the CSRF middleware before dispatch). The set
+/// body suppresses the action dispatcher's default redirect.
+pub fn handleUploadJson(ctx: *Context) !void {
+    ctx.response.setHeader("Content-Type", "application/json");
+
+    const db = if (auth_middleware.auth) |a| a.db else {
+        ctx.response.setStatus("401 Unauthorized");
+        ctx.response.setBody("{\"error\":\"unauthorized\"}");
+        return;
+    };
+
+    const record = crud.uploadFromMultipart(ctx, db) catch |err| {
+        const status: []const u8, const code: []const u8 = switch (err) {
+            error.BadRequest => .{ "400 Bad Request", "bad_request" },
+            error.FileTooLarge => .{ "413 Payload Too Large", "file_too_large" },
+            error.InvalidFileType, error.InvalidMimeType => .{ "422 Unprocessable Entity", "invalid_file_type" },
+            else => .{ "422 Unprocessable Entity", "upload_failed" },
+        };
+        ctx.response.setStatus(status);
+        const body = std.fmt.allocPrint(ctx.allocator, "{{\"error\":\"{s}\"}}", .{code}) catch "{\"error\":\"upload_failed\"}";
+        ctx.response.setBody(body);
+        return;
+    };
+
+    var json: std.ArrayListUnmanaged(u8) = .{};
+    const writer = json.writer(ctx.allocator);
+    const url = std.fmt.allocPrint(ctx.allocator, "/media/{s}", .{record.storage_key}) catch "";
+    const is_image = std.mem.startsWith(u8, record.mime_type, "image/");
+    const thumb_url = if (is_image)
+        std.fmt.allocPrint(ctx.allocator, "/media/{s}?w=300", .{record.storage_key}) catch url
+    else
+        url;
+
+    writer.print(
+        \\{{"id":{f},"url":{f},"thumb_url":{f},"filename":{f},"mime_type":{f},
+    , .{
+        std.json.fmt(record.id, .{}),
+        std.json.fmt(url, .{}),
+        std.json.fmt(thumb_url, .{}),
+        std.json.fmt(record.filename, .{}),
+        std.json.fmt(record.mime_type, .{}),
+    }) catch {};
+    if (record.width) |wv|
+        writer.print("\"width\":{d},", .{wv}) catch {}
+    else
+        writer.writeAll("\"width\":null,") catch {};
+    if (record.height) |hv|
+        writer.print("\"height\":{d},", .{hv}) catch {}
+    else
+        writer.writeAll("\"height\":null,") catch {};
+    writer.print("\"alt_text\":{f}}}", .{std.json.fmt(record.data.alt_text orelse "", .{})}) catch {};
+
+    ctx.response.setStatus("201 Created");
     ctx.response.setBody(json.items);
 }
 
@@ -220,6 +292,12 @@ test "admin media api: unauthenticated branches" {
     try handlePickerList(&picker);
     try std.testing.expect(std.mem.indexOf(u8, picker.response.body, "\"items\":[]") != null);
 
+    var upload = Context.init(std.heap.page_allocator, .POST, "/admin/action");
+    defer upload.deinit();
+    try handleUploadJson(&upload);
+    try std.testing.expectEqualStrings("401 Unauthorized", upload.response.status);
+    try std.testing.expect(std.mem.indexOf(u8, upload.response.body, "\"error\":\"unauthorized\"") != null);
+
     var thumb = Context.init(std.heap.page_allocator, .GET, "/admin/media/picker/thumb");
     defer thumb.deinit();
     try handlePickerThumb(&thumb);
@@ -239,6 +317,7 @@ test "admin media api: unauthenticated branches" {
 test "admin media api: public API coverage" {
     _ = handlePickerList;
     _ = handlePickerThumb;
+    _ = handleUploadJson;
     _ = handleSync;
     _ = handleScan;
 }

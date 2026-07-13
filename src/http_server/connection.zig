@@ -6,8 +6,10 @@ const tpl = @import("tpl");
 /// Request header - imported from middleware
 const RequestHeader = @import("middleware").RequestHeader;
 
-/// Max request body size (2MB — enough for 1MB upload + multipart overhead)
-const max_body_size: usize = 2 * 1024 * 1024;
+/// Max request body size (12MB — enough for the 10MB admin upload cap
+/// [storage.admin_upload_max_size] + multipart overhead). Large bodies
+/// heap-allocate, so the cap costs nothing on ordinary requests.
+const max_body_size: usize = 12 * 1024 * 1024;
 
 var configured_router: ?*Router = null;
 var active_connections: ?*std.atomic.Value(u32) = null;
