@@ -2197,13 +2197,18 @@ body.admin.has-recompile-bar {
     background: rgba(0, 0, 0, 0.5);
     align-items: center;
     justify-content: center;
-    padding: 1.5rem;
+    padding: 2rem;
+}
+
+.dark .image-picker-modal {
+    background: rgba(0, 0, 0, 0.75);
 }
 
 .image-picker-modal.open {
     display: flex;
 }
 
+/* Full-screen dialog: the overlay's padding is the only margin. */
 .image-picker-modal-content {
     background: var(--popover);
     color: var(--popover-foreground);
@@ -2211,8 +2216,7 @@ body.admin.has-recompile-bar {
     border-radius: calc(var(--radius) + 4px);
     box-shadow: 0 20px 50px -12px color-mix(in oklch, var(--foreground) 35%, transparent);
     width: 100%;
-    max-width: 1000px;
-    height: 85vh;
+    height: 100%;
     min-height: 500px;
     display: flex;
     flex-direction: column;
@@ -2537,4 +2541,9 @@ body.admin.has-recompile-bar {
 .image-picker-modal-actions {
     display: flex;
     gap: 0.5rem;
+}
+
+.image-picker-modal-upload.is-uploading {
+    opacity: 0.6;
+    pointer-events: none;
 }

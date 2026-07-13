@@ -634,6 +634,8 @@ let currentImagePicker = null;
 // funnels through closeImagePickerModal, which resolves a pending promise
 // with null (cancel).
 let pickerResolve = null;
+// A just-uploaded media id to pre-select once the grid refresh renders it.
+let pendingSelectId = null;
 let pickerActiveFolder = '';
 let pickerActiveFolderName = '';
 let pickerActiveTags = [];
@@ -670,6 +672,10 @@ function getImagePickerModal() {
                             <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none"><path d="M21 21L17.5001 17.5M20 11.5C20 16.1944 16.1944 20 11.5 20C6.80558 20 3 16.1944 3 11.5C3 6.80558 6.80558 3 11.5 3C16.1944 3 20 6.80558 20 11.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             <input type="text" placeholder="Search media..." />
                         </div>
+                        <label class="btn btn-sm image-picker-modal-upload">
+                            <span>Upload</span>
+                            <input type="file" multiple style="display: none" />
+                        </label>
                     </div>
                     <div class="image-picker-modal-body">
                         <div class="image-picker-modal-grid"></div>
@@ -727,6 +733,47 @@ function getImagePickerModal() {
         searchTimer = setTimeout(() => {
             loadMediaItems(searchInput.value);
         }, 300);
+    });
+
+    // Upload straight from the dialog: post through the same JSON action the
+    // block editor's media adapter uses, then refresh the grid and pre-select
+    // the (last) new item so one click on Select finishes the flow.
+    const uploadLabel = modal.querySelector('.image-picker-modal-upload');
+    const uploadText = uploadLabel.querySelector('span');
+    const uploadInput = uploadLabel.querySelector('input[type="file"]');
+    uploadInput.addEventListener('change', async () => {
+        const files = [...uploadInput.files];
+        uploadInput.value = ''; // same-file re-selects must fire change again
+        if (!files.length) return;
+        const csrf = document.querySelector('input[name="_csrf"]')?.value ?? '';
+        uploadLabel.classList.add('is-uploading');
+        uploadText.textContent = files.length > 1 ? `Uploading 0/${files.length}…` : 'Uploading…';
+        let lastId = null;
+        try {
+            for (let i = 0; i < files.length; i++) {
+                if (files.length > 1) uploadText.textContent = `Uploading ${i + 1}/${files.length}…`;
+                const fd = new FormData();
+                fd.append('action', 'media.upload_json');
+                fd.append('_csrf', csrf);
+                if (pickerActiveFolder && pickerActiveFolder !== 'default') {
+                    fd.append('folder_id', pickerActiveFolder);
+                }
+                fd.append('file', files[i], files[i].name);
+                const r = await fetch('/admin/action', { method: 'POST', body: fd });
+                const m = await r.json().catch(() => null);
+                if (!r.ok || !m || m.error) throw new Error((m && m.error) || 'HTTP ' + r.status);
+                lastId = m.id;
+            }
+        } catch (err) {
+            toast('Upload failed: ' + err.message, 'error');
+        } finally {
+            uploadText.textContent = 'Upload';
+            uploadLabel.classList.remove('is-uploading');
+        }
+        if (lastId) {
+            pendingSelectId = lastId;
+            loadMediaItems(searchInput.value);
+        }
     });
 
     // Folder click handler
@@ -848,6 +895,8 @@ function resetAndOpenPicker(accept) {
     pickerSearchTerm = '';
     pickerAcceptFilter = accept || '';
     const modal = getImagePickerModal();
+    // The in-dialog Upload honors the same accept filter as the listing.
+    modal.querySelector('.image-picker-modal-upload input').accept = pickerAcceptFilter;
     modal.classList.add('open');
     document.body.style.overflow = 'hidden';
 
@@ -1050,6 +1099,17 @@ function loadMediaItems(search) {
                     <div class="image-picker-modal-item-name">${escAttr(item.filename)}</div>
                 </button>
             `).join('');
+
+            // Pre-select a just-uploaded item (see the Upload wiring above).
+            if (pendingSelectId) {
+                const fresh = grid.querySelector(`[data-media-id="${pendingSelectId}"]`);
+                pendingSelectId = null;
+                if (fresh) {
+                    fresh.classList.add('selected');
+                    fresh.scrollIntoView({ block: 'nearest' });
+                    selectBtn.disabled = false;
+                }
+            }
         })
         .catch(err => {
             console.error('Failed to load media:', err);
