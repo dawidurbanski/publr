@@ -40,6 +40,13 @@ const JitUtilitiesCss = @embedFile("static_jit_css");
 const PublrCss = static.Asset("publr.css", PreflightCss ++ "\n" ++ JitUtilitiesCss);
 const TokensCss = static.Asset("tokens.css", @embedFile("static_tokens_css"));
 
+fn composePublrCss(allocator: std.mem.Allocator, runtime_delta: []const u8) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}\n{s}\n{s}",
+        .{ PreflightCss, JitUtilitiesCss, runtime_delta },
+    );
+}
 const PublrCheckboxJs = static.Asset("publr-checkbox.js", publr_ui.checkbox_js);
 const PublrDialogJs = static.Asset("publr-dialog.js", publr_ui.dialog_js);
 const PublrDropdownJs = static.Asset("publr-dropdown.js", publr_ui.dropdown_js);
@@ -99,14 +106,17 @@ pub fn handleStatic(ctx: *Context) !void {
         return;
     };
 
-    // In dev mode, the HMR loop may have set a runtime override for
-    // publr.css after a fast-path swap (see runtime_css.set). Serve
-    // that first so just-extracted classes are covered before the next
-    // `zig build` regenerates the embedded copy.
+    // In dev mode, the HMR loop may have compiled additional utilities from
+    // the last hot-swapped component (see runtime_css.set). That payload is
+    // only a delta: replacing JitUtilitiesCss with it drops every utility
+    // used outside the swapped subtree and breaks unrelated admin pages.
+    // Keep the complete build-time sheet and append the runtime delta.
     if (is_dev_mode and std.mem.eql(u8, file, "styles/publr.css")) {
         if (try runtime_css.dupCurrent(std.heap.page_allocator)) |content| {
+            defer std.heap.page_allocator.free(content);
+            const body = try composePublrCss(std.heap.page_allocator, content);
             ctx.response.setContentType(static.getMimeType(file));
-            ctx.response.setBody(content);
+            ctx.response.setBody(body);
             return;
         }
     }
@@ -134,6 +144,23 @@ pub fn handleStatic(ctx: *Context) !void {
     ctx.response.setStatus("404 Not Found");
     ctx.response.setContentType("text/plain");
     ctx.response.setBody("Not Found");
+}
+
+test "dev publr.css keeps build-time utilities when adding an HMR delta" {
+    const delta = "@layer utilities { .hmr-only { display: block; } }";
+    const body = try composePublrCss(std.testing.allocator, delta);
+    defer std.testing.allocator.free(body);
+
+    const base_end = PreflightCss.len + 1 + JitUtilitiesCss.len;
+    try std.testing.expectEqualSlices(u8, PreflightCss, body[0..PreflightCss.len]);
+    try std.testing.expectEqual('\n', body[PreflightCss.len]);
+    try std.testing.expectEqualSlices(
+        u8,
+        JitUtilitiesCss,
+        body[PreflightCss.len + 1 .. base_end],
+    );
+    try std.testing.expectEqual('\n', body[base_end]);
+    try std.testing.expectEqualSlices(u8, delta, body[base_end + 1 ..]);
 }
 
 const theme_static = @import("theme_static");
