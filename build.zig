@@ -152,8 +152,8 @@ pub fn build(b: *std.Build) void {
     const static_files = .{
         .{ "static_admin_css", "static/admin.css" },
         .{ "static_logo_svg", "static/logo.svg" },
-        .{ "static_preflight_css", "vendor/jit/preflight.css" },
-        .{ "static_tokens_css", "vendor/tokens.css" },
+        .{ "static_preflight_css", "vendor/tailwindcss/preflight.css" },
+        .{ "static_tokens_css", "static/styles/tokens.css" },
         .{ "static_admin_js", "static/admin.js" },
         .{ "static_interact_core_js", "static/interact/core.js" },
         .{ "static_interact_toggle_js", "static/interact/toggle.js" },
@@ -169,10 +169,10 @@ pub fn build(b: *std.Build) void {
         .{ "static_interact_websocket_js", "static/interact/websocket.js" },
         // PublrJS runtime (data-p-* stores) — second system
         // alongside interact/core.js, for the dashboard demo (#101).
-        .{ "static_publr_js", "static/publr.js" },
-        .{ "static_publr_query_js", "static/publr-query.js" },
-        .{ "static_publr_position_js", "static/publr-position.js" },
-        .{ "static_publr_focus_js", "static/publr-focus.js" },
+        .{ "static_publr_js", "lib/publr/publr.js" },
+        .{ "static_publr_query_js", "lib/publr/publr-query.js" },
+        .{ "static_publr_position_js", "lib/publr/publr-position.js" },
+        .{ "static_publr_focus_js", "lib/publr/publr-focus.js" },
         .{ "static_dashboard_demo_js", "static/dashboard-demo.js" },
     };
     inline for (static_files) |sf| {
@@ -196,18 +196,18 @@ pub fn build(b: *std.Build) void {
     // Shared UI icons — a pinned, checked-in Zig adapter from publr-icons.
     // CMS builds remain npm-free, submodule-free, and fully offline.
     const publr_icons = b.createModule(.{
-        .root_source_file = b.path("vendor/publr_icons.zig"),
+        .root_source_file = b.path("lib/publr_icons.zig"),
     });
 
     // Design system amalgamation — components, CSS, JS as string constants
     const publr_ui = b.createModule(.{
-        .root_source_file = b.path("vendor/publr_ui.zig"),
+        .root_source_file = b.path("lib/publr_ui.zig"),
     });
     publr_ui.addImport("publr_icons", publr_icons);
 
     // ZSX runtime for views (same amalgamation, views only use .runtime)
     const zsx_views = b.createModule(.{
-        .root_source_file = b.path("vendor/zsx.zig"),
+        .root_source_file = b.path("lib/zsx.zig"),
     });
 
     // HMR module: the generated views emit `try @import("hmr").captureProps(...)`
@@ -987,22 +987,14 @@ pub fn build(b: *std.Build) void {
     // here we wrap it as an importable module so the HMR loop can call
     // into it without forking a subprocess.
     const jit_runtime_module = b.createModule(.{
-        .root_source_file = b.path("vendor/jit/jit.zig"),
-        .imports = &.{
-            .{ .name = "zsx", .module = zsx_views },
-        },
+        .root_source_file = b.path("lib/publr_jit.zig"),
     });
 
     // Themes as .zon imports so the runtime JIT merges them at comptime
     // the same way build/theme.zig does. Keeps build-time and runtime
     // CSS byte-identical for the same class set (no late divergence).
-    const default_theme_zon = b.createModule(.{
-        .root_source_file = b.path("vendor/jit/default-theme.zon"),
-        .imports = &.{.{ .name = "jit", .module = jit_runtime_module }},
-    });
     const ds_theme_zon = b.createModule(.{
-        .root_source_file = b.path("vendor/jit/ds-tokens.zon"),
-        .imports = &.{.{ .name = "jit", .module = jit_runtime_module }},
+        .root_source_file = b.path("src/styles/jit-theme.zon"),
     });
 
     // CSS JIT module — small wrapper that walks rendered HTML for
@@ -1014,7 +1006,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/css_jit.zig"),
         .imports = &.{
             .{ .name = "jit", .module = jit_runtime_module },
-            .{ .name = "default_theme", .module = default_theme_zon },
             .{ .name = "ds_theme", .module = ds_theme_zon },
         },
     });

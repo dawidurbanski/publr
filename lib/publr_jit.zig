@@ -1,3 +1,999 @@
+// SPDX-License-Identifier: Apache-2.0
+// Publr JIT Amalgamation — generated from jit/src/*.zig
+// Do not edit directly. Regenerate: ./scripts/amalgamate-jit.sh
+// The third-party compatibility preflight is distributed separately.
+
+const amalgam = @This();
+
+pub const candidate_mod = struct {
+/// Class candidate parser.
+///
+/// Configuration-free: produces all possible structural interpretations of an
+/// input class string. The consumer (utility and variant tables) disambiguates
+/// them by checking which root is registered.
+///
+/// Coverage in this version:
+///   - Static utilities (flex, block, etc.)
+///   - Functional utilities (bg-red-500, w-1/2)
+///   - Arbitrary values (bg-[#abc], w-[calc(100%-1rem)])
+///   - Parens-arbitrary values (bg-(--my-var), bg-(color:--my-var))
+///   - Arbitrary properties ([color:red])
+///   - Modifiers (named: /50, arbitrary: /[0.9], parens: /(--my-var))
+///   - Important markers (trailing `!`, leading `!` legacy syntax)
+///   - Static variants (hover:, focus:)
+///   - Functional variants (md:, data-[state=open]:, aria-[busy=true]:)
+///   - Compound variants (group-hover:, peer-focus:, named: group/foo:hover:)
+///   - Arbitrary variants ([selector]:, [&_p]:, [@media...]:)
+///   - Stacked variants (md:hover:focus:)
+///
+/// Deferred to follow-up:
+///   - Container queries (@container, @sm: inside container contexts)
+///   - not-*, has-*, in-* compound forwarding
+///   - Some niche edge cases around relative selectors
+///
+/// Memory model: parser takes an allocator; returns an array of Candidates.
+/// Slices inside the candidates point into the input string OR the allocator's
+/// memory. Caller frees by passing the same allocator to `freeCandidates`.
+const std = @import("std");
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+pub const ArbitraryUtilityValue = struct {
+    /// Type hint, e.g. `color` in `bg-[color:var(--my-color)]`.
+    data_type: ?[]const u8,
+    value: []const u8,
+};
+
+pub const NamedUtilityValue = struct {
+    value: []const u8,
+    /// For fractions like `w-1/2`, this stores `1/2`. Otherwise null.
+    fraction: ?[]const u8,
+};
+
+pub const UtilityValueKind = enum { named, arbitrary };
+
+pub const UtilityValue = union(UtilityValueKind) {
+    named: NamedUtilityValue,
+    arbitrary: ArbitraryUtilityValue,
+};
+
+pub const ModifierKind = enum { named, arbitrary };
+
+pub const Modifier = union(ModifierKind) {
+    /// `bg-red-500/50` — `value` is `"50"`.
+    named: []const u8,
+    /// `bg-red-500/[50%]` or `bg-red-500/(--var)` — `value` is `"50%"` or `"var(--var)"`.
+    arbitrary: []const u8,
+};
+
+pub const VariantKind = enum { static_v, functional, compound, arbitrary };
+
+/// Variant tags.
+/// `static_v` instead of `static` to avoid the Zig keyword.
+pub const Variant = union(VariantKind) {
+    static_v: struct { root: []const u8 },
+    functional: struct {
+        root: []const u8,
+        value: ?VariantValue,
+        modifier: ?Modifier,
+    },
+    compound: struct {
+        root: []const u8,
+        /// Named-group variant suffix. `group/foo:hover` → modifier = "foo" (named).
+        modifier: ?Modifier,
+        variant: *Variant,
+    },
+    arbitrary: struct {
+        selector: []const u8,
+        relative: bool,
+    },
+};
+
+pub const VariantValueKind = enum { named, arbitrary };
+
+pub const VariantValue = union(VariantValueKind) {
+    named: []const u8,
+    arbitrary: []const u8,
+};
+
+pub const CandidateKind = enum { static_c, functional, arbitrary };
+
+pub const Candidate = union(CandidateKind) {
+    static_c: struct {
+        root: []const u8,
+        variants: []const Variant,
+        important: bool,
+        raw: []const u8,
+    },
+    functional: struct {
+        root: []const u8,
+        value: ?UtilityValue,
+        modifier: ?Modifier,
+        variants: []const Variant,
+        important: bool,
+        raw: []const u8,
+    },
+    arbitrary: struct {
+        property: []const u8,
+        value: []const u8,
+        modifier: ?Modifier,
+        variants: []const Variant,
+        important: bool,
+        raw: []const u8,
+    },
+};
+
+// ── Public entry point ──────────────────────────────────────────────────────
+
+pub const ParseError = error{OutOfMemory};
+
+/// Parse a class string into all possible structural interpretations.
+/// Returns an empty slice if the input is structurally invalid.
+/// Caller owns the returned slice; the allocator is also used for nested
+/// allocations (variants, etc.).
+pub fn parseCandidate(allocator: std.mem.Allocator, input: []const u8) ParseError![]Candidate {
+    var results = std.array_list.Managed(Candidate).init(allocator);
+    errdefer results.deinit();
+
+    if (input.len == 0) return results.toOwnedSlice();
+
+    // Split on `:` outside brackets to separate stacked variants from base.
+    var raw_variants = try segmentColon(allocator, input);
+    defer allocator.free(raw_variants);
+
+    if (raw_variants.len == 0) return results.toOwnedSlice();
+
+    var base = raw_variants[raw_variants.len - 1];
+    const variant_strs = raw_variants[0 .. raw_variants.len - 1];
+
+    // Parse variants in reverse so the innermost variant is stored first.
+    var parsed_variants = std.array_list.Managed(Variant).init(allocator);
+    errdefer parsed_variants.deinit();
+
+    var i = variant_strs.len;
+    while (i > 0) {
+        i -= 1;
+        const v = parseVariant(allocator, variant_strs[i]) catch return ParseError.OutOfMemory;
+        if (v == null) return results.toOwnedSlice(); // unparseable variant → no candidates
+        try parsed_variants.append(v.?);
+    }
+    // `variants_master` is a single owned copy; we deep-clone it for each yielded
+    // candidate so freeCandidates can free per-candidate without double-freeing.
+    const variants_master = try parsed_variants.toOwnedSlice();
+    defer {
+        for (variants_master) |v| freeVariant(allocator, v);
+        allocator.free(variants_master);
+    }
+
+    // Important detection: trailing `!` (preferred), or legacy leading `!`.
+    var important = false;
+    if (base.len > 0 and base[base.len - 1] == '!') {
+        important = true;
+        base = base[0 .. base.len - 1];
+    } else if (base.len > 0 and base[0] == '!') {
+        important = true;
+        base = base[1..];
+    }
+
+    if (base.len == 0) return results.toOwnedSlice();
+
+    // Try a pure static interpretation first (e.g. `flex` could be a static utility).
+    // Skip if the base contains `[`, `(`, or `/` — those signal arbitrary / parens /
+    // modifier forms which can never be a static utility name on their own.
+    if (std.mem.indexOfScalar(u8, base, '[') == null and
+        std.mem.indexOfScalar(u8, base, '(') == null and
+        std.mem.indexOfScalar(u8, base, '/') == null)
+    {
+        try results.append(.{ .static_c = .{
+            .root = base,
+            .variants = try cloneVariants(allocator, variants_master),
+            .important = important,
+            .raw = input,
+        } });
+    }
+
+    // Modifier slash split (top-level only, outside brackets/parens).
+    var base_no_mod = base;
+    var modifier_str: ?[]const u8 = null;
+    {
+        const slash_parts = try segmentByte(allocator, base, '/');
+        defer allocator.free(slash_parts);
+        // 0 or 1 segments: no modifier. Exactly 2 parts: name/modifier. >2 parts: invalid.
+        if (slash_parts.len == 2) {
+            base_no_mod = slash_parts[0];
+            modifier_str = slash_parts[1];
+        } else if (slash_parts.len > 2) {
+            return results.toOwnedSlice();
+        }
+    }
+
+    // Parse modifier if present. `parsed_modifier_master` is the single owned copy;
+    // each yield clones it so freeCandidates can free per-candidate.
+    var parsed_modifier_master: ?Modifier = null;
+    defer if (parsed_modifier_master) |m| freeModifier(allocator, m);
+    if (modifier_str) |m| {
+        parsed_modifier_master = try parseModifier(allocator, m);
+        if (parsed_modifier_master == null) return results.toOwnedSlice(); // empty/invalid
+    }
+
+    // Arbitrary properties: `[color:red]` or `[--var:1px]`.
+    if (base_no_mod.len >= 2 and base_no_mod[0] == '[' and base_no_mod[base_no_mod.len - 1] == ']') {
+        const inner = base_no_mod[1 .. base_no_mod.len - 1];
+        // Property must start with a-z or `-` (vendor prefix).
+        if (inner.len == 0) return results.toOwnedSlice();
+        const c0 = inner[0];
+        if (!(c0 == '-' or (c0 >= 'a' and c0 <= 'z'))) return results.toOwnedSlice();
+        const colon_idx = std.mem.indexOfScalar(u8, inner, ':') orelse return results.toOwnedSlice();
+        if (colon_idx == 0 or colon_idx == inner.len - 1) return results.toOwnedSlice();
+        const property = inner[0..colon_idx];
+        const value_raw = inner[colon_idx + 1 ..];
+        const value = try decodeArbitrary(allocator, value_raw);
+        if (!isValidArbitrary(value)) {
+            allocator.free(value);
+            return results.toOwnedSlice();
+        }
+        try results.append(.{ .arbitrary = .{
+            .property = property,
+            .value = value,
+            .modifier = if (parsed_modifier_master) |m| try cloneModifier(allocator, m) else null,
+            .variants = try cloneVariants(allocator, variants_master),
+            .important = important,
+            .raw = input,
+        } });
+        return results.toOwnedSlice();
+    }
+
+    // Functional with `[...]` arbitrary value.
+    if (base_no_mod.len > 0 and base_no_mod[base_no_mod.len - 1] == ']') {
+        const idx = std.mem.indexOf(u8, base_no_mod, "-[") orelse return results.toOwnedSlice();
+        const root = base_no_mod[0..idx];
+        const arbitrary_raw = base_no_mod[idx + 2 .. base_no_mod.len - 1];
+        const decoded = try decodeArbitrary(allocator, arbitrary_raw);
+        if (!isValidArbitrary(decoded)) {
+            allocator.free(decoded);
+            return results.toOwnedSlice();
+        }
+        if (decoded.len == 0 or std.mem.trim(u8, decoded, " \t\n\r").len == 0) {
+            allocator.free(decoded);
+            return results.toOwnedSlice();
+        }
+
+        // Extract a typehint if present: `bg-[color:var(--x)]` → typehint=`color`.
+        var data_type_slice: ?[]const u8 = null;
+        var value_str: []const u8 = decoded;
+        var th_idx: usize = 0;
+        while (th_idx < decoded.len) : (th_idx += 1) {
+            const c = decoded[th_idx];
+            if (c == ':') {
+                data_type_slice = decoded[0..th_idx];
+                value_str = decoded[th_idx + 1 ..];
+                break;
+            }
+            // Typehint chars: lowercase or `-`.
+            if (c == '-' or (c >= 'a' and c <= 'z')) continue;
+            break;
+        }
+
+        const data_type = if (data_type_slice) |dt| try allocator.dupe(u8, dt) else null;
+        errdefer if (data_type) |dt| allocator.free(dt);
+        const owned_value = try allocator.dupe(u8, value_str);
+        errdefer allocator.free(owned_value);
+        allocator.free(decoded);
+
+        try results.append(.{ .functional = .{
+            .root = root,
+            .value = .{ .arbitrary = .{ .data_type = data_type, .value = owned_value } },
+            .modifier = if (parsed_modifier_master) |m| try cloneModifier(allocator, m) else null,
+            .variants = try cloneVariants(allocator, variants_master),
+            .important = important,
+            .raw = input,
+        } });
+        return results.toOwnedSlice();
+    }
+
+    // Functional with `(--var)` parens-arbitrary value.
+    if (base_no_mod.len > 0 and base_no_mod[base_no_mod.len - 1] == ')') {
+        const idx = std.mem.indexOf(u8, base_no_mod, "-(") orelse return results.toOwnedSlice();
+        const root = base_no_mod[0..idx];
+        const inner = base_no_mod[idx + 2 .. base_no_mod.len - 1];
+        // Optional typehint via `:` separator inside the parens.
+        var data_type_slice: ?[]const u8 = null;
+        var var_name: []const u8 = inner;
+        if (std.mem.indexOfScalar(u8, inner, ':')) |colon| {
+            data_type_slice = inner[0..colon];
+            var_name = inner[colon + 1 ..];
+        }
+        // Var name must start with `--`.
+        if (var_name.len < 2 or var_name[0] != '-' or var_name[1] != '-') return results.toOwnedSlice();
+        if (!isValidArbitrary(var_name)) return results.toOwnedSlice();
+
+        // Wrap in `var(...)` to form the arbitrary CSS value.
+        const wrapped = try std.fmt.allocPrint(allocator, "var({s})", .{var_name});
+        errdefer allocator.free(wrapped);
+        const data_type = if (data_type_slice) |dt| try allocator.dupe(u8, dt) else null;
+        errdefer if (data_type) |dt| allocator.free(dt);
+        try results.append(.{ .functional = .{
+            .root = root,
+            .value = .{ .arbitrary = .{ .data_type = data_type, .value = wrapped } },
+            .modifier = if (parsed_modifier_master) |m| try cloneModifier(allocator, m) else null,
+            .variants = try cloneVariants(allocator, variants_master),
+            .important = important,
+            .raw = input,
+        } });
+        return results.toOwnedSlice();
+    }
+
+    // Functional with named value. Yield all possible (root, value) splits at
+    // hyphen positions, right-to-left. Plus the no-value form (full base = root).
+    // Consumer disambiguates via utility table presence.
+    {
+        var idx = std.mem.lastIndexOfScalar(u8, base_no_mod, '-');
+        while (idx != null and idx.? > 0) {
+            const root = base_no_mod[0..idx.?];
+            const value_part = base_no_mod[idx.? + 1 ..];
+            if (value_part.len == 0) break; // `bg-` is invalid
+
+            if (!isValidNamedValue(value_part)) {
+                idx = std.mem.lastIndexOfScalar(u8, base_no_mod[0..idx.?], '-');
+                continue;
+            }
+
+            // Compute fraction string if a modifier exists alongside (e.g. `w-1/2`):
+            // Store `${value}/${modifierSegment}` in the fraction field.
+            // We don't have access to modifier_str directly here unless we capture it.
+            const fraction: ?[]const u8 = blk: {
+                if (modifier_str == null) break :blk null;
+                if (parsed_modifier_master != null and parsed_modifier_master.? == .arbitrary) break :blk null;
+                break :blk try std.fmt.allocPrint(allocator, "{s}/{s}", .{ value_part, modifier_str.? });
+            };
+
+            try results.append(.{ .functional = .{
+                .root = root,
+                .value = .{ .named = .{ .value = value_part, .fraction = fraction } },
+                .modifier = if (parsed_modifier_master) |m| try cloneModifier(allocator, m) else null,
+                .variants = try cloneVariants(allocator, variants_master),
+                .important = important,
+                .raw = input,
+            } });
+
+            idx = std.mem.lastIndexOfScalar(u8, base_no_mod[0..idx.?], '-');
+        }
+    }
+
+    return results.toOwnedSlice();
+}
+
+// ── Variant parsing ─────────────────────────────────────────────────────────
+
+/// Like `std.mem.lastIndexOfScalar(u8, s, '-')` but ignores dashes that sit
+/// inside `[…]` or `(…)` so e.g. `data-[publr-state=open]` splits between
+/// `data` and the bracketed value, not at the `-` inside `publr-state`.
+fn lastIndexOfDashOutsideBrackets(s: []const u8) ?usize {
+    var depth: i32 = 0;
+    var i: usize = s.len;
+    while (i > 0) {
+        i -= 1;
+        const c = s[i];
+        switch (c) {
+            ']', ')' => depth += 1,
+            '[', '(' => depth -= 1,
+            '-' => if (depth == 0) return i,
+            else => {},
+        }
+    }
+    return null;
+}
+
+pub fn parseVariant(allocator: std.mem.Allocator, input: []const u8) ParseError!?Variant {
+    if (input.len == 0) return null;
+
+    // Arbitrary variants: `[selector]`, `[&:hover]`, `[@media (...)]`.
+    if (input[0] == '[' and input[input.len - 1] == ']') {
+        // Reject `[@media(...){&:hover}]` (combined at-rules + selector).
+        if (input.len > 1 and input[1] == '@' and std.mem.indexOfScalar(u8, input, '&') != null) return null;
+        const inner = input[1 .. input.len - 1];
+        const decoded = try decodeArbitrary(allocator, inner);
+        if (!isValidArbitrary(decoded) or decoded.len == 0 or std.mem.trim(u8, decoded, " \t\n\r").len == 0) {
+            allocator.free(decoded);
+            return null;
+        }
+        const relative = decoded.len > 0 and (decoded[0] == '>' or decoded[0] == '+' or decoded[0] == '~');
+        var selector: []const u8 = decoded;
+        // If not a relative selector and not an at-rule, wrap in `&:is(…)` for the `&` requirement.
+        if (!relative and decoded.len > 0 and decoded[0] != '@' and std.mem.indexOfScalar(u8, decoded, '&') == null) {
+            const wrapped = try std.fmt.allocPrint(allocator, "&:is({s})", .{decoded});
+            allocator.free(decoded);
+            selector = wrapped;
+        }
+        return .{ .arbitrary = .{ .selector = selector, .relative = relative } };
+    }
+
+    // Static, functional, compound — split on `/` for modifier.
+    const slash_parts = try segmentByte(allocator, input, '/');
+    defer allocator.free(slash_parts);
+    if (slash_parts.len > 2) return null;
+    const without_modifier = if (slash_parts.len == 0) input else slash_parts[0];
+    const modifier_str = if (slash_parts.len == 2) slash_parts[1] else null;
+
+    const parsed_modifier: ?Modifier = if (modifier_str) |m| try parseModifier(allocator, m) else null;
+    if (modifier_str != null and parsed_modifier == null) return null;
+
+    // For compound variants (group-, peer-, etc.), split on
+    // the first `-` to find the compound root, then recursively parses the rest.
+    // We try a few well-known compound roots.
+    const compound_roots = [_][]const u8{ "group", "peer", "in", "has", "not", "supports" };
+    for (compound_roots) |cr| {
+        if (std.mem.startsWith(u8, without_modifier, cr) and
+            without_modifier.len > cr.len and
+            without_modifier[cr.len] == '-')
+        {
+            const sub = without_modifier[cr.len + 1 ..];
+            const sub_parsed = try parseVariant(allocator, sub);
+            if (sub_parsed == null) return null;
+            const heap_sub = try allocator.create(Variant);
+            heap_sub.* = sub_parsed.?;
+            return .{ .compound = .{
+                .root = cr,
+                .modifier = parsed_modifier,
+                .variant = heap_sub,
+            } };
+        }
+    }
+
+    // Otherwise: static or functional variant.
+    // For Phase 1 we yield just the most-specific match: full `without_modifier`
+    // as static, plus the rightmost dash split as functional. Consumer (variant
+    // table, task-06) determines which is real.
+    //
+    // Use a bracket-aware lastIndexOf — a plain `lastIndexOfScalar` would find
+    // the `-` *inside* `[publr-state=open]` and break `data-[publr-state=open]`
+    // into `data-[publr` + `state=open]`, neither of which parses. Symptom:
+    // `group-data-[publr-state=open]:opacity-100` silently drops out of the
+    // JIT manifest and Dialog's overlay never opens.
+    if (lastIndexOfDashOutsideBrackets(without_modifier)) |dash_idx| {
+        if (dash_idx > 0 and dash_idx < without_modifier.len - 1) {
+            const root = without_modifier[0..dash_idx];
+            const value_str = without_modifier[dash_idx + 1 ..];
+            // Functional value can be arbitrary `[...]`, parens `(...)`, or named.
+            var v_value: ?VariantValue = null;
+            if (value_str.len >= 2 and value_str[0] == '[' and value_str[value_str.len - 1] == ']') {
+                const inner = value_str[1 .. value_str.len - 1];
+                const decoded = try decodeArbitrary(allocator, inner);
+                if (!isValidArbitrary(decoded) or decoded.len == 0 or std.mem.trim(u8, decoded, " \t\n\r").len == 0) {
+                    allocator.free(decoded);
+                    return null;
+                }
+                v_value = .{ .arbitrary = decoded };
+            } else if (value_str.len >= 2 and value_str[0] == '(' and value_str[value_str.len - 1] == ')') {
+                const inner = value_str[1 .. value_str.len - 1];
+                if (inner.len < 2 or inner[0] != '-' or inner[1] != '-') return null;
+                const wrapped = try std.fmt.allocPrint(allocator, "var({s})", .{inner});
+                v_value = .{ .arbitrary = wrapped };
+            } else if (isValidNamedValue(value_str)) {
+                v_value = .{ .named = value_str };
+            } else {
+                return null;
+            }
+            return .{ .functional = .{
+                .root = root,
+                .value = v_value,
+                .modifier = parsed_modifier,
+            } };
+        }
+    }
+
+    // Pure static variant (no value, no dash split).
+    if (parsed_modifier != null) return null; // static variants don't take modifiers
+    return .{ .static_v = .{ .root = without_modifier } };
+}
+
+// ── Modifier parsing ────────────────────────────────────────────────────────
+
+pub fn parseModifier(allocator: std.mem.Allocator, input: []const u8) ParseError!?Modifier {
+    if (input.len == 0) return null;
+    // Arbitrary `[...]`
+    if (input[0] == '[' and input[input.len - 1] == ']') {
+        const inner = input[1 .. input.len - 1];
+        const decoded = try decodeArbitrary(allocator, inner);
+        if (!isValidArbitrary(decoded) or decoded.len == 0 or std.mem.trim(u8, decoded, " \t\n\r").len == 0) {
+            allocator.free(decoded);
+            return null;
+        }
+        return .{ .arbitrary = decoded };
+    }
+    // Parens `(--var)`
+    if (input[0] == '(' and input[input.len - 1] == ')') {
+        const inner = input[1 .. input.len - 1];
+        if (inner.len < 2 or inner[0] != '-' or inner[1] != '-') return null;
+        if (!isValidArbitrary(inner)) return null;
+        const wrapped = try std.fmt.allocPrint(allocator, "var({s})", .{inner});
+        return .{ .arbitrary = wrapped };
+    }
+    // Named
+    if (!isValidNamedValue(input)) return null;
+    return .{ .named = input };
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Split a string on `:` at top level (not inside `[]` or `()`).
+/// Returns owned slice of subslices.
+fn segmentColon(allocator: std.mem.Allocator, input: []const u8) ![][]const u8 {
+    return segmentByte(allocator, input, ':');
+}
+
+fn segmentByte(allocator: std.mem.Allocator, input: []const u8, delim: u8) ![][]const u8 {
+    var parts = std.array_list.Managed([]const u8).init(allocator);
+    errdefer parts.deinit();
+
+    var depth_sq: u32 = 0;
+    var depth_pa: u32 = 0;
+    var start: usize = 0;
+    var i: usize = 0;
+    while (i < input.len) : (i += 1) {
+        const c = input[i];
+        switch (c) {
+            '[' => depth_sq += 1,
+            ']' => if (depth_sq > 0) {
+                depth_sq -= 1;
+            },
+            '(' => depth_pa += 1,
+            ')' => if (depth_pa > 0) {
+                depth_pa -= 1;
+            },
+            else => {},
+        }
+        if (c == delim and depth_sq == 0 and depth_pa == 0) {
+            try parts.append(input[start..i]);
+            start = i + 1;
+        }
+    }
+    if (start <= input.len) try parts.append(input[start..]);
+    return parts.toOwnedSlice();
+}
+
+/// Decode an arbitrary value: replace `_` with ` ` (unless escaped as `\_`).
+/// Caller owns the returned slice.
+fn decodeArbitrary(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out = std.array_list.Managed(u8).init(allocator);
+    errdefer out.deinit();
+    var i: usize = 0;
+    while (i < input.len) : (i += 1) {
+        const c = input[i];
+        if (c == '\\' and i + 1 < input.len and input[i + 1] == '_') {
+            try out.append('_');
+            i += 1;
+            continue;
+        }
+        if (c == '_') {
+            try out.append(' ');
+            continue;
+        }
+        try out.append(c);
+    }
+    const decoded = try out.toOwnedSlice();
+    defer allocator.free(decoded);
+    // CSS `calc()`, `min()`, `max()`, `clamp()` require whitespace around the
+    // binary `+` and `-` operators. Class values may contain `calc(50%-4rem)`;
+    // canonicalize it by inserting spaces. The sign of a unary `-` (e.g.
+    // `-4rem` at the start of an arg)
+    // stays untouched: a `-` is only treated as binary when the preceding
+    // non-space char is a digit, `%`, `)`, or letter.
+    return try canonicalizeCalcOps(allocator, decoded);
+}
+
+fn canonicalizeCalcOps(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out = std.array_list.Managed(u8).init(allocator);
+    errdefer out.deinit();
+    // Stack of "is this nested paren a math function?" booleans. Only inside
+    // calc/min/max/clamp/mod/rem do we space out `+`/`-`. Inside `var(...)`,
+    // `url(...)`, etc., a `-` is part of an identifier and must stay glued.
+    var stack: std.array_list.Managed(bool) = .init(allocator);
+    defer stack.deinit();
+
+    var i: usize = 0;
+    while (i < input.len) : (i += 1) {
+        const c = input[i];
+        if (c == '(') {
+            // Determine if this opening paren belongs to a math fn — look at
+            // the trailing identifier in `out` (already-emitted chars).
+            const is_math = endsWithMathFn(out.items);
+            try stack.append(is_math);
+            try out.append(c);
+            continue;
+        }
+        if (c == ')') {
+            if (stack.items.len > 0) _ = stack.pop();
+            try out.append(c);
+            continue;
+        }
+
+        const in_math = stack.items.len > 0 and stack.items[stack.items.len - 1];
+        if (in_math and (c == '+' or c == '-')) {
+            // Look at the previous non-space char to decide unary vs binary.
+            var j: usize = out.items.len;
+            while (j > 0 and out.items[j - 1] == ' ') : (j -= 1) {}
+            if (j > 0) {
+                const p = out.items[j - 1];
+                const is_binary = (p >= '0' and p <= '9') or
+                    (p >= 'a' and p <= 'z') or (p >= 'A' and p <= 'Z') or
+                    p == '%' or p == ')';
+                if (is_binary) {
+                    if (out.items.len == 0 or out.items[out.items.len - 1] != ' ') {
+                        try out.append(' ');
+                    }
+                    try out.append(c);
+                    var k = i + 1;
+                    while (k < input.len and input[k] == ' ') : (k += 1) {}
+                    try out.append(' ');
+                    i = k - 1;
+                    continue;
+                }
+            }
+        }
+        try out.append(c);
+    }
+    return out.toOwnedSlice();
+}
+
+fn endsWithMathFn(buf: []const u8) bool {
+    const fns = [_][]const u8{ "calc", "min", "max", "clamp", "mod", "rem", "round", "abs", "sign", "hypot" };
+    for (fns) |f| {
+        if (buf.len >= f.len) {
+            const tail = buf[buf.len - f.len ..];
+            if (std.mem.eql(u8, tail, f)) {
+                // Make sure it's not a suffix of a longer ident (e.g. `mycalc`).
+                if (buf.len == f.len) return true;
+                const before = buf[buf.len - f.len - 1];
+                const is_ident = (before >= 'a' and before <= 'z') or
+                    (before >= 'A' and before <= 'Z') or
+                    (before >= '0' and before <= '9') or before == '-' or before == '_';
+                if (!is_ident) return true;
+            }
+        }
+    }
+    return false;
+}
+
+fn isValidArbitrary(input: []const u8) bool {
+    // Reject `;` and `}` at the top level (outside parens/brackets).
+    var depth_sq: u32 = 0;
+    var depth_pa: u32 = 0;
+    for (input) |c| {
+        switch (c) {
+            '[' => depth_sq += 1,
+            ']' => if (depth_sq > 0) {
+                depth_sq -= 1;
+            },
+            '(' => depth_pa += 1,
+            ')' => if (depth_pa > 0) {
+                depth_pa -= 1;
+            },
+            ';', '}' => if (depth_sq == 0 and depth_pa == 0) return false,
+            else => {},
+        }
+    }
+    return true;
+}
+
+fn isValidNamedValue(s: []const u8) bool {
+    // /^[a-zA-Z0-9_.%-]+$/
+    if (s.len == 0) return false;
+    for (s) |c| {
+        const ok = (c >= 'a' and c <= 'z') or
+            (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or
+            c == '_' or c == '.' or c == '%' or c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+/// Deep-clone a single Variant. Allocates new heap memory for any inner
+/// strings (arbitrary selectors, arbitrary values, modifier strings) and
+/// for the inner Variant pointer of compound variants.
+pub fn cloneVariant(allocator: std.mem.Allocator, v: Variant) ParseError!Variant {
+    return switch (v) {
+        .static_v => |s| .{ .static_v = .{ .root = s.root } },
+        .functional => |f| blk: {
+            var new_value: ?VariantValue = null;
+            if (f.value) |val| switch (val) {
+                .named => |n| new_value = .{ .named = n },
+                .arbitrary => |a| {
+                    const dup = try allocator.dupe(u8, a);
+                    new_value = .{ .arbitrary = dup };
+                },
+            };
+            const new_modifier: ?Modifier = if (f.modifier) |m| try cloneModifier(allocator, m) else null;
+            break :blk .{ .functional = .{
+                .root = f.root,
+                .value = new_value,
+                .modifier = new_modifier,
+            } };
+        },
+        .compound => |c| blk: {
+            const inner = try cloneVariant(allocator, c.variant.*);
+            const heap_inner = try allocator.create(Variant);
+            heap_inner.* = inner;
+            const new_modifier: ?Modifier = if (c.modifier) |m| try cloneModifier(allocator, m) else null;
+            break :blk .{ .compound = .{
+                .root = c.root,
+                .modifier = new_modifier,
+                .variant = heap_inner,
+            } };
+        },
+        .arbitrary => |a| blk: {
+            const dup = try allocator.dupe(u8, a.selector);
+            break :blk .{ .arbitrary = .{ .selector = dup, .relative = a.relative } };
+        },
+    };
+}
+
+fn cloneModifier(allocator: std.mem.Allocator, m: Modifier) ParseError!Modifier {
+    return switch (m) {
+        .named => |n| .{ .named = n },
+        .arbitrary => |a| .{ .arbitrary = try allocator.dupe(u8, a) },
+    };
+}
+
+/// Deep-clone a variants slice. Each candidate owns its own copy.
+fn cloneVariants(allocator: std.mem.Allocator, variants: []const Variant) ParseError![]Variant {
+    const out = try allocator.alloc(Variant, variants.len);
+    var i: usize = 0;
+    errdefer {
+        var j: usize = 0;
+        while (j < i) : (j += 1) freeVariant(allocator, out[j]);
+        allocator.free(out);
+    }
+    while (i < variants.len) : (i += 1) {
+        out[i] = try cloneVariant(allocator, variants[i]);
+    }
+    return out;
+}
+
+/// Free a Candidate slice and any heap-allocated content within.
+/// Frees variants array, decoded arbitrary values, fractions, and recursively
+/// frees compound variants' inner Variant pointers.
+pub fn freeCandidates(allocator: std.mem.Allocator, candidates: []Candidate) void {
+    for (candidates) |c| {
+        switch (c) {
+            .static_c => |s| freeVariants(allocator, s.variants),
+            .functional => |f| {
+                freeVariants(allocator, f.variants);
+                if (f.value) |v| freeUtilityValue(allocator, v);
+                if (f.modifier) |m| freeModifier(allocator, m);
+            },
+            .arbitrary => |a| {
+                freeVariants(allocator, a.variants);
+                allocator.free(a.value);
+                if (a.modifier) |m| freeModifier(allocator, m);
+            },
+        }
+    }
+    allocator.free(candidates);
+}
+
+fn freeVariants(allocator: std.mem.Allocator, variants: []const Variant) void {
+    for (variants) |v| freeVariant(allocator, v);
+    allocator.free(variants);
+}
+
+fn freeVariant(allocator: std.mem.Allocator, v: Variant) void {
+    switch (v) {
+        .static_v => {},
+        .functional => |f| {
+            if (f.value) |val| switch (val) {
+                .named => {},
+                .arbitrary => |s| allocator.free(s),
+            };
+            if (f.modifier) |m| freeModifier(allocator, m);
+        },
+        .compound => |c| {
+            freeVariant(allocator, c.variant.*);
+            allocator.destroy(c.variant);
+            if (c.modifier) |m| freeModifier(allocator, m);
+        },
+        .arbitrary => |a| allocator.free(a.selector),
+    }
+}
+
+fn freeUtilityValue(allocator: std.mem.Allocator, v: UtilityValue) void {
+    switch (v) {
+        .named => |n| {
+            if (n.fraction) |f| allocator.free(f);
+        },
+        .arbitrary => |a| {
+            if (a.data_type) |data_type| allocator.free(data_type);
+            allocator.free(a.value);
+        },
+    }
+}
+
+fn freeModifier(allocator: std.mem.Allocator, m: Modifier) void {
+    switch (m) {
+        .named => {},
+        .arbitrary => |s| allocator.free(s),
+    }
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+const t = std.testing;
+
+fn expectStaticRoot(input: []const u8, expected_root: []const u8) !void {
+    const cands = try parseCandidate(t.allocator, input);
+    defer freeCandidates(t.allocator, cands);
+    try t.expect(cands.len > 0);
+    // Find the static interpretation (parser yields static + functional splits).
+    for (cands) |c| {
+        if (c == .static_c) {
+            try t.expectEqualStrings(expected_root, c.static_c.root);
+            return;
+        }
+    }
+    return error.NoStaticCandidate;
+}
+
+};
+
+pub const theme_mod = struct {
+/// Theme — Publr JIT's comptime theme model.
+///
+/// Decision (locked 2026-05-02): theme is comptime-only. `theme.zon` imports
+/// at comptime, with no runtime override layer.
+///
+/// Schema choice: flat `[]const Token` mirroring CSS custom properties 1:1.
+///   - Trivial to author + diff in ZON.
+///   - Trivial to merge (override matching `name`, append new).
+///   - Trivial to emit (`:root { --name: value; ... }`).
+///   - Order in ZON = order in `:root` output, so both sides are deterministic.
+///
+/// Lookups are O(n) over the array. With ~400 default + ~tens of user tokens
+/// the array is small enough that this is fine. Future optimization: build a
+/// comptime hash map from the array at JIT build time if profiling shows
+/// lookups dominate.
+
+const std = @import("std");
+
+pub const Token = struct {
+    /// CSS-custom-property name *without* the leading `--`.
+    /// Examples: "spacing", "color-red-500", "breakpoint-md", "font-sans".
+    name: []const u8,
+    /// Raw CSS value (no leading/trailing whitespace).
+    /// Examples: "0.25rem", "oklch(63.7% 0.237 25.331)", "Switzer, system-ui, sans-serif".
+    value: []const u8,
+};
+
+pub const Theme = struct {
+    tokens: []const Token,
+};
+
+/// Merge two themes at comptime. `override`'s tokens replace `base`'s tokens
+/// whose `name` matches; `override`'s remaining tokens are appended in source
+/// order. Result preserves the relative order of `base` tokens that survive.
+///
+/// Must be called at comptime (both args comptime, both ZON-imported).
+pub fn extendTheme(comptime base: Theme, comptime override: Theme) Theme {
+    comptime {
+        // ~419 default tokens × 419 = ~175k branch traversals just for the
+        // base loop, plus the second pass — well over the default 1000 quota.
+        // Generous quota: 5M handles base ~5000 × override ~1000.
+        @setEvalBranchQuota(5_000_000);
+        var merged: [base.tokens.len + override.tokens.len]Token = undefined;
+        var len: usize = 0;
+
+        // Walk base; for each token, look for an override with the same name.
+        // If found, take the override's value; if not, take base's.
+        for (base.tokens) |bt| {
+            var replaced = false;
+            for (override.tokens) |ot| {
+                if (std.mem.eql(u8, bt.name, ot.name)) {
+                    merged[len] = ot;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) merged[len] = bt;
+            len += 1;
+        }
+
+        // Append override tokens that weren't matches against base.
+        for (override.tokens) |ot| {
+            var was_match = false;
+            for (base.tokens) |bt| {
+                if (std.mem.eql(u8, bt.name, ot.name)) {
+                    was_match = true;
+                    break;
+                }
+            }
+            if (!was_match) {
+                merged[len] = ot;
+                len += 1;
+            }
+        }
+
+        const final = merged[0..len].*;
+        return Theme{ .tokens = &final };
+    }
+}
+
+/// Runtime sibling of `extendTheme`. Same merge semantics — base tokens
+/// preserve order; override values win for matching names; override-only
+/// tokens append in source order. Caller owns the returned `tokens` slice
+/// (the slice itself; the inner Token strings are borrowed from `base` /
+/// `override` and live as long as those do).
+///
+/// Used by the CLI when `--theme=<path>` provides a user theme parsed at
+/// runtime (`std.zon.parse.fromSlice`) — the comptime path can't run when
+/// either side isn't comptime-known.
+pub fn extendThemeRuntime(
+    allocator: std.mem.Allocator,
+    base: Theme,
+    override: Theme,
+) !Theme {
+    var out: std.ArrayListUnmanaged(Token) = .{};
+    errdefer out.deinit(allocator);
+    try out.ensureTotalCapacity(allocator, base.tokens.len + override.tokens.len);
+
+    // Walk base; for each token, look for an override with the same name.
+    for (base.tokens) |bt| {
+        var replaced = false;
+        for (override.tokens) |ot| {
+            if (std.mem.eql(u8, bt.name, ot.name)) {
+                out.appendAssumeCapacity(ot);
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) out.appendAssumeCapacity(bt);
+    }
+
+    // Append override tokens that weren't matches against base.
+    for (override.tokens) |ot| {
+        var was_match = false;
+        for (base.tokens) |bt| {
+            if (std.mem.eql(u8, bt.name, ot.name)) {
+                was_match = true;
+                break;
+            }
+        }
+        if (!was_match) out.appendAssumeCapacity(ot);
+    }
+
+    return Theme{ .tokens = try out.toOwnedSlice(allocator) };
+}
+
+/// Look up a token by `name`. Returns the value, or null if absent.
+/// Comptime-callable when called with comptime args; runtime-fine for
+/// JIT-internal lookups during compile.
+pub fn lookup(theme: Theme, name: []const u8) ?[]const u8 {
+    for (theme.tokens) |t| {
+        if (std.mem.eql(u8, t.name, name)) return t.value;
+    }
+    return null;
+}
+
+/// Emit `:root { --token: value; ... }` for the merged theme.
+/// Caller owns returned bytes. UTF-8, LF-terminated.
+pub fn emitCssVariables(allocator: std.mem.Allocator, theme: Theme) ![]u8 {
+    var buf = std.array_list.Managed(u8).init(allocator);
+    errdefer buf.deinit();
+
+    const w = buf.writer();
+    try w.writeAll(":root {\n");
+    for (theme.tokens) |t| {
+        try w.print("  --{s}: {s};\n", .{ t.name, t.value });
+    }
+    try w.writeAll("}\n");
+
+    return buf.toOwnedSlice();
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+};
+
+pub const utilities_mod = struct {
 /// Utility resolver — turns parsed `Candidate`s into CSS declarations.
 ///
 /// Architecture: a comptime-known set of "kinds" (static utilities, functional
@@ -15,11 +1011,10 @@
 /// This module DOES NOT own:
 ///   - Variant wrapping (task-06's variants.zig).
 ///   - Sort order (task-07's compile.zig).
-///   - The full Tailwind serializer (task-07).
-
+///   - The full CSS serializer.
 const std = @import("std");
-const candidate = @import("candidate.zig");
-const theme = @import("theme.zig");
+const candidate = amalgam.candidate_mod;
+const theme = amalgam.theme_mod;
 
 const Candidate = candidate.Candidate;
 const Theme = theme.Theme;
@@ -364,7 +1359,7 @@ const STATIC_UTILITIES = [_]StaticEntry{
     .{ .name = "list-image-none", .decls = &.{.{ .property = "list-style-image", .value = "none" }} },
 
     // ── Font-variant-numeric ────────────────────────────────────────────────
-    // Upstream composes via `--tw-numeric-*` vars; we emit each utility
+    // The class contract composes via `--tw-numeric-*` vars; we emit each utility
     // directly (last-write-wins). For most use cases this is identical.
     .{ .name = "normal-nums", .decls = &.{.{ .property = "font-variant-numeric", .value = "normal" }} },
     .{ .name = "ordinal", .decls = &.{.{ .property = "font-variant-numeric", .value = "ordinal" }} },
@@ -433,7 +1428,7 @@ const STATIC_UTILITIES = [_]StaticEntry{
     .{ .name = "italic", .decls = &.{.{ .property = "font-style", .value = "italic" }} },
     .{ .name = "not-italic", .decls = &.{.{ .property = "font-style", .value = "normal" }} },
 
-    // ── Font weight (full scale per Tailwind v4) ────────────────────────────
+    // ── Font weight (full supported scale) ─────────────────────────────────
     .{ .name = "font-thin", .decls = &.{.{ .property = "font-weight", .value = "100" }} },
     .{ .name = "font-extralight", .decls = &.{.{ .property = "font-weight", .value = "200" }} },
     .{ .name = "font-light", .decls = &.{.{ .property = "font-weight", .value = "300" }} },
@@ -483,7 +1478,7 @@ const STATIC_UTILITIES = [_]StaticEntry{
         .{ .property = "white-space", .value = "normal" },
     } },
 
-    // ── Ring width: bare `ring` defaults to 3px (Tailwind v4) ──────────────
+    // ── Ring width: bare `ring` defaults to 3px ────────────────────────────
     .{ .name = "ring", .decls = &.{
         .{ .property = "--tw-ring-shadow", .value = "var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width, 0px)) var(--tw-ring-color, currentColor)" },
         .{ .property = "box-shadow", .value = "var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000)" },
@@ -749,7 +1744,7 @@ const STATIC_UTILITIES = [_]StaticEntry{
     .{ .name = "rounded-full", .decls = &.{.{ .property = "border-radius", .value = "calc(infinity * 1px)" }} },
 
     // ── Misc ────────────────────────────────────────────────────────────────
-    // ── Cursor (full set per Tailwind v4) ───────────────────────────────────
+    // ── Cursor (full supported set) ─────────────────────────────────────────
     .{ .name = "cursor-auto", .decls = &.{.{ .property = "cursor", .value = "auto" }} },
     .{ .name = "cursor-default", .decls = &.{.{ .property = "cursor", .value = "default" }} },
     .{ .name = "cursor-pointer", .decls = &.{.{ .property = "cursor", .value = "pointer" }} },
@@ -1292,7 +2287,7 @@ fn resolveFunctional(
 
     // ── divide-x-N / divide-y-N — between-children border via selector mod ─
     // Emits `.divide-x-N > :not(:last-child) { border-right-width: Npx }`.
-    // Default (just `divide-x`) is 1px per Tailwind v4. Same dispatch handles
+    // Default (just `divide-x`) is 1px. The same dispatch handles
     // `divide-{color}` by falling through to the color path below.
     if (std.mem.eql(u8, root, "divide-x") and !negative) {
         if (try resolveDivideAxis(allocator, f.value, "border-right-width")) |r| return r;
@@ -1349,7 +2344,7 @@ fn resolveFunctional(
 
     // ── text-{size} — theme text-size lookup. Falls through if the value
     //    isn't a `--text-*` token, leaving text-color cases to the color
-    //    handler below (or, for non-Tailwind names, the legacy resolver).
+    //    handler below (or, for other names, the legacy resolver).
     //    Modifier (`/N`) overrides line-height: `text-2xl/8` → font-size from
     //    --text-2xl, line-height = calc(var(--spacing) * 8).
     if (std.mem.eql(u8, root, "text") and !negative) {
@@ -1789,8 +2784,8 @@ fn resolveArbitraryProperty(
 ) ResolveError!?ResolvedUtility {
     // When a modifier is present and the property is color-shaped, apply it
     // as opacity via `color-mix(in oklab, <value> <pct>, transparent)`.
-    // Upstream Tailwind uses `oklab` (not `srgb`) for arbitrary-property
-    // color modifiers — see `index.test.ts` fixtures around line 990.
+    // Use `oklab` (not `srgb`) for arbitrary-property
+    // color modifiers.
     const final_value: []u8 = if (modifier) |m| blk: {
         if (!isColorProperty(property)) {
             // Modifier on a non-color property is meaningless; emit verbatim.
@@ -1863,7 +2858,7 @@ fn resolveSpacingDecl(
         css_value = if (negative) try negate(allocator, owned) else owned;
         if (negative) allocator.free(owned);
     } else if (isSpacingNumber(n)) {
-        // Compute `calc(var(--spacing) * N)`. Accepts integers and Tailwind's
+        // Compute `calc(var(--spacing) * N)`. Accepts integers and the
         // half-step fractionals (0.5, 1.5, 2.5, 3.5).
         css_value = if (negative)
             try std.fmt.allocPrint(allocator, "calc(var(--spacing) * -{s})", .{n})
@@ -1905,8 +2900,8 @@ fn resolveSpacingPairSigned(
     const v = value orelse return null;
 
     // Fraction form: `w-1/2`, `h-2/3`, `inset-1/4`. When both value and
-    // modifier are integer-shaped, emit `calc(<n> / <d> * 100%)`. Tailwind
-    // v4 uses fractions only on size/position-style utilities (the
+    // modifier are integer-shaped, emit `calc(<n> / <d> * 100%)`. Fractions
+    // are intended for size/position-style classes (the
     // dispatch table above is the gate — gap/padding/margin go through
     // here too, which is technically wrong, but those candidates are rare
     // enough we don't bother filtering. If someone writes `gap-1/2` they
@@ -1944,8 +2939,8 @@ fn resolveSpacingPairSigned(
     //   1. Arbitrary value: `p-[10px]` → `10px`
     //   2. Named keyword: `auto`, `full`, `px`, `screen`, `min`, `max`, `fit`
     //   3. Theme lookup `--<property>-<N>` (e.g. `--width-screen` → `100vw`)
-    //   4. Container namespace lookup for width-shaped properties — Tailwind
-    //      v4 stores `max-w-7xl`, `w-prose`, etc. as `--container-{key}` (not
+    //   4. Container namespace lookup for width-shaped properties. Classes such
+    //      as `max-w-7xl` and `w-prose` use `--container-{key}` (not
     //      `--max-width-{key}`). Only consulted when the first property is a
     //      width-or-height longhand.
     //   5. Theme lookup `--spacing-<N>` (rare direct-spacing).
@@ -2002,7 +2997,7 @@ fn resolveSpacingPairSigned(
 
 /// `divide-x-N` / `divide-y-N` — between-children border via selector
 /// modifier. Mirror of `resolveSpaceAxis`. Default `divide-x` (no value)
-/// emits 1px per Tailwind v4.
+/// emits 1px.
 fn resolveDivideAxis(
     allocator: std.mem.Allocator,
     value: ?candidate.UtilityValue,
@@ -2142,7 +3137,7 @@ fn resolveSpaceAxis(
 }
 
 /// True for the longhand width/height properties whose named values
-/// (`max-w-7xl`, `w-prose`, etc.) Tailwind v4 stores under `--container-*`.
+/// (`max-w-7xl`, `w-prose`, etc.) stored under `--container-*`.
 fn isWidthHeightProperty(property: []const u8) bool {
     return std.mem.eql(u8, property, "width") or
         std.mem.eql(u8, property, "height") or
@@ -2619,7 +3614,7 @@ fn resolveTranslate(
     // declaration invalid (computed `none`) — so e.g. `peer-checked:translate-x-5`
     // on a Switch thumb sets `--tw-translate-x` correctly but the composed
     // `translate` reference for `--tw-translate-y` (never set) wipes the
-    // whole property. Tailwind itself uses the same fallbacks.
+    // whole property. The generated CSS uses the same fallbacks throughout.
     const composed_2axis: []const u8 = "var(--tw-translate-x, 0) var(--tw-translate-y, 0)";
     const composed_3axis: []const u8 = "var(--tw-translate-x, 0) var(--tw-translate-y, 0) var(--tw-translate-z, 0)";
 
@@ -2878,11 +3873,11 @@ fn resolveTransformOrigin(
     const css_value: []u8 = switch (v) {
         .arbitrary => |a| try allocator.dupe(u8, a.value),
         .named => |n| blk: {
-            // Tailwind v4 keywords: center, top, top-right, right, bottom-right,
+            // Supported keywords: center, top, top-right, right, bottom-right,
             // bottom, bottom-left, left, top-left.
             const allowed = [_][]const u8{
-                "center",     "top",      "top-right", "right",   "bottom-right",
-                "bottom",     "bottom-left", "left",   "top-left",
+                "center", "top",         "top-right", "right",    "bottom-right",
+                "bottom", "bottom-left", "left",      "top-left",
             };
             for (allowed) |k| {
                 if (std.mem.eql(u8, n.value, k)) {
@@ -3174,7 +4169,7 @@ fn resolveContent(
 }
 
 /// `shadow-{size}` — theme-driven via `--shadow-{size}` tokens. Emits the
-/// layered Tailwind v4 box-shadow composition so ring + inset + shadow can
+/// layered box-shadow composition so ring + inset + shadow can
 /// stack on the same element without overwriting each other.
 fn resolveShadow(
     allocator: std.mem.Allocator,
@@ -3210,7 +4205,7 @@ fn resolveShadow(
 }
 
 /// `blur-{size}` — `filter: blur(<value>)`. Theme tokens at `--blur-{size}`,
-/// arbitrary forms (`blur-[20px]`) pass through verbatim. The Tailwind v4
+/// arbitrary forms (`blur-[20px]`) pass through verbatim. The
 /// composed-filter pattern (`var(--tw-blur)`) isn't modeled yet — single
 /// `filter` declaration is good enough for typical use; revisit if multiple
 /// filter utilities need to compose.
@@ -3265,8 +4260,7 @@ fn resolveFontFamily(
 
 /// `text-<size>` (text-xs, text-3xl, …) — resolves via theme `--text-<size>`.
 /// If the theme also defines `--text-<size>--line-height`, emit that as well
-/// so a single class sets both font-size and line-height (matching upstream
-/// Tailwind v4 behaviour).
+/// so a single class sets both font-size and line-height.
 ///
 /// Modifier semantics — `text-{size}/{N}`:
 ///   - Named modifier `/8` → `line-height: calc(var(--spacing) * 8)` (or
@@ -3281,20 +4275,27 @@ fn resolveTextSize(
     modifier: ?candidate.Modifier,
 ) ResolveError!?ResolvedUtility {
     const v = value orelse return null;
-    if (v != .named) return null;
-    const size = v.named.value;
-
-    const size_token = try std.fmt.allocPrint(allocator, "text-{s}", .{size});
-    defer allocator.free(size_token);
-    if (theme.lookup(t, size_token) == null) return null;
+    const font_size: []u8 = switch (v) {
+        .named => |n| blk: {
+            const size_token = try std.fmt.allocPrint(allocator, "text-{s}", .{n.value});
+            defer allocator.free(size_token);
+            if (theme.lookup(t, size_token) == null) return null;
+            break :blk try std.fmt.allocPrint(allocator, "var(--text-{s})", .{n.value});
+        },
+        .arbitrary => |a| blk: {
+            if (!isArbitraryTextSize(a)) return null;
+            break :blk try allocator.dupe(u8, a.value);
+        },
+    };
+    errdefer allocator.free(font_size);
 
     // Resolve line-height. Modifier wins over the theme's default-LH for the
-    // size (Tailwind v4 semantics). If neither is present, emit only font-size.
+    // size. If neither is present, emit only font-size.
     const line_height: ?[]u8 = blk: {
         if (modifier) |m| {
             switch (m) {
                 .named => |n| {
-                    // Try `--leading-{n}` token first (Tailwind v4 named-leading scale).
+                    // Try the `--leading-{n}` named-leading token first.
                     const tok = try std.fmt.allocPrint(allocator, "leading-{s}", .{n});
                     defer allocator.free(tok);
                     if (theme.lookup(t, tok) != null) {
@@ -3310,11 +4311,14 @@ fn resolveTextSize(
                 .arbitrary => |a| break :blk try allocator.dupe(u8, a),
             }
         }
-        // No modifier — fall back to theme's default line-height for this size.
-        const lh_token = try std.fmt.allocPrint(allocator, "text-{s}--line-height", .{size});
-        defer allocator.free(lh_token);
-        if (theme.lookup(t, lh_token) != null) {
-            break :blk try std.fmt.allocPrint(allocator, "var(--text-{s}--line-height)", .{size});
+        // No modifier — named sizes fall back to the theme's default line-height.
+        if (v == .named) {
+            const size = v.named.value;
+            const lh_token = try std.fmt.allocPrint(allocator, "text-{s}--line-height", .{size});
+            defer allocator.free(lh_token);
+            if (theme.lookup(t, lh_token) != null) {
+                break :blk try std.fmt.allocPrint(allocator, "var(--text-{s}--line-height)", .{size});
+            }
         }
         break :blk null;
     };
@@ -3324,12 +4328,43 @@ fn resolveTextSize(
     errdefer allocator.free(decls);
     decls[0] = .{
         .property = "font-size",
-        .value = try std.fmt.allocPrint(allocator, "var(--text-{s})", .{size}),
+        .value = font_size,
     };
     if (line_height) |lh| {
         decls[1] = .{ .property = "line-height", .value = lh };
     }
     return .{ .declarations = decls };
+}
+
+/// Disambiguate `text-[…]`, which can mean either font-size or text color.
+/// Explicit type hints win. Without one, CSS lengths/percentages and math
+/// functions are sizes; color-shaped and ambiguous values continue to the
+/// text-color resolver.
+fn isArbitraryTextSize(a: candidate.ArbitraryUtilityValue) bool {
+    if (a.data_type) |data_type| {
+        return std.mem.eql(u8, data_type, "length") or
+            std.mem.eql(u8, data_type, "percentage");
+    }
+
+    const value = std.mem.trim(u8, a.value, " \t\r\n");
+    if (value.len == 0) return false;
+    if (std.mem.eql(u8, value, "0")) return true;
+    if (std.mem.startsWith(u8, value, "calc(") or
+        std.mem.startsWith(u8, value, "min(") or
+        std.mem.startsWith(u8, value, "max(") or
+        std.mem.startsWith(u8, value, "clamp(")) return true;
+    if (std.mem.endsWith(u8, value, "%")) return true;
+
+    const length_units = [_][]const u8{
+        "cap",  "ch",   "em",  "ex",  "ic",  "lh", "rem", "rlh",
+        "cm",   "mm",   "Q",   "in",  "pc",  "pt", "px",  "dvh",
+        "dvw",  "lvh",  "lvw", "svh", "svw", "vb", "vh",  "vi",
+        "vmax", "vmin", "vw",
+    };
+    for (length_units) |unit| {
+        if (std.mem.endsWith(u8, value, unit)) return true;
+    }
+    return false;
 }
 
 // ── Color utilities ─────────────────────────────────────────────────────────
@@ -3365,7 +4400,7 @@ fn resolveColorBase(
 
 /// Format an opacity modifier as the percentage string used inside
 /// `color-mix(in oklab, <base> <pct>, transparent)`. Named `/50` becomes `50%`;
-/// arbitrary `/[0.4]` is coerced to `40%` (matching upstream Tailwind's
+/// arbitrary `/[0.4]` is coerced to `40%` (matching the class contract's
 /// `withAlpha`); arbitrary `/[27%]` or `/(--my-opacity)` is passed through
 /// verbatim.
 fn modifierAsOpacity(
@@ -3517,7 +4552,7 @@ fn resolveBgLinearDirection(
 
 /// `bg-linear-{angle}` (degrees) — e.g. `bg-linear-45`. The candidate parser
 /// splits on `-` so the root becomes `bg-linear` and the value is the angle.
-/// Negative angles via `-bg-linear-45` aren't standard Tailwind syntax;
+/// Negative angles via `-bg-linear-45` aren't supported class syntax;
 /// negative is rejected at the dispatch site.
 fn resolveBgLinearAngle(
     allocator: std.mem.Allocator,
@@ -3570,7 +4605,7 @@ fn resolveBgConic(
 }
 
 /// `bg-radial-{arbitrary | --var}` — only arbitrary forms accepted (named
-/// keywords like `bg-radial-circle` aren't standard Tailwind v4). The bare
+/// keywords like `bg-radial-circle` aren't supported). The bare
 /// `bg-radial` is a static (no value).
 fn resolveBgRadial(
     allocator: std.mem.Allocator,
@@ -3686,7 +4721,7 @@ fn emitGradientStopPosition(
 
 /// `duration-N` / `delay-N` — numeric values are milliseconds. Theme-keyed
 /// (`duration-fast` etc.) tries `--<theme_namespace>-<key>` lookup.
-/// `theme_namespace` is `duration` for both — Tailwind v4 doesn't separately
+/// `theme_namespace` is `duration` for both; the theme doesn't separately
 /// namespace delays.
 fn resolveTimingMs(
     allocator: std.mem.Allocator,
@@ -3827,7 +4862,7 @@ fn resolveBorderWidth(
 // ── Border radius ───────────────────────────────────────────────────────────
 
 /// Mapping from a `rounded-<side>` or `rounded-<corner>` root to the longhand
-/// border-radius properties it sets. Tailwind v4 covers physical sides
+/// border-radius properties it sets. The class contract covers physical sides
 /// (`t/r/b/l`), physical corners (`tl/tr/br/bl`), and logical (`s/e` and
 /// `ss/se/es/ee`). Returns `null` if `root` isn't a recognised side/corner.
 fn roundedSideProperties(root: []const u8) ?[]const []const u8 {
@@ -3915,7 +4950,7 @@ fn isInteger(s: []const u8) bool {
 }
 
 /// Numeric value on the spacing/scale grid. Accepts integers (`12`) and
-/// single-decimal fractionals (`0.5`, `1.5`, `2.5`, `3.5` — Tailwind's
+/// single-decimal fractionals (`0.5`, `1.5`, `2.5`, `3.5` — the supported
 /// half-step spacing scale). Rejects empty, leading dot, trailing dot,
 /// multi-dot, or any non-digit characters.
 fn isSpacingNumber(s: []const u8) bool {
@@ -3964,1110 +4999,2413 @@ fn parseAndResolve(allocator: std.mem.Allocator, input: []const u8) !?ResolvedUt
     return null;
 }
 
-test "static: text-balance" {
-    const r = (try parseAndResolve(tst.allocator, "text-balance")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("text-wrap", r.declarations[0].property);
-    try tst.expectEqualStrings("balance", r.declarations[0].value);
-}
-
-test "static: text-clip / text-ellipsis" {
-    const r1 = (try parseAndResolve(tst.allocator, "text-clip")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("text-overflow", r1.declarations[0].property);
-    try tst.expectEqualStrings("clip", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "text-ellipsis")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("ellipsis", r2.declarations[0].value);
-}
-
-test "static: overflow-scroll + axis variants" {
-    const r1 = (try parseAndResolve(tst.allocator, "overflow-scroll")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("overflow", r1.declarations[0].property);
-    try tst.expectEqualStrings("scroll", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "overflow-x-hidden")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("overflow-x", r2.declarations[0].property);
-    try tst.expectEqualStrings("hidden", r2.declarations[0].value);
-    const r3 = (try parseAndResolve(tst.allocator, "overflow-y-auto")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("overflow-y", r3.declarations[0].property);
-    try tst.expectEqualStrings("auto", r3.declarations[0].value);
-}
-
-test "static: truncate emits 3 declarations" {
-    const r = (try parseAndResolve(tst.allocator, "truncate")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 3), r.declarations.len);
-    try tst.expectEqualStrings("overflow", r.declarations[0].property);
-    try tst.expectEqualStrings("hidden", r.declarations[0].value);
-    try tst.expectEqualStrings("text-overflow", r.declarations[1].property);
-    try tst.expectEqualStrings("ellipsis", r.declarations[1].value);
-    try tst.expectEqualStrings("white-space", r.declarations[2].property);
-    try tst.expectEqualStrings("nowrap", r.declarations[2].value);
-}
-
-test "static: peer / group resolve to empty decls (marker classes)" {
-    const r1 = (try parseAndResolve(tst.allocator, "peer")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqual(@as(usize, 0), r1.declarations.len);
-    const r2 = (try parseAndResolve(tst.allocator, "group")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqual(@as(usize, 0), r2.declarations.len);
-}
-
-test "important flag propagates from candidate (trailing form)" {
-    // `underline!` — important after the root.
-    const r = (try parseAndResolve(tst.allocator, "underline!")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expect(r.important);
-}
-
-test "important flag propagates from candidate (leading form)" {
-    // `!underline` — legacy leading-bang form.
-    const r = (try parseAndResolve(tst.allocator, "!underline")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expect(r.important);
-}
-
-test "important flag propagates on functional utilities" {
-    const r = (try parseAndResolve(tst.allocator, "size-12!")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expect(r.important);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-}
-
-test "important flag propagates on arbitrary properties" {
-    const r = (try parseAndResolve(tst.allocator, "[color:red]!")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expect(r.important);
-    try tst.expectEqualStrings("color", r.declarations[0].property);
-    try tst.expectEqualStrings("red", r.declarations[0].value);
-}
-
-test "important flag absent when not marked" {
-    const r = (try parseAndResolve(tst.allocator, "underline")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expect(!r.important);
-}
-
 // ── Border radius ────────────────────────────────────────────────────────────
-
-test "rounded: bare → var(--radius)" {
-    const r = (try parseAndResolve(tst.allocator, "rounded")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("border-radius", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--radius)", r.declarations[0].value);
-}
-
-test "rounded: -none → 0; -full → calc(infinity * 1px)" {
-    const r1 = (try parseAndResolve(tst.allocator, "rounded-none")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("0", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "rounded-full")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("calc(infinity * 1px)", r2.declarations[0].value);
-}
-
-test "rounded: theme key (md, lg, 2xl)" {
-    const r = (try parseAndResolve(tst.allocator, "rounded-md")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("border-radius", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--radius-md)", r.declarations[0].value);
-}
-
-test "rounded: arbitrary value" {
-    const r = (try parseAndResolve(tst.allocator, "rounded-[7px]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("7px", r.declarations[0].value);
-}
-
-test "rounded: side variant (rounded-t-md sets two longhands)" {
-    const r = (try parseAndResolve(tst.allocator, "rounded-t-md")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("border-top-left-radius", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--radius-md)", r.declarations[0].value);
-    try tst.expectEqualStrings("border-top-right-radius", r.declarations[1].property);
-    try tst.expectEqualStrings("var(--radius-md)", r.declarations[1].value);
-}
-
-test "rounded: corner variant (rounded-tl-lg sets one longhand)" {
-    const r = (try parseAndResolve(tst.allocator, "rounded-tl-lg")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("border-top-left-radius", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--radius-lg)", r.declarations[0].value);
-}
-
-test "rounded: logical side (rounded-s-md → start-start + end-start)" {
-    const r = (try parseAndResolve(tst.allocator, "rounded-s-md")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("border-start-start-radius", r.declarations[0].property);
-    try tst.expectEqualStrings("border-end-start-radius", r.declarations[1].property);
-}
-
-test "rounded: side variant + none" {
-    const r = (try parseAndResolve(tst.allocator, "rounded-b-none")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("0", r.declarations[0].value);
-    try tst.expectEqualStrings("0", r.declarations[1].value);
-}
-
-test "rounded: unknown key returns null" {
-    try tst.expect((try parseAndResolve(tst.allocator, "rounded-totally-invalid")) == null);
-}
 
 // ── Modifier on arbitrary properties ────────────────────────────────────────
 
-test "arbitrary property + opacity modifier: [color:red]/50 → color-mix" {
-    const r = (try parseAndResolve(tst.allocator, "[color:red]/50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("color", r.declarations[0].property);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, red 50%, transparent)",
-        r.declarations[0].value,
-    );
-}
-
-test "arbitrary property + arbitrary opacity: [color:red]/[var(--my-op)]" {
-    const r = (try parseAndResolve(tst.allocator, "[color:red]/[var(--my-op)]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, red var(--my-op), transparent)",
-        r.declarations[0].value,
-    );
-}
-
-test "arbitrary color-property with var() value + opacity modifier" {
-    const r = (try parseAndResolve(tst.allocator, "[color:var(--my-color)]/50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--my-color) 50%, transparent)",
-        r.declarations[0].value,
-    );
-}
-
-test "arbitrary non-color property + modifier: modifier ignored, value verbatim" {
-    // `[margin:10px]/50` — `/50` has no meaning on margin; emit `margin: 10px`.
-    const r = (try parseAndResolve(tst.allocator, "[margin:10px]/50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("margin", r.declarations[0].property);
-    try tst.expectEqualStrings("10px", r.declarations[0].value);
-}
-
-test "arbitrary property without modifier still works (regression check)" {
-    const r = (try parseAndResolve(tst.allocator, "[--my-prop:42]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--my-prop", r.declarations[0].property);
-    try tst.expectEqualStrings("42", r.declarations[0].value);
-}
-
 // ── Modifier on functional color: text-current/50 ───────────────────────────
-
-test "color: text-current/50 → color-mix(currentColor)" {
-    // The functional-color path through resolveColorProperty already handles
-    // the `current` keyword and applies the modifier; verify it works.
-    const r = (try parseAndResolve(tst.allocator, "text-current/50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("color", r.declarations[0].property);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, currentColor 50%, transparent)",
-        r.declarations[0].value,
-    );
-}
-
-test "color: text-transparent (no modifier emits literal)" {
-    const r = (try parseAndResolve(tst.allocator, "text-transparent")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("transparent", r.declarations[0].value);
-}
 
 // ── Text size with line-height modifier ─────────────────────────────────────
 
-test "text-{size}: emits font-size + theme default line-height" {
-    const r = (try parseAndResolve(tst.allocator, "text-2xl")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("font-size", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--text-2xl)", r.declarations[0].value);
-    try tst.expectEqualStrings("line-height", r.declarations[1].property);
-    try tst.expectEqualStrings("var(--text-2xl--line-height)", r.declarations[1].value);
-}
-
-test "text-{size}/N: modifier overrides line-height with spacing calc" {
-    // text-2xl/8 → font-size from --text-2xl, line-height = calc(var(--spacing) * 8)
-    const r = (try parseAndResolve(tst.allocator, "text-2xl/8")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("var(--text-2xl)", r.declarations[0].value);
-    try tst.expectEqualStrings("line-height", r.declarations[1].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 8)", r.declarations[1].value);
-}
-
-test "text-{size}/[arb]: arbitrary modifier emits verbatim" {
-    const r = (try parseAndResolve(tst.allocator, "text-2xl/[1.5]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("1.5", r.declarations[1].value);
-}
-
-test "text-{size}/N with fractional spacing modifier" {
-    const r = (try parseAndResolve(tst.allocator, "text-base/0.5")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("calc(var(--spacing) * 0.5)", r.declarations[1].value);
-}
-
-test "text-{size} without theme line-height: only font-size emitted" {
-    // text-base in our test_theme has no --text-base--line-height token.
-    const r = (try parseAndResolve(tst.allocator, "text-base")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("font-size", r.declarations[0].property);
-}
-
 // ── Gradient direction extras ───────────────────────────────────────────────
-
-test "bg-linear-{angle}: numeric → <N>deg" {
-    const r = (try parseAndResolve(tst.allocator, "bg-linear-45")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-gradient-position", r.declarations[0].property);
-    try tst.expectEqualStrings("45deg", r.declarations[0].value);
-    try tst.expectEqualStrings("background-image", r.declarations[1].property);
-    try tst.expectEqualStrings("linear-gradient(var(--tw-gradient-stops, var(--tw-gradient-position), var(--tw-gradient-from, transparent), var(--tw-gradient-to, transparent)))", r.declarations[1].value);
-}
-
-test "bg-linear-[arbitrary]: passes value verbatim" {
-    const r = (try parseAndResolve(tst.allocator, "bg-linear-[in_oklch_45deg]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("in oklch 45deg", r.declarations[0].value);
-}
-
-test "bg-conic: bare emits conic-gradient base" {
-    const r = (try parseAndResolve(tst.allocator, "bg-conic")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-gradient-position", r.declarations[0].property);
-    try tst.expect(std.mem.indexOf(u8, r.declarations[1].value, "conic-gradient") != null);
-}
-
-test "bg-conic-{angle}: emits 'from <N>deg in oklab'" {
-    const r = (try parseAndResolve(tst.allocator, "bg-conic-90")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("from 90deg in oklab", r.declarations[0].value);
-    try tst.expect(std.mem.indexOf(u8, r.declarations[1].value, "conic-gradient") != null);
-}
-
-test "bg-conic-[arbitrary]: passes verbatim" {
-    const r = (try parseAndResolve(tst.allocator, "bg-conic-[from_180deg_at_25%_25%]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("from 180deg at 25% 25%", r.declarations[0].value);
-}
-
-test "bg-radial: bare emits radial-gradient base" {
-    const r = (try parseAndResolve(tst.allocator, "bg-radial")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expect(std.mem.indexOf(u8, r.declarations[1].value, "radial-gradient") != null);
-}
-
-test "bg-radial-[arbitrary]: passes verbatim" {
-    const r = (try parseAndResolve(tst.allocator, "bg-radial-[ellipse_at_top]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("ellipse at top", r.declarations[0].value);
-    try tst.expect(std.mem.indexOf(u8, r.declarations[1].value, "radial-gradient") != null);
-}
-
-test "bg-radial-{named} (non-arbitrary) returns null" {
-    // Tailwind v4 doesn't define `bg-radial-circle` etc.; only arbitrary.
-    try tst.expect((try parseAndResolve(tst.allocator, "bg-radial-circle")) == null);
-}
 
 // ── Grid row utilities + arbitrary col-span ─────────────────────────────────
 
-test "row-span-N → grid-row" {
-    const r = (try parseAndResolve(tst.allocator, "row-span-3")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("grid-row", r.declarations[0].property);
-    try tst.expectEqualStrings("span 3 / span 3", r.declarations[0].value);
-}
-
-test "col-span-[arbitrary]" {
-    const r = (try parseAndResolve(tst.allocator, "col-span-[5]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("grid-column", r.declarations[0].property);
-    try tst.expectEqualStrings("span 5 / span 5", r.declarations[0].value);
-}
-
-test "grid-rows-N → grid-template-rows repeat" {
-    const r = (try parseAndResolve(tst.allocator, "grid-rows-4")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("grid-template-rows", r.declarations[0].property);
-    try tst.expectEqualStrings("repeat(4, minmax(0, 1fr))", r.declarations[0].value);
-}
-
-test "grid-rows-subgrid → grid-template-rows: subgrid" {
-    const r = (try parseAndResolve(tst.allocator, "grid-rows-subgrid")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("subgrid", r.declarations[0].value);
-}
-
-test "grid-cols-none → grid-template-columns: none" {
-    const r = (try parseAndResolve(tst.allocator, "grid-cols-none")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("none", r.declarations[0].value);
-}
-
-test "row-auto / row-span-full statics" {
-    const r1 = (try parseAndResolve(tst.allocator, "row-auto")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("grid-row", r1.declarations[0].property);
-    try tst.expectEqualStrings("auto", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "row-span-full")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("1 / -1", r2.declarations[0].value);
-}
-
 // ── Spacing dispatch: padding / margin / gap / width / height ──────────────
-
-test "padding: p-N → padding (single)" {
-    const r = (try parseAndResolve(tst.allocator, "p-4")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("padding", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 4)", r.declarations[0].value);
-}
-
-test "padding: px-N expands to padding-left + padding-right" {
-    const r = (try parseAndResolve(tst.allocator, "px-3")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("padding-left", r.declarations[0].property);
-    try tst.expectEqualStrings("padding-right", r.declarations[1].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 3)", r.declarations[0].value);
-    try tst.expectEqualStrings("calc(var(--spacing) * 3)", r.declarations[1].value);
-}
-
-test "padding: pt-N → padding-top only" {
-    const r = (try parseAndResolve(tst.allocator, "pt-2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("padding-top", r.declarations[0].property);
-}
-
-test "padding: logical sides ps-/pe-" {
-    const r1 = (try parseAndResolve(tst.allocator, "ps-2")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("padding-inline-start", r1.declarations[0].property);
-    const r2 = (try parseAndResolve(tst.allocator, "pe-1.5")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("padding-inline-end", r2.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 1.5)", r2.declarations[0].value);
-}
-
-test "margin: m-N + negative -m-N + auto" {
-    const r1 = (try parseAndResolve(tst.allocator, "m-4")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("margin", r1.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 4)", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "-m-4")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("calc(calc(var(--spacing) * 4) * -1)", r2.declarations[0].value);
-    const r3 = (try parseAndResolve(tst.allocator, "m-auto")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("auto", r3.declarations[0].value);
-}
-
-test "margin: mx-auto sets both sides to auto" {
-    const r = (try parseAndResolve(tst.allocator, "mx-auto")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("margin-left", r.declarations[0].property);
-    try tst.expectEqualStrings("auto", r.declarations[0].value);
-    try tst.expectEqualStrings("margin-right", r.declarations[1].property);
-    try tst.expectEqualStrings("auto", r.declarations[1].value);
-}
-
-test "gap: gap-N + gap-x-N + gap-y-N" {
-    const r1 = (try parseAndResolve(tst.allocator, "gap-4")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("gap", r1.declarations[0].property);
-    const r2 = (try parseAndResolve(tst.allocator, "gap-x-2")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("column-gap", r2.declarations[0].property);
-    const r3 = (try parseAndResolve(tst.allocator, "gap-y-0.5")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("row-gap", r3.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 0.5)", r3.declarations[0].value);
-}
-
-test "width: w-N, w-full (static), w-auto, w-px, w-screen (static)" {
-    const r1 = (try parseAndResolve(tst.allocator, "w-32")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("width", r1.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 32)", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "w-auto")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("auto", r2.declarations[0].value);
-    const r3 = (try parseAndResolve(tst.allocator, "w-px")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("1px", r3.declarations[0].value);
-    const r4 = (try parseAndResolve(tst.allocator, "w-screen")).?;
-    defer freeResolvedUtility(tst.allocator, r4);
-    try tst.expectEqualStrings("100vw", r4.declarations[0].value);
-}
-
-test "spacing: arbitrary values [10px] / [var(--w)]" {
-    const r1 = (try parseAndResolve(tst.allocator, "p-[10px]")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("10px", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "w-[var(--my-w)]")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("var(--my-w)", r2.declarations[0].value);
-    // Negative arbitrary on margin.
-    const r3 = (try parseAndResolve(tst.allocator, "-mt-[10px]")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("calc(10px * -1)", r3.declarations[0].value);
-}
-
-test "spacing: top/right/bottom/left as standalone roots" {
-    const r1 = (try parseAndResolve(tst.allocator, "top-4")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("top", r1.declarations[0].property);
-    const r2 = (try parseAndResolve(tst.allocator, "-bottom-2")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("bottom", r2.declarations[0].property);
-    try tst.expectEqualStrings("calc(calc(var(--spacing) * 2) * -1)", r2.declarations[0].value);
-}
-
-test "spacing: width keywords (min/max/fit)" {
-    const r1 = (try parseAndResolve(tst.allocator, "w-min")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("min-content", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "w-max")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("max-content", r2.declarations[0].value);
-    const r3 = (try parseAndResolve(tst.allocator, "w-fit")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("fit-content", r3.declarations[0].value);
-}
 
 // ── Fractions (modifier-as-denominator) ─────────────────────────────────────
 
-test "fraction: w-1/2 → calc(1/2 * 100%)" {
-    const r = (try parseAndResolve(tst.allocator, "w-1/2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("width", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(1/2 * 100%)", r.declarations[0].value);
-}
-
-test "fraction: w-2/3 → calc(2/3 * 100%)" {
-    const r = (try parseAndResolve(tst.allocator, "w-2/3")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("calc(2/3 * 100%)", r.declarations[0].value);
-}
-
-test "fraction: h-1/4 → calc(1/4 * 100%) on height" {
-    const r = (try parseAndResolve(tst.allocator, "h-1/4")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("height", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(1/4 * 100%)", r.declarations[0].value);
-}
-
-test "fraction: inset-1/2 → calc(1/2 * 100%) on inset" {
-    const r = (try parseAndResolve(tst.allocator, "inset-1/2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("inset", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(1/2 * 100%)", r.declarations[0].value);
-}
-
-test "fraction: -mt-1/2 negative fraction" {
-    const r = (try parseAndResolve(tst.allocator, "-mt-1/2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("margin-top", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(calc(1/2 * 100%) * -1)", r.declarations[0].value);
-}
-
-test "fraction: w-3/4 (multi-digit numerator works)" {
-    const r = (try parseAndResolve(tst.allocator, "w-11/12")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("calc(11/12 * 100%)", r.declarations[0].value);
-}
-
 // ── space-x-N / space-y-N — selector-modifying utility ──────────────────────
-
-test "space-x-N emits margin-right with selector_suffix" {
-    const r = (try parseAndResolve(tst.allocator, "space-x-4")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("margin-right", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 4)", r.declarations[0].value);
-    try tst.expect(r.selector_suffix != null);
-    try tst.expectEqualStrings(" > :not(:last-child)", r.selector_suffix.?);
-}
-
-test "space-y-N emits margin-bottom with selector_suffix" {
-    const r = (try parseAndResolve(tst.allocator, "space-y-2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("margin-bottom", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 2)", r.declarations[0].value);
-    try tst.expect(r.selector_suffix != null);
-}
-
-test "space-x-N: arbitrary value works" {
-    const r = (try parseAndResolve(tst.allocator, "space-x-[10px]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("10px", r.declarations[0].value);
-    try tst.expect(r.selector_suffix != null);
-}
-
-test "space-x-reverse: marker class (no decls)" {
-    const r = (try parseAndResolve(tst.allocator, "space-x-reverse")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 0), r.declarations.len);
-}
 
 // ── Border width ────────────────────────────────────────────────────────────
 
-test "border: bare → border-width: 1px + style" {
-    const r = (try parseAndResolve(tst.allocator, "border")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("border-style", r.declarations[0].property);
-    try tst.expectEqualStrings("border-width", r.declarations[1].property);
-    try tst.expectEqualStrings("1px", r.declarations[1].value);
-}
-
-test "border-N: integer value → border-width: Npx" {
-    const r = (try parseAndResolve(tst.allocator, "border-2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("border-width", r.declarations[0].property);
-    try tst.expectEqualStrings("2px", r.declarations[0].value);
-}
-
-test "border-{side}-N: emits side-specific width" {
-    const r1 = (try parseAndResolve(tst.allocator, "border-t-2")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("border-top-width", r1.declarations[0].property);
-    try tst.expectEqualStrings("2px", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "border-l-4")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("border-left-width", r2.declarations[0].property);
-}
-
-test "border-x-N / border-y-N: axis pair" {
-    const r1 = (try parseAndResolve(tst.allocator, "border-x-2")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqual(@as(usize, 2), r1.declarations.len);
-    try tst.expectEqualStrings("border-left-width", r1.declarations[0].property);
-    try tst.expectEqualStrings("border-right-width", r1.declarations[1].property);
-    const r2 = (try parseAndResolve(tst.allocator, "border-y-1")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("border-top-width", r2.declarations[0].property);
-    try tst.expectEqualStrings("border-bottom-width", r2.declarations[1].property);
-}
-
-test "border-{side}: bare side static" {
-    const r = (try parseAndResolve(tst.allocator, "border-t")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("border-top-width", r.declarations[1].property);
-    try tst.expectEqualStrings("1px", r.declarations[1].value);
-}
-
-test "border-[arbitrary]: arbitrary width" {
-    const r = (try parseAndResolve(tst.allocator, "border-[3.5px]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("border-width", r.declarations[0].property);
-    try tst.expectEqualStrings("3.5px", r.declarations[0].value);
-}
-
-test "border-{color}: color path still works (regression)" {
-    // Color values shouldn't be caught by border-width — they fall through
-    // to the color path which emits border-color.
-    const r = (try parseAndResolve(tst.allocator, "border-red-500")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("border-color", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--color-red-500)", r.declarations[0].value);
-}
-
 // ── Transition / duration / delay / ease ────────────────────────────────────
-
-test "static: transition (bare) emits property + duration + timing" {
-    const r = (try parseAndResolve(tst.allocator, "transition")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 3), r.declarations.len);
-    try tst.expectEqualStrings("transition-property", r.declarations[0].property);
-    try tst.expect(std.mem.indexOf(u8, r.declarations[0].value, "color") != null);
-    try tst.expectEqualStrings("transition-duration", r.declarations[2].property);
-}
-
-test "static: transition-{all,colors,opacity,shadow,transform,none}" {
-    const r1 = (try parseAndResolve(tst.allocator, "transition-all")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("all", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "transition-opacity")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("opacity", r2.declarations[0].value);
-    const r3 = (try parseAndResolve(tst.allocator, "transition-none")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqual(@as(usize, 1), r3.declarations.len);
-    try tst.expectEqualStrings("none", r3.declarations[0].value);
-}
-
-test "duration-N → transition-duration: Nms" {
-    const r = (try parseAndResolve(tst.allocator, "duration-300")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("transition-duration", r.declarations[0].property);
-    try tst.expectEqualStrings("300ms", r.declarations[0].value);
-}
-
-test "delay-N → transition-delay: Nms" {
-    const r = (try parseAndResolve(tst.allocator, "delay-150")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("transition-delay", r.declarations[0].property);
-    try tst.expectEqualStrings("150ms", r.declarations[0].value);
-}
-
-test "duration-[arb] / delay-[arb] arbitrary values" {
-    const r1 = (try parseAndResolve(tst.allocator, "duration-[2s]")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("2s", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "delay-[var(--my-delay)]")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("var(--my-delay)", r2.declarations[0].value);
-}
-
-test "static: ease-{linear,in,out,in-out,initial}" {
-    const r1 = (try parseAndResolve(tst.allocator, "ease-linear")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("transition-timing-function", r1.declarations[0].property);
-    try tst.expectEqualStrings("linear", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "ease-in-out")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expect(std.mem.indexOf(u8, r2.declarations[0].value, "cubic-bezier") != null);
-}
-
-test "ease-[arbitrary]" {
-    const r = (try parseAndResolve(tst.allocator, "ease-[cubic-bezier(0.5,0,0.5,1)]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("cubic-bezier(0.5,0,0.5,1)", r.declarations[0].value);
-}
 
 // ── Shadow / outline base statics + cursor / select / object-fit ────────────
 
-test "shadow-{color}: sets --tw-shadow-color" {
-    const r = (try parseAndResolve(tst.allocator, "shadow-red-500")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-shadow-color", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--color-red-500)", r.declarations[0].value);
-}
-
-test "shadow-{color}/{opacity}: applies color-mix" {
-    const r = (try parseAndResolve(tst.allocator, "shadow-red-500/50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--color-red-500) 50%, transparent)",
-        r.declarations[0].value,
-    );
-}
-
-test "static: shadow (bare) + shadow-none" {
-    const r1 = (try parseAndResolve(tst.allocator, "shadow")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqual(@as(usize, 2), r1.declarations.len);
-    try tst.expectEqualStrings("--tw-shadow", r1.declarations[0].property);
-    try tst.expectEqualStrings("box-shadow", r1.declarations[1].property);
-    const r2 = (try parseAndResolve(tst.allocator, "shadow-none")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("0 0 #0000", r2.declarations[0].value);
-}
-
-test "static: outline (bare) + outline-none + outline-{style}" {
-    const r1 = (try parseAndResolve(tst.allocator, "outline")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqual(@as(usize, 2), r1.declarations.len);
-    try tst.expectEqualStrings("outline-style", r1.declarations[0].property);
-    try tst.expectEqualStrings("outline-width", r1.declarations[1].property);
-    const r2 = (try parseAndResolve(tst.allocator, "outline-none")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("none", r2.declarations[0].value);
-    const r3 = (try parseAndResolve(tst.allocator, "outline-dashed")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("dashed", r3.declarations[0].value);
-}
-
-test "static: cursor variants (full set)" {
-    for ([_][]const u8{
-        "cursor-auto",       "cursor-default",   "cursor-pointer", "cursor-wait",
-        "cursor-help",       "cursor-not-allowed", "cursor-grab",  "cursor-grabbing",
-        "cursor-zoom-in",    "cursor-zoom-out",  "cursor-text",
-    }) |c| {
-        const r = (try parseAndResolve(tst.allocator, c)).?;
-        defer freeResolvedUtility(tst.allocator, r);
-        try tst.expectEqualStrings("cursor", r.declarations[0].property);
-    }
-}
-
-test "static: select-{none,text,all,auto}" {
-    for ([_][]const u8{ "select-none", "select-text", "select-all", "select-auto" }) |c| {
-        const r = (try parseAndResolve(tst.allocator, c)).?;
-        defer freeResolvedUtility(tst.allocator, r);
-        try tst.expectEqualStrings("user-select", r.declarations[0].property);
-    }
-}
-
-test "static: object-fit + object-position" {
-    const r1 = (try parseAndResolve(tst.allocator, "object-cover")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("object-fit", r1.declarations[0].property);
-    try tst.expectEqualStrings("cover", r1.declarations[0].value);
-    const r2 = (try parseAndResolve(tst.allocator, "object-top-right")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("object-position", r2.declarations[0].property);
-    try tst.expectEqualStrings("top right", r2.declarations[0].value);
-}
-
-test "static: pointer-events + resize" {
-    const r1 = (try parseAndResolve(tst.allocator, "pointer-events-none")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("pointer-events", r1.declarations[0].property);
-    const r2 = (try parseAndResolve(tst.allocator, "resize-y")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("vertical", r2.declarations[0].value);
-}
-
-test "border style statics (solid/dashed/dotted/double/none)" {
-    const r1 = (try parseAndResolve(tst.allocator, "border-solid")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("solid", r1.declarations[1].value);
-    const r2 = (try parseAndResolve(tst.allocator, "border-dashed")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("dashed", r2.declarations[1].value);
-    const r3 = (try parseAndResolve(tst.allocator, "border-none")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqualStrings("none", r3.declarations[1].value);
-}
-
-test "static: antialiased emits two declarations" {
-    const r = (try parseAndResolve(tst.allocator, "antialiased")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("-webkit-font-smoothing", r.declarations[0].property);
-    try tst.expectEqualStrings("-moz-osx-font-smoothing", r.declarations[1].property);
-}
-
-test "functional: size-N emits width + height" {
-    const r = (try parseAndResolve(tst.allocator, "size-12")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("width", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 12)", r.declarations[0].value);
-    try tst.expectEqualStrings("height", r.declarations[1].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 12)", r.declarations[1].value);
-}
-
-test "functional: col-span-N" {
-    const r = (try parseAndResolve(tst.allocator, "col-span-2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("grid-column", r.declarations[0].property);
-    try tst.expectEqualStrings("span 2 / span 2", r.declarations[0].value);
-}
-
-test "functional: grid-cols-subgrid" {
-    const r = (try parseAndResolve(tst.allocator, "grid-cols-subgrid")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("grid-template-columns", r.declarations[0].property);
-    try tst.expectEqualStrings("subgrid", r.declarations[0].value);
-}
-
-test "functional: grid-cols-N" {
-    const r = (try parseAndResolve(tst.allocator, "grid-cols-3")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("repeat(3, minmax(0, 1fr))", r.declarations[0].value);
-}
-
-test "functional: inset-N" {
-    const r = (try parseAndResolve(tst.allocator, "inset-2")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("inset", r.declarations[0].property);
-    try tst.expectEqualStrings("calc(var(--spacing) * 2)", r.declarations[0].value);
-}
-
-test "functional: fractional spacing (Tailwind half-step scale)" {
-    // inset-0.5 → calc(var(--spacing) * 0.5)
-    const r1 = (try parseAndResolve(tst.allocator, "inset-0.5")).?;
-    defer freeResolvedUtility(tst.allocator, r1);
-    try tst.expectEqualStrings("calc(var(--spacing) * 0.5)", r1.declarations[0].value);
-    // inset-2.5
-    const r2 = (try parseAndResolve(tst.allocator, "inset-2.5")).?;
-    defer freeResolvedUtility(tst.allocator, r2);
-    try tst.expectEqualStrings("calc(var(--spacing) * 2.5)", r2.declarations[0].value);
-    // size-1.5 → both width + height with the fractional value
-    const r3 = (try parseAndResolve(tst.allocator, "size-1.5")).?;
-    defer freeResolvedUtility(tst.allocator, r3);
-    try tst.expectEqual(@as(usize, 2), r3.declarations.len);
-    try tst.expectEqualStrings("calc(var(--spacing) * 1.5)", r3.declarations[0].value);
-    try tst.expectEqualStrings("calc(var(--spacing) * 1.5)", r3.declarations[1].value);
-}
-
-test "functional: malformed fractional spacing rejected" {
-    // Leading dot, trailing dot, multi-dot, non-numeric all return null.
-    try tst.expect((try parseAndResolve(tst.allocator, "inset-.5")) == null);
-    try tst.expect((try parseAndResolve(tst.allocator, "inset-5.")) == null);
-    try tst.expect((try parseAndResolve(tst.allocator, "inset-1.5.5")) == null);
-}
-
-test "isSpacingNumber covers integers and half-steps, rejects edges" {
-    try tst.expect(isSpacingNumber("0"));
-    try tst.expect(isSpacingNumber("12"));
-    try tst.expect(isSpacingNumber("0.5"));
-    try tst.expect(isSpacingNumber("1.5"));
-    try tst.expect(isSpacingNumber("2.5"));
-    try tst.expect(isSpacingNumber("100.25"));
-    try tst.expect(!isSpacingNumber(""));
-    try tst.expect(!isSpacingNumber("."));
-    try tst.expect(!isSpacingNumber(".5"));
-    try tst.expect(!isSpacingNumber("5."));
-    try tst.expect(!isSpacingNumber("1.2.3"));
-    try tst.expect(!isSpacingNumber("abc"));
-    try tst.expect(!isSpacingNumber("1a"));
-}
-
-test "functional: -z-N (negative)" {
-    const r = (try parseAndResolve(tst.allocator, "-z-10")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("z-index", r.declarations[0].property);
-    try tst.expectEqualStrings("-10", r.declarations[0].value);
-}
-
-test "functional: z-N (positive)" {
-    const r = (try parseAndResolve(tst.allocator, "z-50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("50", r.declarations[0].value);
-}
-
-test "functional: font-sans (theme lookup)" {
-    const r = (try parseAndResolve(tst.allocator, "font-sans")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("font-family", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--font-sans)", r.declarations[0].value);
-}
-
-test "functional: font-{unknown} returns null" {
-    const r = try parseAndResolve(tst.allocator, "font-unknown");
-    try tst.expect(r == null);
-}
-
-test "functional: bg-linear-to-b" {
-    const r = (try parseAndResolve(tst.allocator, "bg-linear-to-b")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 2), r.declarations.len);
-    try tst.expectEqualStrings("--tw-gradient-position", r.declarations[0].property);
-    try tst.expectEqualStrings("to bottom", r.declarations[0].value);
-    try tst.expectEqualStrings("background-image", r.declarations[1].property);
-    try tst.expectEqualStrings("linear-gradient(var(--tw-gradient-stops, var(--tw-gradient-position), var(--tw-gradient-from, transparent), var(--tw-gradient-to, transparent)))", r.declarations[1].value);
-}
-
-test "functional: from-{color} (theme lookup)" {
-    const r = (try parseAndResolve(tst.allocator, "from-white")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-gradient-from", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--color-white)", r.declarations[0].value);
-}
-
-test "functional: to-{percent}" {
-    const r = (try parseAndResolve(tst.allocator, "to-50%")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-gradient-to-position", r.declarations[0].property);
-    try tst.expectEqualStrings("50%", r.declarations[0].value);
-}
-
-test "functional: from-[arbitrary]" {
-    const r = (try parseAndResolve(tst.allocator, "from-[-25%]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-gradient-from", r.declarations[0].property);
-    try tst.expectEqualStrings("-25%", r.declarations[0].value);
-}
-
-test "arbitrary property" {
-    const r = (try parseAndResolve(tst.allocator, "[--my-prop:42]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--my-prop", r.declarations[0].property);
-    try tst.expectEqualStrings("42", r.declarations[0].value);
-}
-
-test "unknown utility returns null" {
-    const r = try parseAndResolve(tst.allocator, "totally-made-up");
-    try tst.expect(r == null);
-}
-
 // ── Color utilities ────────────────────────────────────────────────────────
 
-test "color: bg-{theme-color}" {
-    const r = (try parseAndResolve(tst.allocator, "bg-red-500")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqual(@as(usize, 1), r.declarations.len);
-    try tst.expectEqualStrings("background-color", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--color-red-500)", r.declarations[0].value);
+};
+
+pub const variants_mod = struct {
+/// Variant resolver — wraps a base selector + at-rule context based on parsed variants.
+///
+/// Architecture: a comptime-known set of variant kinds (static / functional /
+/// compound / arbitrary). Compound variants delegate to inner-variant lookup.
+///
+/// Public API: `applyVariants(allocator, comptime theme, variants, base_class) -> !WrappedRule`.
+/// `base_class` is the unescaped utility class (e.g., "bg-red-500" — caller is
+/// responsible for escaping `:` etc. when emitting the final CSS string).
+///
+/// Phase 1 coverage:
+///   - Pseudo-class statics: hover, focus, focus-visible, focus-within, active,
+///     visited, disabled, enabled, checked, indeterminate, first, last, only,
+///     odd, even, empty, target, default, required, valid, invalid, read-only.
+///   - Pseudo-element statics: before, after, placeholder, selection, marker, file.
+///   - Color scheme: dark, light, motion-reduce, motion-safe, print.
+///   - Breakpoints (theme-driven): sm, md, lg, xl, 2xl + max-* variants.
+///   - Functional: data-*, aria-* (with arbitrary value).
+///   - Compound: group-*, peer-* with named-group modifier (`group-hover/foo`).
+///   - Arbitrary selectors: [&_p], [@media (...)], etc.
+///
+/// Deferred:
+///   - Container queries (@container, @sm: inside container contexts).
+///   - not-*, has-*, in-* compound forwarding.
+
+const std = @import("std");
+const candidate = amalgam.candidate_mod;
+const theme = amalgam.theme_mod;
+
+const Variant = candidate.Variant;
+const Theme = theme.Theme;
+
+pub const WrappedRule = struct {
+    /// Final CSS selector. Caller wraps the utility declarations in `<selector> { ... }`.
+    selector: []u8,
+    /// At-rule wrappers in outer-first order. Caller emits as nested at-rules.
+    at_rules: []AtRule,
+};
+
+pub const AtRule = struct {
+    /// e.g., "media", "container", "supports".
+    name: []const u8,
+    /// e.g., "(min-width: var(--breakpoint-md))".
+    condition: []u8,
+};
+
+pub const VariantError = error{
+    OutOfMemory,
+    UnknownVariant,
+};
+
+pub fn freeWrappedRule(allocator: std.mem.Allocator, r: WrappedRule) void {
+    allocator.free(r.selector);
+    for (r.at_rules) |ar| allocator.free(ar.condition);
+    allocator.free(r.at_rules);
 }
 
-test "color: bg-{color}/{opacity} → color-mix" {
-    const r = (try parseAndResolve(tst.allocator, "bg-red-500/50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("background-color", r.declarations[0].property);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--color-red-500) 50%, transparent)",
-        r.declarations[0].value,
-    );
-}
+/// Apply parsed variants to a base class name.
+/// Variants are applied innermost-first per parser convention (variants[0] is
+/// the variant immediately preceding the base in the source: `md:hover:foo` →
+/// variants = [hover, md]).
+pub fn applyVariants(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    variants: []const Variant,
+    base_class: []const u8,
+) VariantError!WrappedRule {
+    var selector = try escapeClassSelector(allocator, base_class);
+    errdefer allocator.free(selector);
 
-test "color: bg-{color}/[0.4] → numeric arbitrary coerced to %" {
-    const r = (try parseAndResolve(tst.allocator, "bg-red-500/[0.4]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--color-red-500) 40%, transparent)",
-        r.declarations[0].value,
-    );
-}
+    var at_rules = std.array_list.Managed(AtRule).init(allocator);
+    errdefer {
+        for (at_rules.items) |ar| allocator.free(ar.condition);
+        at_rules.deinit();
+    }
 
-test "color: bg-{color}/[27%] → arbitrary with % preserved verbatim" {
-    const r = (try parseAndResolve(tst.allocator, "bg-red-500/[27%]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--color-red-500) 27%, transparent)",
-        r.declarations[0].value,
-    );
-}
+    for (variants) |v| {
+        try applyOne(allocator, t, v, &selector, &at_rules);
+    }
 
-test "modifierAsOpacity: numberStringTimes100 edge cases" {
-    const cases = [_]struct { in: []const u8, out: ?[]const u8 }{
-        .{ .in = "0.4", .out = "40" },
-        .{ .in = "0.04", .out = "4" },
-        .{ .in = "0.123", .out = "12.3" },
-        .{ .in = "1", .out = "100" },
-        .{ .in = ".5", .out = "50" },
-        .{ .in = "0", .out = "0" },
-        .{ .in = "27%", .out = null }, // contains '%' → not a plain number
-        .{ .in = "1.2.3", .out = null }, // multiple dots
-        .{ .in = "var(--x)", .out = null },
-        .{ .in = "", .out = null },
+    return .{
+        .selector = selector,
+        .at_rules = try at_rules.toOwnedSlice(),
     };
-    for (cases) |c| {
-        const got = try numberStringTimes100(tst.allocator, c.in);
-        defer if (got) |g| tst.allocator.free(g);
-        if (c.out) |expected| {
-            try tst.expect(got != null);
-            try tst.expectEqualStrings(expected, got.?);
+}
+
+fn applyOne(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    variant: Variant,
+    selector: *[]u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    switch (variant) {
+        .static_v => |s| try applyStatic(allocator, t, s.root, selector, at_rules),
+        .functional => |f| try applyFunctional(allocator, t, f.root, f.value, selector, at_rules),
+        .compound => |c| try applyCompound(allocator, t, c.root, c.modifier, c.variant.*, selector, at_rules),
+        .arbitrary => |a| try applyArbitrary(allocator, a.selector, a.relative, selector, at_rules),
+    }
+}
+
+// ── Static variants ─────────────────────────────────────────────────────────
+
+const StaticVariant = struct {
+    name: []const u8,
+    /// Selector suffix appended to `&`. e.g. ":hover", ":focus-visible".
+    /// Empty string means use at-rule path instead.
+    suffix: []const u8,
+    /// If non-empty, this variant emits an at-rule with `(condition)` instead of
+    /// modifying the selector.
+    at_rule_name: []const u8 = "",
+    at_rule_condition: []const u8 = "",
+};
+
+const STATIC_VARIANTS = [_]StaticVariant{
+    // ── Pseudo-classes ──────────────────────────────────────────────────────
+    .{ .name = "hover", .suffix = ":hover" },
+    .{ .name = "focus", .suffix = ":focus" },
+    .{ .name = "focus-visible", .suffix = ":focus-visible" },
+    .{ .name = "focus-within", .suffix = ":focus-within" },
+    .{ .name = "active", .suffix = ":active" },
+    .{ .name = "visited", .suffix = ":visited" },
+    .{ .name = "target", .suffix = ":target" },
+    .{ .name = "disabled", .suffix = ":disabled" },
+    .{ .name = "enabled", .suffix = ":enabled" },
+    .{ .name = "checked", .suffix = ":checked" },
+    .{ .name = "indeterminate", .suffix = ":indeterminate" },
+    .{ .name = "default", .suffix = ":default" },
+    .{ .name = "required", .suffix = ":required" },
+    .{ .name = "valid", .suffix = ":valid" },
+    .{ .name = "invalid", .suffix = ":invalid" },
+    .{ .name = "placeholder-shown", .suffix = ":placeholder-shown" },
+    .{ .name = "read-only", .suffix = ":read-only" },
+    .{ .name = "open", .suffix = "[open]" },
+
+    // ── Structural ──────────────────────────────────────────────────────────
+    .{ .name = "first", .suffix = ":first-child" },
+    .{ .name = "last", .suffix = ":last-child" },
+    .{ .name = "only", .suffix = ":only-child" },
+    .{ .name = "odd", .suffix = ":nth-child(odd)" },
+    .{ .name = "even", .suffix = ":nth-child(even)" },
+    .{ .name = "first-of-type", .suffix = ":first-of-type" },
+    .{ .name = "last-of-type", .suffix = ":last-of-type" },
+    .{ .name = "only-of-type", .suffix = ":only-of-type" },
+    .{ .name = "empty", .suffix = ":empty" },
+
+    // ── Pseudo-elements ─────────────────────────────────────────────────────
+    .{ .name = "before", .suffix = "::before" },
+    .{ .name = "after", .suffix = "::after" },
+    .{ .name = "placeholder", .suffix = "::placeholder" },
+    .{ .name = "selection", .suffix = "::selection" },
+    .{ .name = "marker", .suffix = "::marker" },
+    .{ .name = "file", .suffix = "::file-selector-button" },
+    .{ .name = "backdrop", .suffix = "::backdrop" },
+
+    // ── Color scheme + media ────────────────────────────────────────────────
+    .{ .name = "dark", .suffix = "", .at_rule_name = "media", .at_rule_condition = "(prefers-color-scheme: dark)" },
+    .{ .name = "light", .suffix = "", .at_rule_name = "media", .at_rule_condition = "(prefers-color-scheme: light)" },
+    .{ .name = "motion-reduce", .suffix = "", .at_rule_name = "media", .at_rule_condition = "(prefers-reduced-motion: reduce)" },
+    .{ .name = "motion-safe", .suffix = "", .at_rule_name = "media", .at_rule_condition = "(prefers-reduced-motion: no-preference)" },
+    .{ .name = "print", .suffix = "", .at_rule_name = "media", .at_rule_condition = "print" },
+    .{ .name = "forced-colors", .suffix = "", .at_rule_name = "media", .at_rule_condition = "(forced-colors: active)" },
+};
+
+fn applyStatic(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    name: []const u8,
+    selector: *[]u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    if (try tryApplyStaticName(allocator, name, selector, at_rules)) return;
+    // Container queries: `@container`, `@xs`, `@sm`, …, `@[400px]`.
+    if (name.len > 0 and name[0] == '@') {
+        return applyContainerQuery(allocator, t, name, at_rules);
+    }
+    // Fall back to breakpoint lookup: `md` etc. parse as static_v, but they're
+    // theme-driven media queries.
+    applyBreakpointBare(allocator, t, name, at_rules) catch |err| {
+        if (err == VariantError.UnknownVariant) return VariantError.UnknownVariant;
+        return err;
+    };
+}
+
+/// Container queries. Five forms:
+///   `@container`          → `@container { ... }` (responds to nearest container, no condition)
+///   `@<name>`             → `@container (width >= var(--container-<name>))` after theme lookup
+///   `@max-<name>`         → `@container (width < var(--container-<name>))`
+///   `@[<arbitrary>]`      → `@container (<arbitrary>)` (literal condition)
+///   `@max-[<arbitrary>]`  → `@container (width < <arbitrary>)`
+fn applyContainerQuery(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    name: []const u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    // `@container` (no value) — bare at-rule.
+    if (std.mem.eql(u8, name, "@container")) {
+        const cond = try allocator.dupe(u8, "");
+        try at_rules.append(.{ .name = "container", .condition = cond });
+        return;
+    }
+
+    // Strip the leading `@`.
+    const after_at = name[1..];
+
+    // Detect `max-` prefix.
+    var is_max = false;
+    var key = after_at;
+    if (std.mem.startsWith(u8, after_at, "max-")) {
+        is_max = true;
+        key = after_at[4..];
+    }
+
+    // Arbitrary: `@[<expr>]` or `@max-[<expr>]`.
+    if (key.len >= 2 and key[0] == '[' and key[key.len - 1] == ']') {
+        const inner = key[1 .. key.len - 1];
+        const cond = if (is_max)
+            try std.fmt.allocPrint(allocator, "(width < {s})", .{inner})
+        else
+            try std.fmt.allocPrint(allocator, "({s})", .{inner});
+        try at_rules.append(.{ .name = "container", .condition = cond });
+        return;
+    }
+
+    // Named: `@<key>` or `@max-<key>` — theme `--container-<key>` lookup.
+    const tok = try std.fmt.allocPrint(allocator, "container-{s}", .{key});
+    defer allocator.free(tok);
+    const value = theme.lookup(t, tok) orelse return VariantError.UnknownVariant;
+
+    const cond = if (is_max)
+        try std.fmt.allocPrint(allocator, "(width < {s})", .{value})
+    else
+        try std.fmt.allocPrint(allocator, "(width >= {s})", .{value});
+    try at_rules.append(.{ .name = "container", .condition = cond });
+}
+
+/// Try the static variant table; returns true on match, false if name unknown.
+/// Separated so applyFunctional can fall back to it for hyphenated statics like
+/// `focus-visible` that the parser splits as functional `focus`+`visible`.
+fn tryApplyStaticName(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    selector: *[]u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!bool {
+    inline for (STATIC_VARIANTS) |sv| {
+        if (std.mem.eql(u8, name, sv.name)) {
+            if (sv.at_rule_name.len > 0) {
+                const cond = try allocator.dupe(u8, sv.at_rule_condition);
+                try at_rules.append(.{ .name = sv.at_rule_name, .condition = cond });
+                return true;
+            }
+            const new_sel = try insertSelectorSuffix(allocator, selector.*, sv.suffix);
+            allocator.free(selector.*);
+            selector.* = new_sel;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// CSS rule: pseudo-elements (`::before`, `::after`, `::placeholder`, etc.)
+/// must be the LAST simple selector in a compound selector. When the new
+/// suffix is a pseudo-class (or attribute selector) and the existing selector
+/// already ends in a pseudo-element, splice the suffix in BEFORE it.
+///
+/// Examples:
+///   selector=".x", suffix="::before"  → ".x::before"      (append; pseudo-element last)
+///   selector=".x::before", suffix=":hover" → ".x:hover::before" (splice in)
+///   selector=".x:hover", suffix="::before" → ".x:hover::before" (append)
+///   selector=".x", suffix=":hover"   → ".x:hover"         (append)
+fn insertSelectorSuffix(
+    allocator: std.mem.Allocator,
+    sel: []const u8,
+    suffix: []const u8,
+) VariantError![]u8 {
+    // Suffix is itself a pseudo-element: just append (it's allowed to be
+    // last; if the selector already had one, the user gets two pseudo-
+    // elements, which is invalid CSS but our concern is composition, not
+    // diagnosis).
+    if (suffix.len >= 2 and suffix[0] == ':' and suffix[1] == ':') {
+        return try std.fmt.allocPrint(allocator, "{s}{s}", .{ sel, suffix });
+    }
+    // Find a trailing `::pseudo-element` on the existing selector.
+    if (findTrailingPseudoElement(sel)) |split| {
+        return try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ sel[0..split], suffix, sel[split..] });
+    }
+    return try std.fmt.allocPrint(allocator, "{s}{s}", .{ sel, suffix });
+}
+
+/// Returns the byte index at which a trailing `::<pseudo-element>` starts in
+/// `sel`, or null if no recognised pseudo-element is at the end. Recognised
+/// names match `STATIC_VARIANTS` entries with `::`-prefix suffixes.
+fn findTrailingPseudoElement(sel: []const u8) ?usize {
+    const known = [_][]const u8{
+        "::before",
+        "::after",
+        "::placeholder",
+        "::selection",
+        "::marker",
+        "::file-selector-button",
+        "::backdrop",
+    };
+    for (known) |pe| {
+        if (sel.len >= pe.len and std.mem.eql(u8, sel[sel.len - pe.len ..], pe)) {
+            return sel.len - pe.len;
+        }
+    }
+    return null;
+}
+
+// ── Functional variants ─────────────────────────────────────────────────────
+
+fn applyFunctional(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    root: []const u8,
+    value: ?candidate.VariantValue,
+    selector: *[]u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    // Breakpoints (theme-driven): `md:`, `lg:`, etc. with no value.
+    if (value == null) {
+        // First check if the bare root is a known static (e.g. `hover`, `dark`).
+        // The parser yields `static_v` for these, but compound dispatch can also
+        // route here if a name was misclassified.
+        if (try tryApplyStaticName(allocator, root, selector, at_rules)) return;
+        // Container queries can also reach here when the parser routes
+        // `@xs` etc. through the static-fallback path.
+        if (root.len > 0 and root[0] == '@') {
+            return applyContainerQuery(allocator, t, root, at_rules);
+        }
+        return applyBreakpointBare(allocator, t, root, at_rules);
+    }
+
+    const v = value.?;
+
+    // Container queries with values (`@max-md`, `@max-[500px]`) parse as
+    // functional with root prefixed `@`. Reconstruct the full name and
+    // dispatch to the container query handler.
+    if (root.len > 0 and root[0] == '@') {
+        const value_str = switch (v) {
+            .named => |n| n,
+            .arbitrary => |a| a,
+        };
+        // Reconstruct the original `@<root-after-at>-<value>` string. For
+        // arbitrary values we wrap in `[...]` so the container handler's
+        // arbitrary detection fires.
+        const reconstructed = if (v == .arbitrary)
+            try std.fmt.allocPrint(allocator, "{s}-[{s}]", .{ root, value_str })
+        else
+            try std.fmt.allocPrint(allocator, "{s}-{s}", .{ root, value_str });
+        defer allocator.free(reconstructed);
+        return applyContainerQuery(allocator, t, reconstructed, at_rules);
+    }
+
+    // Hyphenated static fallback: `focus-visible` parses as functional
+    // `focus`+`visible`; reconstruct and try as a static name.
+    if (v == .named) {
+        const reconstructed = try std.fmt.allocPrint(allocator, "{s}-{s}", .{ root, v.named });
+        defer allocator.free(reconstructed);
+        if (try tryApplyStaticName(allocator, reconstructed, selector, at_rules)) return;
+    }
+
+    // data-[state=open]: → &[data-state=open]
+    if (std.mem.eql(u8, root, "data")) {
+        const val_str = switch (v) {
+            .arbitrary => |a| a,
+            .named => |n| n,
+        };
+        const new_sel = try std.fmt.allocPrint(allocator, "{s}[data-{s}]", .{ selector.*, val_str });
+        allocator.free(selector.*);
+        selector.* = new_sel;
+        return;
+    }
+
+    // aria-[busy=true]:foo → foo[aria-busy=true]
+    if (std.mem.eql(u8, root, "aria")) {
+        const val_str = switch (v) {
+            .arbitrary => |a| a,
+            .named => |n| n,
+        };
+        const new_sel = try std.fmt.allocPrint(allocator, "{s}[aria-{s}]", .{ selector.*, val_str });
+        allocator.free(selector.*);
+        selector.* = new_sel;
+        return;
+    }
+
+    // supports-[(...)]:foo → @supports (...) { ... }
+    if (std.mem.eql(u8, root, "supports")) {
+        const val_str = switch (v) {
+            .arbitrary => |a| a,
+            .named => |n| n,
+        };
+        const cond = try std.fmt.allocPrint(allocator, "({s})", .{val_str});
+        try at_rules.append(.{ .name = "supports", .condition = cond });
+        return;
+    }
+
+    // max-md:, max-lg:, etc. — max-width variants.
+    if (std.mem.eql(u8, root, "max")) {
+        return applyMaxBreakpoint(allocator, t, v, at_rules);
+    }
+
+    return VariantError.UnknownVariant;
+}
+
+fn applyBreakpointBare(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    root: []const u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    const token_name = try std.fmt.allocPrint(allocator, "breakpoint-{s}", .{root});
+    defer allocator.free(token_name);
+
+    // Resolve the breakpoint to its literal value. CSS media queries do NOT
+    // accept `var()` references in feature value position — the browser
+    // silently drops the whole at-rule if you try, so every `lg:*`/`md:*` etc.
+    // utility becomes dead and responsive layouts collapse to mobile-stacked.
+    const value = theme.lookup(t, token_name) orelse return VariantError.UnknownVariant;
+
+    const cond = try std.fmt.allocPrint(allocator, "(min-width: {s})", .{value});
+    try at_rules.append(.{ .name = "media", .condition = cond });
+}
+
+fn applyMaxBreakpoint(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    v: candidate.VariantValue,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    if (v != .named) return VariantError.UnknownVariant;
+    const root = v.named;
+    const token_name = try std.fmt.allocPrint(allocator, "breakpoint-{s}", .{root});
+    defer allocator.free(token_name);
+    const value = theme.lookup(t, token_name) orelse return VariantError.UnknownVariant;
+
+    // Same reason as applyBreakpointBare: substitute the literal value.
+    // `calc()` *is* legal inside a media-feature value, so the - 0.02px offset
+    // (used to make max-width strictly exclusive) stays.
+    const cond = try std.fmt.allocPrint(
+        allocator,
+        "(max-width: calc({s} - 0.02px))",
+        .{value},
+    );
+    try at_rules.append(.{ .name = "media", .condition = cond });
+}
+
+// ── Compound variants ───────────────────────────────────────────────────────
+
+fn applyCompound(
+    allocator: std.mem.Allocator,
+    t: Theme,
+    root: []const u8,
+    modifier: ?candidate.Modifier,
+    inner: Variant,
+    selector: *[]u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    // Resolve the inner variant first into a temporary "&"-anchored sub-selector.
+    var sub_selector = try allocator.dupe(u8, "&");
+    defer allocator.free(sub_selector);
+    var sub_at_rules = std.array_list.Managed(AtRule).init(allocator);
+    defer {
+        for (sub_at_rules.items) |ar| allocator.free(ar.condition);
+        sub_at_rules.deinit();
+    }
+
+    try applyOne(allocator, t, inner, &sub_selector, &sub_at_rules);
+
+    // Hoist the inner variant's at-rules onto our outer at-rule list.
+    for (sub_at_rules.items) |ar| {
+        const dup = try allocator.dupe(u8, ar.condition);
+        try at_rules.append(.{ .name = ar.name, .condition = dup });
+    }
+
+    // The "suffix" is whatever the inner variant added after `&`. For
+    // `hover`, that's `:hover`. For `data-[state=open]`, that's
+    // `[data-state=open]`. For `[input:focus]` (arbitrary wrapped in
+    // `&:is(...)` by the parser), it's `:is(input:focus)`.
+    const sub_no_amp = if (sub_selector.len > 0 and sub_selector[0] == '&') sub_selector[1..] else sub_selector;
+
+    // Dispatch by compound root. `not-`, `has-`, `in-` use selector-wrapping
+    // (CSS pseudo-class functions); `group-`, `peer-`, `supports-` use the
+    // class-prefix pattern.
+    if (std.mem.eql(u8, root, "not")) {
+        // not-X:foo → .not-X\:foo:not(<inner-suffix>)
+        if (modifier != null) return VariantError.UnknownVariant; // not- doesn't take modifiers
+        if (sub_no_amp.len == 0) return VariantError.UnknownVariant;
+        const new_sel = try std.fmt.allocPrint(allocator, "{s}:not({s})", .{ selector.*, sub_no_amp });
+        allocator.free(selector.*);
+        selector.* = new_sel;
+        return;
+    }
+    if (std.mem.eql(u8, root, "has")) {
+        // has-X:foo → .has-X\:foo:has(<inner-suffix>)
+        if (modifier != null) return VariantError.UnknownVariant;
+        if (sub_no_amp.len == 0) return VariantError.UnknownVariant;
+        const new_sel = try std.fmt.allocPrint(allocator, "{s}:has({s})", .{ selector.*, sub_no_amp });
+        allocator.free(selector.*);
+        selector.* = new_sel;
+        return;
+    }
+    if (std.mem.eql(u8, root, "in")) {
+        // in-X:foo → :where(<inner-suffix>) .in-X\:foo
+        // Matches "any ancestor that satisfies the inner variant's
+        // condition." Uses :where() to keep specificity low.
+        if (modifier != null) return VariantError.UnknownVariant;
+        if (sub_no_amp.len == 0) return VariantError.UnknownVariant;
+        const new_sel = try std.fmt.allocPrint(allocator, ":where({s}) {s}", .{ sub_no_amp, selector.* });
+        allocator.free(selector.*);
+        selector.* = new_sel;
+        return;
+    }
+    // `supports-` is handled at parse-call time via the functional path
+    // (`supports-[(...)]:`); reaching here means the parser routed it into
+    // compound which we just don't support.
+    if (std.mem.eql(u8, root, "supports")) return VariantError.UnknownVariant;
+
+    // `group-` and `peer-` both follow the class-prefix pattern, but they
+    // differ in how the inner element relates to the marker class:
+    //   - `group-X:foo` → `.group:X .foo` (descendant — inner is inside the
+    //     marker, e.g. `<div class="group"><span class="group-hover:…">`)
+    //   - `peer-X:foo`  → `.peer:X ~ .foo` (subsequent sibling — inner sits
+    //     next to the marker, e.g. `<input class="peer"><span class="peer-checked:…">`)
+    // Without the `~` for `peer-`, every `peer-checked:translate-x-N`,
+    // `peer-checked:bg-primary` etc. silently never matches and components
+    // like Switch stop reacting to `:checked`.
+    const combinator: []const u8 = if (std.mem.eql(u8, root, "peer")) " ~ " else " ";
+
+    const escaped_root = if (modifier) |m| switch (m) {
+        .named => |n| try std.fmt.allocPrint(allocator, ".{s}\\/{s}", .{ root, n }),
+        .arbitrary => return VariantError.UnknownVariant,
+    } else try std.fmt.allocPrint(allocator, ".{s}", .{root});
+    defer allocator.free(escaped_root);
+
+    const new_sel = try std.fmt.allocPrint(
+        allocator,
+        "{s}{s}{s}{s}",
+        .{ escaped_root, sub_no_amp, combinator, selector.* },
+    );
+    allocator.free(selector.*);
+    selector.* = new_sel;
+}
+
+// ── Arbitrary selector variants ─────────────────────────────────────────────
+
+fn applyArbitrary(
+    allocator: std.mem.Allocator,
+    arbitrary_selector: []const u8,
+    relative: bool,
+    selector: *[]u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    // Arbitrary at-rule variant: `[@media(width>=123px)]:` →
+    // `@media (width>=123px) { … }`. Detected by the leading `@` (the parser
+    // doesn't pass these through `&:is(...)` wrapping).
+    if (arbitrary_selector.len > 0 and arbitrary_selector[0] == '@') {
+        return parseArbitraryAtRule(allocator, arbitrary_selector, at_rules);
+    }
+
+    if (relative) {
+        // Relative (e.g., `> img`): append to selector with the relative combinator.
+        const new_sel = try std.fmt.allocPrint(allocator, "{s} {s}", .{ selector.*, arbitrary_selector });
+        allocator.free(selector.*);
+        selector.* = new_sel;
+        return;
+    }
+
+    // Substitute `&` with current selector.
+    const new_sel = try substituteAmpersand(allocator, arbitrary_selector, selector.*);
+    allocator.free(selector.*);
+    selector.* = new_sel;
+}
+
+/// Parse a CSS at-rule string like `@media(width>=123px)` or
+/// `@supports (display: grid)` into the runner's at-rule format.
+/// The split is on the first `(` (or first whitespace) — everything before
+/// is the at-rule name (without the `@`); everything after is the condition.
+fn parseArbitraryAtRule(
+    allocator: std.mem.Allocator,
+    raw: []const u8,
+    at_rules: *std.array_list.Managed(AtRule),
+) VariantError!void {
+    // Skip leading `@`.
+    const after_at = raw[1..];
+    // Find end of at-rule name: first `(`, ` `, or end of string.
+    var i: usize = 0;
+    while (i < after_at.len and after_at[i] != '(' and after_at[i] != ' ') : (i += 1) {}
+    if (i == 0) return VariantError.UnknownVariant;
+    const name = after_at[0..i];
+    // Skip whitespace between name and condition.
+    var cond_start = i;
+    while (cond_start < after_at.len and after_at[cond_start] == ' ') : (cond_start += 1) {}
+    const cond_raw = after_at[cond_start..];
+
+    // Match the at-rule name against a small allow-list of safe ones.
+    if (!isAllowedArbitraryAtRule(name)) return VariantError.UnknownVariant;
+
+    // Normalize: ensure condition is wrapped in parens (callers may pass
+    // either `(...)` or just `...`). If empty, leave as empty.
+    const cond_owned: []u8 = if (cond_raw.len == 0)
+        try allocator.dupe(u8, "")
+    else if (cond_raw[0] == '(')
+        try allocator.dupe(u8, cond_raw)
+    else
+        try std.fmt.allocPrint(allocator, "({s})", .{cond_raw});
+
+    // Dupe `name` because the runner's `AtRule.name` is a static slice;
+    // we hand back the parser-owned slice (`raw` lives in the candidate's
+    // allocator, which outlives this call). For safety, return one of a
+    // small set of known constants instead.
+    const name_const = canonicalAtRuleName(name) orelse {
+        allocator.free(cond_owned);
+        return VariantError.UnknownVariant;
+    };
+    try at_rules.append(.{ .name = name_const, .condition = cond_owned });
+}
+
+fn isAllowedArbitraryAtRule(name: []const u8) bool {
+    return std.mem.eql(u8, name, "media") or
+        std.mem.eql(u8, name, "supports") or
+        std.mem.eql(u8, name, "container") or
+        std.mem.eql(u8, name, "starting-style");
+}
+
+fn canonicalAtRuleName(name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, name, "media")) return "media";
+    if (std.mem.eql(u8, name, "supports")) return "supports";
+    if (std.mem.eql(u8, name, "container")) return "container";
+    if (std.mem.eql(u8, name, "starting-style")) return "starting-style";
+    return null;
+}
+
+fn substituteAmpersand(
+    allocator: std.mem.Allocator,
+    pattern: []const u8,
+    replacement: []const u8,
+) VariantError![]u8 {
+    var out = std.array_list.Managed(u8).init(allocator);
+    errdefer out.deinit();
+    for (pattern) |c| {
+        if (c == '&') {
+            try out.appendSlice(replacement);
         } else {
-            try tst.expect(got == null);
+            try out.append(c);
+        }
+    }
+    return out.toOwnedSlice();
+}
+
+// ── Selector escaping ───────────────────────────────────────────────────────
+
+/// Escape special characters in a class name for use in a CSS selector.
+/// Characters needing escapes: `:`, `/`, `[`, `]`, `(`, `)`, `.`, `,`, `#`,
+/// `%`, `!`, `@`, `$`, `^`, `*`, `+`, `=`, `~`, `|`, `<`, `>`, `?`, `'`, `"`.
+/// We escape with a leading backslash.
+pub fn escapeClassSelector(allocator: std.mem.Allocator, class: []const u8) VariantError![]u8 {
+    var out = std.array_list.Managed(u8).init(allocator);
+    errdefer out.deinit();
+    try out.append('.');
+    for (class) |c| {
+        switch (c) {
+            ':', '/', '[', ']', '(', ')', '.', ',', '#', '%', '!', '@',
+            '$', '^', '*', '+', '=', '~', '|', '<', '>', '?', '\'', '"',
+            ' ',
+            => {
+                try out.append('\\');
+                try out.append(c);
+            },
+            else => try out.append(c),
+        }
+    }
+    return out.toOwnedSlice();
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+const tst = std.testing;
+
+const test_theme = theme.Theme{ .tokens = &.{
+    .{ .name = "breakpoint-sm", .value = "40rem" },
+    .{ .name = "breakpoint-md", .value = "48rem" },
+    .{ .name = "breakpoint-lg", .value = "64rem" },
+    .{ .name = "container-xs", .value = "20rem" },
+    .{ .name = "container-sm", .value = "24rem" },
+    .{ .name = "container-md", .value = "28rem" },
+} };
+
+fn parseAndApply(allocator: std.mem.Allocator, input: []const u8) !struct { sel: []u8, ats: []AtRule, base: []const u8 } {
+    const cands = try candidate.parseCandidate(allocator, input);
+    defer candidate.freeCandidates(allocator, cands);
+    // Take the first functional or static-c candidate for testing.
+    for (cands) |c| {
+        switch (c) {
+            .static_c => |s| {
+                const wr = try applyVariants(allocator, test_theme, s.variants, s.root);
+                return .{ .sel = wr.selector, .ats = wr.at_rules, .base = s.root };
+            },
+            .functional => |f| {
+                const wr = try applyVariants(allocator, test_theme, f.variants, f.root);
+                return .{ .sel = wr.selector, .ats = wr.at_rules, .base = f.root };
+            },
+            else => continue,
+        }
+    }
+    return error.NoCandidate;
+}
+
+// ── not-* / has-* / in-* compound forwarding ────────────────────────────────
+
+// ── Container queries ──────────────────────────────────────────────────────
+
+// ── Arbitrary at-rule variants ──────────────────────────────────────────────
+
+};
+
+pub const sort_mod = struct {
+/// Deterministic class sorting.
+///
+/// Replaces the task-03 stub. Implements `sortClasses(allocator, input, theme_css)`
+/// which the test runner calls per fixture.
+///
+/// Algorithm (Phase 1, faithful enough for the 10 sort fixtures):
+///   1. Parse each class via candidate.zig.
+///   2. Compute a sort key per class:
+///      - Unknown or unparseable classes → null (sort to front,
+///        preserve input order).
+///      - Known classes → a multi-field key combining: !important flag,
+///        variant count, property bucket index, alphabetical position.
+///   3. Stable-sort by key.
+///   4. Join with spaces.
+///
+/// The theme_css argument is accepted for compat with the test runner's API
+/// but is currently parsed only enough to know if breakpoint tokens exist
+/// (used as a hint for whether a name like `md` should be a breakpoint variant).
+/// Per-fixture themes are not used for sort ordering, only for resolution
+/// presence checks (which Phase 1 doesn't need).
+
+const std = @import("std");
+const candidate = amalgam.candidate_mod;
+
+pub const SortError = error{
+    NotImplemented,
+    OutOfMemory,
+};
+
+pub fn sortClasses(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    theme_css: []const u8,
+) SortError![]u8 {
+    _ = theme_css; // not currently used; see module doc comment
+
+    // Split input on whitespace.
+    var classes = std.array_list.Managed([]const u8).init(allocator);
+    defer classes.deinit();
+    var it = std.mem.tokenizeAny(u8, input, " \t\n\r");
+    while (it.next()) |c| try classes.append(c);
+
+    if (classes.items.len == 0) {
+        return allocator.dupe(u8, "") catch return SortError.OutOfMemory;
+    }
+
+    // Compute sort entries: (class_name, sort_key, input_index).
+    // input_index breaks ties to keep stability.
+    const Entry = struct {
+        name: []const u8,
+        key: ?u64,
+        idx: u32,
+    };
+
+    const entries = try allocator.alloc(Entry, classes.items.len);
+    defer allocator.free(entries);
+
+    for (classes.items, 0..) |name, i| {
+        entries[i] = .{
+            .name = name,
+            .key = sortKey(allocator, name) catch |err| switch (err) {
+                error.OutOfMemory => return SortError.OutOfMemory,
+            },
+            .idx = @intCast(i),
+        };
+    }
+
+    std.mem.sort(Entry, entries, {}, struct {
+        fn lessThan(_: void, a: Entry, b: Entry) bool {
+            // Both null: preserve input order.
+            if (a.key == null and b.key == null) return a.idx < b.idx;
+            // Null sorts to front.
+            if (a.key == null) return true;
+            if (b.key == null) return false;
+            if (a.key.? != b.key.?) return a.key.? < b.key.?;
+            // Same key (same bucket + same variant chain + same important):
+            // tiebreak on the full class name lexicographically. This gives
+            // `bg-blue-500 < bg-red-500` etc.
+            const cmp = std.mem.order(u8, a.name, b.name);
+            if (cmp == .lt) return true;
+            if (cmp == .gt) return false;
+            return a.idx < b.idx;
+        }
+    }.lessThan);
+
+    // Join.
+    var total: usize = 0;
+    for (entries) |e| total += e.name.len;
+    if (entries.len > 1) total += entries.len - 1;
+    var out = try allocator.alloc(u8, total);
+    var pos: usize = 0;
+    for (entries, 0..) |e, i| {
+        if (i > 0) {
+            out[pos] = ' ';
+            pos += 1;
+        }
+        @memcpy(out[pos .. pos + e.name.len], e.name);
+        pos += e.name.len;
+    }
+    return out;
+}
+
+/// Compute a sort key for a class name. Returns null for unknown or unparseable
+/// classes (they sort to the front in input order).
+///
+/// Key layout (high to low bits):
+///   - bit 60:    !important (1 = important, sorts later within its group)
+///   - bits 52-59: variant count (more variants → later)
+///   - bits 36-51: breakpoint priority (16 bits) — min-width in rem × 16,
+///                 so larger breakpoints sort LATER and override smaller
+///                 ones in the cascade. Zero when no breakpoint variant.
+///   - bits 16-35: property bucket index (lower = earlier in cascade)
+///   - bits 0-15: alphabetical position (per class-name slot in bucket)
+///
+/// **Why breakpoint priority matters**: at a wide viewport, both `sm:X` and
+/// `lg:X` media queries match. The CSS cascade gives the win to whichever
+/// rule comes LATER in source order. So we need `sm:X` emitted BEFORE
+/// `lg:X` to make `lg:X` win.
+fn sortKey(allocator: std.mem.Allocator, name: []const u8) error{OutOfMemory}!?u64 {
+    const cands = try candidate.parseCandidate(allocator, name);
+    defer candidate.freeCandidates(allocator, cands);
+
+    // Parser failed: not a recognized class.
+    if (cands.len == 0) return null;
+
+    // Pick the candidate whose root we can place in the bucket table. Prefer
+    // arbitrary > functional with a known bucket > static.
+    var best_bucket: ?u32 = null;
+    var best_cand: ?candidate.Candidate = null;
+    for (cands) |c| {
+        const root = candidateRoot(c);
+        if (bucketForRoot(root)) |b| {
+            if (best_bucket == null or b < best_bucket.?) {
+                best_bucket = b;
+                best_cand = c;
+            }
+        }
+    }
+
+    // Fall back: if no candidate has a known bucket, use the first one with a
+    // catchall bucket (e.g. arbitrary properties get a high bucket so they
+    // sort consistently among themselves).
+    if (best_bucket == null) {
+        if (cands[0] == .arbitrary) {
+            best_bucket = ARBITRARY_PROPERTY_BUCKET;
+            best_cand = cands[0];
+        } else {
+            // Unknown utility → null sort key.
+            return null;
+        }
+    }
+
+    const c = best_cand.?;
+    const variants = switch (c) {
+        .static_c => |s| s.variants,
+        .functional => |f| f.variants,
+        .arbitrary => |a| a.variants,
+    };
+    const important = switch (c) {
+        .static_c => |s| s.important,
+        .functional => |f| f.important,
+        .arbitrary => |a| a.important,
+    };
+
+    // Breakpoint priority: max across all variant slots. Higher value
+    // means a wider min-width, which means the rule must come later in CSS
+    // so it overrides narrower-breakpoint rules at wide viewports.
+    var bp_priority: u16 = 0;
+    for (variants) |v| {
+        const p = breakpointPriority(v);
+        if (p > bp_priority) bp_priority = p;
+    }
+
+    var key: u64 = 0;
+    if (important) key |= @as(u64, 1) << 60;
+    key |= @as(u64, @min(variants.len, 0xFF)) << 52;
+    key |= @as(u64, bp_priority) << 36;
+    key |= @as(u64, best_bucket.? & 0xFFFFF) << 16;
+    key |= @as(u64, alphaScore(name) & 0xFFFF);
+
+    return key;
+}
+
+/// Heuristic priority for breakpoint variants — used so `sm:X` sorts before
+/// `lg:X` in the output, giving `lg:X` the cascade win at wide viewports.
+/// Returns 0 for non-breakpoint variants (hover, focus, dark, data-*, etc.)
+/// so they don't perturb the sort.
+///
+/// Values are min-width-in-rem × 16 to leave room for half-step custom
+/// breakpoints if needed. Default breakpoints:
+///   sm  = 40rem → 640
+///   md  = 48rem → 768
+///   lg  = 64rem → 1024
+///   xl  = 80rem → 1280
+///   2xl = 96rem → 1536
+///
+/// `max-{key}:` variants get a HIGHER priority than the equivalent `{key}:`
+/// because max-* sets a *narrower* viewport ceiling — at viewport just
+/// under the breakpoint, both `max-sm:X` and `sm:X` match, and `max-sm:X`
+/// must win (it's the more specific narrowing condition).
+fn breakpointPriority(v: candidate.Variant) u16 {
+    return switch (v) {
+        .static_v => |s| breakpointFor(s.root),
+        .functional => |f| blk: {
+            // `max-{key}:` — value is the key.
+            if (std.mem.eql(u8, f.root, "max")) {
+                if (f.value) |val| {
+                    if (val == .named) {
+                        const p = breakpointFor(val.named);
+                        // max-{key} wins by a small margin over plain {key}.
+                        if (p > 0) break :blk p +| 1;
+                    }
+                }
+            }
+            break :blk 0;
+        },
+        else => 0,
+    };
+}
+
+fn breakpointFor(name: []const u8) u16 {
+    if (std.mem.eql(u8, name, "sm")) return 640;
+    if (std.mem.eql(u8, name, "md")) return 768;
+    if (std.mem.eql(u8, name, "lg")) return 1024;
+    if (std.mem.eql(u8, name, "xl")) return 1280;
+    if (std.mem.eql(u8, name, "2xl")) return 1536;
+    if (std.mem.eql(u8, name, "3xl")) return 1792;
+    if (std.mem.eql(u8, name, "4xl")) return 2048;
+    if (std.mem.eql(u8, name, "5xl")) return 2304;
+    if (std.mem.eql(u8, name, "6xl")) return 2560;
+    if (std.mem.eql(u8, name, "7xl")) return 2816;
+    return 0;
+}
+
+fn candidateRoot(c: candidate.Candidate) []const u8 {
+    return switch (c) {
+        .static_c => |s| s.root,
+        .functional => |f| f.root,
+        .arbitrary => |a| a.property,
+    };
+}
+
+/// Map a utility root to its property bucket index. Lower = earlier in cascade.
+/// The bucket numbers implement the JIT's cascade order for known properties.
+/// Extend them as class coverage grows.
+const PropertyBucket = struct { root: []const u8, bucket: u32 };
+
+const ARBITRARY_PROPERTY_BUCKET: u32 = 5000;
+
+const PROPERTY_BUCKETS = [_]PropertyBucket{
+    // ── Layout / position (very early in cascade) ──
+    .{ .root = "static", .bucket = 10 },
+    .{ .root = "relative", .bucket = 10 },
+    .{ .root = "absolute", .bucket = 10 },
+    .{ .root = "fixed", .bucket = 10 },
+    .{ .root = "sticky", .bucket = 10 },
+    .{ .root = "isolate", .bucket = 11 },
+    .{ .root = "z", .bucket = 12 },
+    .{ .root = "inset", .bucket = 13 },
+    .{ .root = "top", .bucket = 14 },
+    .{ .root = "right", .bucket = 14 },
+    .{ .root = "bottom", .bucket = 14 },
+    .{ .root = "left", .bucket = 14 },
+
+    // ── Display / box ──
+    .{ .root = "block", .bucket = 20 },
+    .{ .root = "inline", .bucket = 20 },
+    .{ .root = "inline-block", .bucket = 20 },
+    .{ .root = "flex", .bucket = 20 },
+    .{ .root = "inline-flex", .bucket = 20 },
+    .{ .root = "grid", .bucket = 20 },
+    .{ .root = "inline-grid", .bucket = 20 },
+    .{ .root = "hidden", .bucket = 20 },
+    .{ .root = "overflow", .bucket = 22 },
+    .{ .root = "overflow-hidden", .bucket = 22 },
+    .{ .root = "overflow-auto", .bucket = 22 },
+    .{ .root = "overflow-visible", .bucket = 22 },
+
+    // ── Sizing ──
+    .{ .root = "size", .bucket = 30 },
+    .{ .root = "w", .bucket = 31 },
+    .{ .root = "h", .bucket = 32 },
+    .{ .root = "max-w", .bucket = 33 },
+    .{ .root = "max-h", .bucket = 34 },
+    .{ .root = "min-w", .bucket = 35 },
+    .{ .root = "min-h", .bucket = 36 },
+
+    // ── Grid ──
+    .{ .root = "grid-cols", .bucket = 40 },
+    .{ .root = "col-span", .bucket = 41 },
+    .{ .root = "grid-rows", .bucket = 42 },
+    .{ .root = "row-span", .bucket = 43 },
+    .{ .root = "gap", .bucket = 44 },
+    .{ .root = "gap-x", .bucket = 45 },
+    .{ .root = "gap-y", .bucket = 46 },
+
+    // ── Flex ──
+    .{ .root = "flex-row", .bucket = 50 },
+    .{ .root = "flex-col", .bucket = 50 },
+    .{ .root = "flex-wrap", .bucket = 51 },
+    .{ .root = "items-center", .bucket = 52 },
+    .{ .root = "items-start", .bucket = 52 },
+    .{ .root = "items-end", .bucket = 52 },
+    .{ .root = "justify-center", .bucket = 53 },
+    .{ .root = "justify-start", .bucket = 53 },
+    .{ .root = "justify-between", .bucket = 53 },
+    .{ .root = "justify-end", .bucket = 53 },
+    .{ .root = "self-center", .bucket = 54 },
+
+    // ── Padding (cascade-affecting; shorthand-then-axis-then-side) ──
+    .{ .root = "p", .bucket = 100 },
+    .{ .root = "px", .bucket = 101 },
+    .{ .root = "py", .bucket = 102 },
+    .{ .root = "pt", .bucket = 103 },
+    .{ .root = "pr", .bucket = 104 },
+    .{ .root = "pb", .bucket = 105 },
+    .{ .root = "pl", .bucket = 106 },
+
+    // ── Margin ──
+    .{ .root = "m", .bucket = 110 },
+    .{ .root = "mx", .bucket = 111 },
+    .{ .root = "my", .bucket = 112 },
+    .{ .root = "mt", .bucket = 113 },
+    .{ .root = "mr", .bucket = 114 },
+    .{ .root = "mb", .bucket = 115 },
+    .{ .root = "ml", .bucket = 116 },
+
+    // ── Background (before padding/border) ──
+    .{ .root = "bg", .bucket = 80 },
+    .{ .root = "bg-linear-to", .bucket = 81 },
+    .{ .root = "from", .bucket = 82 },
+    .{ .root = "via", .bucket = 83 },
+    .{ .root = "to", .bucket = 84 },
+
+    // ── Border ──
+    .{ .root = "border", .bucket = 200 },
+    .{ .root = "border-x", .bucket = 201 },
+    .{ .root = "border-y", .bucket = 202 },
+    .{ .root = "border-t", .bucket = 203 },
+    .{ .root = "border-r", .bucket = 204 },
+    .{ .root = "border-b", .bucket = 205 },
+    .{ .root = "border-l", .bucket = 206 },
+    .{ .root = "rounded", .bucket = 220 },
+    .{ .root = "ring", .bucket = 230 },
+    .{ .root = "ring-inset", .bucket = 231 },
+
+    // ── Typography ──
+    .{ .root = "text", .bucket = 300 },
+    .{ .root = "text-balance", .bucket = 301 },
+    .{ .root = "text-pretty", .bucket = 301 },
+    .{ .root = "text-wrap", .bucket = 301 },
+    .{ .root = "text-nowrap", .bucket = 301 },
+    .{ .root = "text-left", .bucket = 302 },
+    .{ .root = "text-center", .bucket = 302 },
+    .{ .root = "text-right", .bucket = 302 },
+    .{ .root = "font", .bucket = 310 },
+    .{ .root = "tracking", .bucket = 320 },
+    .{ .root = "leading", .bucket = 330 },
+    .{ .root = "antialiased", .bucket = 340 },
+    .{ .root = "subpixel-antialiased", .bucket = 340 },
+
+    // ── Effects ──
+    .{ .root = "opacity", .bucket = 400 },
+    .{ .root = "shadow", .bucket = 410 },
+
+    // ── Transition ──
+    .{ .root = "transition", .bucket = 500 },
+    .{ .root = "transition-colors", .bucket = 500 },
+    .{ .root = "transition-opacity", .bucket = 500 },
+    .{ .root = "duration", .bucket = 510 },
+};
+
+fn bucketForRoot(root: []const u8) ?u32 {
+    inline for (PROPERTY_BUCKETS) |entry| {
+        if (std.mem.eql(u8, root, entry.root)) return entry.bucket;
+    }
+    // Negative-prefix fallback: `-z` → look up `z`.
+    if (root.len > 1 and root[0] == '-') {
+        inline for (PROPERTY_BUCKETS) |entry| {
+            if (std.mem.eql(u8, root[1..], entry.root)) return entry.bucket;
+        }
+    }
+    return null;
+}
+
+/// Compute a small alphabetical score for tie-breaking within a bucket.
+/// Uses the first ~3 chars of the class name. 12 bits = 4096 slots.
+fn alphaScore(s: []const u8) u32 {
+    var score: u32 = 0;
+    var i: usize = 0;
+    while (i < s.len and i < 3) : (i += 1) {
+        score = score * 256 + s[i];
+    }
+    return score & 0xFFF;
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+const tst = std.testing;
+
+};
+
+pub const compile_mod = struct {
+/// Compile pipeline — wires theme + parser + utility table + variant table
+/// into a single CSS string output.
+///
+/// Public API: `compile(allocator, comptime theme, classes) -> ![]u8`.
+///
+/// Output structure (Phase 1):
+///
+///   :root {
+///     --token: value;
+///     ...
+///   }
+///   @layer utilities {
+///     .escaped\\:class { property: value; ... }
+///     ...
+///   }
+///
+/// At-rule wrapping (e.g., `@media`, `@supports`) wraps individual utility
+/// rules — not the whole `@layer` — to preserve cascade behavior.
+///
+/// Sort: classes are sorted via `sort.sortClasses` before emission so the
+/// output order is deterministic and cascade-correct.
+///
+/// Modifier semantics (e.g. `bg-red-500/50` opacity): not yet wired. Color
+/// utilities are out of task-05's Phase-1 scope; opacity-via-color-mix lands
+/// when colors are ported.
+
+const std = @import("std");
+const candidate = amalgam.candidate_mod;
+const theme = amalgam.theme_mod;
+const utilities = amalgam.utilities_mod;
+const variants = amalgam.variants_mod;
+const sort = amalgam.sort_mod;
+
+pub const CompileError = error{
+    OutOfMemory,
+    /// Raised when input contains a CSS directive Publr JIT does not
+    /// support (`@apply`, `@import`, `@source`, `@utility`, `@variant`,
+    /// `@custom-variant`). Callers that parse user CSS should pair this with
+    /// `unsupportedFeatureMessage(directive)` for a migration-friendly
+    /// diagnostic. `compile()` itself takes pre-tokenized class strings and
+    /// has no path to raise it today; the variant exists so future user-CSS
+    /// entry points (loaders, plugin hosts) error consistently. See
+    UnsupportedFeature,
+};
+
+/// Migration message for an unsupported CSS directive. Returns a stable,
+/// user-facing string keyed on the directive name (with or without the leading
+/// `@`). Returns `null` for unknown names — caller is responsible for falling
+/// back to a generic message.
+pub fn unsupportedFeatureMessage(directive: []const u8) ?[]const u8 {
+    const name = if (directive.len > 0 and directive[0] == '@') directive[1..] else directive;
+    if (std.mem.eql(u8, name, "apply")) return msg_apply;
+    if (std.mem.eql(u8, name, "import")) return msg_import;
+    if (std.mem.eql(u8, name, "source")) return msg_source;
+    if (std.mem.eql(u8, name, "utility")) return msg_utility;
+    if (std.mem.eql(u8, name, "variant")) return msg_variant;
+    if (std.mem.eql(u8, name, "custom-variant")) return msg_custom_variant;
+    return null;
+}
+
+const msg_apply =
+    "Publr JIT does not support @apply. Migration: rewrite the rule to " ++
+    "apply utility classes directly in HTML, or define the equivalent CSS by hand.";
+const msg_import =
+    "Publr JIT does not support @import. Migration: inline the imported CSS, " ++
+    "or compose stylesheets at the build/serve layer outside the JIT.";
+const msg_source =
+    "Publr JIT does not support @source. Migration: class strings are collected " ++
+    "from ZSX/.publr templates at build time — no file scanner is invoked. " ++
+    "Remove the directive; the JIT will pick up classes via the transpiler manifest.";
+const msg_utility =
+    "Publr JIT does not support @utility. Migration: add the utility to " ++
+    "jit/src/utilities.zig (comptime table) and rebuild — runtime utility " ++
+    "registration is intentionally out of scope.";
+const msg_variant =
+    "Publr JIT does not support @variant. Migration: add the variant to " ++
+    "jit/src/variants.zig (comptime table) and rebuild — runtime variant " ++
+    "registration is intentionally out of scope.";
+const msg_custom_variant =
+    "Publr JIT does not support @custom-variant. Migration: add the variant to " ++
+    "jit/src/variants.zig (comptime table) and rebuild — runtime variant " ++
+    "registration is intentionally out of scope.";
+
+/// Output options for `compile()`. Defaults preserve the readable, indented
+/// form library callers/tests expect; the CLI flips `minify` on for production
+/// builds. Whitespace-only minification: declarations are kept one-per-line in
+/// the source emit order, but indents and the spaces around `:`/`{` are dropped
+/// and trailing newlines are squeezed. Color shortening, numeric trimming, and
+/// shorthand merging are out of scope — see the discussion in
+/// `memory/project_jit_minify_scope.md`.
+pub const Options = struct {
+    minify: bool = false,
+};
+
+/// Compile a list of class strings into a CSS document.
+/// `theme` is comptime; user themes typically come from `extendTheme(default, user)`.
+///
+/// Theme tree-shaking: only theme tokens actually referenced by the emitted
+/// utility rules (or transitively referenced by other emitted tokens) appear
+/// in the `:root { ... }` block. Building 413 default tokens for a single
+/// `flex` class is wasteful — we emit only what's used.
+pub fn compile(
+    allocator: std.mem.Allocator,
+    t: theme.Theme,
+    classes: []const []const u8,
+    options: Options,
+) CompileError![]u8 {
+    const nl: []const u8 = if (options.minify) "" else "\n";
+    const sp: []const u8 = if (options.minify) "" else " ";
+    const ind2: []const u8 = if (options.minify) "" else "  ";
+    // 1. Sort classes (cascade-correct ordering).
+    const joined = try joinClasses(allocator, classes);
+    defer allocator.free(joined);
+    const sorted = sort.sortClasses(allocator, joined, "") catch |err| switch (err) {
+        sort.SortError.OutOfMemory => return CompileError.OutOfMemory,
+        sort.SortError.NotImplemented => return CompileError.UnsupportedFeature,
+    };
+    defer allocator.free(sorted);
+
+    // 2. Emit utility rules into a buffer. We emit them first (without :root)
+    //    so we can scan the buffer for `var(--token)` references and tree-shake
+    //    the theme to only what's actually used.
+    var utility_block = std.array_list.Managed(u8).init(allocator);
+    defer utility_block.deinit();
+
+    try utility_block.print("@layer utilities{s}{{{s}", .{ sp, nl });
+    var class_iter = std.mem.tokenizeAny(u8, sorted, " ");
+    while (class_iter.next()) |class_name| {
+        try emitClassRule(allocator, t, class_name, &utility_block, options);
+    }
+    try utility_block.print("}}{s}", .{nl});
+
+    // 3. Tree-shake the theme: collect var(--*) references in utility output,
+    //    then transitively expand to include any theme tokens those tokens
+    //    reference (e.g., `--default-font-family` includes `--font-sans`).
+    var used_tokens = std.StringHashMap(void).init(allocator);
+    defer used_tokens.deinit();
+    try collectVarRefs(utility_block.items, &used_tokens);
+
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (t.tokens) |tok| {
+            if (used_tokens.contains(tok.name)) {
+                var iter = VarRefIterator{ .input = tok.value, .pos = 0 };
+                while (iter.next()) |name| {
+                    const result = try used_tokens.getOrPut(name);
+                    if (!result.found_existing) changed = true;
+                }
+            }
+        }
+    }
+
+    // 4. Emit final document: :root { only-used tokens } + utility block.
+    var out = std.array_list.Managed(u8).init(allocator);
+    errdefer out.deinit();
+
+    if (used_tokens.count() > 0) {
+        try out.print(":root{s}{{{s}", .{ sp, nl });
+        for (t.tokens) |tok| {
+            if (used_tokens.contains(tok.name)) {
+                try out.print("{s}--{s}:{s}{s};{s}", .{ ind2, tok.name, sp, tok.value, nl });
+            }
+        }
+        try out.print("}}{s}", .{nl});
+    }
+    try out.appendSlice(utility_block.items);
+
+    return out.toOwnedSlice();
+}
+
+/// Iterator over `var(--name)` references in a CSS string.
+const VarRefIterator = struct {
+    input: []const u8,
+    pos: usize,
+
+    fn next(self: *VarRefIterator) ?[]const u8 {
+        while (self.pos < self.input.len) {
+            const start = std.mem.indexOfPos(u8, self.input, self.pos, "var(--") orelse {
+                self.pos = self.input.len;
+                return null;
+            };
+            const name_start = start + "var(--".len;
+            // Token name ends at the first non-ident char (`,`, `)`, ` `, etc.).
+            var i = name_start;
+            while (i < self.input.len) : (i += 1) {
+                const c = self.input[i];
+                const is_ident = (c >= 'a' and c <= 'z') or
+                    (c >= 'A' and c <= 'Z') or
+                    (c >= '0' and c <= '9') or
+                    c == '-' or c == '_';
+                if (!is_ident) break;
+            }
+            self.pos = i;
+            if (i > name_start) return self.input[name_start..i];
+        }
+        return null;
+    }
+};
+
+fn collectVarRefs(input: []const u8, set: *std.StringHashMap(void)) !void {
+    var iter = VarRefIterator{ .input = input, .pos = 0 };
+    while (iter.next()) |name| {
+        _ = try set.getOrPut(name);
+    }
+}
+
+fn joinClasses(allocator: std.mem.Allocator, classes: []const []const u8) ![]u8 {
+    var total: usize = 0;
+    for (classes) |c| total += c.len;
+    if (classes.len > 1) total += classes.len - 1;
+    const out = try allocator.alloc(u8, total);
+    var pos: usize = 0;
+    for (classes, 0..) |c, i| {
+        if (i > 0) {
+            out[pos] = ' ';
+            pos += 1;
+        }
+        @memcpy(out[pos .. pos + c.len], c);
+        pos += c.len;
+    }
+    return out;
+}
+
+fn emitClassRule(
+    allocator: std.mem.Allocator,
+    t: theme.Theme,
+    class_name: []const u8,
+    out: *std.array_list.Managed(u8),
+    options: Options,
+) CompileError!void {
+    const nl: []const u8 = if (options.minify) "" else "\n";
+    const sp: []const u8 = if (options.minify) "" else " ";
+    const ind2: []const u8 = if (options.minify) "" else "  ";
+    const ind4: []const u8 = if (options.minify) "" else "    ";
+    const cands = candidate.parseCandidate(allocator, class_name) catch |err| switch (err) {
+        error.OutOfMemory => return CompileError.OutOfMemory,
+    };
+    defer candidate.freeCandidates(allocator, cands);
+
+    // Iterate yielded interpretations; pick the first that resolves via the
+    // new utilities.zig table (architecturally clean path).
+    for (cands) |c| {
+        const resolved = utilities.resolveCandidate(allocator, t, c) catch |err| switch (err) {
+            error.OutOfMemory => return CompileError.OutOfMemory,
+        };
+        if (resolved == null) continue;
+        defer utilities.freeResolvedUtility(allocator, resolved.?);
+
+        // Marker classes (e.g. `peer`, `group`) resolve successfully but
+        // emit no declarations. They exist to be referenced by compound
+        // variants (`peer-*`, `group-*`) on sibling/ancestor elements.
+        // Skip rule emission so we don't produce empty `.peer { }` blocks.
+        if (resolved.?.declarations.len == 0) return;
+
+        // Wrap with variants.
+        const cand_variants = switch (c) {
+            .static_c => |s| s.variants,
+            .functional => |f| f.variants,
+            .arbitrary => |a| a.variants,
+        };
+        const wrapped = variants.applyVariants(allocator, t, cand_variants, class_name) catch |err| switch (err) {
+            error.OutOfMemory => return CompileError.OutOfMemory,
+            error.UnknownVariant => return, // skip silently — unsupported variant
+        };
+        defer variants.freeWrappedRule(allocator, wrapped);
+
+        // Emit at-rule open wrappers.
+        for (wrapped.at_rules) |ar| {
+            try out.print("{s}@{s} {s}{s}{{{s}", .{ ind2, ar.name, ar.condition, sp, nl });
+        }
+
+        // Emit the rule. If the utility carries a selector_suffix
+        // (e.g. ` > :not(:last-child)` for `space-x-N`), append it before
+        // opening the declaration block.
+        try out.appendSlice(ind2);
+        try out.appendSlice(wrapped.selector);
+        if (resolved.?.selector_suffix) |sfx| try out.appendSlice(sfx);
+        try out.print("{s}{{{s}", .{ sp, nl });
+        for (resolved.?.declarations) |d| {
+            if (resolved.?.important) {
+                try out.print("{s}{s}:{s}{s} !important;{s}", .{ ind4, d.property, sp, d.value, nl });
+            } else {
+                try out.print("{s}{s}:{s}{s};{s}", .{ ind4, d.property, sp, d.value, nl });
+            }
+        }
+        try out.print("{s}}}{s}", .{ ind2, nl });
+
+        // Emit at-rule close wrappers.
+        for (wrapped.at_rules) |_| {
+            try out.print("{s}}}{s}", .{ ind2, nl });
+        }
+
+        return; // first resolved wins
+    }
+
+    // No interpretation matched. Class is silently skipped — same behavior
+    // as truly unknown utility names. Callers wanting strict-mode "unknown
+    // class" diagnostics can detect by diffing input class set vs emitted
+    // selectors; out of scope here.
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+const tst = std.testing;
+
+const test_theme = theme.Theme{ .tokens = &.{
+    .{ .name = "spacing", .value = "0.25rem" },
+    .{ .name = "color-red-500", .value = "oklch(0.637 0.237 25.331)" },
+    .{ .name = "breakpoint-md", .value = "48rem" },
+    .{ .name = "font-sans", .value = "Switzer, system-ui, sans-serif" },
+} };
+
+};
+
+pub const theme_from_css_mod = struct {
+/// theme-from-css — converts a CSS file's @theme blocks into
+/// a Publr `theme.zon` override-only file.
+///
+/// Behaviors locked from validation B:
+///   - Recognizes `@theme {}`, `@theme default {}`, `@theme inline {}`. Logs a
+///     warning for non-bare modifier words and treats them the same.
+///   - Skips nested `@keyframes` blocks inside `@theme` with a warning. Lifting
+///     them as keyframe tokens is deferred (the flat Token schema doesn't
+///     model keyframes natively yet).
+///   - Multi-line CSS values (font stacks) are collapsed to single-line strings
+///     by squashing whitespace runs to single spaces.
+///
+/// Output is deterministic: tokens emitted in source order, no trailing
+/// whitespace, single trailing LF. Re-running on the same input is byte-stable.
+
+const std = @import("std");
+
+pub const ConvertOptions = struct {
+    /// Optional warning sink. Receives one line per warning, no trailing LF.
+    /// Caller can pass `&warnings_log.writer()` or null to suppress.
+    warn: ?*std.io.Writer = null,
+};
+
+pub const ConvertError = error{
+    UnclosedBlock,
+    UnclosedComment,
+    InvalidValue,
+    OutOfMemory,
+} || std.io.Writer.Error;
+
+/// Convert a CSS source buffer into ZON bytes.
+/// Caller owns the returned slice.
+pub fn convert(
+    allocator: std.mem.Allocator,
+    css: []const u8,
+    options: ConvertOptions,
+) ![]u8 {
+    var out = std.array_list.Managed(u8).init(allocator);
+    errdefer out.deinit();
+    const w = out.writer();
+
+    try w.writeAll(".{\n    .tokens = .{\n");
+
+    var i: usize = 0;
+    var token_count: usize = 0;
+    var skipped_keyframes: usize = 0;
+
+    while (i < css.len) {
+        const at_idx = std.mem.indexOfPos(u8, css, i, "@theme") orelse break;
+        i = at_idx + "@theme".len;
+
+        // Read optional modifier words (default / inline) until `{`.
+        // Validation B: warn if a non-bare modifier appears so users know what
+        // we treated it as.
+        var modifier: []const u8 = "";
+        while (i < css.len and (css[i] == ' ' or css[i] == '\t')) i += 1;
+        if (i < css.len and css[i] != '{') {
+            const start = i;
+            while (i < css.len and css[i] != ' ' and css[i] != '\t' and css[i] != '{') i += 1;
+            modifier = std.mem.trim(u8, css[start..i], " \t");
+            while (i < css.len and (css[i] == ' ' or css[i] == '\t')) i += 1;
+        }
+        if (i >= css.len or css[i] != '{') continue; // malformed — skip
+        i += 1; // past `{`
+
+        if (modifier.len > 0 and options.warn != null) {
+            try options.warn.?.print(
+                "warning: @theme modifier '{s}' treated as bare @theme — Publr only supports the override-extend mode (see THEME.md)\n",
+                .{modifier},
+            );
+        }
+
+        // Parse declarations until matching `}`.
+        var depth: u32 = 1;
+        while (i < css.len and depth > 0) {
+            // Skip whitespace.
+            while (i < css.len and (css[i] == ' ' or css[i] == '\t' or css[i] == '\n' or css[i] == '\r')) i += 1;
+            if (i >= css.len) break;
+
+            if (css[i] == '}') {
+                depth -= 1;
+                i += 1;
+                continue;
+            }
+
+            // Skip /* ... */ comments.
+            if (i + 1 < css.len and css[i] == '/' and css[i + 1] == '*') {
+                const end = std.mem.indexOfPos(u8, css, i + 2, "*/") orelse return ConvertError.UnclosedComment;
+                i = end + 2;
+                continue;
+            }
+
+            // Skip nested at-rules (mainly @keyframes inside @theme).
+            // Validation B finding: lift these as keyframe tokens later; for
+            // now warn + skip the block.
+            if (css[i] == '@') {
+                const at_start = i;
+                while (i < css.len and css[i] != '{') i += 1;
+                if (i >= css.len) return ConvertError.UnclosedBlock;
+                const at_name = std.mem.trim(u8, css[at_start..i], " \t\n\r");
+                if (options.warn != null) {
+                    try options.warn.?.print(
+                        "warning: skipping nested at-rule inside @theme: {s} (keyframe-style theme tokens not yet supported by the converter)\n",
+                        .{at_name},
+                    );
+                }
+                skipped_keyframes += 1;
+
+                // Walk balanced braces.
+                i += 1;
+                var nested: u32 = 1;
+                while (i < css.len and nested > 0) {
+                    if (css[i] == '{') nested += 1
+                    else if (css[i] == '}') nested -= 1;
+                    i += 1;
+                }
+                continue;
+            }
+
+            // Stray `{` — bump depth and continue (unusual but defensive).
+            if (css[i] == '{') {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+
+            // Custom property `--name: value;`
+            if (i + 1 >= css.len or css[i] != '-' or css[i + 1] != '-') {
+                // Non-property content (e.g., regular CSS rule); skip to next `;` or `}`.
+                while (i < css.len and css[i] != ';' and css[i] != '}') i += 1;
+                if (i < css.len and css[i] == ';') i += 1;
+                continue;
+            }
+            i += 2; // past `--`
+
+            const name_start = i;
+            while (i < css.len and css[i] != ':') i += 1;
+            if (i >= css.len) return ConvertError.InvalidValue;
+            const name = std.mem.trim(u8, css[name_start..i], " \t\n\r");
+            i += 1; // past `:`
+
+            // Read value until `;` outside parens / strings.
+            const val_start = i;
+            var paren_depth: u32 = 0;
+            var in_single = false;
+            var in_double = false;
+            while (i < css.len) {
+                const c = css[i];
+                if (in_single) {
+                    if (c == '\'') in_single = false;
+                } else if (in_double) {
+                    if (c == '"') in_double = false;
+                } else if (c == '\'') {
+                    in_single = true;
+                } else if (c == '"') {
+                    in_double = true;
+                } else if (c == '(') {
+                    paren_depth += 1;
+                } else if (c == ')') {
+                    if (paren_depth > 0) paren_depth -= 1;
+                } else if (c == ';' and paren_depth == 0) {
+                    break;
+                }
+                i += 1;
+            }
+            if (i >= css.len) return ConvertError.InvalidValue;
+            const raw_value = std.mem.trim(u8, css[val_start..i], " \t\n\r");
+            i += 1; // past `;`
+
+            // Collapse whitespace runs (newlines + tabs) to single spaces. Lets
+            // multi-line font stacks live as a single ZON string.
+            const collapsed = try collapseWhitespace(allocator, raw_value);
+            defer allocator.free(collapsed);
+
+            // ZON string literals: escape `"` and `\`. Use the @"..." identifier
+            // form is for field names, not values — values are plain strings.
+            if (token_count > 0) try w.writeAll(",\n");
+            try w.writeAll("        .{ .name = \"");
+            try writeZonStringEscaped(w.any(), name);
+            try w.writeAll("\", .value = \"");
+            try writeZonStringEscaped(w.any(), collapsed);
+            try w.writeAll("\" }");
+            token_count += 1;
+        }
+    }
+
+    if (token_count > 0) try w.writeAll(",\n");
+    try w.writeAll("    },\n}\n");
+
+    if (options.warn != null and skipped_keyframes > 0) {
+        try options.warn.?.print(
+            "info: skipped {d} nested at-rule(s) inside @theme; total tokens emitted: {d}\n",
+            .{ skipped_keyframes, token_count },
+        );
+    }
+
+    return out.toOwnedSlice();
+}
+
+/// Collapse runs of whitespace (space/tab/CR/LF) to a single ASCII space.
+/// Caller owns the returned slice.
+fn collapseWhitespace(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var buf = std.array_list.Managed(u8).init(allocator);
+    errdefer buf.deinit();
+
+    var prev_ws = false;
+    for (s) |c| {
+        if (c == ' ' or c == '\t' or c == '\n' or c == '\r') {
+            if (!prev_ws) try buf.append(' ');
+            prev_ws = true;
+        } else {
+            try buf.append(c);
+            prev_ws = false;
+        }
+    }
+    // Trim trailing space if any.
+    var out = try buf.toOwnedSlice();
+    while (out.len > 0 and out[out.len - 1] == ' ') out = out[0 .. out.len - 1];
+    return out;
+}
+
+/// Write a string with ZON-string-literal escaping: `\` and `"` get backslash-escaped.
+/// Other chars pass through; we don't try to handle non-printable bytes since
+/// CSS theme values shouldn't contain them.
+fn writeZonStringEscaped(w: std.io.AnyWriter, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '\\', '"' => {
+                try w.writeByte('\\');
+                try w.writeByte(c);
+            },
+            else => try w.writeByte(c),
         }
     }
 }
 
-test "color: text-{theme-color}" {
-    const r = (try parseAndResolve(tst.allocator, "text-gray-800")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("color", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--color-gray-800)", r.declarations[0].value);
-}
+// ── Tests ───────────────────────────────────────────────────────────────────
 
-test "color: border-{color}/{opacity}" {
-    const r = (try parseAndResolve(tst.allocator, "border-white/5")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("border-color", r.declarations[0].property);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--color-white) 5%, transparent)",
-        r.declarations[0].value,
-    );
-}
+};
 
-test "color: ring → --tw-ring-color" {
-    const r = (try parseAndResolve(tst.allocator, "ring-red-500")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-ring-color", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--color-red-500)", r.declarations[0].value);
-}
+const embedded_default_theme: theme_mod.Theme =
+.{
+    .tokens = &.{
+        .{ .name = "font-sans", .value = "ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'" },
+        .{ .name = "font-serif", .value = "ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif" },
+        .{ .name = "font-mono", .value = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace" },
+        .{ .name = "color-red-50", .value = "oklch(97.1% 0.013 17.38)" },
+        .{ .name = "color-red-100", .value = "oklch(93.6% 0.032 17.717)" },
+        .{ .name = "color-red-200", .value = "oklch(88.5% 0.062 18.334)" },
+        .{ .name = "color-red-300", .value = "oklch(80.8% 0.114 19.571)" },
+        .{ .name = "color-red-400", .value = "oklch(70.4% 0.191 22.216)" },
+        .{ .name = "color-red-500", .value = "oklch(63.7% 0.237 25.331)" },
+        .{ .name = "color-red-600", .value = "oklch(57.7% 0.245 27.325)" },
+        .{ .name = "color-red-700", .value = "oklch(50.5% 0.213 27.518)" },
+        .{ .name = "color-red-800", .value = "oklch(44.4% 0.177 26.899)" },
+        .{ .name = "color-red-900", .value = "oklch(39.6% 0.141 25.723)" },
+        .{ .name = "color-red-950", .value = "oklch(25.8% 0.092 26.042)" },
+        .{ .name = "color-orange-50", .value = "oklch(98% 0.016 73.684)" },
+        .{ .name = "color-orange-100", .value = "oklch(95.4% 0.038 75.164)" },
+        .{ .name = "color-orange-200", .value = "oklch(90.1% 0.076 70.697)" },
+        .{ .name = "color-orange-300", .value = "oklch(83.7% 0.128 66.29)" },
+        .{ .name = "color-orange-400", .value = "oklch(75% 0.183 55.934)" },
+        .{ .name = "color-orange-500", .value = "oklch(70.5% 0.213 47.604)" },
+        .{ .name = "color-orange-600", .value = "oklch(64.6% 0.222 41.116)" },
+        .{ .name = "color-orange-700", .value = "oklch(55.3% 0.195 38.402)" },
+        .{ .name = "color-orange-800", .value = "oklch(47% 0.157 37.304)" },
+        .{ .name = "color-orange-900", .value = "oklch(40.8% 0.123 38.172)" },
+        .{ .name = "color-orange-950", .value = "oklch(26.6% 0.079 36.259)" },
+        .{ .name = "color-amber-50", .value = "oklch(98.7% 0.022 95.277)" },
+        .{ .name = "color-amber-100", .value = "oklch(96.2% 0.059 95.617)" },
+        .{ .name = "color-amber-200", .value = "oklch(92.4% 0.12 95.746)" },
+        .{ .name = "color-amber-300", .value = "oklch(87.9% 0.169 91.605)" },
+        .{ .name = "color-amber-400", .value = "oklch(82.8% 0.189 84.429)" },
+        .{ .name = "color-amber-500", .value = "oklch(76.9% 0.188 70.08)" },
+        .{ .name = "color-amber-600", .value = "oklch(66.6% 0.179 58.318)" },
+        .{ .name = "color-amber-700", .value = "oklch(55.5% 0.163 48.998)" },
+        .{ .name = "color-amber-800", .value = "oklch(47.3% 0.137 46.201)" },
+        .{ .name = "color-amber-900", .value = "oklch(41.4% 0.112 45.904)" },
+        .{ .name = "color-amber-950", .value = "oklch(27.9% 0.077 45.635)" },
+        .{ .name = "color-yellow-50", .value = "oklch(98.7% 0.026 102.212)" },
+        .{ .name = "color-yellow-100", .value = "oklch(97.3% 0.071 103.193)" },
+        .{ .name = "color-yellow-200", .value = "oklch(94.5% 0.129 101.54)" },
+        .{ .name = "color-yellow-300", .value = "oklch(90.5% 0.182 98.111)" },
+        .{ .name = "color-yellow-400", .value = "oklch(85.2% 0.199 91.936)" },
+        .{ .name = "color-yellow-500", .value = "oklch(79.5% 0.184 86.047)" },
+        .{ .name = "color-yellow-600", .value = "oklch(68.1% 0.162 75.834)" },
+        .{ .name = "color-yellow-700", .value = "oklch(55.4% 0.135 66.442)" },
+        .{ .name = "color-yellow-800", .value = "oklch(47.6% 0.114 61.907)" },
+        .{ .name = "color-yellow-900", .value = "oklch(42.1% 0.095 57.708)" },
+        .{ .name = "color-yellow-950", .value = "oklch(28.6% 0.066 53.813)" },
+        .{ .name = "color-lime-50", .value = "oklch(98.6% 0.031 120.757)" },
+        .{ .name = "color-lime-100", .value = "oklch(96.7% 0.067 122.328)" },
+        .{ .name = "color-lime-200", .value = "oklch(93.8% 0.127 124.321)" },
+        .{ .name = "color-lime-300", .value = "oklch(89.7% 0.196 126.665)" },
+        .{ .name = "color-lime-400", .value = "oklch(84.1% 0.238 128.85)" },
+        .{ .name = "color-lime-500", .value = "oklch(76.8% 0.233 130.85)" },
+        .{ .name = "color-lime-600", .value = "oklch(64.8% 0.2 131.684)" },
+        .{ .name = "color-lime-700", .value = "oklch(53.2% 0.157 131.589)" },
+        .{ .name = "color-lime-800", .value = "oklch(45.3% 0.124 130.933)" },
+        .{ .name = "color-lime-900", .value = "oklch(40.5% 0.101 131.063)" },
+        .{ .name = "color-lime-950", .value = "oklch(27.4% 0.072 132.109)" },
+        .{ .name = "color-green-50", .value = "oklch(98.2% 0.018 155.826)" },
+        .{ .name = "color-green-100", .value = "oklch(96.2% 0.044 156.743)" },
+        .{ .name = "color-green-200", .value = "oklch(92.5% 0.084 155.995)" },
+        .{ .name = "color-green-300", .value = "oklch(87.1% 0.15 154.449)" },
+        .{ .name = "color-green-400", .value = "oklch(79.2% 0.209 151.711)" },
+        .{ .name = "color-green-500", .value = "oklch(72.3% 0.219 149.579)" },
+        .{ .name = "color-green-600", .value = "oklch(62.7% 0.194 149.214)" },
+        .{ .name = "color-green-700", .value = "oklch(52.7% 0.154 150.069)" },
+        .{ .name = "color-green-800", .value = "oklch(44.8% 0.119 151.328)" },
+        .{ .name = "color-green-900", .value = "oklch(39.3% 0.095 152.535)" },
+        .{ .name = "color-green-950", .value = "oklch(26.6% 0.065 152.934)" },
+        .{ .name = "color-emerald-50", .value = "oklch(97.9% 0.021 166.113)" },
+        .{ .name = "color-emerald-100", .value = "oklch(95% 0.052 163.051)" },
+        .{ .name = "color-emerald-200", .value = "oklch(90.5% 0.093 164.15)" },
+        .{ .name = "color-emerald-300", .value = "oklch(84.5% 0.143 164.978)" },
+        .{ .name = "color-emerald-400", .value = "oklch(76.5% 0.177 163.223)" },
+        .{ .name = "color-emerald-500", .value = "oklch(69.6% 0.17 162.48)" },
+        .{ .name = "color-emerald-600", .value = "oklch(59.6% 0.145 163.225)" },
+        .{ .name = "color-emerald-700", .value = "oklch(50.8% 0.118 165.612)" },
+        .{ .name = "color-emerald-800", .value = "oklch(43.2% 0.095 166.913)" },
+        .{ .name = "color-emerald-900", .value = "oklch(37.8% 0.077 168.94)" },
+        .{ .name = "color-emerald-950", .value = "oklch(26.2% 0.051 172.552)" },
+        .{ .name = "color-teal-50", .value = "oklch(98.4% 0.014 180.72)" },
+        .{ .name = "color-teal-100", .value = "oklch(95.3% 0.051 180.801)" },
+        .{ .name = "color-teal-200", .value = "oklch(91% 0.096 180.426)" },
+        .{ .name = "color-teal-300", .value = "oklch(85.5% 0.138 181.071)" },
+        .{ .name = "color-teal-400", .value = "oklch(77.7% 0.152 181.912)" },
+        .{ .name = "color-teal-500", .value = "oklch(70.4% 0.14 182.503)" },
+        .{ .name = "color-teal-600", .value = "oklch(60% 0.118 184.704)" },
+        .{ .name = "color-teal-700", .value = "oklch(51.1% 0.096 186.391)" },
+        .{ .name = "color-teal-800", .value = "oklch(43.7% 0.078 188.216)" },
+        .{ .name = "color-teal-900", .value = "oklch(38.6% 0.063 188.416)" },
+        .{ .name = "color-teal-950", .value = "oklch(27.7% 0.046 192.524)" },
+        .{ .name = "color-cyan-50", .value = "oklch(98.4% 0.019 200.873)" },
+        .{ .name = "color-cyan-100", .value = "oklch(95.6% 0.045 203.388)" },
+        .{ .name = "color-cyan-200", .value = "oklch(91.7% 0.08 205.041)" },
+        .{ .name = "color-cyan-300", .value = "oklch(86.5% 0.127 207.078)" },
+        .{ .name = "color-cyan-400", .value = "oklch(78.9% 0.154 211.53)" },
+        .{ .name = "color-cyan-500", .value = "oklch(71.5% 0.143 215.221)" },
+        .{ .name = "color-cyan-600", .value = "oklch(60.9% 0.126 221.723)" },
+        .{ .name = "color-cyan-700", .value = "oklch(52% 0.105 223.128)" },
+        .{ .name = "color-cyan-800", .value = "oklch(45% 0.085 224.283)" },
+        .{ .name = "color-cyan-900", .value = "oklch(39.8% 0.07 227.392)" },
+        .{ .name = "color-cyan-950", .value = "oklch(30.2% 0.056 229.695)" },
+        .{ .name = "color-sky-50", .value = "oklch(97.7% 0.013 236.62)" },
+        .{ .name = "color-sky-100", .value = "oklch(95.1% 0.026 236.824)" },
+        .{ .name = "color-sky-200", .value = "oklch(90.1% 0.058 230.902)" },
+        .{ .name = "color-sky-300", .value = "oklch(82.8% 0.111 230.318)" },
+        .{ .name = "color-sky-400", .value = "oklch(74.6% 0.16 232.661)" },
+        .{ .name = "color-sky-500", .value = "oklch(68.5% 0.169 237.323)" },
+        .{ .name = "color-sky-600", .value = "oklch(58.8% 0.158 241.966)" },
+        .{ .name = "color-sky-700", .value = "oklch(50% 0.134 242.749)" },
+        .{ .name = "color-sky-800", .value = "oklch(44.3% 0.11 240.79)" },
+        .{ .name = "color-sky-900", .value = "oklch(39.1% 0.09 240.876)" },
+        .{ .name = "color-sky-950", .value = "oklch(29.3% 0.066 243.157)" },
+        .{ .name = "color-blue-50", .value = "oklch(97% 0.014 254.604)" },
+        .{ .name = "color-blue-100", .value = "oklch(93.2% 0.032 255.585)" },
+        .{ .name = "color-blue-200", .value = "oklch(88.2% 0.059 254.128)" },
+        .{ .name = "color-blue-300", .value = "oklch(80.9% 0.105 251.813)" },
+        .{ .name = "color-blue-400", .value = "oklch(70.7% 0.165 254.624)" },
+        .{ .name = "color-blue-500", .value = "oklch(62.3% 0.214 259.815)" },
+        .{ .name = "color-blue-600", .value = "oklch(54.6% 0.245 262.881)" },
+        .{ .name = "color-blue-700", .value = "oklch(48.8% 0.243 264.376)" },
+        .{ .name = "color-blue-800", .value = "oklch(42.4% 0.199 265.638)" },
+        .{ .name = "color-blue-900", .value = "oklch(37.9% 0.146 265.522)" },
+        .{ .name = "color-blue-950", .value = "oklch(28.2% 0.091 267.935)" },
+        .{ .name = "color-indigo-50", .value = "oklch(96.2% 0.018 272.314)" },
+        .{ .name = "color-indigo-100", .value = "oklch(93% 0.034 272.788)" },
+        .{ .name = "color-indigo-200", .value = "oklch(87% 0.065 274.039)" },
+        .{ .name = "color-indigo-300", .value = "oklch(78.5% 0.115 274.713)" },
+        .{ .name = "color-indigo-400", .value = "oklch(67.3% 0.182 276.935)" },
+        .{ .name = "color-indigo-500", .value = "oklch(58.5% 0.233 277.117)" },
+        .{ .name = "color-indigo-600", .value = "oklch(51.1% 0.262 276.966)" },
+        .{ .name = "color-indigo-700", .value = "oklch(45.7% 0.24 277.023)" },
+        .{ .name = "color-indigo-800", .value = "oklch(39.8% 0.195 277.366)" },
+        .{ .name = "color-indigo-900", .value = "oklch(35.9% 0.144 278.697)" },
+        .{ .name = "color-indigo-950", .value = "oklch(25.7% 0.09 281.288)" },
+        .{ .name = "color-violet-50", .value = "oklch(96.9% 0.016 293.756)" },
+        .{ .name = "color-violet-100", .value = "oklch(94.3% 0.029 294.588)" },
+        .{ .name = "color-violet-200", .value = "oklch(89.4% 0.057 293.283)" },
+        .{ .name = "color-violet-300", .value = "oklch(81.1% 0.111 293.571)" },
+        .{ .name = "color-violet-400", .value = "oklch(70.2% 0.183 293.541)" },
+        .{ .name = "color-violet-500", .value = "oklch(60.6% 0.25 292.717)" },
+        .{ .name = "color-violet-600", .value = "oklch(54.1% 0.281 293.009)" },
+        .{ .name = "color-violet-700", .value = "oklch(49.1% 0.27 292.581)" },
+        .{ .name = "color-violet-800", .value = "oklch(43.2% 0.232 292.759)" },
+        .{ .name = "color-violet-900", .value = "oklch(38% 0.189 293.745)" },
+        .{ .name = "color-violet-950", .value = "oklch(28.3% 0.141 291.089)" },
+        .{ .name = "color-purple-50", .value = "oklch(97.7% 0.014 308.299)" },
+        .{ .name = "color-purple-100", .value = "oklch(94.6% 0.033 307.174)" },
+        .{ .name = "color-purple-200", .value = "oklch(90.2% 0.063 306.703)" },
+        .{ .name = "color-purple-300", .value = "oklch(82.7% 0.119 306.383)" },
+        .{ .name = "color-purple-400", .value = "oklch(71.4% 0.203 305.504)" },
+        .{ .name = "color-purple-500", .value = "oklch(62.7% 0.265 303.9)" },
+        .{ .name = "color-purple-600", .value = "oklch(55.8% 0.288 302.321)" },
+        .{ .name = "color-purple-700", .value = "oklch(49.6% 0.265 301.924)" },
+        .{ .name = "color-purple-800", .value = "oklch(43.8% 0.218 303.724)" },
+        .{ .name = "color-purple-900", .value = "oklch(38.1% 0.176 304.987)" },
+        .{ .name = "color-purple-950", .value = "oklch(29.1% 0.149 302.717)" },
+        .{ .name = "color-fuchsia-50", .value = "oklch(97.7% 0.017 320.058)" },
+        .{ .name = "color-fuchsia-100", .value = "oklch(95.2% 0.037 318.852)" },
+        .{ .name = "color-fuchsia-200", .value = "oklch(90.3% 0.076 319.62)" },
+        .{ .name = "color-fuchsia-300", .value = "oklch(83.3% 0.145 321.434)" },
+        .{ .name = "color-fuchsia-400", .value = "oklch(74% 0.238 322.16)" },
+        .{ .name = "color-fuchsia-500", .value = "oklch(66.7% 0.295 322.15)" },
+        .{ .name = "color-fuchsia-600", .value = "oklch(59.1% 0.293 322.896)" },
+        .{ .name = "color-fuchsia-700", .value = "oklch(51.8% 0.253 323.949)" },
+        .{ .name = "color-fuchsia-800", .value = "oklch(45.2% 0.211 324.591)" },
+        .{ .name = "color-fuchsia-900", .value = "oklch(40.1% 0.17 325.612)" },
+        .{ .name = "color-fuchsia-950", .value = "oklch(29.3% 0.136 325.661)" },
+        .{ .name = "color-pink-50", .value = "oklch(97.1% 0.014 343.198)" },
+        .{ .name = "color-pink-100", .value = "oklch(94.8% 0.028 342.258)" },
+        .{ .name = "color-pink-200", .value = "oklch(89.9% 0.061 343.231)" },
+        .{ .name = "color-pink-300", .value = "oklch(82.3% 0.12 346.018)" },
+        .{ .name = "color-pink-400", .value = "oklch(71.8% 0.202 349.761)" },
+        .{ .name = "color-pink-500", .value = "oklch(65.6% 0.241 354.308)" },
+        .{ .name = "color-pink-600", .value = "oklch(59.2% 0.249 0.584)" },
+        .{ .name = "color-pink-700", .value = "oklch(52.5% 0.223 3.958)" },
+        .{ .name = "color-pink-800", .value = "oklch(45.9% 0.187 3.815)" },
+        .{ .name = "color-pink-900", .value = "oklch(40.8% 0.153 2.432)" },
+        .{ .name = "color-pink-950", .value = "oklch(28.4% 0.109 3.907)" },
+        .{ .name = "color-rose-50", .value = "oklch(96.9% 0.015 12.422)" },
+        .{ .name = "color-rose-100", .value = "oklch(94.1% 0.03 12.58)" },
+        .{ .name = "color-rose-200", .value = "oklch(89.2% 0.058 10.001)" },
+        .{ .name = "color-rose-300", .value = "oklch(81% 0.117 11.638)" },
+        .{ .name = "color-rose-400", .value = "oklch(71.2% 0.194 13.428)" },
+        .{ .name = "color-rose-500", .value = "oklch(64.5% 0.246 16.439)" },
+        .{ .name = "color-rose-600", .value = "oklch(58.6% 0.253 17.585)" },
+        .{ .name = "color-rose-700", .value = "oklch(51.4% 0.222 16.935)" },
+        .{ .name = "color-rose-800", .value = "oklch(45.5% 0.188 13.697)" },
+        .{ .name = "color-rose-900", .value = "oklch(41% 0.159 10.272)" },
+        .{ .name = "color-rose-950", .value = "oklch(27.1% 0.105 12.094)" },
+        .{ .name = "color-slate-50", .value = "oklch(98.4% 0.003 247.858)" },
+        .{ .name = "color-slate-100", .value = "oklch(96.8% 0.007 247.896)" },
+        .{ .name = "color-slate-200", .value = "oklch(92.9% 0.013 255.508)" },
+        .{ .name = "color-slate-300", .value = "oklch(86.9% 0.022 252.894)" },
+        .{ .name = "color-slate-400", .value = "oklch(70.4% 0.04 256.788)" },
+        .{ .name = "color-slate-500", .value = "oklch(55.4% 0.046 257.417)" },
+        .{ .name = "color-slate-600", .value = "oklch(44.6% 0.043 257.281)" },
+        .{ .name = "color-slate-700", .value = "oklch(37.2% 0.044 257.287)" },
+        .{ .name = "color-slate-800", .value = "oklch(27.9% 0.041 260.031)" },
+        .{ .name = "color-slate-900", .value = "oklch(20.8% 0.042 265.755)" },
+        .{ .name = "color-slate-950", .value = "oklch(12.9% 0.042 264.695)" },
+        .{ .name = "color-gray-50", .value = "oklch(98.5% 0.002 247.839)" },
+        .{ .name = "color-gray-100", .value = "oklch(96.7% 0.003 264.542)" },
+        .{ .name = "color-gray-200", .value = "oklch(92.8% 0.006 264.531)" },
+        .{ .name = "color-gray-300", .value = "oklch(87.2% 0.01 258.338)" },
+        .{ .name = "color-gray-400", .value = "oklch(70.7% 0.022 261.325)" },
+        .{ .name = "color-gray-500", .value = "oklch(55.1% 0.027 264.364)" },
+        .{ .name = "color-gray-600", .value = "oklch(44.6% 0.03 256.802)" },
+        .{ .name = "color-gray-700", .value = "oklch(37.3% 0.034 259.733)" },
+        .{ .name = "color-gray-800", .value = "oklch(27.8% 0.033 256.848)" },
+        .{ .name = "color-gray-900", .value = "oklch(21% 0.034 264.665)" },
+        .{ .name = "color-gray-950", .value = "oklch(13% 0.028 261.692)" },
+        .{ .name = "color-zinc-50", .value = "oklch(98.5% 0 0)" },
+        .{ .name = "color-zinc-100", .value = "oklch(96.7% 0.001 286.375)" },
+        .{ .name = "color-zinc-200", .value = "oklch(92% 0.004 286.32)" },
+        .{ .name = "color-zinc-300", .value = "oklch(87.1% 0.006 286.286)" },
+        .{ .name = "color-zinc-400", .value = "oklch(70.5% 0.015 286.067)" },
+        .{ .name = "color-zinc-500", .value = "oklch(55.2% 0.016 285.938)" },
+        .{ .name = "color-zinc-600", .value = "oklch(44.2% 0.017 285.786)" },
+        .{ .name = "color-zinc-700", .value = "oklch(37% 0.013 285.805)" },
+        .{ .name = "color-zinc-800", .value = "oklch(27.4% 0.006 286.033)" },
+        .{ .name = "color-zinc-900", .value = "oklch(21% 0.006 285.885)" },
+        .{ .name = "color-zinc-950", .value = "oklch(14.1% 0.005 285.823)" },
+        .{ .name = "color-neutral-50", .value = "oklch(98.5% 0 0)" },
+        .{ .name = "color-neutral-100", .value = "oklch(97% 0 0)" },
+        .{ .name = "color-neutral-200", .value = "oklch(92.2% 0 0)" },
+        .{ .name = "color-neutral-300", .value = "oklch(87% 0 0)" },
+        .{ .name = "color-neutral-400", .value = "oklch(70.8% 0 0)" },
+        .{ .name = "color-neutral-500", .value = "oklch(55.6% 0 0)" },
+        .{ .name = "color-neutral-600", .value = "oklch(43.9% 0 0)" },
+        .{ .name = "color-neutral-700", .value = "oklch(37.1% 0 0)" },
+        .{ .name = "color-neutral-800", .value = "oklch(26.9% 0 0)" },
+        .{ .name = "color-neutral-900", .value = "oklch(20.5% 0 0)" },
+        .{ .name = "color-neutral-950", .value = "oklch(14.5% 0 0)" },
+        .{ .name = "color-stone-50", .value = "oklch(98.5% 0.001 106.423)" },
+        .{ .name = "color-stone-100", .value = "oklch(97% 0.001 106.424)" },
+        .{ .name = "color-stone-200", .value = "oklch(92.3% 0.003 48.717)" },
+        .{ .name = "color-stone-300", .value = "oklch(86.9% 0.005 56.366)" },
+        .{ .name = "color-stone-400", .value = "oklch(70.9% 0.01 56.259)" },
+        .{ .name = "color-stone-500", .value = "oklch(55.3% 0.013 58.071)" },
+        .{ .name = "color-stone-600", .value = "oklch(44.4% 0.011 73.639)" },
+        .{ .name = "color-stone-700", .value = "oklch(37.4% 0.01 67.558)" },
+        .{ .name = "color-stone-800", .value = "oklch(26.8% 0.007 34.298)" },
+        .{ .name = "color-stone-900", .value = "oklch(21.6% 0.006 56.043)" },
+        .{ .name = "color-stone-950", .value = "oklch(14.7% 0.004 49.25)" },
+        .{ .name = "color-mauve-50", .value = "oklch(98.5% 0 0)" },
+        .{ .name = "color-mauve-100", .value = "oklch(96% 0.003 325.6)" },
+        .{ .name = "color-mauve-200", .value = "oklch(92.2% 0.005 325.62)" },
+        .{ .name = "color-mauve-300", .value = "oklch(86.5% 0.012 325.68)" },
+        .{ .name = "color-mauve-400", .value = "oklch(71.1% 0.019 323.02)" },
+        .{ .name = "color-mauve-500", .value = "oklch(54.2% 0.034 322.5)" },
+        .{ .name = "color-mauve-600", .value = "oklch(43.5% 0.029 321.78)" },
+        .{ .name = "color-mauve-700", .value = "oklch(36.4% 0.029 323.89)" },
+        .{ .name = "color-mauve-800", .value = "oklch(26.3% 0.024 320.12)" },
+        .{ .name = "color-mauve-900", .value = "oklch(21.2% 0.019 322.12)" },
+        .{ .name = "color-mauve-950", .value = "oklch(14.5% 0.008 326)" },
+        .{ .name = "color-olive-50", .value = "oklch(98.8% 0.003 106.5)" },
+        .{ .name = "color-olive-100", .value = "oklch(96.6% 0.005 106.5)" },
+        .{ .name = "color-olive-200", .value = "oklch(93% 0.007 106.5)" },
+        .{ .name = "color-olive-300", .value = "oklch(88% 0.011 106.6)" },
+        .{ .name = "color-olive-400", .value = "oklch(73.7% 0.021 106.9)" },
+        .{ .name = "color-olive-500", .value = "oklch(58% 0.031 107.3)" },
+        .{ .name = "color-olive-600", .value = "oklch(46.6% 0.025 107.3)" },
+        .{ .name = "color-olive-700", .value = "oklch(39.4% 0.023 107.4)" },
+        .{ .name = "color-olive-800", .value = "oklch(28.6% 0.016 107.4)" },
+        .{ .name = "color-olive-900", .value = "oklch(22.8% 0.013 107.4)" },
+        .{ .name = "color-olive-950", .value = "oklch(15.3% 0.006 107.1)" },
+        .{ .name = "color-mist-50", .value = "oklch(98.7% 0.002 197.1)" },
+        .{ .name = "color-mist-100", .value = "oklch(96.3% 0.002 197.1)" },
+        .{ .name = "color-mist-200", .value = "oklch(92.5% 0.005 214.3)" },
+        .{ .name = "color-mist-300", .value = "oklch(87.2% 0.007 219.6)" },
+        .{ .name = "color-mist-400", .value = "oklch(72.3% 0.014 214.4)" },
+        .{ .name = "color-mist-500", .value = "oklch(56% 0.021 213.5)" },
+        .{ .name = "color-mist-600", .value = "oklch(45% 0.017 213.2)" },
+        .{ .name = "color-mist-700", .value = "oklch(37.8% 0.015 216)" },
+        .{ .name = "color-mist-800", .value = "oklch(27.5% 0.011 216.9)" },
+        .{ .name = "color-mist-900", .value = "oklch(21.8% 0.008 223.9)" },
+        .{ .name = "color-mist-950", .value = "oklch(14.8% 0.004 228.8)" },
+        .{ .name = "color-taupe-50", .value = "oklch(98.6% 0.002 67.8)" },
+        .{ .name = "color-taupe-100", .value = "oklch(96% 0.002 17.2)" },
+        .{ .name = "color-taupe-200", .value = "oklch(92.2% 0.005 34.3)" },
+        .{ .name = "color-taupe-300", .value = "oklch(86.8% 0.007 39.5)" },
+        .{ .name = "color-taupe-400", .value = "oklch(71.4% 0.014 41.2)" },
+        .{ .name = "color-taupe-500", .value = "oklch(54.7% 0.021 43.1)" },
+        .{ .name = "color-taupe-600", .value = "oklch(43.8% 0.017 39.3)" },
+        .{ .name = "color-taupe-700", .value = "oklch(36.7% 0.016 35.7)" },
+        .{ .name = "color-taupe-800", .value = "oklch(26.8% 0.011 36.5)" },
+        .{ .name = "color-taupe-900", .value = "oklch(21.4% 0.009 43.1)" },
+        .{ .name = "color-taupe-950", .value = "oklch(14.7% 0.004 49.3)" },
+        .{ .name = "color-black", .value = "#000" },
+        .{ .name = "color-white", .value = "#fff" },
+        .{ .name = "spacing", .value = "0.25rem" },
+        .{ .name = "breakpoint-sm", .value = "40rem" },
+        .{ .name = "breakpoint-md", .value = "48rem" },
+        .{ .name = "breakpoint-lg", .value = "64rem" },
+        .{ .name = "breakpoint-xl", .value = "80rem" },
+        .{ .name = "breakpoint-2xl", .value = "96rem" },
+        .{ .name = "container-3xs", .value = "16rem" },
+        .{ .name = "container-2xs", .value = "18rem" },
+        .{ .name = "container-xs", .value = "20rem" },
+        .{ .name = "container-sm", .value = "24rem" },
+        .{ .name = "container-md", .value = "28rem" },
+        .{ .name = "container-lg", .value = "32rem" },
+        .{ .name = "container-xl", .value = "36rem" },
+        .{ .name = "container-2xl", .value = "42rem" },
+        .{ .name = "container-3xl", .value = "48rem" },
+        .{ .name = "container-4xl", .value = "56rem" },
+        .{ .name = "container-5xl", .value = "64rem" },
+        .{ .name = "container-6xl", .value = "72rem" },
+        .{ .name = "container-7xl", .value = "80rem" },
+        // Container helpers used by `max-w-screen-{key}` utilities — match
+        // the breakpoint scale so consumers can clamp containers to the
+        // viewport-step they design at.
+        .{ .name = "container-screen-sm", .value = "40rem" },
+        .{ .name = "container-screen-md", .value = "48rem" },
+        .{ .name = "container-screen-lg", .value = "64rem" },
+        .{ .name = "container-screen-xl", .value = "80rem" },
+        .{ .name = "container-screen-2xl", .value = "96rem" },
+        .{ .name = "text-xs", .value = "0.75rem" },
+        .{ .name = "text-xs--line-height", .value = "calc(1 / 0.75)" },
+        .{ .name = "text-sm", .value = "0.875rem" },
+        .{ .name = "text-sm--line-height", .value = "calc(1.25 / 0.875)" },
+        .{ .name = "text-base", .value = "1rem" },
+        .{ .name = "text-base--line-height", .value = "calc(1.5 / 1)" },
+        .{ .name = "text-lg", .value = "1.125rem" },
+        .{ .name = "text-lg--line-height", .value = "calc(1.75 / 1.125)" },
+        .{ .name = "text-xl", .value = "1.25rem" },
+        .{ .name = "text-xl--line-height", .value = "calc(1.75 / 1.25)" },
+        .{ .name = "text-2xl", .value = "1.5rem" },
+        .{ .name = "text-2xl--line-height", .value = "calc(2 / 1.5)" },
+        .{ .name = "text-3xl", .value = "1.875rem" },
+        .{ .name = "text-3xl--line-height", .value = "calc(2.25 / 1.875)" },
+        .{ .name = "text-4xl", .value = "2.25rem" },
+        .{ .name = "text-4xl--line-height", .value = "calc(2.5 / 2.25)" },
+        .{ .name = "text-5xl", .value = "3rem" },
+        .{ .name = "text-5xl--line-height", .value = "1" },
+        .{ .name = "text-6xl", .value = "3.75rem" },
+        .{ .name = "text-6xl--line-height", .value = "1" },
+        .{ .name = "text-7xl", .value = "4.5rem" },
+        .{ .name = "text-7xl--line-height", .value = "1" },
+        .{ .name = "text-8xl", .value = "6rem" },
+        .{ .name = "text-8xl--line-height", .value = "1" },
+        .{ .name = "text-9xl", .value = "8rem" },
+        .{ .name = "text-9xl--line-height", .value = "1" },
+        .{ .name = "font-weight-thin", .value = "100" },
+        .{ .name = "font-weight-extralight", .value = "200" },
+        .{ .name = "font-weight-light", .value = "300" },
+        .{ .name = "font-weight-normal", .value = "400" },
+        .{ .name = "font-weight-medium", .value = "500" },
+        .{ .name = "font-weight-semibold", .value = "600" },
+        .{ .name = "font-weight-bold", .value = "700" },
+        .{ .name = "font-weight-extrabold", .value = "800" },
+        .{ .name = "font-weight-black", .value = "900" },
+        .{ .name = "tracking-tighter", .value = "-0.05em" },
+        .{ .name = "tracking-tight", .value = "-0.025em" },
+        .{ .name = "tracking-normal", .value = "0em" },
+        .{ .name = "tracking-wide", .value = "0.025em" },
+        .{ .name = "tracking-wider", .value = "0.05em" },
+        .{ .name = "tracking-widest", .value = "0.1em" },
+        .{ .name = "leading-tight", .value = "1.25" },
+        .{ .name = "leading-snug", .value = "1.375" },
+        .{ .name = "leading-normal", .value = "1.5" },
+        .{ .name = "leading-relaxed", .value = "1.625" },
+        .{ .name = "leading-loose", .value = "2" },
+        .{ .name = "radius-xs", .value = "0.125rem" },
+        .{ .name = "radius-sm", .value = "0.25rem" },
+        .{ .name = "radius-md", .value = "0.375rem" },
+        .{ .name = "radius-lg", .value = "0.5rem" },
+        .{ .name = "radius-xl", .value = "0.75rem" },
+        .{ .name = "radius-2xl", .value = "1rem" },
+        .{ .name = "radius-3xl", .value = "1.5rem" },
+        .{ .name = "radius-4xl", .value = "2rem" },
+        .{ .name = "shadow-2xs", .value = "0 1px rgb(0 0 0 / 0.05)" },
+        .{ .name = "shadow-xs", .value = "0 1px 2px 0 rgb(0 0 0 / 0.05)" },
+        .{ .name = "shadow-sm", .value = "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)" },
+        .{ .name = "shadow-md", .value = "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)" },
+        .{ .name = "shadow-lg", .value = "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)" },
+        .{ .name = "shadow-xl", .value = "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)" },
+        .{ .name = "shadow-2xl", .value = "0 25px 50px -12px rgb(0 0 0 / 0.25)" },
+        .{ .name = "inset-shadow-2xs", .value = "inset 0 1px rgb(0 0 0 / 0.05)" },
+        .{ .name = "inset-shadow-xs", .value = "inset 0 1px 1px rgb(0 0 0 / 0.05)" },
+        .{ .name = "inset-shadow-sm", .value = "inset 0 2px 4px rgb(0 0 0 / 0.05)" },
+        .{ .name = "drop-shadow-xs", .value = "0 1px 1px rgb(0 0 0 / 0.05)" },
+        .{ .name = "drop-shadow-sm", .value = "0 1px 2px rgb(0 0 0 / 0.15)" },
+        .{ .name = "drop-shadow-md", .value = "0 3px 3px rgb(0 0 0 / 0.12)" },
+        .{ .name = "drop-shadow-lg", .value = "0 4px 4px rgb(0 0 0 / 0.15)" },
+        .{ .name = "drop-shadow-xl", .value = "0 9px 7px rgb(0 0 0 / 0.1)" },
+        .{ .name = "drop-shadow-2xl", .value = "0 25px 25px rgb(0 0 0 / 0.15)" },
+        .{ .name = "text-shadow-2xs", .value = "0px 1px 0px rgb(0 0 0 / 0.15)" },
+        .{ .name = "text-shadow-xs", .value = "0px 1px 1px rgb(0 0 0 / 0.2)" },
+        .{ .name = "text-shadow-sm", .value = "0px 1px 0px rgb(0 0 0 / 0.075), 0px 1px 1px rgb(0 0 0 / 0.075), 0px 2px 2px rgb(0 0 0 / 0.075)" },
+        .{ .name = "text-shadow-md", .value = "0px 1px 1px rgb(0 0 0 / 0.1), 0px 1px 2px rgb(0 0 0 / 0.1), 0px 2px 4px rgb(0 0 0 / 0.1)" },
+        .{ .name = "text-shadow-lg", .value = "0px 1px 2px rgb(0 0 0 / 0.1), 0px 3px 2px rgb(0 0 0 / 0.1), 0px 4px 8px rgb(0 0 0 / 0.1)" },
+        .{ .name = "ease-in", .value = "cubic-bezier(0.4, 0, 1, 1)" },
+        .{ .name = "ease-out", .value = "cubic-bezier(0, 0, 0.2, 1)" },
+        .{ .name = "ease-in-out", .value = "cubic-bezier(0.4, 0, 0.2, 1)" },
+        .{ .name = "animate-spin", .value = "spin 1s linear infinite" },
+        .{ .name = "animate-ping", .value = "ping 1s cubic-bezier(0, 0, 0.2, 1) infinite" },
+        .{ .name = "animate-pulse", .value = "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite" },
+        .{ .name = "animate-bounce", .value = "bounce 1s infinite" },
+        .{ .name = "blur-xs", .value = "4px" },
+        .{ .name = "blur-sm", .value = "8px" },
+        .{ .name = "blur-md", .value = "12px" },
+        .{ .name = "blur-lg", .value = "16px" },
+        .{ .name = "blur-xl", .value = "24px" },
+        .{ .name = "blur-2xl", .value = "40px" },
+        .{ .name = "blur-3xl", .value = "64px" },
+        .{ .name = "perspective-dramatic", .value = "100px" },
+        .{ .name = "perspective-near", .value = "300px" },
+        .{ .name = "perspective-normal", .value = "500px" },
+        .{ .name = "perspective-midrange", .value = "800px" },
+        .{ .name = "perspective-distant", .value = "1200px" },
+        .{ .name = "aspect-video", .value = "16 / 9" },
+        .{ .name = "default-transition-duration", .value = "150ms" },
+        .{ .name = "default-transition-timing-function", .value = "cubic-bezier(0.4, 0, 0.2, 1)" },
+        .{ .name = "default-font-family", .value = "--theme(--font-sans, initial)" },
+        .{ .name = "default-font-feature-settings", .value = "--theme(--font-sans--font-feature-settings, initial)" },
+        .{ .name = "default-font-variation-settings", .value = "--theme(--font-sans--font-variation-settings, initial)" },
+        .{ .name = "default-mono-font-family", .value = "--theme(--font-mono, initial)" },
+        .{ .name = "default-mono-font-feature-settings", .value = "--theme(--font-mono--font-feature-settings, initial)" },
+        .{ .name = "default-mono-font-variation-settings", .value = "--theme(--font-mono--font-variation-settings, initial)" },
+    },
+};
 
-test "color: special keywords (transparent, current, inherit)" {
-    {
-        const r = (try parseAndResolve(tst.allocator, "bg-transparent")).?;
-        defer freeResolvedUtility(tst.allocator, r);
-        try tst.expectEqualStrings("transparent", r.declarations[0].value);
+pub const api = struct {
+    pub const Theme = amalgam.theme_mod.Theme;
+    pub const Token = amalgam.theme_mod.Token;
+    pub const extendTheme = amalgam.theme_mod.extendTheme;
+    pub const extendThemeRuntime = amalgam.theme_mod.extendThemeRuntime;
+    pub const lookup = amalgam.theme_mod.lookup;
+    pub const emitCssVariables = amalgam.theme_mod.emitCssVariables;
+    pub const compile = amalgam.compile_mod.compile;
+    pub const CompileError = amalgam.compile_mod.CompileError;
+    pub const unsupportedFeatureMessage = amalgam.compile_mod.unsupportedFeatureMessage;
+    pub const sortClasses = amalgam.sort_mod.sortClasses;
+    pub const SortError = amalgam.sort_mod.SortError;
+    pub const default_theme: Theme = amalgam.embedded_default_theme;
+};
+
+pub const cli = struct {
+/// Publr JIT CSS Compiler CLI.
+///
+/// Reads a class manifest produced by the ZSX/.publr transpilers and emits
+/// utility CSS to stdout via `jit.compile()`.
+///
+/// Theme model: the JIT is theme-agnostic. By default it uses the embedded
+/// `default-theme.zon` token set. Consumers pass their own
+/// theme at the JIT's runtime — which is the consumer's BUILD time — via
+/// `--theme=<path>`. The consumer's theme.zon may be a partial override; the
+/// JIT merges it onto the default before resolving.
+///
+/// Class collection is the transpilers' job — never a file scanner
+/// here. See `memory/project_jit_input_scope.md`.
+///
+/// Preflight CSS (resets, `--tw-*` defaults, keyframes) lives in `preflight.css`
+/// and is prepended by build pipelines, not by this CLI.
+///
+/// Usage:
+///   jit [--theme=<theme.zon>] [--prepend=<preflight.css>] [--minify|--no-minify] <css_classes.txt>
+///     Compile classes to CSS. Output is minified by default; pass `--no-minify`
+///     for the readable indented form (typical for dev/debug builds).
+///   jit theme-from-css <input.css>
+///     Convert CSS @theme blocks to theme.zon.
+
+const std = @import("std");
+const theme_from_css = amalgam.theme_from_css_mod;
+const jit = amalgam.api;
+const default_theme: jit.Theme = amalgam.embedded_default_theme;
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    if (args.len < 2) {
+        try printUsage();
+        std.process.exit(1);
     }
-    {
-        const r = (try parseAndResolve(tst.allocator, "bg-current")).?;
-        defer freeResolvedUtility(tst.allocator, r);
-        try tst.expectEqualStrings("currentColor", r.declarations[0].value);
+
+    if (std.mem.eql(u8, args[1], "theme-from-css")) {
+        try runThemeFromCss(allocator, args);
+        return;
     }
-    {
-        const r = (try parseAndResolve(tst.allocator, "bg-inherit")).?;
-        defer freeResolvedUtility(tst.allocator, r);
-        try tst.expectEqualStrings("inherit", r.declarations[0].value);
+
+    // Parse flags. `compile-classes` is accepted as an alias for the default
+    // mode (used by the visual-regression harness).
+    var arg_index: usize = 1;
+    if (std.mem.eql(u8, args[1], "compile-classes")) arg_index = 2;
+
+    var prepend_path: ?[]const u8 = null;
+    // CLI default: minify. Build pipelines that want readable output (e.g.
+    // CMS Debug builds) pass `--no-minify` explicitly. Library callers of
+    // `jit.compile()` get the unminified form by default — see Options in
+    // compile.zig.
+    var minify: bool = true;
+    // `--theme=<path>` may be passed multiple times; each layer is merged on
+    // top of the previous in argv order, so the rightmost flag wins. This
+    // lets consumers stack a design-system token alias file underneath their
+    // brand theme without having to flatten them externally.
+    var theme_paths: std.array_list.Managed([]const u8) = .init(allocator);
+    defer theme_paths.deinit();
+    // Trailing positional args are class manifests. The build pipeline often
+    // needs multiple — one for the consumer's own ZSX/.publr templates, plus
+    // a vendored copy of `publr_ui.classes.txt` so design-system component
+    // classes (baked into the amalgamated publr_ui.zig and invisible to the
+    // consumer's transpiler) get rules generated in the JIT output. All
+    // listed manifests are concatenated and de-duplicated before compile.
+    var manifest_paths: std.array_list.Managed([]const u8) = .init(allocator);
+    defer manifest_paths.deinit();
+    while (arg_index < args.len) : (arg_index += 1) {
+        const a = args[arg_index];
+        if (std.mem.eql(u8, a, "--prepend")) {
+            arg_index += 1;
+            if (arg_index >= args.len) {
+                try printUsage();
+                std.process.exit(1);
+            }
+            prepend_path = args[arg_index];
+        } else if (std.mem.startsWith(u8, a, "--prepend=")) {
+            prepend_path = a["--prepend=".len..];
+        } else if (std.mem.eql(u8, a, "--theme")) {
+            arg_index += 1;
+            if (arg_index >= args.len) {
+                try printUsage();
+                std.process.exit(1);
+            }
+            try theme_paths.append(args[arg_index]);
+        } else if (std.mem.startsWith(u8, a, "--theme=")) {
+            try theme_paths.append(a["--theme=".len..]);
+        } else if (std.mem.eql(u8, a, "--minify")) {
+            minify = true;
+        } else if (std.mem.eql(u8, a, "--no-minify")) {
+            minify = false;
+        } else {
+            try manifest_paths.append(a);
+        }
+    }
+    if (manifest_paths.items.len == 0) {
+        try printUsage();
+        std.process.exit(1);
+    }
+
+    try runCompile(allocator, manifest_paths.items, prepend_path, theme_paths.items, minify);
+}
+
+fn printUsage() !void {
+    var stderr_buf: [768]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&stderr_buf);
+    try stderr.interface.writeAll("Usage:\n");
+    try stderr.interface.writeAll("  jit [--theme=<theme.zon>] [--prepend=<file.css>] [--minify|--no-minify] <css_classes.txt>\n");
+    try stderr.interface.writeAll("    Compile classes to CSS. Manifest from ZSX/.publr transpiler.\n");
+    try stderr.interface.writeAll("    --theme:     override the embedded default theme. The override\n");
+    try stderr.interface.writeAll("                 is merged onto the default; partial themes are fine.\n");
+    try stderr.interface.writeAll("    --prepend:   write the contents of <file.css> before the JIT output\n");
+    try stderr.interface.writeAll("                 (typical use: prepend preflight.css).\n");
+    try stderr.interface.writeAll("    --minify:    compact whitespace (default).\n");
+    try stderr.interface.writeAll("    --no-minify: emit indented, readable CSS (dev/debug builds).\n");
+    try stderr.interface.writeAll("  jit theme-from-css <input.css>\n");
+    try stderr.interface.writeAll("    Convert CSS @theme blocks to theme.zon.\n");
+    try stderr.interface.flush();
+}
+
+/// Read a class manifest, run through `jit.compile()`, write CSS to stdout.
+/// If `theme_path` is provided, the file is parsed as ZON and merged onto the
+/// embedded default theme. `extra_count > 0` triggers a one-release
+/// transitional warning — the legacy CLI took `[scan_paths...]` after the
+/// manifest, but file scanning is out of scope per the input-scope rule.
+fn runCompile(
+    allocator: std.mem.Allocator,
+    manifest_paths: []const []const u8,
+    prepend_path: ?[]const u8,
+    theme_paths: []const []const u8,
+    minify: bool,
+) !void {
+    // Read every manifest, tokenize whitespace-separated, dedupe across all of
+    // them. Buffers stay alive until the end of the function because `classes`
+    // holds borrowed slices into them.
+    var manifest_buffers: std.array_list.Managed([]u8) = .init(allocator);
+    defer {
+        for (manifest_buffers.items) |b| allocator.free(b);
+        manifest_buffers.deinit();
+    }
+
+    var classes: std.ArrayListUnmanaged([]const u8) = .{};
+    defer classes.deinit(allocator);
+
+    var seen = std.StringHashMap(void).init(allocator);
+    defer seen.deinit();
+
+    for (manifest_paths) |p| {
+        const buf = try std.fs.cwd().readFileAlloc(allocator, p, 16 * 1024 * 1024);
+        try manifest_buffers.append(buf);
+        var it = std.mem.tokenizeAny(u8, buf, " \t\n\r");
+        while (it.next()) |c| {
+            if (c.len == 0) continue;
+            const gop = try seen.getOrPut(c);
+            if (gop.found_existing) continue;
+            try classes.append(allocator, c);
+        }
+    }
+
+    // Resolve the theme. Default is the embedded `default-theme.zon`. Each
+    // `--theme=<path>` flag layers on top in argv order via
+    // extendThemeRuntime, so the rightmost flag wins. Typical usage:
+    //   --theme=ds-tokens.zon   (semantic alias palette — design system)
+    //   --theme=brand.zon       (per-consumer brand overrides)
+    var loaded_zons: std.array_list.Managed([:0]u8) = .init(allocator);
+    defer {
+        for (loaded_zons.items) |b| allocator.free(b);
+        loaded_zons.deinit();
+    }
+    var loaded_themes: std.array_list.Managed(jit.Theme) = .init(allocator);
+    defer {
+        for (loaded_themes.items) |ut| std.zon.parse.free(allocator, ut);
+        loaded_themes.deinit();
+    }
+
+    for (theme_paths) |p| {
+        const bytes = try std.fs.cwd().readFileAllocOptions(
+            allocator,
+            p,
+            4 * 1024 * 1024,
+            null,
+            std.mem.Alignment.@"1",
+            0, // sentinel-terminated; std.zon.parse needs [:0]const u8
+        );
+        try loaded_zons.append(bytes);
+        const t = try std.zon.parse.fromSlice(jit.Theme, allocator, bytes, null, .{});
+        try loaded_themes.append(t);
+    }
+
+    // Chain merges: start from the embedded default, then layer each theme.
+    // Each intermediate result is freed once it's been folded into the next.
+    var merged_theme: jit.Theme = default_theme;
+    var owns_merged = false;
+    defer if (owns_merged) allocator.free(merged_theme.tokens);
+
+    for (loaded_themes.items) |ut| {
+        const next = try jit.extendThemeRuntime(allocator, merged_theme, ut);
+        if (owns_merged) allocator.free(merged_theme.tokens);
+        merged_theme = next;
+        owns_merged = true;
+    }
+
+    const css = try jit.compile(allocator, merged_theme, classes.items, .{ .minify = minify });
+    defer allocator.free(css);
+
+    var stdout_buf: [16 * 1024]u8 = undefined;
+    var stdout = std.fs.File.stdout().writer(&stdout_buf);
+    if (prepend_path) |p| {
+        const prepend = try std.fs.cwd().readFileAlloc(allocator, p, 4 * 1024 * 1024);
+        defer allocator.free(prepend);
+        try stdout.interface.writeAll(prepend);
+        try stdout.interface.writeByte('\n');
+    }
+    try stdout.interface.writeAll(css);
+    try stdout.interface.flush();
+}
+
+/// `jit theme-from-css <input.css>` — read CSS, emit theme.zon to stdout.
+/// Warnings (unsupported `@theme` modifiers, skipped nested at-rules) go to stderr.
+fn runThemeFromCss(allocator: std.mem.Allocator, args: []const [:0]u8) !void {
+    if (args.len < 3) {
+        var stderr_buf: [256]u8 = undefined;
+        var stderr = std.fs.File.stderr().writer(&stderr_buf);
+        try stderr.interface.writeAll("Usage: jit theme-from-css <input.css>\n");
+        try stderr.interface.flush();
+        std.process.exit(1);
+    }
+
+    const css = try std.fs.cwd().readFileAlloc(allocator, args[2], 4 * 1024 * 1024);
+    defer allocator.free(css);
+
+    var warn_buffer: [4096]u8 = undefined;
+    var warn_iface = std.io.Writer.fixed(&warn_buffer);
+
+    const zon = try theme_from_css.convert(allocator, css, .{ .warn = &warn_iface });
+    defer allocator.free(zon);
+
+    var stdout_buf: [16 * 1024]u8 = undefined;
+    var stdout = std.fs.File.stdout().writer(&stdout_buf);
+    try stdout.interface.writeAll(zon);
+    try stdout.interface.flush();
+
+    const warns = warn_iface.buffered();
+    if (warns.len > 0) {
+        var stderr_buf: [256]u8 = undefined;
+        var stderr = std.fs.File.stderr().writer(&stderr_buf);
+        try stderr.interface.writeAll(warns);
+        try stderr.interface.flush();
     }
 }
+};
 
-test "color: arbitrary [#abc]" {
-    const r = (try parseAndResolve(tst.allocator, "bg-[#abc]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("background-color", r.declarations[0].property);
-    try tst.expectEqualStrings("#abc", r.declarations[0].value);
-}
-
-test "color: parens-arbitrary (--my-var)" {
-    const r = (try parseAndResolve(tst.allocator, "bg-(--my-var)")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("background-color", r.declarations[0].property);
-    try tst.expectEqualStrings("var(--my-var)", r.declarations[0].value);
-}
-
-test "color: arbitrary opacity modifier" {
-    const r = (try parseAndResolve(tst.allocator, "bg-red-500/[27%]")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--color-red-500) 27%, transparent)",
-        r.declarations[0].value,
-    );
-}
-
-test "color: bg-{unknown} returns null (falls through)" {
-    const r = try parseAndResolve(tst.allocator, "bg-totallyunknown");
-    try tst.expect(r == null);
-}
-
-test "color: decoration / outline / accent / caret / fill / stroke" {
-    const Cases = struct { input: []const u8, property: []const u8 };
-    const cases = [_]Cases{
-        .{ .input = "decoration-red-500", .property = "text-decoration-color" },
-        .{ .input = "outline-red-500", .property = "outline-color" },
-        .{ .input = "accent-red-500", .property = "accent-color" },
-        .{ .input = "caret-red-500", .property = "caret-color" },
-        .{ .input = "fill-red-500", .property = "fill" },
-        .{ .input = "stroke-red-500", .property = "stroke" },
-    };
-    inline for (cases) |c| {
-        const r = (try parseAndResolve(tst.allocator, c.input)).?;
-        defer freeResolvedUtility(tst.allocator, r);
-        try tst.expectEqualStrings(c.property, r.declarations[0].property);
-        try tst.expectEqualStrings("var(--color-red-500)", r.declarations[0].value);
-    }
-}
-
-test "gradient: from-{color}/{opacity}" {
-    const r = (try parseAndResolve(tst.allocator, "from-red-500/50")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-gradient-from", r.declarations[0].property);
-    try tst.expectEqualStrings(
-        "color-mix(in oklab, var(--color-red-500) 50%, transparent)",
-        r.declarations[0].value,
-    );
-}
-
-test "gradient: to-transparent special keyword" {
-    const r = (try parseAndResolve(tst.allocator, "to-transparent")).?;
-    defer freeResolvedUtility(tst.allocator, r);
-    try tst.expectEqualStrings("--tw-gradient-to", r.declarations[0].property);
-    try tst.expectEqualStrings("transparent", r.declarations[0].value);
+pub fn main() !void {
+    return cli.main();
 }

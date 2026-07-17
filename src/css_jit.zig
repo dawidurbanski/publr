@@ -13,23 +13,22 @@
 //! Fix: after every fast-path HMR swap, re-extract classes from the just-
 //! rendered HTML (ground truth — exactly what the browser will see) and
 //! recompile. The result lands in an in-memory override slot read by the
-//! static handler in dev mode; the browser refetches `/static/admin.css`
+//! static handler in dev mode; the browser refetches `/static/styles/publr.css`
 //! after the existing `broadcastCss` cache-bust signal.
 //!
 //! Production is untouched: the build-time CSS embedded in the binary is
 //! still the source of truth when the runtime override is empty.
 
 const std = @import("std");
-const jit = @import("jit");
+const jit = @import("jit").api;
 
-// Themes are merged at comptime: built-in Tailwind palette first, then
+// Themes are merged at comptime: built-in palette first, then
 // DS semantic palette layered on top so utilities like `bg-card` resolve
 // to `var(--card)`. Mirrors the build-time JIT compiler's setup in
 // build/theme.zig so runtime swaps and `zig build` produce identical CSS
 // for the same class set.
-const default_theme: jit.Theme = @import("default_theme");
 const ds_theme: jit.Theme = @import("ds_theme");
-const merged_theme: jit.Theme = jit.extendTheme(default_theme, ds_theme);
+const merged_theme: jit.Theme = jit.extendTheme(jit.default_theme, ds_theme);
 
 /// Extract every class token from `class="…"` AND `data-p-class="…"`
 /// attributes in the HTML. Caller owns the returned slice; deduplicated via
@@ -208,4 +207,15 @@ test "extractClasses: deduplicates across attributes" {
     const html = "<a class=\"px-4 py-2\"></a><b class=\"px-4 text-bold\"></b>";
     try extractClasses(testing.allocator, html, &seen);
     try testing.expectEqual(@as(u32, 3), seen.count());
+}
+
+test "compileFromHtml: arbitrary text lengths emit font-size" {
+    const css = try compileFromHtml(
+        testing.allocator,
+        "<span class=\"text-[0.6875rem]\">Folders</span>",
+    );
+    defer testing.allocator.free(css);
+
+    try testing.expect(std.mem.indexOf(u8, css, "font-size: 0.6875rem") != null);
+    try testing.expect(std.mem.indexOf(u8, css, "color: 0.6875rem") == null);
 }

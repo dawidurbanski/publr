@@ -38,7 +38,7 @@ zig build test
 
 **Completed:**
 - `build.zig` with SQLite compilation and static asset embedding
-- `vendor/` with SQLite/stb and pinned internal Zig UI artifacts
+- `vendor/` with permissively licensed third-party code and `lib/` with pinned Publr libraries
 - `src/main.zig` with CLI (serve command, --port, --dev flags, PORT env var)
 - `src/http.zig` with HTTP server (/, /admin, /static/*)
 - Graceful shutdown on SIGINT/SIGTERM
@@ -52,7 +52,7 @@ zig build test
 ### Shared UI icons
 
 CMS consumes [`publr-icons`](https://github.com/publr-org/publr-icons) through
-the checked-in `vendor/publr_icons.zig` adapter. There is no npm package,
+the checked-in `lib/publr_icons.zig` adapter. There is no npm package,
 submodule, build-time network access, or runtime fetch. Upgrades are explicit:
 
 ```sh

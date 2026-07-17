@@ -2,10 +2,10 @@
 set -eu
 
 # Explicit dependency update: normal CMS builds are offline and npm-free.
-REVISION="bb2b18e"
-SHA256="dd8673d57eab83c1b5ace1d5f81ba2fb6b2e354b8f1f9b23207f2ad6db103cba"
+REVISION="365ca0e"
+SHA256="96673acc28e4b8a1e9a19f1f88b7c00ba71f7c84bb936cf34495c67a73ba2337"
 URL="https://raw.githubusercontent.com/publr-org/publr-icons/${REVISION}/publr_icons.zig"
-TARGET="vendor/publr_icons.zig"
+TARGET="lib/publr_icons.zig"
 TEMP="${TARGET}.tmp"
 
 mkdir -p vendor

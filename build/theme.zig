@@ -4,7 +4,7 @@
 //!   1. `src/views/*.zsx` → transpiled .zig (for admin UI)
 //!   2. `themes/<name>/*.publr` → synthetic .zsx → transpiled .zig (for theme)
 //!   3. JIT compiler runs over each class manifest and emits utility CSS
-//!      embedded into the binary as /static/publr.css and /theme.css.
+//!      embedded into the binary as /static/styles/publr.css and /theme.css.
 //!
 //! All build-time tools (`zsx_transpile`, `zsx_format`, `publr_preprocess`,
 //! `jit`) live here too because their lifetime is tied to this pipeline.
@@ -56,9 +56,9 @@ pub const Result = struct {
 };
 
 pub fn wire(b: *std.Build, deps: Deps) Result {
-    // ZSX amalgamation — single vendor/zsx.zig for all build tools + runtime
+    // ZSX amalgamation — single lib/zsx.zig for all build tools + runtime
     const zsx = b.createModule(.{
-        .root_source_file = b.path("vendor/zsx.zig"),
+        .root_source_file = b.path("lib/zsx.zig"),
     });
 
     // Thin entry points for build tools (generated at build time)
@@ -169,19 +169,18 @@ pub fn wire(b: *std.Build, deps: Deps) Result {
     const gen_theme = transpile_theme_cmd.addOutputDirectoryArg("theme");
 
     // JIT CSS compiler — reads class manifests produced by the transpilers
-    // and emits utility CSS embedded as /static/publr.css.
+    // and emits utility CSS embedded as /static/styles/publr.css.
     const jit_compiler = b.addExecutable(.{
         .name = "jit",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("vendor/jit/main.zig"),
+            .root_source_file = b.path("lib/publr_jit.zig"),
             .target = b.graph.host,
-            .imports = &.{.{ .name = "zsx", .module = zsx }},
         }),
     });
 
     const jit_cmd = b.addRunArtifact(jit_compiler);
     jit_cmd.setCwd(b.path("."));
-    jit_cmd.addPrefixedFileArg("--theme=", b.path("vendor/jit/ds-tokens.zon"));
+    jit_cmd.addPrefixedFileArg("--theme=", b.path("src/styles/jit-theme.zon"));
 
     const should_minify = deps.minify_css orelse (deps.optimize != .Debug);
     if (!should_minify) jit_cmd.addArg("--no-minify");
@@ -191,7 +190,7 @@ pub fn wire(b: *std.Build, deps: Deps) Result {
     // CMS admin classes from .zsx
     jit_cmd.addFileArg(gen_views.path(b, "css_classes.txt"));
     // Pre-amalgamated publr_ui classes (invisible to local transpiler)
-    jit_cmd.addFileArg(b.path("vendor/publr_ui.classes.txt"));
+    jit_cmd.addFileArg(b.path("lib/publr_ui.classes.txt"));
     jit_cmd.has_side_effects = true;
     jit_cmd.step.dependOn(&transpile_zsx_cmd.step);
     const jit_css_output = jit_cmd.captureStdOut();
@@ -209,13 +208,13 @@ pub fn wire(b: *std.Build, deps: Deps) Result {
 
     const theme_jit_cmd = b.addRunArtifact(jit_compiler);
     theme_jit_cmd.setCwd(b.path("."));
-    theme_jit_cmd.addPrefixedFileArg("--theme=", b.path("vendor/jit/ds-tokens.zon"));
+    theme_jit_cmd.addPrefixedFileArg("--theme=", b.path("src/styles/jit-theme.zon"));
     if (!should_minify) theme_jit_cmd.addArg("--no-minify");
     if (has_theme_zon) {
         theme_jit_cmd.addPrefixedFileArg("--theme=", b.path(theme_zon_rel));
     }
     theme_jit_cmd.addArg("--prepend");
-    theme_jit_cmd.addFileArg(b.path("vendor/jit/preflight.css"));
+    theme_jit_cmd.addFileArg(b.path("vendor/tailwindcss/preflight.css"));
     theme_jit_cmd.addFileArg(gen_theme.path(b, "css_classes.txt"));
     theme_jit_cmd.has_side_effects = true;
     theme_jit_cmd.step.dependOn(&transpile_theme_cmd.step);
@@ -321,4 +320,3 @@ pub fn staticAssetsModule(b: *std.Build, opts: struct {
 
     return mod;
 }
-
