@@ -9218,7 +9218,7 @@ pub fn Tabs(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TabsProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TabsProps, _props);
-    try writer.writeAll("<div data-p-store=\"local:tabs\" data-publr-component=\"tabs\" data-publr-default-value=\"");
+    try writer.writeAll("<div data-p-store=\"local:ds-tabs\" data-publr-component=\"tabs\" data-publr-default-value=\"");
     try runtime.render(writer, props.default_value);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);

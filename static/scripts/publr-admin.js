@@ -15,11 +15,11 @@
 //   recompile-bar.js   layout.zsx
 //   ws.js              imported by presence.js (ref-counted transport)
 //
-// publr-tabs.js is served but deliberately NOT loaded: the DS store
-// registers the name 'tabs', which collides with the weather demo plugin's
-// local 'tabs' factory (store registration is last-write-wins). It needs a
-// namespaced name (e.g. ds-tabs) before it can load globally — see #147's
-// notes; the DS Tabs manifest CSS gap is tracked there too.
+// publr-tabs.js registers the namespaced 'ds-tabs' store (#147 resolved) —
+// no collision with app-defined 'tabs' stores. Interop contract: the DS
+// store owns trigger/panel activation; page stores listen for clicks on
+// [data-publr-part="trigger"] or observe data-publr-state instead of
+// re-activating panels themselves.
 
 // Core runtime + addons
 import '/static/scripts/publr.js';
@@ -40,6 +40,7 @@ import '/static/scripts/publr-select.js';
 import '/static/scripts/publr-popover.js';
 import '/static/scripts/publr-radio-group.js';
 import '/static/scripts/publr-switch.js';
+import '/static/scripts/publr-tabs.js';
 
 // App stores present on every admin page
 import '/static/scripts/media-picker.js';
