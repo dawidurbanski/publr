@@ -174,10 +174,17 @@ pub const FieldMap = struct {
                     std.mem.eql(u8, id, "url") or
                     std.mem.eql(u8, id, "image")))
                 {
+                    // Dupe into the FieldMap's arena — `raw` borrows the
+                    // caller's parse buffer, which is typically freed before
+                    // the map is read (parseEntryRowSpecialized deinits the
+                    // typed parse right after this returns).
                     if (comptime @typeInfo(@TypeOf(raw)) == .optional) {
-                        break :comptime_value if (raw) |s| FieldValue{ .text = s } else FieldValue.null_;
+                        break :comptime_value if (raw) |s|
+                            FieldValue{ .text = try arena_alloc.dupe(u8, s) }
+                        else
+                            FieldValue.null_;
                     } else {
-                        break :comptime_value FieldValue{ .text = raw };
+                        break :comptime_value FieldValue{ .text = try arena_alloc.dupe(u8, raw) };
                     }
                 } else if (comptime std.mem.eql(u8, id, "boolean")) {
                     if (comptime @typeInfo(@TypeOf(raw)) == .optional) {
@@ -226,9 +233,12 @@ pub const FieldMap = struct {
 
     /// Construct from a JSON object string. Values are coerced by JSON shape:
     /// strings → `.text`, integers → `.int`, floats → `.real`, booleans →
-    /// `.bool_`, nulls → `.null_`, nested objects / arrays → `.json`. Caller
-    /// retains ownership of `json_text`; the returned `FieldMap` borrows
-    /// references into the parsed arena (kept alive on the FieldMap).
+    /// `.bool_`, nulls → `.null_`, nested objects / arrays → `.json`.
+    /// `json_text` may be freed as soon as this returns: parsing uses
+    /// `.alloc_always` so every string is copied into the FieldMap's arena
+    /// (the default `.alloc_if_needed` would keep escape-free strings as
+    /// borrowed slices of `json_text` — dangling once the caller frees it,
+    /// e.g. SQLite row buffers freed at statement finalize).
     pub fn fromJson(allocator: Allocator, json_text: []const u8) !FieldMap {
         const arena_ptr = try allocator.create(std.heap.ArenaAllocator);
         arena_ptr.* = std.heap.ArenaAllocator.init(allocator);
@@ -238,7 +248,9 @@ pub const FieldMap = struct {
             allocator.destroy(arena_ptr);
         }
 
-        var parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena_alloc, json_text, .{});
+        var parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena_alloc, json_text, .{
+            .allocate = .alloc_always,
+        });
         if (parsed != .object) {
             return .{ .arena = arena_ptr };
         }
@@ -321,6 +333,22 @@ test "FieldMap.fromJson parses scalars into typed variants" {
     try std.testing.expectEqual(true, map.getBool("featured").?);
     try std.testing.expect(map.isNull("missing"));
     try std.testing.expect(map.getText("not-there") == null);
+}
+
+test "FieldMap.fromJson values survive freeing the input JSON" {
+    // Regression: escape-free strings used to be borrowed slices of
+    // `json_text` (std.json `.alloc_if_needed`), dangling once the caller
+    // freed it — e.g. SQLite row buffers freed at statement finalize.
+    // The testing allocator poisons freed memory, so a borrow fails here.
+    const json_text = try std.testing.allocator.dupe(u8,
+        \\{"title": "Hello", "content": "data:image/jpeg;base64,AAAA"}
+    );
+    var map = try FieldMap.fromJson(std.testing.allocator, json_text);
+    defer map.deinit(std.testing.allocator);
+    std.testing.allocator.free(json_text);
+
+    try std.testing.expectEqualStrings("Hello", map.getText("title").?);
+    try std.testing.expectEqualStrings("data:image/jpeg;base64,AAAA", map.getText("content").?);
 }
 
 test "FieldMap.fromJson keeps nested objects as .json" {
