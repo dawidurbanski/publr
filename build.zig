@@ -124,7 +124,7 @@ pub fn build(b: *std.Build) void {
         if (optimize == .Debug) .ReleaseFast else optimize;
     const vendor_lib = vendors.library(b, target, vendor_optimize, native_vendor_opts);
     exe.linkLibC();
-    exe.addIncludePath(b.path("vendor")); // for @cImport headers
+    vendors.addIncludePaths(b, exe.root_module, native_vendor_opts);
     exe.linkLibrary(vendor_lib);
     vendors.linkStaticLibs(exe, native_vendor_opts);
 
@@ -413,7 +413,7 @@ pub fn build(b: *std.Build) void {
     const route_match_module = reg.simple("route_match", "src/route_match.zig", &.{"middleware"});
     const router_module = reg.simple("router", "src/router.zig", &.{ "middleware", "route_match" });
     const db_module = reg.leaf("db", "src/core/db.zig");
-    db_module.addIncludePath(b.path("vendor"));
+    vendors.addIncludePaths(b, db_module, native_vendor_opts);
     _ = reg.simple("publish_hooks", "src/publish_hooks.zig", &.{"db"});
     const modules_api_module = reg.simple("modules", "src/modules/mod.zig", &.{ "router", "db", "publr_config" });
     _ = reg.leaf("id_gen", "src/core/id_gen.zig");
@@ -465,7 +465,7 @@ pub fn build(b: *std.Build) void {
     const media_module = reg.simple("media", "src/core/media.zig", &.{ "db", "cms", "schema_media", "storage", "svg_sanitize", "id_gen", "taxonomy", "media_query" });
     _ = reg.simple("media_query", "src/core/media_query.zig", &.{ "db", "cms", "media", "taxonomy" });
     const media_sync_module = reg.simple("media_sync", "src/core/media_sync.zig", &.{ "db", "media", "storage", "svg_sanitize", "mime" });
-    media_sync_module.addIncludePath(b.path("vendor"));
+    vendors.addIncludePaths(b, media_sync_module, native_vendor_opts);
     const tpl_module = reg.leaf("tpl", "src/tpl.zig");
     const auth_module = reg.simple("auth", "src/core/auth.zig", &.{ "db", "time_util" });
     const auth_middleware_module = reg.simple("auth_middleware", "src/auth_middleware.zig", &.{ "middleware", "auth", "db" });
@@ -473,7 +473,7 @@ pub fn build(b: *std.Build) void {
     _ = reg.simple("actions", "src/actions.zig", &.{ "middleware", "csrf" });
     const admin_api_module = reg.simple("admin_api", "src/admin_api.zig", &.{ "middleware", "publr_ui", "actions", "content_type", "schemas", "schema_registry" });
     const image_module = reg.leaf("image", "src/image.zig");
-    image_module.addIncludePath(b.path("vendor"));
+    vendors.addIncludePaths(b, image_module, native_vendor_opts);
     const media_handler_module = reg.simple("media_handler", "src/media_handler.zig", &.{ "storage", "auth_middleware", "middleware", "image", "url", "mime" });
     const gravatar_module = reg.leaf("gravatar", "src/gravatar.zig");
     const websocket_module = reg.leaf("websocket", "src/websocket.zig");

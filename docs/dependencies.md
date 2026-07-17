@@ -6,13 +6,28 @@ This project has exactly three external dependencies, all vendored:
 
 | File | Purpose | Lines | License |
 |------|---------|-------|---------|
-| `vendor/sqlite3.c` + `.h` | Database | ~250k | Public domain |
-| `vendor/stb_image.h` | Image decode | ~8k | Public domain |
-| `vendor/stb_image_resize2.h` | Image resize | ~3k | Public domain |
-| `vendor/stb_image_write.h` | Image encode | ~2k | Public domain |
-| `vendor/libwebp.c` + `.h` | WebP encoding | ~64k | BSD-3-Clause |
+| `vendor/sqlite/` | Database | ~250k | Public domain |
+| `vendor/stb/stb_image.h` | Image decode | ~8k | MIT or public domain |
+| `vendor/stb/stb_image_resize2.h` | Image resize | ~3k | MIT or public domain |
+| `vendor/stb/stb_image_write.h` | Image encode | ~2k | MIT or public domain |
+| `vendor/libwebp/` | WebP encoding | ~64k | BSD-3-Clause |
 
 **Total external code:** ~323k lines of C, all permissively licensed, all vendored.
+
+## First-party libraries
+
+Generated libraries maintained in other Publr repositories live in `lib/`,
+not `vendor/`. They are first-party Apache-2.0 code and are covered by the
+CMS distribution's root license:
+
+- `lib/zsx.zig`
+- `lib/publr_ui.zig`
+- `lib/publr_icons.zig`
+- `lib/publr_jit.zig`
+
+`vendor/` is reserved for third-party code and derived third-party assets.
+Each library has its own directory, with its license and provenance files
+beside its source. `THIRD_PARTY_NOTICES.md` provides the consolidated inventory.
 
 ## Decision Flow
 
@@ -80,7 +95,7 @@ This project has exactly three external dependencies, all vendored:
                     ┌─────────────────────┐   ┌───────────────────┐
                     │ ✓ VENDOR IT         │   │ ✗ REJECTED        │
                     │                     │   │                   │
-                    │ • Copy to vendor/   │   │ Write it yourself │
+                    │ • Copy to vendor/x/ │   │ Write it yourself │
                     │ • Document in table │   │ or find another   │
                     │ • Add to build.zig  │   │ approach          │
                     └─────────────────────┘   └───────────────────┘

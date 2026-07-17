@@ -35,7 +35,7 @@ pub fn wire(b: *std.Build, deps: Deps) void {
         }),
     });
     init_db.linkLibC();
-    init_db.addIncludePath(b.path("vendor"));
+    vendors.addIncludePaths(b, init_db.root_module, .{});
     vendors.addSqlite(b, init_db, .{});
     init_db.root_module.addImport("schema_registry", deps.schema_registry);
     init_db.root_module.addImport("field", deps.field);

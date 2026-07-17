@@ -71,8 +71,7 @@ pub fn build(b: *std.Build, deps: Deps) Result {
     // contributions (C sources + static libs) are folded in via vendor_opts.
     const vendor_lib_wasm = vendors.library(b, wasm_target, .ReleaseSmall, deps.vendor_opts);
     browser_wasm.linkLibC();
-    browser_wasm.addIncludePath(b.path("vendor"));
-    for (deps.vendor_opts.extra_include_paths) |p| browser_wasm.addIncludePath(p);
+    vendors.addIncludePaths(b, browser_wasm.root_module, deps.vendor_opts);
     browser_wasm.linkLibrary(vendor_lib_wasm);
     vendors.linkStaticLibs(browser_wasm, deps.vendor_opts);
 

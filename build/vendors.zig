@@ -14,14 +14,14 @@ pub const Opts = struct {
     /// the SQLite build.
     extra_c_sources: []const ExtraCSource = &.{},
     /// Extra include paths so plugin C sources can find their own
-    /// headers (publr's vendor/ is already on the path).
+    /// headers (Publr's per-library vendor directories are already on the path).
     extra_include_paths: []const std.Build.LazyPath = &.{},
     /// Prebuilt static libraries (e.g. Rust-built cr-sqlite core) to
     /// link into publr_vendors. Resolved at the final link.
     static_libs: []const std.Build.LazyPath = &.{},
     /// Plugin-provided sqlite source directory (build-root-relative).
     /// When set, the build:
-    ///   - uses `<dir>/sqlite3.c` instead of `vendor/sqlite3.c`
+    ///   - uses `<dir>/sqlite3.c` instead of `vendor/sqlite/sqlite3.c`
     ///   - adds `<dir>` to the include path FIRST so its `sqlite3.h` wins
     ///   - compiles every other `*.c` in `<dir>` with the override's flags
     /// Set by plugins whose manifest.zon declares `.sqlite_override_dir`
@@ -39,7 +39,7 @@ pub const ExtraCSource = struct {
     flags: []const []const u8,
 };
 
-/// Attach libc + vendor/ include path + SQLite + stb_image + libwebp C
+/// Attach libc + vendored include paths + SQLite + stb_image + libwebp C
 /// sources to any compile step (exe, lib, test). Plugin C sources are
 /// compiled in here; plugin static libs (`opts.static_libs`) must be
 /// attached separately to the final exe step (a static archive's contents
@@ -47,19 +47,23 @@ pub const ExtraCSource = struct {
 /// only pulled in at the final link).
 pub fn addAll(b: *std.Build, compile: *std.Build.Step.Compile, opts: Opts) void {
     compile.linkLibC();
-    // Override include path FIRST so the plugin's sqlite3.h is the one
-    // every TU sees (the C glue is compiled against it). Default
-    // vendor/ is added next so non-sqlite headers (stb, libwebp) still
-    // resolve.
-    if (opts.sqlite_override_dir) |dir| compile.addIncludePath(b.path(dir));
-    compile.addIncludePath(b.path("vendor"));
-    for (opts.extra_include_paths) |p| compile.addIncludePath(p);
+    addIncludePaths(b, compile.root_module, opts);
     addSqlite(b, compile, opts);
     addImage(b, compile);
     addSqliteOverrideGlue(b, compile, opts);
     for (opts.extra_c_sources) |src| {
         compile.addCSourceFile(.{ .file = src.file, .flags = src.flags });
     }
+}
+
+/// Add the include directories for each vendored library. A plugin SQLite
+/// override comes first so its sqlite3.h wins over the default amalgamation.
+pub fn addIncludePaths(b: *std.Build, module: *std.Build.Module, opts: Opts) void {
+    if (opts.sqlite_override_dir) |dir| module.addIncludePath(b.path(dir));
+    module.addIncludePath(b.path("vendor/sqlite"));
+    module.addIncludePath(b.path("vendor/stb"));
+    module.addIncludePath(b.path("vendor/libwebp"));
+    for (opts.extra_include_paths) |p| module.addIncludePath(p);
 }
 
 /// Attach plugin-contributed static libs to a final exe / test target.
@@ -78,7 +82,7 @@ pub fn addSqlite(b: *std.Build, compile: *std.Build.Step.Compile, opts: Opts) vo
     const sqlite_c_path = if (opts.sqlite_override_dir) |dir|
         b.fmt("{s}/sqlite3.c", .{dir})
     else
-        "vendor/sqlite3.c";
+        "vendor/sqlite/sqlite3.c";
     compile.addCSourceFile(.{
         .file = b.path(sqlite_c_path),
         .flags = sqliteFlags(opts.wasm),
@@ -110,7 +114,7 @@ pub fn addImage(b: *std.Build, compile: *std.Build.Step.Compile) void {
     // stb_image_resize2 does intentional misaligned uint64 stores in
     // stbir__pack_coefficients, which triggers UBSan in debug builds.
     compile.addCSourceFile(.{
-        .file = b.path("vendor/stb_impl.c"),
+        .file = b.path("vendor/stb/stb_impl.c"),
         .flags = &.{"-fno-sanitize=alignment"},
     });
     // libwebp split amalgamation: same file compiled 124 times with different
@@ -120,7 +124,7 @@ pub fn addImage(b: *std.Build, compile: *std.Build.Step.Compile) void {
         var buf: [32]u8 = undefined;
         const flag = std.fmt.bufPrint(&buf, "-DWEBP_AMALGAMATION_PART={d}", .{part}) catch unreachable;
         compile.addCSourceFile(.{
-            .file = b.path("vendor/libwebp.c"),
+            .file = b.path("vendor/libwebp/libwebp.c"),
             .flags = &.{ flag, "-U__SSE2__", "-U__SSE4_1__", "-U__AVX2__" },
         });
     }
