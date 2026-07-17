@@ -3549,6 +3549,295 @@ const props = runtime.withDefaults(DialogDemoProps, _props);
 
 };
 
+pub const drawer = struct {
+
+/// Drawer — right-side slide-in panel.
+///
+/// The panel slides in under the h-12 admin top bar (top-12) from the right.
+/// Open state lives in the PAGE store: pass `open_key` (a boolean store key)
+/// and the drawer renders the `data-p-class` toggle that slides it in/out.
+/// Render a control with `data-drawer-close` inside (usually in the header) —
+/// drawer.js clicks it on Escape, so close logic stays with the consumer.
+///
+/// Sub-components:
+///   - Drawer: fixed aside root (`open_key`, `width`, `raised`, `label`)
+///   - DrawerOverlay: optional dimmer (`open_key`, `close_action`)
+///   - DrawerHeader: h-14 top row (back/close button, eyebrow+title, actions)
+///   - DrawerStatusBar: h-10 muted strip (status badge, save state, meta)
+///   - DrawerContent: scrollable body
+///   - DrawerFooter: bottom action row
+///
+/// Widths: `md` = w-full max-w-xl (36rem); `wide` = near-full with responsive
+/// margins. All drawers share z-50 — stacking is DOM order (a nested
+/// reference drawer rendered AFTER the base drawer paints above it; mark it
+/// `raised` so Escape targets it first). For the POC's push-left choreography
+/// (a base drawer sliding aside when a nested one opens), wrap the base
+/// drawer in consumer-owned transform wrappers — that composition is
+/// app-specific and stays out of the DS.
+///
+/// Example:
+///   <Drawer open_key="uploadOpen" label="Upload assets">
+///       <DrawerHeader>
+///           <button data-drawer-close onClick="closeUpload" ...>…</button>
+///           <h2 class="text-sm font-semibold">Upload assets</h2>
+///       </DrawerHeader>
+///       <DrawerContent>…</DrawerContent>
+///       <DrawerFooter>…</DrawerFooter>
+///   </Drawer>
+pub const Width = enum { md, wide };
+pub const DrawerProps = struct {
+    label: []const u8 = "",
+    // Page-store boolean key that slides the drawer in when truthy.
+    open_key: []const u8 = "",
+    width: Width = .md,
+    // Marks a drawer stacked above a base drawer (nested reference pattern).
+    // Render it AFTER the base drawer — stacking is DOM order at shared z-50.
+    raised: bool = false,
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn Drawer(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(DrawerProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DrawerProps, _props);
+    const width_class = switch (props.width) {
+        .md => "w-full max-w-xl",
+        .wide => "w-[calc(100%-3rem)] sm:w-[calc(100%-5rem)] xl:w-[calc(100%-13rem)]",
+    };
+    const base = "fixed bottom-0 right-0 top-12 z-50 flex translate-x-full flex-col border-l border-border bg-card transition-transform duration-200 ease-out";
+    if (props.open_key.len > 0) {
+        try writer.writeAll("<aside data-publr-component=\"drawer\" tabindex=\"-1\" data-publr-raised=\"");
+        try runtime.render(writer, if (props.raised) "true" else null);
+        try writer.writeAll("\" aria-label=\"");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("\" data-p-class=\"");
+        try runtime.escape(writer, props.open_key);
+        try writer.writeAll("->translate-x-0~translate-x-full\" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(width_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\">\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n</aside>");
+    } else {
+        try writer.writeAll("<aside data-publr-component=\"drawer\" tabindex=\"-1\" data-publr-raised=\"");
+        try runtime.render(writer, if (props.raised) "true" else null);
+        try writer.writeAll("\" aria-label=\"");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("\" class=\"");
+        try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(width_class);
+        try writer.writeAll(" ");
+        try writer.writeAll(props.class);
+        try writer.writeAll("\">\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n</aside>");
+    }
+        }
+    }.b);
+}
+
+/// DrawerOverlay — optional click-to-close dimmer behind the drawer.
+/// `close_action` is the page-store action fired on click.
+pub const DrawerOverlayProps = struct {
+    open_key: []const u8 = "",
+    close_action: []const u8 = "",
+    raised: bool = false,
+    class: []const u8 = "",
+};
+pub fn DrawerOverlay(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(DrawerOverlayProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DrawerOverlayProps, _props);
+    // Raised overlays share the drawers' z-50 plane (DOM order stacks them);
+    // base overlays sit below every drawer at z-40.
+    const z_class = if (props.raised) "z-50" else "z-40";
+    try writer.writeAll("<div data-publr-part=\"overlay\" data-p-show=\"");
+    try runtime.render(writer, props.open_key);
+    try writer.writeAll("\" data-p-on=\"click:");
+    try runtime.escape(writer, props.close_action);
+    try writer.writeAll("\" class=\"fixed inset-0 bg-black/50 ");
+    try writer.writeAll(z_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\"></div>");
+        }
+    }.b);
+}
+
+pub const DrawerHeaderProps = struct {
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn DrawerHeader(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(DrawerHeaderProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DrawerHeaderProps, _props);
+    try writer.writeAll("<header data-publr-part=\"header\" class=\"flex h-14 shrink-0 items-center gap-3 border-b border-border px-4 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n</header>");
+        }
+    }.b);
+}
+
+pub const DrawerStatusBarProps = struct {
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn DrawerStatusBar(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(DrawerStatusBarProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DrawerStatusBarProps, _props);
+    try writer.writeAll("<div data-publr-part=\"status-bar\" class=\"flex h-10 shrink-0 items-center gap-3 border-b border-border bg-muted/20 px-4 text-xs ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n</div>");
+        }
+    }.b);
+}
+
+pub const DrawerContentProps = struct {
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn DrawerContent(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(DrawerContentProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DrawerContentProps, _props);
+    try writer.writeAll("<div data-publr-part=\"content\" class=\"flex-1 overflow-y-auto ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n</div>");
+        }
+    }.b);
+}
+
+pub const DrawerFooterProps = struct {
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn DrawerFooter(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(DrawerFooterProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DrawerFooterProps, _props);
+    try writer.writeAll("<footer data-publr-part=\"footer\" class=\"flex shrink-0 items-center gap-2 border-t border-border px-4 py-3 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n</footer>");
+        }
+    }.b);
+}
+
+// ── Gallery Demo ────────────────────────────────────
+// Rendered statically open (no store in the gallery): position + transform
+// overridden so the panel sits in normal flow.
+pub const Status = root.status.Status;
+pub const DrawerDemoProps = struct {
+    demo: enum { detail, upload } = .detail,
+};
+pub fn DrawerDemo(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(DrawerDemoProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(DrawerDemoProps, _props);
+    try writer.writeAll("<div class=\"relative h-96 overflow-hidden rounded-lg border border-border\">\n");
+    if (props.demo == .upload) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
+            _ = &_children_w_0;
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n<h2 class=\"text-sm font-semibold text-foreground\">Upload assets</h2>\n");
+                try DrawerHeader(_children_w_0, .{ .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n<p class=\"text-xs text-muted-foreground\">Drop files here to upload.</p>\n");
+                try DrawerContent(_children_w_0, .{ .class = "p-4", .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n<span class=\"text-xs text-muted-foreground\">0 files queued</span>\n");
+                try DrawerFooter(_children_w_0, .{ .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            try Drawer(writer, .{ .label = "Upload assets",  .class = "static h-full translate-x-0", .children = _children_buf_0.items });
+        }
+    } else {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
+            _ = &_children_w_0;
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n<div class=\"min-w-0 flex-1\">\n<p class=\"text-3xs font-semibold uppercase tracking-[0.1em] text-muted-foreground\">Asset</p>\n<h2 class=\"truncate text-sm font-semibold text-foreground\">hero-lighthouse.jpg</h2>\n</div>\n");
+                try DrawerHeader(_children_w_0, .{ .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n");
+                try Status(_children_w_1, .{ .tone = .published });
+                try _children_w_1.writeAll("\n<span class=\"text-muted-foreground\">Saved 2 min ago</span>\n");
+                try DrawerStatusBar(_children_w_0, .{ .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            {
+                var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
+                const _children_alloc_1 = @import("std").heap.page_allocator;
+                defer _children_buf_1.deinit(_children_alloc_1);
+                const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
+                _ = &_children_w_1;
+                try _children_w_1.writeAll("\n<p class=\"text-xs text-muted-foreground\">Details body.</p>\n");
+                try DrawerContent(_children_w_0, .{ .class = "p-4", .children = _children_buf_1.items });
+            }
+            try _children_w_0.writeAll("\n");
+            try Drawer(writer, .{ .label = "Asset details",  .class = "static h-full translate-x-0", .children = _children_buf_0.items });
+        }
+    }
+    try writer.writeAll("\n</div>");
+        }
+    }.b);
+}
+
+};
+
 pub const dropdown = struct {
 
 /// DropdownMenu — action menu triggered by a button.
@@ -10244,6 +10533,11 @@ pub const dismiss_js =
     \\
 ;
 
+pub const drawer_js =
+    \\const u="translate-x-0",i=o=>o.classList.contains(u),d=()=>[...document.querySelectorAll('[data-publr-component="drawer"]')].filter(i);document.addEventListener("keydown",o=>{if(o.key!=="Escape")return;const r=d();if(!r.length)return;const n=r.filter(c=>c.dataset.publrRaised==="true"),s=(n.length?n:r).pop().querySelector("[data-drawer-close]");s&&(o.stopPropagation(),s.click())});let t=null;const p=new MutationObserver(o=>{var r;for(const n of o){const e=n.target;if(!(e instanceof Element)||e.getAttribute("data-publr-component")!=="drawer")continue;const s=(n.oldValue||"").split(/\s+/).includes(u),c=i(e);if(c&&!s){t=document.activeElement;const l=e.querySelector("[data-autofocus]")||e.querySelector("[data-drawer-close]")||e;setTimeout(()=>{var a;return(a=l.focus)==null?void 0:a.call(l,{preventScroll:!0})},200)}else!c&&s&&(t&&t.isConnected&&((r=t.focus)==null||r.call(t,{preventScroll:!0})),t=null)}});p.observe(document.documentElement,{attributes:!0,attributeFilter:["class"],attributeOldValue:!0,subtree:!0});
+    \\
+;
+
 pub const dropdown_js =
     \\import{Publr as u}from"/static/scripts/publr.js";import{position as v}from"/static/scripts/publr-position.js";u.store("dropdown",()=>{const o=u.reactive({open:!1});let c=null,a=null,l=null;const f=()=>a?[...a.querySelectorAll('[data-publr-part="item"]')].filter(r=>!r.disabled&&r.getAttribute("aria-disabled")!=="true"):[],i=(r,n)=>{var e;r.forEach((t,s)=>{t.tabIndex=s===n?0:-1}),(e=r[n])==null||e.focus()},d=()=>{a&&a.contains(document.activeElement)&&(c.querySelector("button")||c).focus()};return{state:o,actions:{toggle:()=>{o.open=!o.open},openMenu:(r,n)=>{n.event.preventDefault(),o.open=!0},close:()=>{o.open=!1},navKeys:(r,n)=>{const e=n.event,t=f();if(!t.length)return;const s=t.indexOf(document.activeElement);switch(e.key){case"ArrowDown":e.preventDefault(),i(t,s<t.length-1?s+1:0);break;case"ArrowUp":e.preventDefault(),i(t,s>0?s-1:t.length-1);break;case"Home":e.preventDefault(),i(t,0);break;case"End":e.preventDefault(),i(t,t.length-1);break;case"Enter":case" ":e.preventDefault(),s>=0&&(t[s].click(),o.open=!1);break;case"Escape":case"Tab":e.preventDefault(),o.open=!1;break;default:if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){const m=e.key.toLowerCase(),p=t.find(b=>b.textContent.trim().toLowerCase().startsWith(m));p&&i(t,t.indexOf(p))}}},itemClick:(r,n)=>{const e=n.event.target.closest('[data-publr-part="item"]');e&&!e.disabled&&e.getAttribute("aria-disabled")!=="true"&&(o.open=!1)}},setup:({el:r})=>(c=r,a=r.querySelector('[data-publr-part="content"]'),u.effect(()=>{if(o.open){if(requestAnimationFrame(()=>{if(!o.open||!a||!c)return;v(a,c,{placement:"bottom-start",offset:8});const n=f();n.length&&i(n,0)}),!l){const n=e=>{!c.contains(e.target)&&!(a&&a.contains(e.target))&&(o.open=!1)};document.addEventListener("mousedown",n,!0),l=()=>{document.removeEventListener("mousedown",n,!0),l=null}}}else d(),l&&l()}),()=>{l&&l()})}});
     \\
@@ -10295,7 +10589,7 @@ pub const switch_js =
 ;
 
 pub const tabs_js =
-    \\import{Publr as i}from"/static/scripts/publr.js";i.store("tabs",()=>{let s=null,u=null;const d=()=>u?[...u.querySelectorAll('[data-publr-part="trigger"]')].filter(a=>!a.disabled):[],c=a=>{if(!a||a.disabled)return;const r=a.dataset.publrTab;s.querySelectorAll('[data-publr-part="trigger"]').forEach(e=>{e.dataset.publrState="inactive",e.setAttribute("aria-selected","false"),e.tabIndex=-1}),s.querySelectorAll('[data-publr-part="content"]').forEach(e=>{e.dataset.publrState="inactive",e.hidden=!0}),a.dataset.publrState="active",a.setAttribute("aria-selected","true"),a.tabIndex=0;const t=s.querySelector(`[data-publr-part="content"][data-publr-tab="${r}"]`);t&&(t.dataset.publrState="active",t.hidden=!1)};return{actions:{tabClick:(a,r)=>{const t=r.event.target.closest('[data-publr-part="trigger"]');t&&!t.disabled&&c(t)},navKeys:(a,r)=>{const t=r.event,e=d(),l=e.indexOf(document.activeElement);if(l===-1)return;let n=l;switch(t.key){case"ArrowRight":t.preventDefault(),n=l<e.length-1?l+1:0;break;case"ArrowLeft":t.preventDefault(),n=l>0?l-1:e.length-1;break;case"Home":t.preventDefault(),n=0;break;case"End":t.preventDefault(),n=e.length-1;break;default:return}e[n].focus(),c(e[n])}},setup:({el:a})=>{if(s=a,u=a.querySelector('[data-publr-part="list"]'),!u)return;const r=d(),t=r.find(e=>e.dataset.publrTab===a.dataset.publrDefaultValue)||r[0];t&&c(t)}}});
+    \\import{Publr as i}from"/static/scripts/publr.js";i.store("ds-tabs",()=>{let s=null,u=null;const d=()=>u?[...u.querySelectorAll('[data-publr-part="trigger"]')].filter(a=>!a.disabled):[],c=a=>{if(!a||a.disabled)return;const r=a.dataset.publrTab;s.querySelectorAll('[data-publr-part="trigger"]').forEach(e=>{e.dataset.publrState="inactive",e.setAttribute("aria-selected","false"),e.tabIndex=-1}),s.querySelectorAll('[data-publr-part="content"]').forEach(e=>{e.dataset.publrState="inactive",e.hidden=!0}),a.dataset.publrState="active",a.setAttribute("aria-selected","true"),a.tabIndex=0;const t=s.querySelector(`[data-publr-part="content"][data-publr-tab="${r}"]`);t&&(t.dataset.publrState="active",t.hidden=!1)};return{actions:{tabClick:(a,r)=>{const t=r.event.target.closest('[data-publr-part="trigger"]');t&&!t.disabled&&c(t)},navKeys:(a,r)=>{const t=r.event,e=d(),l=e.indexOf(document.activeElement);if(l===-1)return;let n=l;switch(t.key){case"ArrowRight":t.preventDefault(),n=l<e.length-1?l+1:0;break;case"ArrowLeft":t.preventDefault(),n=l>0?l-1:e.length-1;break;case"Home":t.preventDefault(),n=0;break;case"End":t.preventDefault(),n=e.length-1;break;default:return}e[n].focus(),c(e[n])}},setup:({el:a})=>{if(s=a,u=a.querySelector('[data-publr-part="list"]'),!u)return;const r=d(),t=r.find(e=>e.dataset.publrTab===a.dataset.publrDefaultValue)||r[0];t&&c(t)}}});
     \\
 ;
 

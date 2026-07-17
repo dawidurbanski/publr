@@ -8,6 +8,7 @@ hover:bg-primary/5
 bottom-0
 space-y-0.5
 shadow-sm
+overflow-hidden
 -space-x-2
 justify-between
 local:dropdown
@@ -18,6 +19,7 @@ hover:bg-muted/20
 pr-1.5
 hover:text-primary
 -mr-1
+translate-x-0
 bg-review
 h-12
 shadow-lg
@@ -32,6 +34,7 @@ w-px
 duration-100
 ring-error/30
 -right-0.5
+z-40
 p-1.5
 py-1
 overflow-y-auto
@@ -44,6 +47,7 @@ shadow-md
 z-50
 mt-0.5
 w-72
+static
 p-8
 sort-trigger
 group-hover:text-primary-foreground/80
@@ -59,6 +63,7 @@ space-y-6
 outline-destructive
 p-0
 hover:bg-foreground/10
+sm:w-[calc(100%-5rem)]
 field-set
 border-2
 h-11
@@ -73,6 +78,7 @@ grid
 shadow-xs
 bg-blue-50
 bg-muted
+w-[calc(100%-3rem)]
 items-stretch
 inset-y-0
 fixed
@@ -101,6 +107,7 @@ border-success/30
 size-10
 min-w-0
 mt-3
+duration-200
 pb-0
 text-foreground
 max-w-sm
@@ -156,6 +163,7 @@ px-2
 local:tooltip
 mx-auto
 text-border
+status-bar
 border-destructive/50
 pl-3
 outline-ring
@@ -213,6 +221,7 @@ py-4
 pr-3
 ring-blue-200
 before:border-white/10
+top-12
 pb-2
 outline-none
 gap-6
@@ -258,6 +267,7 @@ border-success/50
 border-sidebar-border
 hover:text-sidebar-accent-foreground
 p-4
+xl:w-[calc(100%-13rem)]
 ring-card
 disabled:pointer-events-none
 tooltip-provider
@@ -298,6 +308,7 @@ bg-muted/30
 px-3
 py-px
 bg-input
+max-w-xl
 pr-2.5
 overflow-auto
 grid-cols-3
@@ -315,9 +326,9 @@ hover:border-gray-300
 h-6
 px-4
 bg-primary/10
-text-warning
-hover:border-primary/20
 py-3
+hover:border-primary/20
+text-warning
 absolute
 before:rounded-md
 transition-transform
@@ -337,10 +348,10 @@ text-primary-foreground
 bg-success/10
 py-1.5
 section-trigger
-group
-items-center
-group-data-[publr-state=open]:pointer-events-auto
 truncate
+items-center
+group
+group-data-[publr-state=open]:pointer-events-auto
 grid-cols-4
 peer-checked:translate-x-4
 group-data-[publr-state=selected]:opacity-100
@@ -388,9 +399,11 @@ mt-4
 hover:text-sidebar-foreground
 h-10
 pr-10
+h-96
 bg-review/10
 table-bulk-bar
 px-2.5
+bg-muted/20
 text-popover-foreground
 bg-primary
 w-3
@@ -412,6 +425,7 @@ space-y-3
 fieldset-email
 mt-auto
 rounded-xl
+translate-x-full
 text-center
 animate-spin
 local:radio-group
