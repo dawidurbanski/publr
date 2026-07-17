@@ -7610,6 +7610,14 @@ pub const sidebar = struct {
 ///   - SidebarMenuButton: clickable nav item (is_active)
 ///   - SidebarMenuBadge: count badge on an item
 ///
+/// Two-tier admin shell parts (icon rail + dense context nav):
+///   - SidebarRail: w-12 vertical icon rail (compose RailLink groups inside)
+///   - RailLink: size-8 icon link with active state + notification dot
+///   - SidebarNavItem: h-8 dense nav row with optional monospace count
+///   - SidebarNavTree: nested sub-tree container
+///   - SidebarNavSubItem: h-7 sub item whose left border forms the tree line
+///     (active segment turns primary)
+///
 /// Usage:
 ///   <Sidebar>
 ///       <SidebarHeader>
@@ -7737,7 +7745,7 @@ pub fn SidebarGroupLabel(__fw: anytype, __fp: anytype) !void {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SidebarGroupLabelProps, _props);
     if (props.collapsible) {
-        try writer.writeAll("<button data-publr-part=\"section-trigger\" class=\"flex w-full items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-sidebar-foreground ");
+        try writer.writeAll("<button data-publr-part=\"section-trigger\" class=\"flex w-full items-center justify-between px-2 pb-1.5 pt-2 text-3xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-sidebar-foreground ");
         try writer.writeAll(props.class);
         try writer.writeAll("\">\n");
         try writer.writeAll(props.children);
@@ -7745,7 +7753,7 @@ const props = runtime.withDefaults(SidebarGroupLabelProps, _props);
         try Icon(writer, .{ .name = .chevron_down,  .size = 14,  .class = "" });
         try writer.writeAll("\n</button>");
     } else {
-        try writer.writeAll("<span class=\"block px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider ");
+        try writer.writeAll("<span class=\"block px-2 pb-1.5 pt-2 text-3xs font-semibold uppercase tracking-[0.1em] text-muted-foreground ");
         try writer.writeAll(props.class);
         try writer.writeAll("\">\n");
         try writer.writeAll(props.children);
@@ -7852,6 +7860,174 @@ const props = runtime.withDefaults(SidebarMenuBadgeProps, _props);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n</span>");
+        }
+    }.b);
+}
+
+// ── Two-tier admin shell parts (icon rail + context nav) ──
+pub const IconName = root.icon.Name;
+/// SidebarRail — narrow vertical icon rail (first tier of the two-tier shell).
+/// Compose a logo slot and RailLink nav groups inside; push a trailing group
+/// to the bottom with `mt-auto` on its wrapper.
+pub const SidebarRailProps = struct {
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn SidebarRail(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(SidebarRailProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarRailProps, _props);
+    try writer.writeAll("<div data-publr-part=\"rail\" class=\"flex w-12 shrink-0 flex-col items-center border-r border-sidebar-border bg-card pb-2 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n</div>");
+        }
+    }.b);
+}
+
+/// RailLink — size-8 icon-only nav link for the rail. `show_dot` renders a
+/// warning notification dot on the top-right corner.
+pub const RailLinkProps = struct {
+    href: []const u8 = "#",
+    label: []const u8 = "",
+    icon: IconName = .grid,
+    is_active: bool = false,
+    show_dot: bool = false,
+    class: []const u8 = "",
+};
+pub fn RailLink(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(RailLinkProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(RailLinkProps, _props);
+    const base = "relative inline-flex size-8 items-center justify-center rounded-md border transition duration-150";
+    const state_class = if (props.is_active)
+        "border-primary bg-primary text-primary-foreground"
+    else
+        "border-transparent text-muted-foreground hover:border-primary/20 hover:bg-primary/5 hover:text-primary";
+    try writer.writeAll("<a data-publr-part=\"item\" href=\"");
+    try runtime.render(writer, props.href);
+    try writer.writeAll("\" aria-label=\"");
+    try runtime.render(writer, props.label);
+    try writer.writeAll("\" title=\"");
+    try runtime.render(writer, props.label);
+    try writer.writeAll("\" data-publr-state=\"");
+    try runtime.render(writer, if (props.is_active) "active" else "inactive");
+    try writer.writeAll("\" class=\"");
+    try writer.writeAll(base);
+    try writer.writeAll(" ");
+    try writer.writeAll(state_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try Icon(writer, .{ .name = props.icon,  .size = 16,  .class = "size-4" });
+    try writer.writeAll("\n");
+    if (props.show_dot) {
+        try writer.writeAll("<span aria-hidden=\"true\" class=\"absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-warning ring-2 ring-card\"></span>");
+    }
+    try writer.writeAll("\n</a>");
+        }
+    }.b);
+}
+
+/// SidebarNavItem — dense h-8 nav row (second tier). Optional trailing
+/// monospace count.
+pub const SidebarNavItemProps = struct {
+    href: []const u8 = "#",
+    label: []const u8 = "",
+    count: []const u8 = "",
+    count_class: []const u8 = "text-muted-foreground",
+    is_active: bool = false,
+    class: []const u8 = "",
+};
+pub fn SidebarNavItem(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(SidebarNavItemProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarNavItemProps, _props);
+    const base = "flex h-8 items-center rounded-md px-2 text-sm transition-colors";
+    const state_class = if (props.is_active)
+        "bg-sidebar-accent font-medium text-foreground"
+    else
+        "text-gray-600 hover:bg-sidebar-accent hover:text-foreground";
+    try writer.writeAll("<a data-publr-part=\"item\" href=\"");
+    try runtime.render(writer, props.href);
+    try writer.writeAll("\" data-publr-state=\"");
+    try runtime.render(writer, if (props.is_active) "active" else "inactive");
+    try writer.writeAll("\" class=\"");
+    try writer.writeAll(base);
+    try writer.writeAll(" ");
+    try writer.writeAll(state_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try runtime.render(writer, props.label);
+    try writer.writeAll("\n");
+    if (props.count.len > 0) {
+        try writer.writeAll("<span data-publr-part=\"count\" class=\"ml-auto font-mono text-2xs ");
+        try writer.writeAll(props.count_class);
+        try writer.writeAll("\">");
+        try runtime.render(writer, props.count);
+        try writer.writeAll("</span>");
+    }
+    try writer.writeAll("\n</a>");
+        }
+    }.b);
+}
+
+/// SidebarNavTree — nested sub-tree under a SidebarNavItem. Sub items carry
+/// their own left border, together forming the tree line.
+pub const SidebarNavTreeProps = struct {
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn SidebarNavTree(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(SidebarNavTreeProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarNavTreeProps, _props);
+    try writer.writeAll("<div data-publr-part=\"tree\" class=\"ml-2 mt-1.5 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n</div>");
+        }
+    }.b);
+}
+
+pub const SidebarNavSubItemProps = struct {
+    href: []const u8 = "#",
+    label: []const u8 = "",
+    count: []const u8 = "",
+    is_active: bool = false,
+    class: []const u8 = "",
+};
+pub fn SidebarNavSubItem(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(SidebarNavSubItemProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SidebarNavSubItemProps, _props);
+    const base = "flex h-7 items-center border-l-2 pl-3 text-xs transition-colors";
+    const state_class = if (props.is_active)
+        "border-primary font-medium text-foreground"
+    else
+        "border-border text-gray-600 hover:text-foreground";
+    try writer.writeAll("<a data-publr-part=\"item\" href=\"");
+    try runtime.render(writer, props.href);
+    try writer.writeAll("\" data-publr-state=\"");
+    try runtime.render(writer, if (props.is_active) "active" else "inactive");
+    try writer.writeAll("\" class=\"");
+    try writer.writeAll(base);
+    try writer.writeAll(" ");
+    try writer.writeAll(state_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    try runtime.render(writer, props.label);
+    try writer.writeAll("\n");
+    if (props.count.len > 0) {
+        try writer.writeAll("<span data-publr-part=\"count\" class=\"ml-auto pr-2 font-mono text-2xs text-muted-foreground\">");
+        try runtime.render(writer, props.count);
+        try writer.writeAll("</span>");
+    }
+    try writer.writeAll("\n</a>");
         }
     }.b);
 }

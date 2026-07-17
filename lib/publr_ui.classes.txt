@@ -4,6 +4,7 @@ my-2
 hover:bg-accent
 mt-6
 items-start
+hover:bg-primary/5
 bottom-0
 space-y-0.5
 shadow-sm
@@ -15,6 +16,7 @@ flex-col
 gap-2
 hover:bg-muted/20
 pr-1.5
+hover:text-primary
 -mr-1
 bg-review
 h-12
@@ -29,11 +31,13 @@ fieldset-name
 w-px
 duration-100
 ring-error/30
+-right-0.5
 p-1.5
 py-1
 overflow-y-auto
 my-4
 hover:bg-muted/30
+pb-1.5
 focus-visible:outline-offset-2
 ring-success/30
 shadow-md
@@ -59,6 +63,7 @@ field-set
 border-2
 h-11
 px-6
+tracking-[0.1em]
 list-none
 leading-5
 focus-visible:bg-destructive/10
@@ -107,12 +112,13 @@ bg-sidebar-accent
 opacity-50
 focus-visible:border-primary
 rotate-45
+pt-2
 uppercase
 p-3
 transition
 border-border
-focus-visible:ring-2
 text-2xs
+focus-visible:ring-2
 bg-border
 whitespace-nowrap
 disabled:hover:text-muted-foreground
@@ -134,6 +140,7 @@ ring-primary/30
 size-14
 px-3.5
 px-1.5
+text-gray-600
 w-full
 w-48
 mx-4
@@ -144,6 +151,7 @@ ease-out
 w-4
 hidden
 grid-cols-2
+border-l-2
 px-2
 local:tooltip
 mx-auto
@@ -176,11 +184,12 @@ option-label
 publr-dialog-title
 tracking-[0.08em]
 mb-1
-publr-dialog-description
+border-primary
 group-data-[publr-state=open]:opacity-100
+publr-dialog-description
 ring-input
-w-80
 p-2
+w-80
 min-w-48
 text-sidebar-accent-foreground
 p-6
@@ -204,6 +213,7 @@ py-4
 pr-3
 ring-blue-200
 before:border-white/10
+pb-2
 outline-none
 gap-6
 flex
@@ -214,6 +224,7 @@ flex-1
 text-primary
 h-7
 pt-0
+ring-2
 pointer-events-none
 border-error/30
 bg-transparent
@@ -247,6 +258,7 @@ border-success/50
 border-sidebar-border
 hover:text-sidebar-accent-foreground
 p-4
+ring-card
 disabled:pointer-events-none
 tooltip-provider
 ring-error
@@ -304,6 +316,7 @@ h-6
 px-4
 bg-primary/10
 text-warning
+hover:border-primary/20
 py-3
 absolute
 before:rounded-md
@@ -320,8 +333,8 @@ tracking-tight
 ease-linear
 pr-2
 h-9
-bg-success/10
 text-primary-foreground
+bg-success/10
 py-1.5
 section-trigger
 group
@@ -349,6 +362,7 @@ before:border
 inline-flex
 bulk-actions
 h-1.5
+local:ds-tabs
 inset-0
 ring-transparent
 ring-primary/20
@@ -363,9 +377,9 @@ h-3.5
 cursor-default
 text-muted-foreground
 local:switch
+mt-1.5
 border-transparent
 size-4
-local:tabs
 ml-2
 bg-background
 cursor-pointer
@@ -390,6 +404,7 @@ max-w-lg
 gap-0.5
 h-3
 text-success
+-top-0.5
 inline-block
 mx-3
 transition-opacity
