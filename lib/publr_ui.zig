@@ -7252,6 +7252,253 @@ const props = runtime.withDefaults(RadioGroupPreviewProps, _props);
 
 };
 
+pub const reference_field = struct {
+
+/// ReferenceField — relational entry pickers with drag-reorderable cards.
+///
+/// Sub-components:
+///   - ReferenceField: field root — hosts the `local:reference-field` store
+///     that owns drag/keyboard reordering (reference_field.js)
+///   - ReferenceCard: one linked entry (drag rail, type chip, status,
+///     hover-revealed remove, open row)
+///   - ReferenceAddCard: dashed "Add reference" placeholder
+///   - SingleReferenceField: one-entry variant — renders the card when
+///     `filled`, the add card otherwise (server-rendered state)
+///
+/// The store is per-field (local:) so multiple reference fields on a page
+/// don't interfere. It performs the DOM reorder (pointer drag with FLIP gap
+/// animation + ArrowUp/Down on the drag handle, Escape/cancel restores the
+/// original order) and emits CustomEvents (bubbling) that the page store
+/// listens to and persists:
+///
+///   publr:reference-reorder  detail: { order: [id, …] }
+///   publr:reference-remove   detail: { id, title }
+///   publr:reference-open     detail: { id, title, slug, type }
+///   publr:reference-add      detail: {}
+///
+/// Example:
+///   <ReferenceField label="Products" count="3">
+///       <ReferenceCard id="p1" title="Aurora Desk Lamp" slug="/products/aurora" type_label="Product" tone=.published />
+///       <ReferenceCard id="p2" title="Drift Chair" slug="/products/drift" type_label="Product" tone=.draft />
+///       <ReferenceAddCard />
+///   </ReferenceField>
+pub const Icon = root.icon.Icon;
+pub const IconName = root.icon.Name;
+pub const Status = root.status.Status;
+pub const StatusTone = root.status.Tone;
+pub const Button = root.button.Button;
+pub const ReferenceFieldProps = struct {
+    label: []const u8 = "",
+    // Optional count shown next to the label (e.g. "3").
+    count: []const u8 = "",
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn ReferenceField(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(ReferenceFieldProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(ReferenceFieldProps, _props);
+    try writer.writeAll("<div data-p-store=\"local:reference-field\" data-publr-component=\"reference-field\" class=\"");
+    try runtime.render(writer, props.class);
+    try writer.writeAll("\">\n");
+    if (props.label.len > 0) {
+        try writer.writeAll("<div data-publr-part=\"label-row\" class=\"mb-2 flex items-baseline\">\n<span class=\"text-xs font-semibold text-foreground\">");
+        try runtime.render(writer, props.label);
+        try writer.writeAll("</span>\n");
+        if (props.count.len > 0) {
+            try writer.writeAll("<span data-publr-part=\"count\" class=\"ml-2 font-mono text-2xs text-muted-foreground\">");
+            try runtime.render(writer, props.count);
+            try writer.writeAll("</span>");
+        }
+        try writer.writeAll("\n</div>");
+    }
+    try writer.writeAll("\n<div data-publr-part=\"list\" class=\"space-y-2\" data-p-on=\"dragover.prevent:trackDrag;drop.prevent:drop\" data-reference-list=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\">\n");
+    try writer.writeAll(props.children);
+    try writer.writeAll("\n</div>\n</div>");
+        }
+    }.b);
+}
+
+pub const ReferenceCardProps = struct {
+    id: []const u8 = "",
+    title: []const u8 = "",
+    slug: []const u8 = "",
+    type_label: []const u8 = "Entry",
+    icon: IconName = .package,
+    tone: StatusTone = .published,
+    class: []const u8 = "",
+};
+pub fn ReferenceCard(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(ReferenceCardProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(ReferenceCardProps, _props);
+    try writer.writeAll("<article data-publr-component=\"reference\" data-publr-state=\"idle\" data-reference-card=\"");
+    try runtime.render(writer, props.id);
+    try writer.writeAll("\" data-reference-id=\"");
+    try runtime.render(writer, props.id);
+    try writer.writeAll("\" data-reference-title=\"");
+    try runtime.render(writer, props.title);
+    try writer.writeAll("\" data-reference-slug=\"");
+    try runtime.render(writer, props.slug);
+    try writer.writeAll("\" data-reference-type=\"");
+    try runtime.render(writer, props.type_label);
+    try writer.writeAll("\" class=\"group flex overflow-hidden rounded-lg border border-border bg-card shadow-xs transition-[border-color,box-shadow] duration-150 hover:border-gray-300 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n<div data-publr-part=\"drag-control\" class=\"flex w-10 shrink-0 items-center justify-center border-r border-border bg-muted/20\">\n<button type=\"button\" draggable=\"true\" aria-keyshortcuts=\"ArrowUp ArrowDown\" class=\"flex h-10 w-8 cursor-grab flex-col items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing\" data-p-on=\"dragstart:startDrag;dragend:endDrag;keydown.up.prevent:moveUp;keydown.down.prevent:moveDown\" aria-label=\"Drag ");
+    try runtime.escape(writer, props.title);
+    try writer.writeAll(" to reorder. Use arrow keys to move it.\" data-reference-id=\"");
+    try runtime.render(writer, props.id);
+    try writer.writeAll("\">\n");
+    try Icon(writer, .{ .name = .more,  .size = 16,  .class = "size-4 shrink-0" });
+    try writer.writeAll("\n");
+    try Icon(writer, .{ .name = .more,  .size = 16,  .class = "-mt-2 size-4 shrink-0" });
+    try writer.writeAll("\n</button>\n</div>\n<div class=\"min-w-0 flex-1\">\n<div data-publr-part=\"header\" class=\"flex h-10 items-center gap-2 border-b border-border bg-muted/20 px-3\">\n<span class=\"inline-flex size-6 shrink-0 items-center justify-center rounded bg-review/10 text-review\">\n");
+    try Icon(writer, .{ .name = props.icon,  .size = 14,  .class = "size-3.5" });
+    try writer.writeAll("\n</span>\n<span class=\"text-xs font-medium text-muted-foreground\">");
+    try runtime.render(writer, props.type_label);
+    try writer.writeAll("</span>\n<span class=\"ml-auto\">");
+    try Status(writer, .{ .tone = props.tone });
+    try writer.writeAll("</span>\n<button type=\"button\" class=\"-mr-1 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100\" data-p-on=\"click:remove\" aria-label=\"Remove ");
+    try runtime.escape(writer, props.title);
+    try writer.writeAll("\" data-reference-id=\"");
+    try runtime.render(writer, props.id);
+    try writer.writeAll("\">\n");
+    try Icon(writer, .{ .name = .trash,  .size = 16,  .class = "size-4" });
+    try writer.writeAll("\n</button>\n</div>\n<button type=\"button\" class=\"flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-none px-4 py-4 text-left hover:bg-muted/30\" data-p-on=\"click:open\" data-reference-id=\"");
+    try runtime.render(writer, props.id);
+    try writer.writeAll("\">\n<span class=\"min-w-0 flex-1\">\n<strong class=\"block truncate text-sm font-semibold text-foreground\" data-reference-card-title=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\">");
+    try runtime.render(writer, props.title);
+    try writer.writeAll("</strong>\n<span class=\"mt-1 block truncate text-xs text-muted-foreground\" data-reference-card-slug=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\">");
+    try runtime.render(writer, props.slug);
+    try writer.writeAll("</span>\n</span>\n");
+    try Icon(writer, .{ .name = .chevron_right,  .size = 16,  .class = "size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" });
+    try writer.writeAll("\n</button>\n</div>\n</article>");
+        }
+    }.b);
+}
+
+pub const ReferenceAddCardProps = struct {
+    label: []const u8 = "Add reference",
+    class: []const u8 = "",
+};
+pub fn ReferenceAddCard(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(ReferenceAddCardProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(ReferenceAddCardProps, _props);
+    try writer.writeAll("<div data-publr-part=\"add-reference-card\" class=\"flex h-[7.125rem] items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 transition-colors hover:border-gray-300 hover:bg-muted/20 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n<button type=\"button\" class=\"group inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-card px-2.5 text-xs font-semibold text-foreground shadow-xs transition duration-150 hover:bg-accent active:translate-y-px\" data-p-on=\"click:add\">\n");
+    try Icon(writer, .{ .name = .plus,  .size = 16,  .class = "size-4 shrink-0" });
+    try writer.writeAll("\n<span class=\"px-0.5\">");
+    try runtime.render(writer, props.label);
+    try writer.writeAll("</span>\n</button>\n</div>");
+        }
+    }.b);
+}
+
+/// SingleReferenceField — a one-entry reference slot. Server-rendered state:
+/// pass `filled` to show the card; otherwise the dashed add card renders.
+pub const SingleReferenceFieldProps = struct {
+    id: []const u8 = "",
+    title: []const u8 = "",
+    slug: []const u8 = "",
+    type_label: []const u8 = "Entry",
+    icon: IconName = .package,
+    tone: StatusTone = .published,
+    filled: bool = false,
+    add_label: []const u8 = "Add reference",
+    class: []const u8 = "",
+};
+pub fn SingleReferenceField(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(SingleReferenceFieldProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SingleReferenceFieldProps, _props);
+    try writer.writeAll("<div data-p-store=\"local:reference-field\" data-publr-component=\"single-reference-field\" class=\"");
+    try runtime.render(writer, props.class);
+    try writer.writeAll("\">\n<div data-publr-part=\"list\" data-reference-list=\"");
+    try runtime.render(writer, true);
+    try writer.writeAll("\">\n");
+    if (props.filled) {
+        try writer.writeAll("<article data-publr-component=\"reference\" data-publr-state=\"idle\" class=\"group overflow-hidden rounded-lg border border-border bg-card shadow-xs transition-[border-color,box-shadow] duration-150 hover:border-gray-300\" data-reference-card=\"");
+        try runtime.render(writer, props.id);
+        try writer.writeAll("\" data-reference-id=\"");
+        try runtime.render(writer, props.id);
+        try writer.writeAll("\" data-reference-title=\"");
+        try runtime.render(writer, props.title);
+        try writer.writeAll("\" data-reference-slug=\"");
+        try runtime.render(writer, props.slug);
+        try writer.writeAll("\" data-reference-type=\"");
+        try runtime.render(writer, props.type_label);
+        try writer.writeAll("\">\n<div data-publr-part=\"header\" class=\"flex h-10 items-center gap-2 border-b border-border bg-muted/20 px-3\">\n<span class=\"inline-flex size-6 shrink-0 items-center justify-center rounded bg-review/10 text-review\">\n");
+        try Icon(writer, .{ .name = props.icon,  .size = 14,  .class = "size-3.5" });
+        try writer.writeAll("\n</span>\n<span class=\"text-xs font-medium text-muted-foreground\">");
+        try runtime.render(writer, props.type_label);
+        try writer.writeAll("</span>\n<span class=\"ml-auto\">");
+        try Status(writer, .{ .tone = props.tone });
+        try writer.writeAll("</span>\n<button type=\"button\" class=\"-mr-1 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100\" data-p-on=\"click:remove\" aria-label=\"Remove ");
+        try runtime.escape(writer, props.title);
+        try writer.writeAll("\" data-reference-id=\"");
+        try runtime.render(writer, props.id);
+        try writer.writeAll("\">\n");
+        try Icon(writer, .{ .name = .trash,  .size = 16,  .class = "size-4" });
+        try writer.writeAll("\n</button>\n</div>\n<button type=\"button\" class=\"flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-none px-4 py-4 text-left hover:bg-muted/30\" data-p-on=\"click:open\" data-reference-id=\"");
+        try runtime.render(writer, props.id);
+        try writer.writeAll("\">\n<span class=\"min-w-0 flex-1\">\n<strong class=\"block truncate text-sm font-semibold text-foreground\">");
+        try runtime.render(writer, props.title);
+        try writer.writeAll("</strong>\n<span class=\"mt-1 block truncate text-xs text-muted-foreground\">");
+        try runtime.render(writer, props.slug);
+        try writer.writeAll("</span>\n</span>\n");
+        try Icon(writer, .{ .name = .chevron_right,  .size = 16,  .class = "size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" });
+        try writer.writeAll("\n</button>\n</article>");
+    } else {
+        try ReferenceAddCard(writer, .{ .label = props.add_label });
+    }
+    try writer.writeAll("\n</div>\n</div>");
+        }
+    }.b);
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const ReferenceFieldDemoProps = struct {
+    demo: enum { list, single_filled, single_empty } = .list,
+};
+pub fn ReferenceFieldDemo(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(ReferenceFieldDemoProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(ReferenceFieldDemoProps, _props);
+    if (props.demo == .list) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
+            _ = &_children_w_0;
+            try _children_w_0.writeAll("\n");
+            try ReferenceCard(_children_w_0, .{ .id = "p1",  .title = "Aurora Desk Lamp",  .slug = "/products/aurora-desk-lamp",  .type_label = "Product",  .tone = .published });
+            try _children_w_0.writeAll("\n");
+            try ReferenceCard(_children_w_0, .{ .id = "p2",  .title = "Drift Lounge Chair",  .slug = "/products/drift-lounge-chair",  .type_label = "Product",  .tone = .draft });
+            try _children_w_0.writeAll("\n");
+            try ReferenceAddCard(_children_w_0, .{ });
+            try _children_w_0.writeAll("\n");
+            try ReferenceField(writer, .{ .label = "Products",  .count = "2", .children = _children_buf_0.items });
+        }
+    } else if (props.demo == .single_filled) {
+        try SingleReferenceField(writer, .{ .id = "b1",  .title = "Northwind Brand",  .slug = "/brands/northwind",  .type_label = "Brand",  .icon = .bookmark,  .tone = .published,  .filled = true });
+    } else {
+        try SingleReferenceField(writer, .{ .add_label = "Add brand" });
+    }
+        }
+    }.b);
+}
+
+};
+
 pub const section_title = struct {
 
 /// SectionTitle — dense admin section header row.
@@ -10570,6 +10817,11 @@ pub const position_js =
 
 pub const radio_group_js =
     \\import{Publr as u}from"/static/scripts/publr.js";u.store("radio-group",()=>{let r=null;const a=()=>r?[...r.querySelectorAll('[data-publr-part="item"]')]:[],c=()=>{a().forEach(t=>{const e=t.querySelector('input[type="radio"]');e&&(t.dataset.publrState=e.checked?"checked":"unchecked")})};return{actions:{sync:c},setup:({el:t})=>{r=t;const e=t.dataset.publrName||"";e&&a().forEach(n=>{const o=n.querySelector('input[type="radio"]');o&&!o.name&&(o.name=e)}),c()}}});
+    \\
+;
+
+pub const reference_field_js =
+    \\import{Publr as B}from"/static/scripts/publr.js";B.store("reference-field",()=>{let h=null,i=null,o=null,d=[],s=-1,c="",b=[],p=!1;const m=()=>[...i.querySelectorAll("[data-reference-card]")].filter(e=>getComputedStyle(e).display!=="none"),g=()=>[...i.querySelectorAll("[data-reference-card]")].map(e=>e.dataset.referenceCard),f=(e,r)=>h.dispatchEvent(new CustomEvent(e,{detail:r,bubbles:!0})),u=e=>i.querySelector(`[data-reference-card="${CSS.escape(e)}"]`),y=()=>{d=m().map(e=>{const r=e.getBoundingClientRect();return r.top+window.scrollY+r.height/2})},x=e=>{if(!c||e===s)return;const r=u(c),t=m()[e];if(!r||!t)return;const n=t.getBoundingClientRect(),a=document.createComment("reference-gap");r.before(a),t.before(r),a.replaceWith(t);const l=t.getBoundingClientRect();t.animate([{transform:`translate(${n.left-l.left}px, ${n.top-l.top}px)`},{transform:"translate(0, 0)"}],{duration:180,easing:"cubic-bezier(0.2, 0, 0, 1)"}),s=e,y()},C=()=>{const e=c?u(c):null;e&&(e.dataset.publrState="idle",e.classList.remove("border-dashed","bg-muted/30"),[...e.children].forEach(r=>r.classList.remove("invisible"))),o==null||o.remove(),o=null,d=[],s=-1,c="",b=[],p=!1},I=e=>{for(const r of e){const t=u(r);t&&i.append(t)}},S=(e,r)=>{const t=m(),n=t.find(v=>v.dataset.referenceCard===e),a=t.indexOf(n),l=t[a+r];!n||!l||(r<0?i.insertBefore(n,l):i.insertBefore(l,n),f("publr:reference-reorder",{order:g()}))};return{actions:{startDrag(e,{event:r,el:t}){c=e.referenceId,b=g(),p=!1;const n=t.closest("[data-reference-card]");y(),s=m().indexOf(n),r.dataTransfer.effectAllowed="move",r.dataTransfer.setData("text/plain",c);const a=n.getBoundingClientRect();o==null||o.remove(),o=n.cloneNode(!0),o.setAttribute("aria-hidden","true"),o.classList.add("fixed","-left-[9999px]","-top-[9999px]","shadow-lg"),o.style.width=`${a.width}px`,document.body.append(o),r.dataTransfer.setDragImage(o,r.clientX-a.left,r.clientY-a.top),requestAnimationFrame(()=>{n.dataset.publrState="dragging",n.classList.add("border-dashed","bg-muted/30"),[...n.children].forEach(l=>l.classList.add("invisible"))})},trackDrag(e,{event:r}){if(!c||!d.length||s<0)return;r.dataTransfer.dropEffect="move";const t=r.clientY+window.scrollY;let n=0;for(let a=1;a<d.length;a+=1)Math.abs(t-d[a])<Math.abs(t-d[n])&&(n=a);if(n>s){const a=(d[s]+d[s+1])/2;if(t<a+8)return}else if(n<s){const a=(d[s]+d[s-1])/2;if(t>a-8)return}x(n)},drop(){c&&(p=!0,f("publr:reference-reorder",{order:g()}),C())},endDrag(){c&&(p||I(b),C())},moveUp(e){S(e.referenceId,-1)},moveDown(e){S(e.referenceId,1)},remove(e,{event:r}){r.stopPropagation();const t=u(e.referenceId);f("publr:reference-remove",{id:e.referenceId,title:(t==null?void 0:t.dataset.referenceTitle)??""})},open(e){const r=u(e.referenceId);r&&f("publr:reference-open",{id:e.referenceId,title:r.dataset.referenceTitle??"",slug:r.dataset.referenceSlug??"",type:r.dataset.referenceType??""})},add(){f("publr:reference-add",{})}},setup:({el:e})=>{h=e,i=e.querySelector("[data-reference-list]")||e}}});
     \\
 ;
 

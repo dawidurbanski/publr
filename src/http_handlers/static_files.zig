@@ -50,6 +50,7 @@ fn composePublrCss(allocator: std.mem.Allocator, runtime_delta: []const u8) ![]u
 const PublrCheckboxJs = static.Asset("publr-checkbox.js", publr_ui.checkbox_js);
 const PublrDialogJs = static.Asset("publr-dialog.js", publr_ui.dialog_js);
 const PublrDrawerJs = static.Asset("publr-drawer.js", publr_ui.drawer_js);
+const PublrReferenceFieldJs = static.Asset("publr-reference-field.js", publr_ui.reference_field_js);
 const PublrDropdownJs = static.Asset("publr-dropdown.js", publr_ui.dropdown_js);
 const PublrPopoverJs = static.Asset("publr-popover.js", publr_ui.popover_js);
 const PublrRadioGroupJs = static.Asset("publr-radio-group.js", publr_ui.radio_group_js);
@@ -90,6 +91,7 @@ const asset_map = .{
     .{ "scripts/publr-checkbox.js", AssetEntry{ .asset = PublrCheckboxJs, .disk_path = null } },
     .{ "scripts/publr-dialog.js", AssetEntry{ .asset = PublrDialogJs, .disk_path = null } },
     .{ "scripts/publr-drawer.js", AssetEntry{ .asset = PublrDrawerJs, .disk_path = null } },
+    .{ "scripts/publr-reference-field.js", AssetEntry{ .asset = PublrReferenceFieldJs, .disk_path = null } },
     .{ "scripts/publr-dropdown.js", AssetEntry{ .asset = PublrDropdownJs, .disk_path = null } },
     .{ "scripts/publr-popover.js", AssetEntry{ .asset = PublrPopoverJs, .disk_path = null } },
     .{ "scripts/publr-radio-group.js", AssetEntry{ .asset = PublrRadioGroupJs, .disk_path = null } },

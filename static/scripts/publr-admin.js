@@ -36,6 +36,7 @@ import '/static/scripts/publr-tooltip.js';
 import '/static/scripts/publr-checkbox.js';
 import '/static/scripts/publr-dialog.js';
 import '/static/scripts/publr-drawer.js';
+import '/static/scripts/publr-reference-field.js';
 import '/static/scripts/publr-dropdown.js';
 import '/static/scripts/publr-select.js';
 import '/static/scripts/publr-popover.js';
