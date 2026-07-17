@@ -12,7 +12,7 @@
 //!
 //! Action names registered: `content.create`, `content.update`, `content.delete`,
 //! `content.publish`, `content.unpublish`, `content.autosave`, `content.discard`,
-//! `content.restore`.
+//! `content.restore`, `content.preview`.
 
 const std = @import("std");
 const mw = @import("middleware");
@@ -20,6 +20,7 @@ const actions = @import("actions");
 const schema_registry = @import("schema_registry");
 const content_type_mod = @import("content_type");
 const content = @import("plugin_content");
+const css_jit = @import("css_jit");
 const tpl = @import("tpl");
 const views = @import("views");
 
@@ -48,6 +49,25 @@ pub fn registerDefaults() void {
     actions.register("content.autosave", handleAutosave);
     actions.register("content.discard", handleDiscard);
     actions.register("content.restore", handleRestore);
+    actions.register("content.preview", handlePreview);
+}
+
+/// `content.preview` — render posted entry content as a standalone page
+/// through the site's REAL CSS pipeline: the theme stylesheet
+/// (`/theme/theme.css`: preflight + build-time utilities + theme tokens)
+/// plus a runtime JIT compile of the posted content's own class universe
+/// (unsaved edits may use classes the build scan never saw). Used by the
+/// block editor's topbar Preview (new tab, form POST) — no entry write.
+fn handlePreview(ctx: *Context) !void {
+    const html = ctx.formValue("content") orelse "";
+    const utilities = css_jit.compileFromHtml(ctx.allocator, html) catch |err| blk: {
+        std.log.warn("content.preview: css compile failed: {s}", .{@errorName(err)});
+        break :blk "";
+    };
+    ctx.html(tpl.render(views.admin.content.preview.ContentPreview, .{.{
+        .utilities_css = utilities,
+        .content = html,
+    }}));
 }
 
 /// Resolve the content type referenced by the form's `type` field.

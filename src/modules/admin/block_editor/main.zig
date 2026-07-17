@@ -162,10 +162,10 @@ const boot_js =
     \\  // Media adapter — the editor's upload/browse seam, pointed at the CMS
     \\  // media library. upload() posts the standard multipart action form
     \\  // (media.upload_json returns the stored record as JSON; _csrf rides as
-    \\  // a multipart field). browse() opens the admin's media picker modal
-    \\  // via window.PublrAdmin.pickMedia — looked up lazily because
-    \\  // /static/interact/index.js is a deferred module that may load after
-    \\  // this inline script runs.
+    \\  // a multipart field). browse() opens the admin's media picker (the
+    \\  // PublrJS store in /static/scripts/media-picker.js) via
+    \\  // window.PublrAdmin.pickMedia — looked up lazily because that module
+    \\  // is deferred and may load after this inline script runs.
     \\  function mediaValueFrom(m){
     \\    return {
     \\      src: m.url,
@@ -199,7 +199,7 @@ const boot_js =
     \\
     \\  // Mirror both serializations into the hidden inputs on every
     \\  // committed change (onChange fires on a microtask after the model
-    \\  // settles — no polling). The synthetic input event feeds admin.js's
+    \\  // settles — no polling). The synthetic input event feeds the entry-editor
     \\  // dirty-detection so Publish enables.
     \\  function sync(editor){
     \\    editingInput.value = editor.serialize();
@@ -222,6 +222,28 @@ const boot_js =
     \\    // live sync via shell.setAppearance below.
     \\    appearance: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
     \\    onChange: sync,
+    \\    // CMS-driven preview: POST the current (possibly unsaved) content to
+    \\    // the content.preview action, which renders it through the site's
+    \\    // real CSS pipeline (theme.css + runtime JIT). target=_blank keeps
+    \\    // the editor page intact; nothing is written to the entry.
+    \\    preview: function(editor){
+    \\      var f = document.createElement('form');
+    \\      f.method = 'POST';
+    \\      f.action = '/admin/action';
+    \\      f.target = '_blank';
+    \\      function add(n, v){
+    \\        var i = document.createElement('input');
+    \\        i.type = 'hidden'; i.name = n; i.value = v;
+    \\        f.appendChild(i);
+    \\      }
+    \\      add('action', 'content.preview');
+    \\      var csrfInput = form.querySelector('input[name="_csrf"]');
+    \\      if (csrfInput) add('_csrf', csrfInput.value);
+    \\      add('content', editor.serialize({ pipeline: 'data' }));
+    \\      document.body.appendChild(f);
+    \\      f.submit();
+    \\      f.remove();
+    \\    },
     \\    actions: [
     \\      { id: 'save', label: 'Save', primary: true, title: 'Save (content.update)',
     \\        onClick: function(){ form.requestSubmit(); } },
@@ -232,7 +254,7 @@ const boot_js =
     \\        mount: function(el){
     \\          // Adopt the admin's server-rendered entry sidebar wholesale:
     \\          // status, publish/discard, sidebar fields, version history,
-    \\          // releases. Everything keeps working — admin.js delegates
+    \\          // releases. Everything keeps working — the entry-editor store delegates
     \\          // events at the document level and the buttons target
     \\          // form="entry-form".
     \\          var aside = document.querySelector('.admin-card main + aside');
@@ -251,7 +273,7 @@ const boot_js =
     \\  }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     \\
     \\  // Belt-and-braces: final sync before submit (capture phase, before
-    \\  // admin.js's handlers read the inputs).
+    \\  // the entry-editor store reads the inputs).
     \\  form.addEventListener('submit', function(){ sync(shell.editor); }, true);
     \\})();
 ;

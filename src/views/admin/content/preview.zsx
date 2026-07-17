@@ -1,0 +1,30 @@
+// Standalone content preview page (`content.preview` action).
+//
+// Renders posted (possibly unsaved) entry content through the site's real
+// CSS pipeline: the theme stylesheet (preflight + build-time utilities +
+// theme tokens) plus a runtime JIT compile of the posted content's own
+// class universe (utilities_css) — unsaved edits may carry classes the
+// build-time scan never saw. Opened in a new tab by the block editor's
+// topbar Preview; nothing is written to the entry.
+
+pub fn ContentPreview(props: struct {
+    utilities_css: []const u8,
+    content: []const u8,
+}) {
+    <!DOCTYPE html>
+    <html lang="en">
+        <head>
+            <meta charset="utf-8" />
+            <meta
+                name="viewport"
+                content="width=device-width, initial-scale=1"
+            />
+            <title>Preview</title>
+            <link rel="stylesheet" href="/theme/theme.css" />
+            <style>{@raw props.utilities_css}</style>
+        </head>
+        <body>
+            {@raw props.content}
+        </body>
+    </html>
+}

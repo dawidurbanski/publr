@@ -51,14 +51,15 @@ vendored files in place.**
   seams (`actions`, `panels`) — plus the inline chrome (floating toolbar,
   slash picker, `+` inserter). `editor.css` ships no preflight — it never
   resets the host page; the shell skin is scoped to `#editor-shell`.
-- The vendored PublrJS runtime. The IIFE sets `window.Publr` on load. Note:
-  despite the name, the admin's `/static/publr-core.js` is NOT PublrJS (it is
-  a ~1 KB design-system widget initializer) — today the editor bundle is the
-  only PublrJS on the edit page, so bundling it is correct. The moment the
-  admin ships the real runtime (epic #146), switch the vendoring to the
-  editor's HOST build (`npm run build:host` → `publr-editor.host.iife.js`),
-  which excludes PublrJS and delegates to `window.Publr` — the opt-out
-  exists exactly for that case.
+- The vendored PublrJS runtime. The IIFE sets `window.Publr` on load. NOTE:
+  the condition this bundling was predicated on has flipped — the admin
+  layouts now ship the real runtime (`/static/scripts/publr-admin.js` →
+  `/static/scripts/publr.js`), so edit pages carry two PublrJS copies. Switch the
+  vendoring to the editor's HOST build (`npm run build:host` →
+  `publr-editor.host.iife.js`), which excludes PublrJS and delegates to
+  `window.Publr` — the opt-out exists exactly for this case. (The
+  `/static/publr-core.js` widget initializer this note used to contrast
+  against is retired, #471.)
 
 ## What it deliberately does NOT contain
 

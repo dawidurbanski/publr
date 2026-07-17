@@ -1008,6 +1008,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "ds_theme", .module = ds_theme_zon },
         },
     });
+    // content.preview JIT-compiles posted content's classes (module created
+    // earlier in the file; the import graph doesn't care about file order).
+    content_actions_module.addImport("css_jit", css_jit_module);
+
     // Runtime CSS override holder — populated by the HMR loop after a
     // fast-path swap, read by the static handler when serving publr.css.
     // Its own module so writer (hmr_loop) and reader (static handler in
