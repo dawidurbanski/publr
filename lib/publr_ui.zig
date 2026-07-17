@@ -8207,6 +8207,91 @@ const props = runtime.withDefaults(StackProps, _props);
 
 };
 
+pub const status = struct {
+
+/// Status — dot-prefixed workflow status text.
+///
+/// Compact inline indicator for entry workflow states: a small tone-colored
+/// dot followed by the state label in matching text. Tones map to semantic
+/// tokens (never raw palette scales) so they track light/dark themes:
+///
+///   - published → success
+///   - review    → review (violet)
+///   - draft     → muted
+///   - scheduled → warning
+///   - changed   → primary
+///
+/// The label defaults to the capitalized tone name; pass `label` to override
+/// (e.g. localized or custom copy).
+///
+/// Emits the badge data-contract (`data-publr-color="status"`) plus
+/// `data-publr-tone` for styling hooks — matches the POC reference markup.
+///
+/// Example:
+///   <Status tone=.published />
+///   <Status tone=.review label="In review" />
+pub const Tone = enum { published, review, draft, scheduled, changed };
+pub const StatusProps = struct {
+    tone: Tone = .draft,
+    label: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn Status(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(StatusProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(StatusProps, _props);
+    const text_class = switch (props.tone) {
+        .published => "text-success",
+        .review => "text-review",
+        .draft => "text-muted-foreground",
+        .scheduled => "text-warning",
+        .changed => "text-primary",
+    };
+    const dot_class = switch (props.tone) {
+        .published => "bg-success",
+        .review => "bg-review",
+        .draft => "bg-gray-400",
+        .scheduled => "bg-warning",
+        .changed => "bg-primary",
+    };
+    const derived_label = switch (props.tone) {
+        .published => "Published",
+        .review => "Review",
+        .draft => "Draft",
+        .scheduled => "Scheduled",
+        .changed => "Changed",
+    };
+    const resolved_label = if (props.label.len > 0) props.label else derived_label;
+    try writer.writeAll("<span data-publr-component=\"badge\" data-publr-color=\"status\" data-publr-type=\"badge\" data-publr-size=\"sm\" data-publr-tone=\"");
+    try runtime.render(writer, props.tone);
+    try writer.writeAll("\" class=\"inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ");
+    try writer.writeAll(text_class);
+    try writer.writeAll(" ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n<span aria-hidden=\"true\" class=\"size-1.5 shrink-0 rounded-full ");
+    try writer.writeAll(dot_class);
+    try writer.writeAll("\"></span>\n");
+    try runtime.render(writer, resolved_label);
+    try writer.writeAll("\n</span>");
+        }
+    }.b);
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const StatusDemoProps = struct {
+    tone: Tone = .published,
+};
+pub fn StatusDemo(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(StatusDemoProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(StatusDemoProps, _props);
+    try Status(writer, .{ .tone = props.tone });
+        }
+    }.b);
+}
+
+};
+
 pub const @"switch" = struct {
 
 /// Switch — toggle control with label.
