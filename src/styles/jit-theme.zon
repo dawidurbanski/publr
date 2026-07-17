@@ -45,6 +45,8 @@
         .{ .name = "color-success-foreground", .value = "var(--success-foreground)" },
         .{ .name = "color-warning", .value = "var(--warning)" },
         .{ .name = "color-warning-foreground", .value = "var(--warning-foreground)" },
+        .{ .name = "color-review", .value = "var(--review)" },
+        .{ .name = "color-review-foreground", .value = "var(--review-foreground)" },
 
         // ── Borders & focus rings ─────────────────────────────────────
         .{ .name = "color-border", .value = "var(--border)" },
@@ -96,5 +98,21 @@
         .{ .name = "color-blue-800", .value = "oklch(0.32 0.13 250)" },
         .{ .name = "color-blue-900", .value = "oklch(0.24 0.10 250)" },
         .{ .name = "color-blue-950", .value = "oklch(0.18 0.07 250)" },
+
+        // ── Violet scale (292 hue, aligned to --review at 500) ────────
+        // Review/workflow accent + decorative chips (reference type,
+        // avatar secondary tone). Same lightness ladder as the blue
+        // scale; slightly higher chroma so violet still reads as violet.
+        .{ .name = "color-violet-50", .value = "oklch(0.97 0.02 292)" },
+        .{ .name = "color-violet-100", .value = "oklch(0.93 0.04 292)" },
+        .{ .name = "color-violet-200", .value = "oklch(0.86 0.07 292)" },
+        .{ .name = "color-violet-300", .value = "oklch(0.78 0.11 292)" },
+        .{ .name = "color-violet-400", .value = "oklch(0.66 0.15 292)" },
+        .{ .name = "color-violet-500", .value = "oklch(0.55 0.19 292)" },
+        .{ .name = "color-violet-600", .value = "oklch(0.48 0.19 292)" },
+        .{ .name = "color-violet-700", .value = "oklch(0.40 0.17 292)" },
+        .{ .name = "color-violet-800", .value = "oklch(0.32 0.14 292)" },
+        .{ .name = "color-violet-900", .value = "oklch(0.24 0.11 292)" },
+        .{ .name = "color-violet-950", .value = "oklch(0.18 0.08 292)" },
     },
 }
