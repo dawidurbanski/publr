@@ -95,18 +95,6 @@ fn runServe(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !void 
             };
         } else if (std.mem.eql(u8, arg, "--dev") or std.mem.eql(u8, arg, "-d")) {
             dev_mode = true;
-        } else if (std.mem.eql(u8, arg, "--watch") or std.mem.eql(u8, arg, "-w")) {
-            // task-08: --watch is deprecated. The new --dev runtime
-            // bundles the watcher, the HMR fast path, the rebuild
-            // trigger, and the dev middleware behind a single flag —
-            // there's no longer anything --watch can do that --dev
-            // doesn't. Alias to --dev with a one-line warning so the
-            // muscle-memory still works for one release cycle.
-            std.debug.print(
-                "[publr] --watch is deprecated; use --dev (which now includes the watch behavior plus HMR fast path)\n",
-                .{},
-            );
-            dev_mode = true;
         } else {
             std.debug.print("Unknown option: {s}\n", .{arg});
             return;
@@ -271,10 +259,19 @@ fn runPreview(args: *std.process.ArgIterator) !void {
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--port") or std.mem.eql(u8, arg, "-p")) {
-            const v = args.next() orelse { std.debug.print("Error: --port requires a value\n", .{}); return; };
-            port = std.fmt.parseInt(u16, v, 10) catch { std.debug.print("Error: invalid port\n", .{}); return; };
+            const v = args.next() orelse {
+                std.debug.print("Error: --port requires a value\n", .{});
+                return;
+            };
+            port = std.fmt.parseInt(u16, v, 10) catch {
+                std.debug.print("Error: invalid port\n", .{});
+                return;
+            };
         } else if (std.mem.eql(u8, arg, "--dir") or std.mem.eql(u8, arg, "-d")) {
-            dir = args.next() orelse { std.debug.print("Error: --dir requires a value\n", .{}); return; };
+            dir = args.next() orelse {
+                std.debug.print("Error: --dir requires a value\n", .{});
+                return;
+            };
         } else if (arg[0] != '-') {
             dir = arg; // positional: publr preview ./dist
         }
@@ -374,7 +371,6 @@ fn resolvePort(cli_port: ?u16) u16 {
     // Default
     return 8080;
 }
-
 
 fn resolveLockTimeoutMs(cli_lock_timeout_ms: ?u32) u32 {
     return cli_lock_timeout_ms orelse collaboration_config.default_lock_timeout_ms;

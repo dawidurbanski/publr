@@ -398,7 +398,8 @@ pub fn build(b: *std.Build) void {
     // Plugin SDK (dual-mode: native + wasm32-freestanding). Plugins import
     // it as `@import("publr_sdk")`. The SDK selects backend by target arch;
     // both the native exe and freestanding plugin builds use this module
-    // unchanged. Task-01 of wasm-plugin-promotion — spike surface only.
+    // unchanged. (The original spike example plugin that exercised it was
+    // removed — real plugins in demos/wasm-plugins are the consumers now.)
     _ = reg.leaf("publr_sdk", "sdk/publr_sdk.zig");
 
     // Shared leaves (no deps)
@@ -1194,60 +1195,6 @@ pub fn build(b: *std.Build) void {
     vendors.linkStaticLibs(kv_tests, native_vendor_opts);
     const run_kv_tests = b.addRunArtifact(kv_tests);
 
-    // SDK spike — task-01 of wasm-plugin-promotion. The native-target test
-    // exercises the SDK's native backend via the spike example plugin; the
-    // freestanding WASM step verifies the SAME plugin source compiles cleanly
-    // for wasm32-freestanding. WAMR-driven execution parity lands in task-02.
-    const spike_plugin_native = b.createModule(.{
-        .root_source_file = b.path("examples/plugins/spike/main.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "publr_sdk", .module = reg.get("publr_sdk") },
-        },
-    });
-    const sdk_spike_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tests/sdk_spike_tests.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "publr_sdk", .module = reg.get("publr_sdk") },
-                .{ .name = "spike_plugin", .module = spike_plugin_native },
-            },
-        }),
-    });
-    const run_sdk_spike_tests = b.addRunArtifact(sdk_spike_tests);
-
-    // Freestanding WASM build of the same plugin source. Compiled as a
-    // dynamic library (artifact) and installed under `zig-out/plugins/`.
-    // Task-02 will load this through WAMR; for now we just need it to compile.
-    const spike_wasm_target = b.resolveTargetQuery(.{
-        .cpu_arch = .wasm32,
-        .os_tag = .freestanding,
-    });
-    const spike_plugin_wasm_module = b.createModule(.{
-        .root_source_file = b.path("examples/plugins/spike/main.zig"),
-        .target = spike_wasm_target,
-        .optimize = .ReleaseSmall,
-        .imports = &.{
-            .{ .name = "publr_sdk", .module = b.createModule(.{
-                .root_source_file = b.path("sdk/publr_sdk.zig"),
-                .target = spike_wasm_target,
-                .optimize = .ReleaseSmall,
-            }) },
-        },
-    });
-    const spike_wasm = b.addExecutable(.{
-        .name = "spike",
-        .root_module = spike_plugin_wasm_module,
-    });
-    spike_wasm.entry = .disabled;
-    spike_wasm.rdynamic = true;
-    const install_spike_wasm = b.addInstallArtifact(spike_wasm, .{
-        .dest_dir = .{ .override = .{ .custom = "plugins" } },
-    });
-
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_core_tests.step);
@@ -1265,7 +1212,6 @@ pub fn build(b: *std.Build) void {
     test_kv_step.dependOn(&run_kv_tests.step);
     test_step.dependOn(&run_editors_tests.step);
     test_step.dependOn(&run_editor_assets_tests.step);
-    test_step.dependOn(&run_sdk_spike_tests.step);
     test_step.dependOn(&run_watcher_tests.step);
     test_step.dependOn(&run_hmr_tests.step);
     test_step.dependOn(&run_hmr_loop_tests.step);
@@ -1285,7 +1231,6 @@ pub fn build(b: *std.Build) void {
     // Verify step: runs all tests + WASM build.
     const verify_step = b.step("verify", "Run tests and verify WASM build");
     verify_step.dependOn(test_step);
-    verify_step.dependOn(&install_spike_wasm.step);
 
     // HTML-in-Zig guard (epic #191): fail the build if a production .zig file
     // writes an HTML tag literal to a writer — all html-like output must live in
