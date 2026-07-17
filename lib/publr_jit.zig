@@ -3222,20 +3222,9 @@ fn resolveZIndex(
     value: ?candidate.UtilityValue,
     negative: bool,
 ) ResolveError!?ResolvedUtility {
-    const v = value orelse return null;
-    if (v != .named) return null;
-    if (!isInteger(v.named.value)) return null;
-
-    const decls = try allocator.alloc(Declaration, 1);
-    errdefer allocator.free(decls);
-    decls[0] = .{
-        .property = "z-index",
-        .value = if (negative)
-            try std.fmt.allocPrint(allocator, "-{s}", .{v.named.value})
-        else
-            try allocator.dupe(u8, v.named.value),
-    };
-    return .{ .declarations = decls };
+    // Same shape as every other integer longhand — including `[arbitrary]`
+    // passthrough, so `z-[60]` works like `order-[…]` does.
+    return resolveIntegerLonghand(allocator, value, "z-index", negative);
 }
 
 /// `<utility>-N` where N is in pixels (e.g., `outline-offset-2` → `2px`).
@@ -3306,7 +3295,12 @@ fn resolveIntegerLonghand(
             else
                 try allocator.dupe(u8, n.value);
         },
-        .arbitrary => |a| try allocator.dupe(u8, a.value),
+        // Negative arbitrary (`-z-[5]`, `-order-[2]`) negates via calc —
+        // the raw value may itself be an expression, so `-{s}` won't do.
+        .arbitrary => |a| if (negative)
+            try std.fmt.allocPrint(allocator, "calc({s} * -1)", .{a.value})
+        else
+            try allocator.dupe(u8, a.value),
     };
     errdefer allocator.free(css_value);
 
