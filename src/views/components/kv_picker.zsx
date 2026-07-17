@@ -1,0 +1,87 @@
+// KV variable picker listbox — ZSX shell for the PublrJS "kv-picker" store
+// (static/kv-picker.js). Rendered once per page that offers `$`-token
+// insertion (entry_form.zsx, variables_form.zsx) next to the #kv-vars-data
+// JSON it reads. Render at most ONE per page: the store binds document-level
+// listeners, so two islands would double-handle every keystroke.
+//
+// The listbox is portalled to <body> and positioned (fixed) below the input
+// by the store, so scroll containers never clip it. Rows render client-side
+// via @for over store state; the store owns filtering, sorting, keyboard
+// selection, and caret-based token replacement.
+//
+// NOTE: `:showIf` nodes must not carry display utilities — the runtime
+// toggles the `hidden` class and the JIT orders display utilities after it.
+
+pub fn KvPicker() {
+    <div @store="local:kv-picker">
+        <div
+            @portal
+            :showIf="$open"
+            data-publr-part="listbox"
+            role="listbox"
+            aria-label="Insert variable"
+            class="hidden fixed z-[1000] min-w-[260px] max-w-[360px] max-h-[280px] overflow-y-auto rounded-md border border-border bg-popover py-1 text-[0.8125rem] text-popover-foreground shadow-lg"
+        >
+            <template @for="item of $items" :key="$item.id">
+                <div>
+                    <template @renderIf="$item.hasHeader">
+                        <div
+                            class="px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground"
+                            :text="$item.headerLabel"
+                        >
+
+                        </div>
+                    </template>
+                    <div
+                        role="option"
+                        onMousedown.prevent="pickItem"
+                        :data-idx="$item.id"
+                        :aria-selected="$item.selected"
+                        class="cursor-pointer px-3 py-1.5"
+                        :class="$item.selected -> bg-accent text-accent-foreground"
+                    >
+                        <div class="flex items-center gap-1.5">
+                            <span
+                                class="font-mono text-xs"
+                                :text="$item.key"
+                            >
+
+                            </span>
+                            <template @renderIf="$item.hasLabel">
+                                <span
+                                    class="text-xs text-muted-foreground"
+                                    :text="$item.labelText"
+                                >
+
+                                </span>
+                            </template>
+                            <template @renderIf="$item.isPlugin">
+                                <span
+                                    class="text-[0.625rem] text-muted-foreground"
+                                    :text="$item.source"
+                                >
+
+                                </span>
+                            </template>
+                        </div>
+                        <template @renderIf="$item.hasValue">
+                            <div
+                                class="mt-0.5 text-[0.6875rem] text-muted-foreground"
+                                :text="$item.valuePreview"
+                            >
+
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+            <div
+                :showIf="$empty"
+                class="hidden px-3 py-2 text-muted-foreground"
+            >
+                No matching variables
+            </div>
+        </div>
+        <script type="module" src="/static/scripts/kv-picker.js"></script>
+    </div>
+}

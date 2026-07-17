@@ -9,19 +9,42 @@ pub fn VersionFlow(props: struct {
     compare_url: []const u8 = "",
     flow_html: []const u8 = "",
 }) {
-    <div class="version-flow-view">
-        <div class="version-preview-header">
-            <div class="version-preview-meta">
-                <span class="version-preview-author">{props.author_str}</span>
-                <span class="version-preview-time">{props.time_str} · {props.version_type}</span>
+    <div class="version-flow-view mx-auto max-w-[880px] p-6">
+        <div
+            class="version-preview-header mb-6 flex items-center justify-between border-b border-border pb-4"
+        >
+            <div class="version-preview-meta flex flex-col gap-1">
+                <span
+                    class="version-preview-author font-semibold text-foreground"
+                >
+                    {props.author_str}
+                </span>
+                <span
+                    class="version-preview-time text-sm text-muted-foreground"
+                >
+                    {props.time_str} · {props.version_type}
+                </span>
             </div>
             {if (props.is_current) (
-                <span class="badge-current">Current version</span>
+                <span class="badge-current text-sm font-semibold text-primary">Current version</span>
             ) else (
-                <a href={props.compare_url} class="btn btn-sm">Compare</a>
+                <a
+                    href={props.compare_url}
+                    class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground no-underline shadow-xs hover:bg-accent hover:no-underline"
+                >
+                    Compare
+                </a>
             )}
         </div>
-        <h3 class="version-preview-subtitle">Flow history</h3>
-        {if (props.flow_html.len > 0) ({@raw props.flow_html}) else (<p class="diff-error">No flow events recorded for this version.</p>)}
+        <h3
+            class="version-preview-subtitle m-0 mb-4 text-sm font-semibold text-muted-foreground"
+        >
+            Flow history
+        </h3>
+        {if (props.flow_html.len > 0) (
+            {@raw props.flow_html}
+        ) else (
+            <p class="diff-error text-sm text-muted-foreground">No flow events recorded for this version.</p>
+        )}
     </div>
 }

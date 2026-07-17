@@ -3,8 +3,8 @@
 //
 // Uses publr_ui Field / FieldLabel / Input / Textarea / Checkbox / Button
 // throughout. The single carve-out is the value textarea: it carries a
-// `data-publr-kv-picker` attribute that the (forthcoming) task-05 picker
-// JS hooks into, so we render that one as a plain HTML <textarea> until
+// `data-publr-kv-picker` attribute that the `$` picker (static/kv-picker.js)
+// hooks into, so we render that one as a plain HTML <textarea> until
 // publr_ui's Textarea grows a generic `data-*` attribute pass-through.
 
 const ui = @import("publr_ui");
@@ -111,7 +111,7 @@ pub fn Form(props: Props) {
 
             <Field>
                 <FieldLabel html_for="kv-value">Value</FieldLabel>
-                // Plain HTML to attach the `data-publr-kv-picker` hook for task-05.
+                // Plain HTML to attach the `data-publr-kv-picker` hook.
                 <textarea
                     id="kv-value"
                     name="value"
@@ -119,7 +119,7 @@ pub fn Form(props: Props) {
                     data-publr-kv-picker
                     class="w-full rounded border border-border bg-background px-3 py-2 text-sm font-mono"
                 >{props.value}</textarea>
-                <FieldDescription>The string stored for this variable. Can reference other variables; the picker UI is in a follow-up task.</FieldDescription>
+                <FieldDescription>The string stored for this variable. Can reference other variables — type $ to pick one.</FieldDescription>
             </Field>
 
             {if (props.is_new) (
@@ -158,10 +158,10 @@ pub fn Form(props: Props) {
         </div>
     )}
 
-    // Picker data: feeds the $ picker on the value textarea. The picker
-    // itself is part of the interact runtime (loaded once via the admin
-    // layout) and binds via delegation, so no per-form script is needed —
-    // it handles these inputs whether they're on the page at load or
-    // swapped in later.
+    // Picker data: feeds the $ picker on the value textarea. The picker is
+    // a PublrJS island (<KvPicker />, static/kv-picker.js) whose document-
+    // delegated listeners handle these inputs whether they're on the page
+    // at load or swapped in later.
     <script id="kv-vars-data" type="application/json">{@raw props.vars_json}</script>
+    <KvPicker />
 }

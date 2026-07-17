@@ -48,18 +48,18 @@ pub const Props = struct {
     plugin_rows: []const Row,
 };
 
-fn ModeBadge(props: struct { mode: []const u8 }) void {
+fn ModeBadge(props: struct { mode: []const u8 }) {
     // Visual coding by mode: baked = blue/neutral, live = warm, computed
     // distinguished by the prefix. Keep it simple — same Badge component as
     // elsewhere with mode label as the body.
     <Badge variant=.secondary>{props.mode}</Badge>
 }
 
-fn SourceTag(props: struct { source: []const u8 }) void {
+fn SourceTag(props: struct { source: []const u8 }) {
     <Text size=.xs color=.muted>{props.source}</Text>
 }
 
-fn RefreshButton(props: struct { url: []const u8, csrf_token: []const u8 }) void {
+fn RefreshButton(props: struct { url: []const u8, csrf_token: []const u8 }) {
     <form method="post" action={props.url} class="inline">
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <Button
@@ -73,7 +73,7 @@ fn RefreshButton(props: struct { url: []const u8, csrf_token: []const u8 }) void
     </form>
 }
 
-fn RowView(props: struct { row: Row, csrf_token: []const u8 }) void {
+fn RowView(props: struct { row: Row, csrf_token: []const u8 }) {
     <TableRow>
         <TableCell>
             <Flex items=.center gap=.sm>
@@ -87,7 +87,10 @@ fn RowView(props: struct { row: Row, csrf_token: []const u8 }) void {
             <Flex items=.center gap=.sm>
                 <Text size=.sm>{props.row.value_preview}</Text>
                 {if (props.row.is_computed) (
-                    <RefreshButton url={props.row.refresh_url} csrf_token={props.csrf_token} />
+                    <RefreshButton
+                        url={props.row.refresh_url}
+                        csrf_token={props.csrf_token}
+                    />
                 )}
             </Flex>
         </TableCell>
@@ -99,80 +102,91 @@ fn RowView(props: struct { row: Row, csrf_token: []const u8 }) void {
         </TableCell>
         <TableCell>
             {if (props.row.is_editor) (
-                <a href={props.row.edit_url} class="text-primary hover:underline text-sm">Edit</a>
+                <a
+                    href={props.row.edit_url}
+                    class="text-primary hover:underline text-sm"
+                >
+                    Edit
+                </a>
             )}
         </TableCell>
     </TableRow>
 }
 
 pub fn List(props: Props) {
-    <PageHeader title="Variables" />
-    <p>Demo2</p>
-
-    <Flex items=.center justify=.between class="mb-4">
-        <input
-            type="search"
-            id="kv-filter"
-            placeholder="Filter by key or label…"
-            class="border rounded px-2 py-1 text-sm w-64"
-            oninput="window.__kvFilter(this.value)"
-        />
-        <Button label="New variable" hierarchy=.primary size=.sm icon=.plus href={props.new_url} />
-    </Flex>
-
-    {if (!props.has_any) (
-        <Empty>
-            <EmptyTitle>No variables yet</EmptyTitle>
-            <EmptyDescription>Create named values that editors can insert into content with the $ picker.</EmptyDescription>
-            <EmptyContent>
-                <Button label="Create your first variable" hierarchy=.primary href={props.new_url} />
-            </EmptyContent>
-        </Empty>
-    )}
-
-    {if (props.has_editor_rows) (
-        <div class="mb-8" data-kv-section="editor">
-            <Text size=.sm color=.muted weight=.medium class="block mb-2">Your variables</Text>
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Key</TableHead>
-                        <TableHead>Value</TableHead>
-                        <TableHead>Mode</TableHead>
-                        <TableHead>Source</TableHead>
-                        <TableHead></TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {for (props.editor_rows) |row| (
-                        <RowView row={row} csrf_token={props.csrf_token} />
-                    )}
-                </TableBody>
-            </Table>
-        </div>
-    )}
-
-    {if (props.has_plugin_rows) (
-        <div data-kv-section="plugin">
-            <Text size=.sm color=.muted weight=.medium class="block mb-2">Plugin variables</Text>
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Key</TableHead>
-                        <TableHead>Value</TableHead>
-                        <TableHead>Mode</TableHead>
-                        <TableHead>Source</TableHead>
-                        <TableHead></TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {for (props.plugin_rows) |row| (
-                        <RowView row={row} csrf_token={props.csrf_token} />
-                    )}
-                </TableBody>
-            </Table>
-        </div>
-    )}
-
-    // Filter script lives in a separate static asset; see task-02 wrap-up.
+    <div @store="local:kv-filter" class="contents">
+        <PageHeader title="Variables" />
+        <Flex items=.center justify=.between class="mb-4">
+            <input
+                type="search"
+                id="kv-filter"
+                placeholder="Filter by key or label…"
+                class="border rounded px-2 py-1 text-sm w-64"
+                onInput="filter"
+            />
+            <Button
+                label="New variable"
+                hierarchy=.primary
+                size=.sm
+                icon=.plus
+                href={props.new_url}
+            />
+        </Flex>
+        {if (!props.has_any) (
+            <Empty>
+                <EmptyTitle>No variables yet</EmptyTitle>
+                <EmptyDescription>Create named values that editors can insert into content with the $ picker.</EmptyDescription>
+                <EmptyContent>
+                    <Button
+                        label="Create your first variable"
+                        hierarchy=.primary
+                        href={props.new_url}
+                    />
+                </EmptyContent>
+            </Empty>
+        )}
+        {if (props.has_editor_rows) (
+            <div class="mb-8" data-kv-section="editor">
+                <Text size=.sm color=.muted weight=.medium class="block mb-2">Your variables</Text>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Key</TableHead>
+                            <TableHead>Value</TableHead>
+                            <TableHead>Mode</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead></TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {for (props.editor_rows) |row| (
+                            <RowView row={row} csrf_token={props.csrf_token} />
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+        )}
+        {if (props.has_plugin_rows) (
+            <div data-kv-section="plugin">
+                <Text size=.sm color=.muted weight=.medium class="block mb-2">Plugin variables</Text>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Key</TableHead>
+                            <TableHead>Value</TableHead>
+                            <TableHead>Mode</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead></TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {for (props.plugin_rows) |row| (
+                            <RowView row={row} csrf_token={props.csrf_token} />
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+        )}
+        <script type="module" src="/static/scripts/kv-filter.js"></script>
+    </div>
 }

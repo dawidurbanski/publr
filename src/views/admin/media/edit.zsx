@@ -15,6 +15,9 @@ const BadgeVariant = ui.badge.Variant;
 const Field = ui.form_field.Field;
 const FieldLabel = ui.form_field.FieldLabel;
 const Input = ui.text_input.Input;
+const Tooltip = ui.tooltip.Tooltip;
+const TooltipTrigger = ui.tooltip.TooltipTrigger;
+const TooltipContent = ui.tooltip.TooltipContent;
 
 const MediaData = struct {
     id: []const u8,
@@ -61,25 +64,59 @@ pub fn Edit(props: struct {
     current_folder_id: []const u8,
 }) {
     <PageHeader title={props.media.filename} />
-
-    <div class="flex min-h-0">
+    // One PublrJS island for the page's two widgets: the focal-point preview
+    // and the tag picker (local:media-edit, static/media-edit.js).
+    <div @store="local:media-edit" class="flex min-h-0">
         <div class="flex-1 flex flex-col p-6">
             {if (props.media.is_image) (
-                <div class="media-preview-image" data-publr-component="focal-point" data-publr-value={props.media.focal_point} data-publr-input="focal_point">
-                    <img src={props.media.preview_url} alt={props.media.filename} draggable="false" data-publr-part="image" />
-                    <div class="focal-point-marker" data-publr-part="marker" data-publr-component="tooltip">
-                        <div data-publr-part="trigger" class="focal-point-marker-dot"></div>
-                        <span data-publr-part="content" class="tooltip-content">Click to set focal point for image cropping</span>
+                <div
+                    class="media-preview-image relative flex min-h-[300px] flex-1 cursor-crosshair items-center justify-center overflow-hidden rounded-md bg-foreground [&>img]:block [&>img]:max-h-full [&>img]:max-w-full [&>img]:object-contain"
+                    data-publr-part="focal"
+                    data-publr-value={props.media.focal_point}
+                    data-publr-input="focal_point"
+                    onClick="setFocal"
+                >
+                    <img
+                        src={props.media.preview_url}
+                        alt={props.media.filename}
+                        draggable="false"
+                        data-publr-part="image"
+                    />
+                    <div
+                        class="focal-point-marker absolute z-[1] hidden h-5 w-5 -translate-x-1/2 -translate-y-1/2"
+                        data-publr-part="marker"
+                    >
+                        <Tooltip>
+                            <TooltipTrigger>
+                                <button
+                                    type="button"
+                                    class="focal-point-marker-dot absolute inset-0 h-full w-full cursor-grab rounded-full border-2 border-white bg-transparent p-0 shadow-[0_0_0_1px_oklch(0_0_0/0.3),inset_0_0_0_1px_oklch(0_0_0/0.3)]"
+                                    aria-label="Set focal point"
+                                ></button>
+                            </TooltipTrigger>
+                            <TooltipContent>Click to set focal point for image cropping</TooltipContent>
+                        </Tooltip>
                     </div>
-                    <span class="focal-point-label" data-publr-part="label"></span>
+                    <span
+                        class="focal-point-label pointer-events-none absolute bottom-2 right-2 hidden rounded-[calc(var(--radius)*0.6)] bg-black/60 px-2 py-0.5 text-xs text-white"
+                        data-publr-part="label"
+                    ></span>
                 </div>
             ) else (
-                <div class="media-preview-file">
-                    <Icon name={IconName.file} class="icon icon-lg" />
-                    <span class="media-preview-filename">{props.media.filename}</span>
+                <div
+                    class="media-preview-file flex min-h-[300px] flex-1 flex-col items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
+                >
+                    <Icon
+                        name={IconName.file}
+                        class="icon icon-lg mb-4 h-12 w-12"
+                    />
+                    <span
+                        class="media-preview-filename break-all text-sm font-medium text-foreground"
+                    >
+                        {props.media.filename}
+                    </span>
                 </div>
             )}
-
             <Flex gap=.xl>
                 <Stack gap=.none>
                     <Text size=.xs color=.muted as=.span>Size</Text>
@@ -94,175 +131,315 @@ pub fn Edit(props: struct {
                         <Text size=.xs color=.muted as=.span>Dimensions</Text>
                         <Text size=.sm weight=.medium as=.span>{props.media.dimensions}</Text>
                     </Stack>
-                ) else (<span></span>)}
+                ) else (
+                    <span></span>
+                )}
                 <Stack gap=.none>
                     <Text size=.xs color=.muted as=.span>Uploaded</Text>
                     <Text size=.sm weight=.medium as=.span>{props.media.created_at}</Text>
                 </Stack>
             </Flex>
         </div>
-
-        <div class="w-96 shrink-0 border-l border-border overflow-y-auto flex flex-col">
-            <form method="POST" action="/admin/action" class="form">
+        <div
+            class="w-96 shrink-0 border-l border-border overflow-y-auto flex flex-col"
+        >
+            <form method="POST" action="/admin/action" class="form w-full">
                 <input type="hidden" name="_csrf" value={props.csrf_token} />
                 <input type="hidden" name="action" value="media.update" />
                 <input type="hidden" name="media_id" value={props.media.id} />
-
                 <div class="p-4 border-b border-border">
-                <Stack gap=.lg>
-                    <Field>
-                        <FieldLabel>Alt Text</FieldLabel>
-                        <Input
-                            input_type=.text
-                            name="alt_text"
-                            value={props.media.alt_text}
-                            placeholder="Describe this image for accessibility"
-                        />
-                        <span class="form-hint">Describes the image for screen readers and when images fail to load.</span>
-                    </Field>
-
-                    <Field>
-                        <FieldLabel>Caption</FieldLabel>
-                        <textarea
-                            id="caption"
-                            name="caption"
-                            class="form-control"
-                            rows="2"
-                            placeholder="Optional caption displayed below the media"
-                        >{props.media.caption}</textarea>
-                    </Field>
-
-                    <Field>
-                        <FieldLabel>Credit</FieldLabel>
-                        <Input
-                            input_type=.text
-                            name="credit"
-                            value={props.media.credit}
-                            placeholder="Photo by..."
-                        />
-                    </Field>
-
-                    <Field>
-                        <FieldLabel>Focal Point</FieldLabel>
-                        <input
-                            type="text"
-                            id="focal_point"
-                            name="focal_point"
-                            value={props.media.focal_point}
-                            class="form-control"
-                            readonly=""
-                        />
-                    </Field>
-                </Stack>
+                    <Stack gap=.lg>
+                        <Field>
+                            <FieldLabel>Alt Text</FieldLabel>
+                            <Input
+                                input_type=.text
+                                name="alt_text"
+                                value={props.media.alt_text}
+                                placeholder="Describe this image for accessibility"
+                            />
+                            <span
+                                class="form-hint mt-1 text-sm leading-5 text-muted-foreground"
+                            >
+                                Describes the image for screen readers and when images fail to load.
+                            </span>
+                        </Field>
+                        <Field>
+                            <FieldLabel>Caption</FieldLabel>
+                            <textarea
+                                id="caption"
+                                name="caption"
+                                class="form-control min-h-32 w-full resize-y rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base leading-6 text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:text-sm"
+                                rows="2"
+                                placeholder="Optional caption displayed below the media"
+                            >{props.media.caption}</textarea>
+                        </Field>
+                        <Field>
+                            <FieldLabel>Credit</FieldLabel>
+                            <Input
+                                input_type=.text
+                                name="credit"
+                                value={props.media.credit}
+                                placeholder="Photo by..."
+                            />
+                        </Field>
+                        <Field>
+                            <FieldLabel>Focal Point</FieldLabel>
+                            <input
+                                type="text"
+                                id="focal_point"
+                                name="focal_point"
+                                value={props.media.focal_point}
+                                class="form-control w-full rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base leading-6 text-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:text-sm"
+                                readonly=""
+                            />
+                        </Field>
+                    </Stack>
                 </div>
-
                 <div class="p-4 border-b border-border">
-                <Stack gap=.lg>
-                    <Field>
-                        <FieldLabel>Folder</FieldLabel>
-                        <select id="folder" name="folder" class="form-control">
-                            <option value="">Default</option>
-                            {for (props.folders) |folder| (
-                                {if (folder.is_selected) (
-                                    <option value={folder.id} selected="selected">{depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}</option>
-                                ) else (
-                                    <option value={folder.id}>{depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}</option>
+                    <Stack gap=.lg>
+                        <Field>
+                            <FieldLabel>Folder</FieldLabel>
+                            <select
+                                id="folder"
+                                name="folder"
+                                class="form-control w-full cursor-pointer appearance-none rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 pr-10 text-base leading-6 text-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:text-sm"
+                            >
+                                <option value="">Default</option>
+                                {for (props.folders) |folder| (
+                                    {if (folder.is_selected) (
+                                        <option
+                                            value={folder.id}
+                                            selected="selected"
+                                        >
+                                            {depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}
+                                        </option>
+                                    ) else (
+                                        <option value={folder.id}>{depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}</option>
+                                    )}
                                 )}
-                            )}
-                        </select>
-                    </Field>
-
-                    <Field>
-                        <FieldLabel>Tags</FieldLabel>
-                        <div class="tag-picker" data-publr-component="tag-picker">
-                            <div class="tag-picker-selected" data-publr-part="selected">
-                                {for (props.all_tags) |tag| (
-                                    {if (tag.is_selected) (
-                                        <span class="tag-picker-chip" data-tag-name={tag.name} data-tag-id={tag.id}>
-                                            {tag.name}
-                                            <button type="button" class="tag-picker-chip-remove" data-publr-part="remove" aria-label="Remove tag">&times;</button>
-                                        </span>
-                                    ) else (<span></span>)}
-                                )}
-                            </div>
-                            <input type="text" class="form-control form-control-sm" data-publr-part="search" placeholder="Search or add tags..." autocomplete="off" />
-                            <div class="tag-picker-dropdown" data-publr-part="dropdown" style="display:none">
-                                <div class="tag-picker-options" data-publr-part="options">
+                            </select>
+                        </Field>
+                        <Field>
+                            <FieldLabel>Tags</FieldLabel>
+                            <div class="tag-picker relative">
+                                <div
+                                    class="tag-picker-selected mb-2 flex flex-wrap gap-1 empty:hidden"
+                                    data-publr-part="selected"
+                                >
                                     {for (props.all_tags) |tag| (
-                                        <label class="tag-picker-option">
-                                            {if (tag.is_selected) (
-                                                <input type="checkbox" data-publr-part="option" data-tag-name={tag.name} data-tag-id={tag.id} value={tag.name} checked="checked" />
-                                            ) else (
-                                                <input type="checkbox" data-publr-part="option" data-tag-name={tag.name} data-tag-id={tag.id} value={tag.name} />
-                                            )}
-                                            {" "}
-                                            {tag.name}
-                                        </label>
+                                        {if (tag.is_selected) (
+                                            <span
+                                                class="tag-picker-chip inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                                                data-tag-name={tag.name}
+                                                data-tag-id={tag.id}
+                                            >
+                                                {tag.name}
+                                                <button
+                                                    type="button"
+                                                    class="tag-picker-chip-remove inline-flex h-3.5 w-3.5 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                                    data-publr-part="remove"
+                                                    aria-label="Remove tag"
+                                                >
+                                                    &times;
+                                                </button>
+                                            </span>
+                                        ) else (
+                                            <span></span>
+                                        )}
                                     )}
                                 </div>
-                                <button type="button" class="tag-picker-create" data-publr-part="create" style="display:none"></button>
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm w-full rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-1.5 text-base leading-5 text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring sm:text-sm"
+                                    data-publr-part="search"
+                                    placeholder="Search or add tags..."
+                                    autocomplete="off"
+                                    onFocus="tagSearchFocus"
+                                    onInput="tagSearchInput"
+                                    onKeydown.enter.prevent="tagCreateFromSearch"
+                                    onKeydown.escape="tagCloseDropdown"
+                                />
+                                <div
+                                    class="tag-picker-dropdown absolute left-0 right-0 z-10 max-h-[200px] overflow-y-auto rounded-[calc(var(--radius)*0.8)] border border-border bg-background shadow-lg"
+                                    data-publr-part="dropdown"
+                                    style="display:none"
+                                >
+                                    <div
+                                        class="tag-picker-options py-1"
+                                        data-publr-part="options"
+                                    >
+                                        {for (props.all_tags) |tag| (
+                                            <label
+                                                class="tag-picker-option flex cursor-pointer items-center gap-2 px-3 py-1 text-sm text-muted-foreground hover:bg-muted [&_input]:accent-primary"
+                                            >
+                                                {if (tag.is_selected) (
+                                                    <input
+                                                        type="checkbox"
+                                                        data-publr-part="option"
+                                                        data-tag-name={tag.name}
+                                                        data-tag-id={tag.id}
+                                                        value={tag.name}
+                                                        checked="checked"
+                                                        onChange="tagOptionToggle"
+                                                    />
+                                                ) else (
+                                                    <input
+                                                        type="checkbox"
+                                                        data-publr-part="option"
+                                                        data-tag-name={tag.name}
+                                                        data-tag-id={tag.id}
+                                                        value={tag.name}
+                                                        onChange="tagOptionToggle"
+                                                    />
+                                                )}
+                                                {" "}
+                                                {tag.name}
+                                            </label>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="tag-picker-create block w-full cursor-pointer border-0 border-t border-border bg-transparent px-3 py-2 text-left text-sm font-medium text-primary hover:bg-muted"
+                                        data-publr-part="create"
+                                        style="display:none"
+                                        onClick="tagCreate"
+                                    ></button>
+                                </div>
+                                <input
+                                    type="hidden"
+                                    name="tags"
+                                    data-publr-part="hidden"
+                                    value={props.tags_display}
+                                />
                             </div>
-                            <input type="hidden" name="tags" data-publr-part="hidden" value={props.tags_display} />
-                        </div>
-                    </Field>
-                </Stack>
+                        </Field>
+                    </Stack>
                 </div>
-
                 <div class="p-4 border-b border-border">
-                    <div class="media-visibility">
-                        <div class="media-visibility-info">
-                            <span class="form-label">Visibility</span>
+                    <div
+                        class="media-visibility flex items-center justify-between"
+                    >
+                        <div
+                            class="media-visibility-info flex items-center gap-3"
+                        >
+                            <span
+                                class="form-label m-0 block text-sm font-medium leading-5 text-muted-foreground"
+                            >
+                                Visibility
+                            </span>
                             {if (props.media.is_private) (
-                                <Badge label={props.media.visibility} variant={BadgeVariant.secondary} />
+                                <Badge
+                                    label={props.media.visibility}
+                                    variant={BadgeVariant.secondary}
+                                />
                             ) else (
-                                <Badge label={props.media.visibility} variant={BadgeVariant.success} />
+                                <Badge
+                                    label={props.media.visibility}
+                                    variant={BadgeVariant.success}
+                                />
                             )}
                         </div>
                     </div>
                 </div>
-
                 <div class="p-4 border-b border-border">
-                <Stack gap=.md>
-                    <Stack gap=.none>
-                        <Text size=.xs color=.muted as=.span>Filename</Text>
-                        <Text size=.sm as=.span>{props.media.filename}</Text>
+                    <Stack gap=.md>
+                        <Stack gap=.none>
+                            <Text size=.xs color=.muted as=.span>Filename</Text>
+                            <Text size=.sm as=.span>{props.media.filename}</Text>
+                        </Stack>
+                        <Stack gap=.none>
+                            <Text size=.xs color=.muted as=.span>URL</Text>
+                            <a
+                                href={props.media.media_url}
+                                class="media-url-link break-all text-xs text-primary"
+                                target="_blank"
+                            >
+                                {props.media.media_url}
+                            </a>
+                        </Stack>
                     </Stack>
-                    <Stack gap=.none>
-                        <Text size=.xs color=.muted as=.span>URL</Text>
-                        <a href={props.media.media_url} class="media-url-link" target="_blank">{props.media.media_url}</a>
-                    </Stack>
-                </Stack>
                 </div>
-
                 <div class="p-4 border-b border-border">
-                <Flex gap=.sm>
-                    <Button button_type=.submit hierarchy=.primary label="Save" />
-                    <Button hierarchy=.secondary label="Cancel" href="/admin/media" onclick="if(history.length>1){history.back();return false}" />
-                </Flex>
+                    <Flex gap=.sm>
+                        <Button
+                            button_type=.submit
+                            hierarchy=.primary
+                            label="Save"
+                        />
+                        <Button
+                            hierarchy=.secondary
+                            label="Cancel"
+                            href="/admin/media"
+                            onclick="if(history.length>1){history.back();return false}"
+                        />
+                    </Flex>
                 </div>
             </form>
-
             <div class="mt-auto p-4 border-t border-border">
                 <Flex justify=.between>
-                    <form method="POST" action="/admin/action" class="media-visibility-form">
-                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <input type="hidden" name="action" value="media.toggle_visibility" />
-                        <input type="hidden" name="media_id" value={props.media.id} />
+                    <form
+                        method="POST"
+                        action="/admin/action"
+                        class="media-visibility-form inline"
+                    >
+                        <input
+                            type="hidden"
+                            name="_csrf"
+                            value={props.csrf_token}
+                        />
+                        <input
+                            type="hidden"
+                            name="action"
+                            value="media.toggle_visibility"
+                        />
+                        <input
+                            type="hidden"
+                            name="media_id"
+                            value={props.media.id}
+                        />
                         {if (props.media.is_private) (
-                            <Button button_type=.submit hierarchy=.secondary size=.sm label="Make Public" />
+                            <Button
+                                button_type=.submit
+                                hierarchy=.secondary
+                                size=.sm
+                                label="Make Public"
+                            />
                         ) else (
-                            <Button button_type=.submit hierarchy=.secondary size=.sm label="Make Private" />
+                            <Button
+                                button_type=.submit
+                                hierarchy=.secondary
+                                size=.sm
+                                label="Make Private"
+                            />
                         )}
                     </form>
                     <form method="POST" action="/admin/action">
-                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <input type="hidden" name="action" value="media.delete" />
-                        <input type="hidden" name="media_id" value={props.media.id} />
-                        <Button button_type=.submit hierarchy=.destructive size=.sm label="Delete"
-                            onclick="return confirm('Delete this file permanently? This cannot be undone.')" />
+                        <input
+                            type="hidden"
+                            name="_csrf"
+                            value={props.csrf_token}
+                        />
+                        <input
+                            type="hidden"
+                            name="action"
+                            value="media.delete"
+                        />
+                        <input
+                            type="hidden"
+                            name="media_id"
+                            value={props.media.id}
+                        />
+                        <Button
+                            button_type=.submit
+                            hierarchy=.destructive
+                            size=.sm
+                            label="Delete"
+                            onclick="return confirm('Delete this file permanently? This cannot be undone.')"
+                        />
                     </form>
                 </Flex>
             </div>
         </div>
+        <script type="module" src="/static/scripts/media-edit.js"></script>
     </div>
 }

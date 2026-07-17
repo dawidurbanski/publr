@@ -4,7 +4,6 @@
     <title>Zig CMS</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="/static/admin.css" id="admin-css">
     <style>
         /* Skeleton shown while WASM loads */
         body:not(.admin) {
@@ -24,6 +23,18 @@
         // /admin/cms-runtime.js. cms-runtime.js then resolves
         // ./cms-worker.js against its own import.meta.url, which is /.
         import { initCMS } from '/cms-runtime.js';
+        // Register PublrJS + store factories BEFORE any admin HTML lands: the
+        // swap path's Publr.hydrate() must find them on the FIRST login→admin
+        // transition, where dynamically recreated module scripts would
+        // otherwise race it. publr-admin.js is the layouts' single bootstrap
+        // (runtime + DS stores + layout-wide app stores); the rest are the
+        // page-scoped stores whose script tags live in swapped bodies.
+        import '../static/scripts/publr-admin.js';
+        import '../static/scripts/media-library.js';
+        import '../static/scripts/media-edit.js';
+        import '../static/scripts/kv-picker.js';
+        import '../static/scripts/ws.js';
+        import '../static/scripts/presence.js';
 
         let cms = null;
 
@@ -31,7 +42,7 @@
             const form = e.target.closest('form');
             if (!form) return;
 
-            // Skip file upload form — handled by admin.js uploadFiles()
+            // Skip file upload form — handled by media-library.js startUpload()
             if (form.id === 'media-upload-form') return;
 
             e.preventDefault();
@@ -44,7 +55,7 @@
         // Global delegation: catch submit on dynamically created forms too
         document.addEventListener('submit', handleFormSubmit);
 
-        // Route /admin/* fetch() calls through the WASM CMS. admin.js does
+        // Route /admin/* fetch() calls through the WASM CMS. Admin stores do
         // direct `fetch('/admin/action', ...)` for autosave and similar AJAX
         // — in the dev shell those would hit the static dev server (405).
         // Same for XMLHttpRequest, patched below.
@@ -73,7 +84,7 @@
             return _origFetch(input, init);
         };
 
-        // Mirror for XMLHttpRequest. admin.js still has one XHR path
+        // Mirror for XMLHttpRequest. media-library.js still has one XHR path
         // (media upload fallback) that hits /admin/action when
         // cms.requestBinary isn't wired up — keep it functional for the
         // dev shell by routing through cms.request.
@@ -123,7 +134,7 @@
                 if (el.tagName === 'TITLE') continue;
                 if (el.tagName === 'LINK' && el.getAttribute('rel') === 'stylesheet') {
                     const href = el.getAttribute('href');
-                    if (href === '/static/tokens.css' || href === '/static/publr.css') continue;
+                    if (href === '/static/styles/tokens.css' || href === '/static/styles/publr.css') continue;
                     if (href && document.head.querySelector('link[href="' + href + '"]')) continue;
                 }
                 if (el.tagName === 'SCRIPT') {
@@ -159,25 +170,36 @@
 
             syncHead(doc);
 
-            // Replace body
+            // Replace body. PublrJS islands must be torn down BEFORE the swap
+            // (their portalled content and effects reference the old subtree)
+            // and re-hydrated after — cached module scripts won't re-run.
+            try { window.Publr?.destroy(document.body); } catch (e) {}
             document.body.className = doc.body.className;
             document.body.innerHTML = doc.body.innerHTML;
 
             // <script> tags inserted via innerHTML don't execute (HTML spec).
-            // Recreate each one so theme-toggle handler, admin.js, module loaders,
-            // etc. actually run after the swap. ES-module srcs are cached by URL
-            // so external scripts won't double-execute.
+            // Recreate each one so theme-toggle handler, module loaders, etc.
+            // actually run after the swap. ES-module srcs are cached by URL so
+            // external scripts won't double-execute — but a page-scoped module
+            // seen for the FIRST time must finish evaluating (registering its
+            // store factory) BEFORE hydrate() runs, so await external loads.
+            const scriptLoads = [];
             for (const oldScript of document.body.querySelectorAll('script')) {
                 const s = document.createElement('script');
                 for (const a of oldScript.attributes) s.setAttribute(a.name, a.value);
                 s.textContent = oldScript.textContent;
+                if (s.src) scriptLoads.push(new Promise((done) => { s.onload = s.onerror = done; }));
                 oldScript.replaceWith(s);
             }
+            await Promise.all(scriptLoads);
 
-            // Initialize interactive components
+            // Re-hydrate PublrJS islands and dispatch publr:init (the
+            // "subtree re-initialized" signal stores listen for). The legacy
+            // interact runtime is gone (#160) — stores register via their
+            // modules.
             try {
-                const { init } = await import('../static/interact/index.js');
-                init();
+                window.Publr?.hydrate(document.body);
+                document.body.dispatchEvent(new CustomEvent('publr:init', { bubbles: true }));
             } catch (e) {}
 
             // Intercept links
@@ -204,8 +226,7 @@
         // Browser back/forward
         window.addEventListener('popstate', () => navigate(location.pathname));
 
-        // Fetch a CSS asset through the WASM (which has it embedded) and
-        // inject it as a <style> tag before the static admin.css link, so
+        // Fetch CSS assets through the WASM (which has them embedded) so
         // tokens and JIT-compiled utilities are available before navigate().
         async function injectCss(path, id) {
             if (document.getElementById(id)) return;
@@ -214,8 +235,7 @@
             const style = document.createElement('style');
             style.id = id;
             style.textContent = res.body;
-            const adminLink = document.getElementById('admin-css');
-            document.head.insertBefore(style, adminLink);
+            document.head.appendChild(style);
         }
 
         // Init
@@ -229,9 +249,9 @@
                 setInterval(() => cms.save(), 30000);
 
                 // tokens.css and publr.css live only inside the WASM binary;
-                // pull them out and inject before admin.css so cascade order matches the rendered <head>.
-                await injectCss('/static/tokens.css', 'tokens-css');
-                await injectCss('/static/publr.css', 'publr-css');
+                // pull them out in the same order as the rendered <head>.
+                await injectCss('/static/styles/tokens.css', 'tokens-css');
+                await injectCss('/static/styles/publr.css', 'publr-css');
 
                 // Navigate to current URL or default
                 const path = location.pathname === '/' ? '/admin' : location.pathname;

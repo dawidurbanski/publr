@@ -1,7 +1,9 @@
-// Taxonomy field control — categorical terms via the
-// `data-widget="taxonomy-picker"` widget (dispatched by interact/core.js's
-// generic [data-widget] registry). `label` is the humanized taxonomy name used
-// in the button ("Select Category"); `many` → data-many "true"/"false".
+// Taxonomy field control — categorical terms. The `data-widget=
+// "taxonomy-picker"` attribute is a DORMANT marker: no JS ever registered
+// this widget (the interact runtime that would have dispatched it is retired,
+// #160) — a future PublrJS picker store should key off it. `label` is the
+// humanized taxonomy name used in the button ("Select Category"); `many` →
+// data-many "true"/"false".
 
 pub fn Taxonomy(props: struct {
     name: []const u8,
@@ -13,10 +15,26 @@ pub fn Taxonomy(props: struct {
     label: []const u8,
     errors: []const []const u8 = &.{},
 }) {
-    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
-        <div data-widget="taxonomy-picker" data-taxonomy={props.taxonomy_id} data-many={props.many ? "true" : "false"} data-name={props.name} data-value={props.value}>
+    <FieldLabelRow
+        name={props.name}
+        display_name={props.display_name}
+        required={props.required}
+        errors={props.errors}
+    >
+        <div
+            data-widget="taxonomy-picker"
+            data-taxonomy={props.taxonomy_id}
+            data-many={props.many ? "true" : "false"}
+            data-name={props.name}
+            data-value={props.value}
+        >
             <input type="hidden" name={props.name} value={props.value} />
-            <button type="button" class="btn btn-sm">Select {props.label}</button>
+            <button
+                type="button"
+                class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground shadow-xs hover:bg-accent"
+            >
+                Select {props.label}
+            </button>
         </div>
     </FieldLabelRow>
 }

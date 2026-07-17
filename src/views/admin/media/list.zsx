@@ -10,8 +10,17 @@ const Size = ui.icon.Size;
 const Stack = ui.stack.Stack;
 const Flex = ui.flex.Flex;
 const Text = ui.text.Text;
+const DropdownMenu = ui.dropdown.DropdownMenu;
+const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
 const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
 const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
+const Dialog = ui.dialog.Dialog;
+const DialogTrigger = ui.dialog.DialogTrigger;
+const DialogOverlay = ui.dialog.DialogOverlay;
+const DialogContent = ui.dialog.DialogContent;
+const DialogClose = ui.dialog.DialogClose;
+const DialogTitle = ui.dialog.DialogTitle;
+const DialogDescription = ui.dialog.DialogDescription;
 const Pagination = ui.pagination.Pagination;
 const PaginationContent = ui.pagination.PaginationContent;
 const PaginationItem = ui.pagination.PaginationItem;
@@ -45,6 +54,7 @@ const FolderItem = struct {
 
 const depth_styles = [_][]const u8{ "", "padding-left: 1.25rem", "padding-left: 2rem", "padding-left: 2.75rem", "padding-left: 3.5rem", "padding-left: 4.25rem" };
 const depth_strs = [_][]const u8{ "0", "1", "2", "3", "4", "5" };
+const depth_prefixes = [_][]const u8{ "", "\u{2014} ", "\u{2014} \u{2014} ", "\u{2014} \u{2014} \u{2014} ", "\u{2014} \u{2014} \u{2014} \u{2014} ", "\u{2014} \u{2014} \u{2014} \u{2014} \u{2014} " };
 const max_depth = depth_styles.len - 1; // deepest renderable level
 
 const TagItem = struct {
@@ -152,465 +162,1309 @@ pub fn List(props: struct {
     items_per_page_str: []const u8,
     breadcrumbs: []const BreadcrumbItem,
 }) {
-    <PageHeader title="Media">
-        <MediaControls
-            filtered_count={props.filtered_count}
-            view_mode={props.view_mode}
-            view_grid_url={props.view_grid_url}
-            view_list_url={props.view_list_url}
-        />
-    </PageHeader>
-    <Breadcrumbs items={props.breadcrumbs} />
-
-    <form method="POST" action="/admin/action" enctype="multipart/form-data" id="media-upload-form" style="display:none">
-        <input type="hidden" name="_csrf" value={props.csrf_token} />
-        <input type="hidden" name="action" value="media.upload" />
-        <input type="hidden" name="folder_id" id="upload-folder-id" value="" />
-        <input type="file" id="media-file-input" name="file" multiple="" />
-    </form>
-
-    <div class="media-select-all-banner" id="media-select-all-banner" style="display:none"
-         data-filtered-count={props.filtered_count_str}
-         data-items-per-page={props.items_per_page_str}
-         data-active-folder={props.active_folder}
-         data-show-unreviewed={if (props.show_unreviewed) ("1") else ("0")}
-         data-search-term={props.search_term}>
-        <span id="media-select-all-banner-text">
-            All {props.items_per_page} items on this page are selected.
-        </span>
-        <button type="button" class="media-select-all-link" id="media-select-all-pages-btn">
-            Select all {props.filtered_count} items
-        </button>
-        <span id="media-select-all-pages-text" style="display:none">
-            All {props.filtered_count} items are selected.
-        </span>
-        <button type="button" class="media-select-all-link" id="media-clear-selection-btn" style="display:none">
-            Clear selection
-        </button>
-    </div>
-
-    <div class="media-filter-bar">
-        {for (props.active_filters) |filter| (
-            <a href={filter.remove_url} class="refinement-chip">
-                <span class="refinement-chip-label">{filter.label}</span>
-                {filter.value}
-                <span class="refinement-chip-remove">&times;</span>
-            </a>
-        )}
-        <form method="GET" action="/admin/media" class="media-search-inline">
-            {for (props.search_hidden_params) |param| (
-                <input type="hidden" name={param.name} value={param.value} />
-            )}
-            <input type="text" name="search" value={props.search_term} placeholder="Type to search for assets" class="media-search-input" />
+    // The whole view is one PublrJS island: selection state (checkboxes,
+    // select-all banner, bulk actions) lives in the local:media-library
+    // store (static/media-library.js). Nested DS islands (dropdowns,
+    // dialogs) stay transparent — refs they can't resolve walk up to here.
+    <div @store="local:media-library" class="contents">
+        <PageHeader title="Media">
+            <MediaControls
+                filtered_count={props.filtered_count}
+                view_mode={props.view_mode}
+                view_grid_url={props.view_grid_url}
+                view_list_url={props.view_list_url}
+                active_folder={props.active_folder}
+            />
+        </PageHeader>
+        <Breadcrumbs items={props.breadcrumbs} />
+        <form
+            method="POST"
+            action="/admin/action"
+            enctype="multipart/form-data"
+            id="media-upload-form"
+            style="display:none"
+            onSubmit.prevent="noop"
+        >
+            <input type="hidden" name="_csrf" value={props.csrf_token} />
+            <input type="hidden" name="action" value="media.upload" />
+            <input
+                type="hidden"
+                name="folder_id"
+                id="upload-folder-id"
+                value=""
+            />
+            <input
+                type="file"
+                id="media-file-input"
+                name="file"
+                multiple=""
+                onChange="uploadFilesChosen"
+            />
         </form>
-        {if (props.active_filters.len > 0) (
-            <a href={props.reset_url} class="refinement-reset">Reset all</a>
-        ) else (<span></span>)}
-    </div>
-
-    <Flex gap=.xl>
-        <div class="w-48 shrink-0">
-        <Stack gap=.xl>
-            <Stack gap=.sm>
-                <Flex justify=.between items=.center>
-                    <Text size=.xs color=.muted weight=.semibold as=.div>Folders</Text>
-                    <button type="button" class="btn-icon-sm" data-publr-action="create-toplevel" aria-label="New folder">
-                        <Icon name={IconName.folder_plus} size={Size.sm} />
-                    </button>
-                </Flex>
-                <ul class="media-folder-list">
-                    <li class={if (std.mem.eql(u8, props.active_folder, "default")) ("media-folder-item active") else ("media-folder-item")}>
-                        <div class="media-folder-row">
-                            <a href={props.unsorted_url} class="media-folder-link">
-                                <Icon name={IconName.folder} size={Size.sm} />
-                                <span class="media-folder-name">Default</span>
-                            </a>
-                            <span class="media-folder-count">{props.unsorted_count}</span>
-                            <span class="media-folder-controls">
-                                <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id="" title="New folder">
-                                    <Icon name={IconName.folder_plus} size={Size.sm} />
-                                </button>
-                            </span>
-                        </div>
-                    </li>
-                    {for (props.folders) |folder| (
-                        <li class={if (folder.is_active) ("media-folder-item active") else if (folder.is_disabled) ("media-folder-item disabled") else ("media-folder-item")} style={depth_styles[@min(folder.depth, depth_styles.len - 1)]}>
-                            <div class="media-folder-row" data-folder-id={folder.id} data-folder-name={folder.name} data-folder-depth={depth_strs[@min(folder.depth, depth_strs.len - 1)]}>
-                                {if (folder.is_disabled) (
-                                    <span class="media-folder-link">
-                                        <Icon name={IconName.folder} size={Size.sm} />
-                                        <span class="media-folder-name">{folder.name}</span>
-                                    </span>
-                                ) else (
-                                    <a href={folder.url} class="media-folder-link">
-                                        <Icon name={IconName.folder} size={Size.sm} />
-                                        <span class="media-folder-name">{folder.name}</span>
+        <div :showIf="$showBanner" class="hidden">
+            <div
+                class="media-select-all-banner mb-4 rounded-[calc(var(--radius)*0.8)] border border-border bg-accent px-4 py-2 text-center text-sm text-muted-foreground"
+                id="media-select-all-banner"
+                data-filtered-count={props.filtered_count_str}
+                data-items-per-page={props.items_per_page_str}
+                data-active-folder={props.active_folder}
+                data-show-unreviewed={if (props.show_unreviewed) ("1") else ("0")}
+                data-search-term={props.search_term}
+            >
+                <span :showIf="not $pages">
+                    All {props.items_per_page} items on this page are selected.
+                </span>
+                <button
+                    type="button"
+                    class="media-select-all-link cursor-pointer border-0 bg-transparent p-0 text-sm font-medium text-primary underline"
+                    onClick="selectAllPages"
+                    :showIf="not $pages"
+                >
+                    Select all {props.filtered_count} items
+                </button>
+                <span :showIf="$pages" class="hidden">
+                    All {props.filtered_count} items are selected.
+                </span>
+                <button
+                    type="button"
+                    class="media-select-all-link hidden cursor-pointer border-0 bg-transparent p-0 text-sm font-medium text-primary underline"
+                    onClick="clearSelection"
+                    :showIf="$pages"
+                >
+                    Clear selection
+                </button>
+            </div>
+        </div>
+        <div
+            class="media-filter-bar mb-4 flex min-h-10 flex-wrap items-center gap-2 rounded-[calc(var(--radius)*0.8)] border border-border p-3"
+        >
+            {for (props.active_filters) |filter| (
+                <a
+                    href={filter.remove_url}
+                    class="refinement-chip inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-0.5 text-sm text-muted-foreground no-underline hover:bg-accent hover:text-foreground hover:no-underline"
+                >
+                    <span
+                        class="refinement-chip-label font-medium text-muted-foreground"
+                    >
+                        {filter.label}
+                    </span>
+                    {filter.value}
+                    <span
+                        class="refinement-chip-remove text-sm leading-none text-muted-foreground"
+                    >
+                        &times;
+                    </span>
+                </a>
+            )}
+            <form
+                method="GET"
+                action="/admin/media"
+                class="media-search-inline flex-1"
+            >
+                {for (props.search_hidden_params) |param| (
+                    <input
+                        type="hidden"
+                        name={param.name}
+                        value={param.value}
+                    />
+                )}
+                <input
+                    type="text"
+                    name="search"
+                    value={props.search_term}
+                    placeholder="Type to search for assets"
+                    class="media-search-input w-full border-0 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
+                />
+            </form>
+            {if (props.active_filters.len > 0) (
+                <a
+                    href={props.reset_url}
+                    class="refinement-reset ml-auto text-sm text-muted-foreground no-underline hover:text-destructive hover:underline"
+                >
+                    Reset all
+                </a>
+            ) else (
+                <span></span>
+            )}
+        </div>
+        <Flex gap=.xl items=.start class="max-md:flex-col">
+            <div class="w-48 shrink-0 max-md:w-full">
+                <Stack gap=.xl>
+                    <Stack gap=.sm>
+                        <Flex justify=.between items=.center>
+                            <Text
+                                size=.xs
+                                color=.muted
+                                weight=.semibold
+                                as=.div
+                            >
+                                Folders
+                            </Text>
+                            <button
+                                type="button"
+                                class="btn-icon-sm inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                data-publr-action="create-toplevel"
+                                onClick="folderAction"
+                                aria-label="New folder"
+                            >
+                                <Icon
+                                    name={IconName.folder_plus}
+                                    size={Size.sm}
+                                />
+                            </button>
+                        </Flex>
+                        <ul
+                            class="media-folder-list m-0 flex list-none flex-col gap-px p-0"
+                        >
+                            <li
+                                class={if (std.mem.eql(u8, props.active_folder, "default")) ("media-folder-item active") else ("media-folder-item")}
+                            >
+                                <div
+                                    class="media-folder-row group flex w-full items-center"
+                                >
+                                    <a
+                                        href={props.unsorted_url}
+                                        class="media-folder-link flex min-w-0 flex-1 items-center gap-2 py-1 text-sm text-muted-foreground no-underline hover:text-foreground hover:no-underline"
+                                    >
+                                        <Icon
+                                            name={IconName.folder}
+                                            size={Size.sm}
+                                        />
+                                        <span
+                                            class="media-folder-name flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                                        >
+                                            Default
+                                        </span>
                                     </a>
-                                )}
-                                <span class="media-folder-count">{folder.count}</span>
-                                <span class="media-folder-controls">
-                                    {if (folder.depth < max_depth) (
-                                        <button type="button" class="btn-icon-sm" data-publr-action="create-subfolder" data-parent-id={folder.id} title="New subfolder">
-                                            <Icon name={IconName.folder_plus} size={Size.sm} />
+                                    <span
+                                        class="media-folder-count shrink-0 text-xs text-muted-foreground group-hover:hidden"
+                                    >
+                                        {props.unsorted_count}
+                                    </span>
+                                    <span
+                                        class="media-folder-controls hidden shrink-0 items-center gap-0.5 group-hover:flex"
+                                    >
+                                        <button
+                                            type="button"
+                                            class="btn-icon-sm inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                            data-publr-action="create-subfolder"
+                                            data-parent-id=""
+                                            onClick="folderAction"
+                                            title="New folder"
+                                        >
+                                            <Icon
+                                                name={IconName.folder_plus}
+                                                size={Size.sm}
+                                            />
                                         </button>
-                                    ) else (<span></span>)}
-                                    <div data-publr-component="dropdown" class="media-folder-actions">
-                                        <button class="btn-icon-sm" data-publr-part="trigger" aria-label="Folder actions">
-                                            <Icon name={IconName.more} />
-                                        </button>
-                                        <DropdownMenuContent>
-                                            <button type="button" class="dropdown-item" data-publr-part="item" data-publr-action="rename-folder" data-folder-id={folder.id} data-folder-name={folder.name}>Rename</button>
-                                            <button type="button" class="dropdown-item" data-publr-part="item" data-publr-action="move-folder" data-folder-id={folder.id} data-folder-name={folder.name}>Move to...</button>
-                                            <DropdownMenuSeparator />
-                                            <button type="button" class="dropdown-item dropdown-item-danger" data-publr-part="item" data-publr-action="delete-folder" data-folder-id={folder.id}>Delete</button>
-                                        </DropdownMenuContent>
+                                    </span>
+                                </div>
+                            </li>
+                            {for (props.folders) |folder| (
+                                <li
+                                    class={if (folder.is_active) ("media-folder-item active") else if (folder.is_disabled) ("media-folder-item disabled") else ("media-folder-item")}
+                                    style={depth_styles[@min(folder.depth, depth_styles.len - 1)]}
+                                >
+                                    <div
+                                        class="media-folder-row group flex w-full items-center"
+                                        data-folder-id={folder.id}
+                                        data-folder-name={folder.name}
+                                        data-folder-depth={depth_strs[@min(folder.depth, depth_strs.len - 1)]}
+                                    >
+                                        {if (folder.is_disabled) (
+                                            <span
+                                                class="media-folder-link flex min-w-0 flex-1 items-center gap-2 py-1 text-sm text-muted-foreground"
+                                            >
+                                                <Icon
+                                                    name={IconName.folder}
+                                                    size={Size.sm}
+                                                />
+                                                <span
+                                                    class="media-folder-name flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                                                >
+                                                    {folder.name}
+                                                </span>
+                                            </span>
+                                        ) else (
+                                            <a
+                                                href={folder.url}
+                                                class="media-folder-link flex min-w-0 flex-1 items-center gap-2 py-1 text-sm text-muted-foreground no-underline hover:text-foreground hover:no-underline"
+                                            >
+                                                <Icon
+                                                    name={IconName.folder}
+                                                    size={Size.sm}
+                                                />
+                                                <span
+                                                    class="media-folder-name flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                                                >
+                                                    {folder.name}
+                                                </span>
+                                            </a>
+                                        )}
+                                        <span
+                                            class="media-folder-count shrink-0 text-xs text-muted-foreground group-hover:hidden group-has-[.media-folder-actions_[aria-expanded=true]]:hidden"
+                                        >
+                                            {folder.count}
+                                        </span>
+                                        <span
+                                            class="media-folder-controls hidden shrink-0 items-center gap-0.5 group-hover:flex group-has-[.media-folder-actions_[aria-expanded=true]]:flex"
+                                        >
+                                            {if (folder.depth < max_depth) (
+                                                <button
+                                                    type="button"
+                                                    class="btn-icon-sm inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                    data-publr-action="create-subfolder"
+                                                    data-parent-id={folder.id}
+                                                    onClick="folderAction"
+                                                    title="New subfolder"
+                                                >
+                                                    <Icon
+                                                        name={IconName.folder_plus}
+                                                        size={Size.sm}
+                                                    />
+                                                </button>
+                                            ) else (
+                                                <span></span>
+                                            )}
+                                            <DropdownMenu
+                                                class="media-folder-actions inline-flex"
+                                            >
+                                                <DropdownMenuTrigger
+                                                    as_child={true}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        class="btn-icon-sm inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                        aria-label="Folder actions"
+                                                    >
+                                                        <Icon
+                                                            name={IconName.more}
+                                                        />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent>
+                                                    <button
+                                                        type="button"
+                                                        class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent focus:bg-accent focus:outline-none"
+                                                        data-publr-part="item"
+                                                        role="menuitem"
+                                                        data-publr-action="rename-folder"
+                                                        data-folder-id={folder.id}
+                                                        data-folder-name={folder.name}
+                                                        onClick="folderAction"
+                                                    >
+                                                        Rename
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent focus:bg-accent focus:outline-none"
+                                                        data-publr-part="item"
+                                                        role="menuitem"
+                                                        data-publr-action="move-folder"
+                                                        data-folder-id={folder.id}
+                                                        data-folder-name={folder.name}
+                                                        onClick="folderAction"
+                                                    >
+                                                        Move to...
+                                                    </button>
+                                                    <DropdownMenuSeparator />
+                                                    <button
+                                                        type="button"
+                                                        class="dropdown-item dropdown-item-danger block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10 focus:bg-destructive/10 focus:outline-none"
+                                                        data-publr-part="item"
+                                                        role="menuitem"
+                                                        data-publr-action="delete-folder"
+                                                        data-folder-id={folder.id}
+                                                        onClick="folderAction"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </span>
                                     </div>
-                                </span>
-                            </div>
-                        </li>
-                    )}
-                </ul>
-                <div data-publr-component="dialog" data-publr-state="closed" id="folder-delete-dialog">
-                    <button data-publr-part="trigger" hidden=""></button>
-                    <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
-                        <div class="dialog-content">
-                            <h3>Delete folder?</h3>
-                            <p>Files will move to the parent folder.</p>
-                            <div class="dialog-actions">
-                                <button data-publr-part="close" class="btn btn-sm">Cancel</button>
-                                <form method="POST" action="/admin/action">
-                                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                    <input type="hidden" name="action" value="media.folder_delete" />
-                                    <input type="hidden" name="term_id" id="folder-delete-id" value="" />
-                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </Stack>
-
-            <Stack gap=.sm>
-                <Flex justify=.between items=.center>
-                    <Text size=.xs color=.muted weight=.semibold as=.div>Tags</Text>
-                    <button type="button" class="btn-icon-sm" data-publr-component="inline-create" data-publr-part="trigger" data-publr-target="tag-create-form" aria-label="New tag">
-                        <Icon name={IconName.plus_circle} size={Size.sm} />
-                    </button>
-                </Flex>
-                <div class="media-tag-list">
-                    {for (props.tags) |tag| (
-                        {if (tag.is_disabled) (
-                            <span class="media-tag-chip disabled">
-                                {tag.name}
-                                <span class="media-tag-count">{tag.count}</span>
-                            </span>
-                        ) else (
-                            <a href={tag.url} class={if (tag.is_active) ("media-tag-chip active") else ("media-tag-chip")}>
-                                {tag.name}
-                                <span class="media-tag-count">{tag.count}</span>
-                            </a>
-                        )}
-                    )}
-                </div>
-                {if (props.tags.len == 0) (
-                    <span class="media-empty-hint" data-publr-component="inline-create" data-publr-part="empty-trigger" data-publr-target="tag-create-form">No tags yet</span>
-                ) else (<span></span>)}
-                <form method="POST" action="/admin/action" class="inline-create-form" id="tag-create-form" style="display:none">
-                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    <input type="hidden" name="action" value="media.tag_create" />
-                    <div class="inline-create-row">
-                        <input type="text" name="tag_name" placeholder="Tag name..." class="form-control form-control-sm" />
-                        <button type="submit" class="btn-icon-sm btn-icon-confirm" aria-label="Create tag">
-                            <Icon name={IconName.check} size={Size.sm} />
-                        </button>
-                    </div>
-                </form>
-            </Stack>
-
-            {if (props.year_options.len > 0) (
-                <Stack gap=.sm>
-                    <Text size=.xs color=.muted weight=.semibold as=.div>Date</Text>
-                    <form method="GET" action="/admin/media" class="media-date-filter">
-                        {for (props.date_hidden_params) |param| (
-                            <input type="hidden" name={param.name} value={param.value} />
-                        )}
-                        <select name="year" class="media-date-select" onchange="this.form.querySelector('[name=month]').value='';this.form.submit()">
-                            <option value="">Year</option>
-                            {for (props.year_options) |yr| (
-                                {if (yr.is_selected) (
-                                    <option value={yr.value} selected="selected">{yr.label}</option>
-                                ) else (
-                                    <option value={yr.value}>{yr.label}</option>
-                                )}
+                                </li>
                             )}
-                        </select>
-                        <select name="month" class="media-date-select" onchange="this.form.submit()">
-                            <option value="">Month</option>
-                            {for (props.month_options) |mo| (
-                                {if (mo.is_selected) (
-                                    <option value={mo.value} selected="selected">{mo.label}</option>
-                                ) else (
-                                    <option value={mo.value}>{mo.label}</option>
-                                )}
-                            )}
-                        </select>
-                    </form>
-                </Stack>
-            ) else (<span></span>)}
+                            <li
+                                class="media-folder-item media-folder-new-row hidden"
+                                data-publr-part="folder-new-row"
+                            >
+                                <div
+                                    class="media-folder-row flex w-full items-center"
+                                    data-publr-part="folder-new-slot"
+                                >
 
-            <Stack gap=.sm class="media-sidebar-filesystem">
-                <Text size=.xs color=.muted weight=.semibold as=.div>Filesystem</Text>
-                {if (props.scan_result != null) (
-                    {if (props.scan_result.? > 0) (
-                        <div class="media-sync-notice">
-                            <span class="media-sync-notice-text">{props.scan_result.?}{" new files found"}</span>
-                            <form method="POST" action="/admin/action" class="media-sync-inline">
-                                <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                <input type="hidden" name="action" value="media.sync" />
-                                <button type="submit" class="btn btn-sm btn-primary">Sync now</button>
+                                </div>
+                            </li>
+                        </ul>
+                        // Reusable inline folder editor (create / rename / move). One
+                        // hidden form + one hidden insertion row (in the list above);
+                        // the media-library store repositions them into the target
+                        // row, toggles which inputs are enabled per mode, and returns
+                        // them home on cancel/Escape. Disabled inputs don't submit.
+                        <div
+                            class="hidden"
+                            data-publr-part="folder-editor-home"
+                        >
+                            <form
+                                method="POST"
+                                action="/admin/action"
+                                class="media-folder-inline-form"
+                                data-publr-part="folder-editor"
+                                onKeydown.escape="cancelFolderEdit"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="_csrf"
+                                    value={props.csrf_token}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value=""
+                                    data-publr-part="folder-editor-action"
+                                />
+                                <input
+                                    type="hidden"
+                                    name="term_id"
+                                    value=""
+                                    data-publr-part="folder-editor-term"
+                                    disabled=""
+                                />
+                                <input
+                                    type="hidden"
+                                    name="parent_id"
+                                    value=""
+                                    data-publr-part="folder-editor-parent"
+                                    disabled=""
+                                />
+                                <Icon name={IconName.folder} size={Size.sm} />
+                                <input
+                                    type="text"
+                                    name="folder_name"
+                                    placeholder="Folder name..."
+                                    class="form-control form-control-sm min-w-0 flex-1 rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-1.5 text-base leading-5 text-foreground focus:border-ring focus:outline-none sm:text-sm"
+                                    data-publr-part="folder-editor-name"
+                                />
+                                <select
+                                    name="parent_id"
+                                    class="form-control form-control-sm hidden min-w-0 flex-1 cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-1.5 text-base leading-5 text-foreground focus:border-ring focus:outline-none sm:text-sm"
+                                    data-publr-part="folder-editor-select"
+                                    disabled=""
+                                >
+                                    <option value="">Top level</option>
+                                    {for (props.folders) |folder| (
+                                        <option
+                                            value={folder.id}
+                                            data-folder-depth={depth_strs[@min(folder.depth, depth_strs.len - 1)]}
+                                            disabled?={folder.depth >= max_depth}
+                                        >
+                                            {depth_prefixes[@min(folder.depth, depth_prefixes.len - 1)]}{folder.name}
+                                        </option>
+                                    )}
+                                </select>
+                                <button
+                                    type="submit"
+                                    class="btn-icon-sm btn-icon-confirm inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-success hover:bg-success/10"
+                                    aria-label="Confirm"
+                                >
+                                    {"\u{2713}"}
+                                </button>
                             </form>
                         </div>
-                    ) else (
-                        <span class="media-sync-status">Up to date</span>
-                    )}
-                    <form method="POST" action="/admin/action" class="media-sync-check">
-                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <input type="hidden" name="action" value="media.scan" />
-                        <button type="submit" class="media-sync-check-link">Check again</button>
-                    </form>
-                ) else (
-                    <form method="POST" action="/admin/action" class="media-sync-check">
-                        <input type="hidden" name="_csrf" value={props.csrf_token} />
-                        <input type="hidden" name="action" value="media.scan" />
-                        <button type="submit" class="media-sync-check-link">Check for changes</button>
-                    </form>
-                )}
-                {if (props.unreviewed_count > 0) (
-                    <a href={props.unreviewed_url} class={if (props.show_unreviewed) ("media-unreviewed-link active") else ("media-unreviewed-link")}>
-                        {"Unreviewed "}
-                        <span class="media-tag-count">{props.unreviewed_count}</span>
-                    </a>
-                ) else (<span></span>)}
-            </Stack>
-        </Stack>
-        </div>
-
-        <div class="flex-1 min-w-0">
-            {if (props.has_media) (
-                {if (std.mem.eql(u8, props.view_mode, "grid")) (
-                    <div class="media-grid">
-                        {for (props.media) |item| (
-                            <div class="media-card" data-media-id={item.id}>
-                                <label class="media-card-check">
-                                    <input type="checkbox" class="media-checkbox" value={item.id} aria-label="Select" />
-                                </label>
-                                <a href={item.edit_url} class="media-card-link">
-                                    <div class="media-card-preview">
-                                        {if (item.is_image) (
-                                            <img src={item.thumb_url} alt={item.filename} loading="lazy" />
-                                        ) else (
-                                            <div class="media-card-icon"><Icon name={IconName.file} /></div>
-                                        )}
-                                        {if (item.is_private) (
-                                            <span class="media-card-badge"><Icon name={IconName.lock} size={Size.sm} /></span>
-                                        ) else (<span></span>)}
-                                    </div>
-                                    <div class="media-card-info">
-                                        <span class="media-card-name">{item.filename}</span>
-                                        <span class="media-card-meta">{item.size_display}</span>
-                                    </div>
-                                </a>
-                            </div>
-                        )}
-                    </div>
-                ) else (
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th class="table-col-check">
-                                    <input type="checkbox" class="table-checkbox" aria-label="Select all" />
-                                </th>
-                                <th class="table-col-thumb"></th>
-                                <th>Filename</th>
-                                <th>Type</th>
-                                <th>Size</th>
-                                <th>Visibility</th>
-                                <th class="actions-col"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {for (props.media) |item| (
-                                <tr>
-                                    <td class="table-col-check">
-                                        <input type="checkbox" class="table-checkbox" value={item.id} aria-label="Select media" />
-                                    </td>
-                                    <td class="table-col-thumb">
-                                        {if (item.is_image) (
-                                            <div class="table-thumb">
-                                                <img src={item.thumb_url} alt={item.filename} />
-                                            </div>
-                                        ) else (
-                                            <div class="table-thumb"><Icon name={IconName.file} /></div>
-                                        )}
-                                    </td>
-                                    <td>
-                                        <a href={item.edit_url}>{item.filename}</a>
-                                    </td>
-                                    <td>{item.mime_type}</td>
-                                    <td>{item.size_display}</td>
-                                    <td>
-                                        <span class={if (item.is_private) ("badge badge-draft") else ("badge badge-published")}>{item.visibility}</span>
-                                    </td>
-                                    <td class="actions-col">
-                                        <div data-publr-component="dropdown">
-                                            <button class="table-actions-btn" data-publr-part="trigger" aria-label="Actions">
-                                                <Icon name={IconName.more} />
-                                            </button>
-                                            <DropdownMenuContent>
-                                                <a href={item.edit_url} class="dropdown-item">Edit</a>
-                                                <DropdownMenuSeparator />
-                                                <form method="POST" action="/admin/action">
-                                                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                                                    <input type="hidden" name="action" value="media.delete" />
-                                                    <input type="hidden" name="media_id" value={item.id} />
-                                                    <button type="submit" class="dropdown-item dropdown-item-danger" onclick="return confirm('Delete this file permanently?')">Delete</button>
-                                                </form>
-                                            </DropdownMenuContent>
+                        <div id="folder-delete-dialog">
+                            <Dialog>
+                                <DialogTrigger><button type="button" hidden=""></button></DialogTrigger>
+                                <DialogOverlay>
+                                    <DialogContent>
+                                        <DialogTitle>Delete folder?</DialogTitle>
+                                        <DialogDescription>Files will move to the parent folder.</DialogDescription>
+                                        <div
+                                            class="dialog-actions flex justify-end gap-2"
+                                        >
+                                            <DialogClose><button type="button" class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground shadow-xs hover:bg-accent">Cancel</button></DialogClose>
+                                            <form
+                                                method="POST"
+                                                action="/admin/action"
+                                            >
+                                                <input
+                                                    type="hidden"
+                                                    name="_csrf"
+                                                    value={props.csrf_token}
+                                                />
+                                                <input
+                                                    type="hidden"
+                                                    name="action"
+                                                    value="media.folder_delete"
+                                                />
+                                                <input
+                                                    type="hidden"
+                                                    name="term_id"
+                                                    id="folder-delete-id"
+                                                    value=""
+                                                />
+                                                <button
+                                                    type="submit"
+                                                    class="btn btn-sm btn-danger inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-destructive bg-destructive px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </form>
                                         </div>
-                                    </td>
-                                </tr>
+                                    </DialogContent>
+                                </DialogOverlay>
+                            </Dialog>
+                        </div>
+                    </Stack>
+                    <Stack gap=.sm>
+                        <Flex justify=.between items=.center>
+                            <Text
+                                size=.xs
+                                color=.muted
+                                weight=.semibold
+                                as=.div
+                            >
+                                Tags
+                            </Text>
+                            <button
+                                type="button"
+                                class="btn-icon-sm inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                data-publr-part="tag-create-trigger"
+                                onClick="toggleTagCreate"
+                                aria-label="New tag"
+                            >
+                                <Icon
+                                    name={IconName.plus_circle}
+                                    size={Size.sm}
+                                />
+                            </button>
+                        </Flex>
+                        <div class="media-tag-list flex flex-wrap gap-1">
+                            {for (props.tags) |tag| (
+                                {if (tag.is_disabled) (
+                                    <span
+                                        class="media-tag-chip disabled pointer-events-none inline-flex cursor-default items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-sm text-muted-foreground opacity-45"
+                                    >
+                                        {tag.name}
+                                        <span
+                                            class="media-tag-count text-[10px] text-muted-foreground"
+                                        >
+                                            {tag.count}
+                                        </span>
+                                    </span>
+                                ) else (
+                                    <a
+                                        href={tag.url}
+                                        class={if (tag.is_active) ("media-tag-chip active inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-sm text-primary-foreground no-underline") else ("media-tag-chip inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-sm text-muted-foreground no-underline hover:bg-accent hover:text-foreground hover:no-underline")}
+                                    >
+                                        {tag.name}
+                                        <span
+                                            class="media-tag-count text-[10px] text-muted-foreground"
+                                        >
+                                            {tag.count}
+                                        </span>
+                                    </a>
+                                )}
                             )}
-                        </tbody>
-                    </table>
-                )}
-            ) else (
-                {if (props.active_folder.len > 0 or props.active_tags.len > 0 or props.search_term.len > 0) (
-                    <div class="empty-state media-upload-zone" id="media-upload-zone">
-                        <div class="empty-state-icon"><Icon name={IconName.upload} /></div>
-                        <p>No files match your current filters.</p>
-                        <p class="empty-state-hint">Drop files here to upload, or <a href={props.reset_url}>reset all</a>.</p>
-                    </div>
+                        </div>
+                        {if (props.tags.len == 0) (
+                            <span
+                                class="media-empty-hint cursor-pointer text-xs text-muted-foreground hover:underline"
+                                onClick="toggleTagCreate"
+                            >
+                                No tags yet
+                            </span>
+                        ) else (
+                            <span></span>
+                        )}
+                        <form
+                            method="POST"
+                            action="/admin/action"
+                            class="inline-create-form hidden mt-2"
+                            id="tag-create-form"
+                            :showIf="$tagCreateOpen"
+                            onKeydown.escape="closeTagCreate"
+                        >
+                            <input
+                                type="hidden"
+                                name="_csrf"
+                                value={props.csrf_token}
+                            />
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="media.tag_create"
+                            />
+                            <div
+                                class="inline-create-row flex items-center gap-1"
+                            >
+                                <input
+                                    type="text"
+                                    name="tag_name"
+                                    placeholder="Tag name..."
+                                    class="form-control form-control-sm min-w-0 flex-1 rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-1.5 text-base leading-5 text-foreground focus:border-ring focus:outline-none sm:text-sm"
+                                />
+                                <button
+                                    type="submit"
+                                    class="btn-icon-sm btn-icon-confirm inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent p-0 text-success hover:bg-success/10"
+                                    aria-label="Create tag"
+                                >
+                                    <Icon
+                                        name={IconName.check}
+                                        size={Size.sm}
+                                    />
+                                </button>
+                            </div>
+                        </form>
+                    </Stack>
+                    {if (props.year_options.len > 0) (
+                        <Stack gap=.sm>
+                            <Text
+                                size=.xs
+                                color=.muted
+                                weight=.semibold
+                                as=.div
+                            >
+                                Date
+                            </Text>
+                            <form
+                                method="GET"
+                                action="/admin/media"
+                                class="media-date-filter flex gap-1"
+                            >
+                                {for (props.date_hidden_params) |param| (
+                                    <input
+                                        type="hidden"
+                                        name={param.name}
+                                        value={param.value}
+                                    />
+                                )}
+                                <select
+                                    name="year"
+                                    class="media-date-select h-[30px] min-w-0 flex-1 cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-border bg-background px-2 py-1 text-base text-muted-foreground outline-none focus:border-primary sm:text-sm"
+                                    onchange="this.form.querySelector('[name=month]').value='';this.form.submit()"
+                                >
+                                    <option value="">Year</option>
+                                    {for (props.year_options) |yr| (
+                                        {if (yr.is_selected) (
+                                            <option
+                                                value={yr.value}
+                                                selected="selected"
+                                            >
+                                                {yr.label}
+                                            </option>
+                                        ) else (
+                                            <option value={yr.value}>{yr.label}</option>
+                                        )}
+                                    )}
+                                </select>
+                                <select
+                                    name="month"
+                                    class="media-date-select h-[30px] min-w-0 flex-1 cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-border bg-background px-2 py-1 text-base text-muted-foreground outline-none focus:border-primary sm:text-sm"
+                                    onchange="this.form.submit()"
+                                >
+                                    <option value="">Month</option>
+                                    {for (props.month_options) |mo| (
+                                        {if (mo.is_selected) (
+                                            <option
+                                                value={mo.value}
+                                                selected="selected"
+                                            >
+                                                {mo.label}
+                                            </option>
+                                        ) else (
+                                            <option value={mo.value}>{mo.label}</option>
+                                        )}
+                                    )}
+                                </select>
+                            </form>
+                        </Stack>
+                    ) else (
+                        <span></span>
+                    )}
+                    <Stack gap=.sm class="media-sidebar-filesystem gap-1">
+                        <Text size=.xs color=.muted weight=.semibold as=.div>Filesystem</Text>
+                        {if (props.scan_result != null) (
+                            {if (props.scan_result.? > 0) (
+                                <div
+                                    class="media-sync-notice flex flex-col gap-1"
+                                >
+                                    <span
+                                        class="media-sync-notice-text text-xs font-medium text-muted-foreground"
+                                    >
+                                        {props.scan_result.?}{" new files found"}
+                                    </span>
+                                    <form
+                                        method="POST"
+                                        action="/admin/action"
+                                        class="media-sync-inline inline-flex"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="_csrf"
+                                            value={props.csrf_token}
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="action"
+                                            value="media.sync"
+                                        />
+                                        <button
+                                            type="submit"
+                                            class="btn btn-sm btn-primary inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                                        >
+                                            Sync now
+                                        </button>
+                                    </form>
+                                </div>
+                            ) else (
+                                <span
+                                    class="media-sync-status text-xs text-muted-foreground"
+                                >
+                                    Up to date
+                                </span>
+                            )}
+                            <form
+                                method="POST"
+                                action="/admin/action"
+                                class="media-sync-check inline-flex"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="_csrf"
+                                    value={props.csrf_token}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="media.scan"
+                                />
+                                <button
+                                    type="submit"
+                                    class="media-sync-check-link cursor-pointer border-0 bg-transparent p-0 text-xs text-muted-foreground underline decoration-transparent transition-colors hover:decoration-muted-foreground"
+                                >
+                                    Check again
+                                </button>
+                            </form>
+                        ) else (
+                            <form
+                                method="POST"
+                                action="/admin/action"
+                                class="media-sync-check inline-flex"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="_csrf"
+                                    value={props.csrf_token}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="media.scan"
+                                />
+                                <button
+                                    type="submit"
+                                    class="media-sync-check-link cursor-pointer border-0 bg-transparent p-0 text-xs text-muted-foreground underline decoration-transparent transition-colors hover:decoration-muted-foreground"
+                                >
+                                    Check for changes
+                                </button>
+                            </form>
+                        )}
+                        {if (props.unreviewed_count > 0) (
+                            <a
+                                href={props.unreviewed_url}
+                                class={if (props.show_unreviewed) ("media-unreviewed-link text-sm font-medium text-primary no-underline") else ("media-unreviewed-link text-sm text-muted-foreground no-underline hover:text-foreground")}
+                            >
+                                {"Unreviewed "}
+                                <span
+                                    class="media-tag-count text-[10px] text-muted-foreground"
+                                >
+                                    {props.unreviewed_count}
+                                </span>
+                            </a>
+                        ) else (
+                            <span></span>
+                        )}
+                    </Stack>
+                </Stack>
+            </div>
+            <div class="flex-1 min-w-0">
+                {if (props.has_media) (
+                    {if (std.mem.eql(u8, props.view_mode, "grid")) (
+                        <div
+                            class="media-grid grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
+                        >
+                            {for (props.media) |item| (
+                                <div
+                                    class="media-card group relative block overflow-hidden rounded-md border border-border text-inherit transition-shadow hover:border-input hover:shadow-md data-[selected=true]:border-primary data-[selected=true]:ring-2 data-[selected=true]:ring-primary/20"
+                                    data-media-id={item.id}
+                                    data-selected="false"
+                                >
+                                    <label
+                                        class="media-card-check absolute left-0 top-0 z-[2] h-[60px] w-[60px] cursor-pointer p-2 opacity-0 transition-opacity group-hover:opacity-100 group-data-[selected=true]:opacity-100"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            class="media-checkbox h-[18px] w-[18px] cursor-pointer accent-primary"
+                                            value={item.id}
+                                            aria-label="Select"
+                                            onChange="toggleItem"
+                                        />
+                                    </label>
+                                    <a
+                                        href={item.edit_url}
+                                        class="media-card-link block text-inherit no-underline"
+                                    >
+                                        <div
+                                            class="media-card-preview flex aspect-square items-center justify-center overflow-hidden bg-muted [&>img]:h-full [&>img]:w-full [&>img]:object-cover"
+                                        >
+                                            {if (item.is_image) (
+                                                <img
+                                                    src={item.thumb_url}
+                                                    alt={item.filename}
+                                                    loading="lazy"
+                                                />
+                                            ) else (
+                                                <div
+                                                    class="media-card-icon text-muted-foreground [&_.icon]:h-8 [&_.icon]:w-8"
+                                                >
+                                                    <Icon name={IconName.file} />
+                                                </div>
+                                            )}
+                                            {if (item.is_private) (
+                                                <span
+                                                    class="media-card-badge absolute right-2 top-2 flex items-center rounded-[calc(var(--radius)*0.6)] bg-black/60 px-1 py-0.5 text-white [&_.icon]:h-3 [&_.icon]:w-3"
+                                                >
+                                                    <Icon name={IconName.lock} size={Size.sm} />
+                                                </span>
+                                            ) else (
+                                                <span></span>
+                                            )}
+                                        </div>
+                                        <div class="media-card-info p-3">
+                                            <span
+                                                class="media-card-name block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium text-foreground"
+                                            >
+                                                {item.filename}
+                                            </span>
+                                            <span
+                                                class="media-card-meta mt-0.5 block text-xs text-muted-foreground"
+                                            >
+                                                {item.size_display}
+                                            </span>
+                                        </div>
+                                    </a>
+                                </div>
+                            )}
+                        </div>
+                    ) else (
+                        <table
+                            class="table w-full border-collapse [&_td]:border-b [&_td]:border-border [&_td]:px-3 [&_td]:py-2.5 [&_td]:text-left [&_th]:border-b [&_th]:border-border [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-left [&_th]:text-xs [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wider [&_th]:text-muted-foreground [&_tbody_tr:hover]:bg-black/5"
+                        >
+                            <thead>
+                                <tr>
+                                    <th class="table-col-check w-10">
+                                        <input
+                                            type="checkbox"
+                                            class="table-checkbox h-4 w-4 cursor-pointer accent-primary"
+                                            aria-label="Select all"
+                                        />
+                                    </th>
+                                    <th class="table-col-thumb w-12"></th>
+                                    <th>Filename</th>
+                                    <th>Type</th>
+                                    <th>Size</th>
+                                    <th>Visibility</th>
+                                    <th class="actions-col w-12 text-right"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {for (props.media) |item| (
+                                    <tr
+                                        class="data-[selected=true]:bg-primary/5"
+                                        data-selected="false"
+                                    >
+                                        <td class="table-col-check w-10">
+                                            <input
+                                                type="checkbox"
+                                                class="table-checkbox h-4 w-4 cursor-pointer accent-primary"
+                                                value={item.id}
+                                                aria-label="Select media"
+                                                onChange="toggleItem"
+                                            />
+                                        </td>
+                                        <td class="table-col-thumb w-12">
+                                            {if (item.is_image) (
+                                                <div
+                                                    class="table-thumb flex h-8 w-8 items-center justify-center rounded-[calc(var(--radius)*0.6)] bg-muted text-xs text-muted-foreground"
+                                                >
+                                                    <img
+                                                        src={item.thumb_url}
+                                                        alt={item.filename}
+                                                    />
+                                                </div>
+                                            ) else (
+                                                <div
+                                                    class="table-thumb flex h-8 w-8 items-center justify-center rounded-[calc(var(--radius)*0.6)] bg-muted text-xs text-muted-foreground"
+                                                >
+                                                    <Icon name={IconName.file} />
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td>
+                                            <a
+                                                href={item.edit_url}
+                                                class="text-primary no-underline hover:underline"
+                                            >
+                                                {item.filename}
+                                            </a>
+                                        </td>
+                                        <td>{item.mime_type}</td>
+                                        <td>{item.size_display}</td>
+                                        <td>
+                                            <span
+                                                class={if (item.is_private) ("badge badge-draft") else ("badge badge-published")}
+                                            >
+                                                {item.visibility}
+                                            </span>
+                                        </td>
+                                        <td class="actions-col w-12 text-right">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger
+                                                    as_child={true}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        class="table-actions-btn inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.6)] border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+                                                        aria-label="Actions"
+                                                    >
+                                                        <Icon
+                                                            name={IconName.more}
+                                                        />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent>
+                                                    <a
+                                                        href={item.edit_url}
+                                                        class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] px-2 py-1.5 text-left text-sm text-foreground no-underline hover:bg-accent"
+                                                        data-publr-part="item"
+                                                        role="menuitem"
+                                                    >
+                                                        Edit
+                                                    </a>
+                                                    <DropdownMenuSeparator />
+                                                    <form
+                                                        method="POST"
+                                                        action="/admin/action"
+                                                    >
+                                                        <input
+                                                            type="hidden"
+                                                            name="_csrf"
+                                                            value={props.csrf_token}
+                                                        />
+                                                        <input
+                                                            type="hidden"
+                                                            name="action"
+                                                            value="media.delete"
+                                                        />
+                                                        <input
+                                                            type="hidden"
+                                                            name="media_id"
+                                                            value={item.id}
+                                                        />
+                                                        <button
+                                                            type="submit"
+                                                            class="dropdown-item dropdown-item-danger block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+                                                            data-publr-part="item"
+                                                            role="menuitem"
+                                                            onclick="return confirm('Delete this file permanently?')"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    </form>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    )}
                 ) else (
-                    <div class="empty-state media-upload-zone" id="media-upload-zone">
-                        <div class="empty-state-icon"><Icon name={IconName.upload} /></div>
-                        <p>No media files yet.</p>
-                        <p class="empty-state-hint">Drop files here or use the upload button below.</p>
-                    </div>
+                    {if (props.active_folder.len > 0 or props.active_tags.len > 0 or props.search_term.len > 0) (
+                        <div
+                            class="empty-state media-upload-zone flex min-h-full cursor-pointer flex-col items-center justify-center rounded-[calc(var(--radius)*1.4)] border-2 border-dashed border-border px-5 py-8 text-center text-muted-foreground transition-colors [&.dragover]:border-primary [&.dragover]:bg-muted"
+                            onDragover.prevent="zoneOver"
+                            onDragleave.prevent="zoneLeave"
+                            onDrop.prevent="zoneDrop"
+                            onClick="zoneClick"
+                            :class="$dragover -> dragover"
+                        >
+                            <div
+                                class="empty-state-icon mb-4 text-muted-foreground [&_.icon]:h-12 [&_.icon]:w-12"
+                            >
+                                <Icon name={IconName.upload} />
+                            </div>
+                            <p>No files match your current filters.</p>
+                            <p class="empty-state-hint mt-2 text-sm">Drop files here to upload, or <a href={props.reset_url}>reset all</a>.</p>
+                        </div>
+                    ) else (
+                        <div
+                            class="empty-state media-upload-zone flex min-h-full cursor-pointer flex-col items-center justify-center rounded-[calc(var(--radius)*1.4)] border-2 border-dashed border-border px-5 py-8 text-center text-muted-foreground transition-colors [&.dragover]:border-primary [&.dragover]:bg-muted"
+                            onDragover.prevent="zoneOver"
+                            onDragleave.prevent="zoneLeave"
+                            onDrop.prevent="zoneDrop"
+                            onClick="zoneClick"
+                            :class="$dragover -> dragover"
+                        >
+                            <div
+                                class="empty-state-icon mb-4 text-muted-foreground [&_.icon]:h-12 [&_.icon]:w-12"
+                            >
+                                <Icon name={IconName.upload} />
+                            </div>
+                            <p>No media files yet.</p>
+                            <p class="empty-state-hint mt-2 text-sm">Drop files here or use the upload button below.</p>
+                        </div>
+                    )}
                 )}
-            )}
-        </div>
-    </Flex>
-
-
-    <div data-publr-component="dialog" data-publr-state="closed" id="bulk-add-tag-dialog">
-        <button data-publr-part="trigger" hidden=""></button>
-        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
-            <div class="dialog-content">
-                <h3>Add Tag</h3>
-                <p>Select a tag to add to the selected items.</p>
-                <form method="POST" action="/admin/action" id="bulk-add-tag-form">
-                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    <input type="hidden" name="action" value="media.bulk_add_tag" />
-                    <input type="hidden" name="ids" id="bulk-add-tag-ids" value="" />
-                    <input type="hidden" name="select_all" id="bulk-add-tag-select-all" value="" />
-                    <input type="hidden" name="filter_folder" id="bulk-add-tag-filter-folder" value="" />
-                    <input type="hidden" name="filter_tags" id="bulk-add-tag-filter-tags" value="" />
-                    <input type="hidden" name="filter_search" id="bulk-add-tag-filter-search" value="" />
-                    <input type="hidden" name="filter_unreviewed" id="bulk-add-tag-filter-unreviewed" value="" />
-                    <input type="hidden" name="filter_year" id="bulk-add-tag-filter-year" value="" />
-                    <input type="hidden" name="filter_month" id="bulk-add-tag-filter-month" value="" />
-                    <select name="term_id" class="form-control" required="">
-                        <option value="">Choose a tag...</option>
-                        {for (props.tags) |tag| (
-                            <option value={tag.id}>{tag.name}</option>
-                        )}
-                    </select>
-                    <div class="dialog-actions">
-                        <button type="button" data-publr-part="close" class="btn btn-sm">Cancel</button>
-                        <button type="submit" class="btn btn-sm btn-primary">Add Tag</button>
-                    </div>
-                </form>
             </div>
+        </Flex>
+        <div id="bulk-add-tag-dialog">
+            <Dialog>
+                <DialogTrigger><button type="button" hidden=""></button></DialogTrigger>
+                <DialogOverlay>
+                    <DialogContent>
+                        <DialogTitle>Add Tag</DialogTitle>
+                        <DialogDescription>Select a tag to add to the selected items.</DialogDescription>
+                        <form
+                            method="POST"
+                            action="/admin/action"
+                            id="bulk-add-tag-form"
+                        >
+                            <input
+                                type="hidden"
+                                name="_csrf"
+                                value={props.csrf_token}
+                            />
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="media.bulk_add_tag"
+                            />
+                            <input
+                                type="hidden"
+                                name="ids"
+                                id="bulk-add-tag-ids"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="select_all"
+                                id="bulk-add-tag-select-all"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_folder"
+                                id="bulk-add-tag-filter-folder"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_tags"
+                                id="bulk-add-tag-filter-tags"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_search"
+                                id="bulk-add-tag-filter-search"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_unreviewed"
+                                id="bulk-add-tag-filter-unreviewed"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_year"
+                                id="bulk-add-tag-filter-year"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_month"
+                                id="bulk-add-tag-filter-month"
+                                value=""
+                            />
+                            <select
+                                name="term_id"
+                                class="form-control w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base text-foreground focus:border-ring focus:outline-none sm:text-sm"
+                                required=""
+                            >
+                                <option value="">Choose a tag...</option>
+                                {for (props.tags) |tag| (
+                                    <option value={tag.id}>{tag.name}</option>
+                                )}
+                            </select>
+                            <div class="dialog-actions flex justify-end gap-2">
+                                <DialogClose><button type="button" class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground hover:bg-accent">Cancel</button></DialogClose>
+                                <button
+                                    type="submit"
+                                    class="btn btn-sm btn-primary inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                                >
+                                    Add Tag
+                                </button>
+                            </div>
+                        </form>
+                    </DialogContent>
+                </DialogOverlay>
+            </Dialog>
         </div>
-    </div>
-
-    <div data-publr-component="dialog" data-publr-state="closed" id="bulk-remove-tag-dialog">
-        <button data-publr-part="trigger" hidden=""></button>
-        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
-            <div class="dialog-content">
-                <h3>Remove Tag</h3>
-                <p>Select a tag to remove from the selected items.</p>
-                <form method="POST" action="/admin/action" id="bulk-remove-tag-form">
-                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    <input type="hidden" name="action" value="media.bulk_remove_tag" />
-                    <input type="hidden" name="ids" id="bulk-remove-tag-ids" value="" />
-                    <input type="hidden" name="select_all" id="bulk-remove-tag-select-all" value="" />
-                    <input type="hidden" name="filter_folder" id="bulk-remove-tag-filter-folder" value="" />
-                    <input type="hidden" name="filter_tags" id="bulk-remove-tag-filter-tags" value="" />
-                    <input type="hidden" name="filter_search" id="bulk-remove-tag-filter-search" value="" />
-                    <input type="hidden" name="filter_unreviewed" id="bulk-remove-tag-filter-unreviewed" value="" />
-                    <input type="hidden" name="filter_year" id="bulk-remove-tag-filter-year" value="" />
-                    <input type="hidden" name="filter_month" id="bulk-remove-tag-filter-month" value="" />
-                    <select name="term_id" class="form-control" required="">
-                        <option value="">Choose a tag...</option>
-                        {for (props.tags) |tag| (
-                            <option value={tag.id}>{tag.name}</option>
-                        )}
-                    </select>
-                    <div class="dialog-actions">
-                        <button type="button" data-publr-part="close" class="btn btn-sm">Cancel</button>
-                        <button type="submit" class="btn btn-sm btn-danger">Remove Tag</button>
-                    </div>
-                </form>
-            </div>
+        <div id="bulk-remove-tag-dialog">
+            <Dialog>
+                <DialogTrigger><button type="button" hidden=""></button></DialogTrigger>
+                <DialogOverlay>
+                    <DialogContent>
+                        <DialogTitle>Remove Tag</DialogTitle>
+                        <DialogDescription>Select a tag to remove from the selected items.</DialogDescription>
+                        <form
+                            method="POST"
+                            action="/admin/action"
+                            id="bulk-remove-tag-form"
+                        >
+                            <input
+                                type="hidden"
+                                name="_csrf"
+                                value={props.csrf_token}
+                            />
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="media.bulk_remove_tag"
+                            />
+                            <input
+                                type="hidden"
+                                name="ids"
+                                id="bulk-remove-tag-ids"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="select_all"
+                                id="bulk-remove-tag-select-all"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_folder"
+                                id="bulk-remove-tag-filter-folder"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_tags"
+                                id="bulk-remove-tag-filter-tags"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_search"
+                                id="bulk-remove-tag-filter-search"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_unreviewed"
+                                id="bulk-remove-tag-filter-unreviewed"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_year"
+                                id="bulk-remove-tag-filter-year"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_month"
+                                id="bulk-remove-tag-filter-month"
+                                value=""
+                            />
+                            <select
+                                name="term_id"
+                                class="form-control w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base text-foreground focus:border-ring focus:outline-none sm:text-sm"
+                                required=""
+                            >
+                                <option value="">Choose a tag...</option>
+                                {for (props.tags) |tag| (
+                                    <option value={tag.id}>{tag.name}</option>
+                                )}
+                            </select>
+                            <div class="dialog-actions flex justify-end gap-2">
+                                <DialogClose><button type="button" class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground hover:bg-accent">Cancel</button></DialogClose>
+                                <button
+                                    type="submit"
+                                    class="btn btn-sm btn-danger inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-destructive bg-destructive px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                                >
+                                    Remove Tag
+                                </button>
+                            </div>
+                        </form>
+                    </DialogContent>
+                </DialogOverlay>
+            </Dialog>
         </div>
-    </div>
-
-    <div data-publr-component="dialog" data-publr-state="closed" id="bulk-move-folder-dialog">
-        <button data-publr-part="trigger" hidden=""></button>
-        <div data-publr-part="content" class="dialog-overlay" role="dialog" aria-modal="true">
-            <div class="dialog-content">
-                <h3>Move to Folder</h3>
-                <p>Select a folder to move the selected items to.</p>
-                <form method="POST" action="/admin/action" id="bulk-move-folder-form">
-                    <input type="hidden" name="_csrf" value={props.csrf_token} />
-                    <input type="hidden" name="action" value="media.bulk_move_folder" />
-                    <input type="hidden" name="ids" id="bulk-move-folder-ids" value="" />
-                    <input type="hidden" name="select_all" id="bulk-move-folder-select-all" value="" />
-                    <input type="hidden" name="filter_folder" id="bulk-move-folder-filter-folder" value="" />
-                    <input type="hidden" name="filter_tags" id="bulk-move-folder-filter-tags" value="" />
-                    <input type="hidden" name="filter_search" id="bulk-move-folder-filter-search" value="" />
-                    <input type="hidden" name="filter_unreviewed" id="bulk-move-folder-filter-unreviewed" value="" />
-                    <input type="hidden" name="filter_year" id="bulk-move-folder-filter-year" value="" />
-                    <input type="hidden" name="filter_month" id="bulk-move-folder-filter-month" value="" />
-                    <select name="term_id" class="form-control" required="">
-                        <option value="">Choose a folder...</option>
-                        {for (props.folders) |folder| (
-                            <option value={folder.id}>{folder.name}</option>
-                        )}
-                    </select>
-                    <div class="dialog-actions">
-                        <button type="button" data-publr-part="close" class="btn btn-sm">Cancel</button>
-                        <button type="submit" class="btn btn-sm btn-primary">Move</button>
-                    </div>
-                </form>
-            </div>
+        <div id="bulk-move-folder-dialog">
+            <Dialog>
+                <DialogTrigger><button type="button" hidden=""></button></DialogTrigger>
+                <DialogOverlay>
+                    <DialogContent>
+                        <DialogTitle>Move to Folder</DialogTitle>
+                        <DialogDescription>Select a folder to move the selected items to.</DialogDescription>
+                        <form
+                            method="POST"
+                            action="/admin/action"
+                            id="bulk-move-folder-form"
+                        >
+                            <input
+                                type="hidden"
+                                name="_csrf"
+                                value={props.csrf_token}
+                            />
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="media.bulk_move_folder"
+                            />
+                            <input
+                                type="hidden"
+                                name="ids"
+                                id="bulk-move-folder-ids"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="select_all"
+                                id="bulk-move-folder-select-all"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_folder"
+                                id="bulk-move-folder-filter-folder"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_tags"
+                                id="bulk-move-folder-filter-tags"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_search"
+                                id="bulk-move-folder-filter-search"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_unreviewed"
+                                id="bulk-move-folder-filter-unreviewed"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_year"
+                                id="bulk-move-folder-filter-year"
+                                value=""
+                            />
+                            <input
+                                type="hidden"
+                                name="filter_month"
+                                id="bulk-move-folder-filter-month"
+                                value=""
+                            />
+                            <select
+                                name="term_id"
+                                class="form-control w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base text-foreground focus:border-ring focus:outline-none sm:text-sm"
+                                required=""
+                            >
+                                <option value="">Choose a folder...</option>
+                                {for (props.folders) |folder| (
+                                    <option value={folder.id}>{folder.name}</option>
+                                )}
+                            </select>
+                            <div class="dialog-actions flex justify-end gap-2">
+                                <DialogClose><button type="button" class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground hover:bg-accent">Cancel</button></DialogClose>
+                                <button
+                                    type="submit"
+                                    class="btn btn-sm btn-primary inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                                >
+                                    Move
+                                </button>
+                            </div>
+                        </form>
+                    </DialogContent>
+                </DialogOverlay>
+            </Dialog>
         </div>
+        <form
+            method="POST"
+            id="bulk-delete-form"
+            action="/admin/action"
+            style="display:none"
+        >
+            <input type="hidden" name="_csrf" value={props.csrf_token} />
+            <input type="hidden" name="action" value="media.bulk_delete" />
+            <input type="hidden" name="ids" id="bulk-delete-ids" value="" />
+            <input
+                type="hidden"
+                name="select_all"
+                id="bulk-delete-select-all"
+                value=""
+            />
+            <input
+                type="hidden"
+                name="filter_folder"
+                id="bulk-delete-filter-folder"
+                value=""
+            />
+            <input
+                type="hidden"
+                name="filter_tags"
+                id="bulk-delete-filter-tags"
+                value=""
+            />
+            <input
+                type="hidden"
+                name="filter_search"
+                id="bulk-delete-filter-search"
+                value=""
+            />
+            <input
+                type="hidden"
+                name="filter_unreviewed"
+                id="bulk-delete-filter-unreviewed"
+                value=""
+            />
+            <input
+                type="hidden"
+                name="filter_year"
+                id="bulk-delete-filter-year"
+                value=""
+            />
+            <input
+                type="hidden"
+                name="filter_month"
+                id="bulk-delete-filter-month"
+                value=""
+            />
+        </form>
+        <script type="module" src="/static/scripts/media-library.js"></script>
     </div>
-
-    <form method="POST" id="bulk-delete-form" action="/admin/action" style="display:none">
-        <input type="hidden" name="_csrf" value={props.csrf_token} />
-        <input type="hidden" name="action" value="media.bulk_delete" />
-        <input type="hidden" name="ids" id="bulk-delete-ids" value="" />
-        <input type="hidden" name="select_all" id="bulk-delete-select-all" value="" />
-        <input type="hidden" name="filter_folder" id="bulk-delete-filter-folder" value="" />
-        <input type="hidden" name="filter_tags" id="bulk-delete-filter-tags" value="" />
-        <input type="hidden" name="filter_search" id="bulk-delete-filter-search" value="" />
-        <input type="hidden" name="filter_unreviewed" id="bulk-delete-filter-unreviewed" value="" />
-        <input type="hidden" name="filter_year" id="bulk-delete-filter-year" value="" />
-        <input type="hidden" name="filter_month" id="bulk-delete-filter-month" value="" />
-    </form>
-
 }
 
 pub fn BottomBar(props: struct {
@@ -621,21 +1475,31 @@ pub fn BottomBar(props: struct {
     page_urls: []const PageUrl,
     csrf_token: []const u8,
 }) {
-    <div class="flex flex-row justify-between items-center border-t border-border" data-active-folder={props.active_folder}>
+    <div
+        class="flex flex-row justify-between items-center border-t border-border"
+        data-active-folder={props.active_folder}
+    >
         <div>
             {if (props.total_pages > 1) (
                 <Pagination>
                     <PaginationContent>
                         <PaginationItem>
                             {if (props.prev_page_url.len > 0) (
-                                <PaginationPrevious href={props.prev_page_url} />
+                                <PaginationPrevious
+                                    href={props.prev_page_url}
+                                />
                             ) else (
                                 <PaginationPrevious disabled={true} />
                             )}
                         </PaginationItem>
                         {for (props.page_urls) |pg| (
                             <PaginationItem>
-                                <PaginationLink href={pg.url} is_active={pg.is_current}>{pg.page_num}</PaginationLink>
+                                <PaginationLink
+                                    href={pg.url}
+                                    is_active={pg.is_current}
+                                >
+                                    {pg.page_num}
+                                </PaginationLink>
                             </PaginationItem>
                         )}
                         <PaginationItem>
@@ -647,12 +1511,28 @@ pub fn BottomBar(props: struct {
                         </PaginationItem>
                     </PaginationContent>
                 </Pagination>
-            ) else (<span></span>)}
+            ) else (
+                <span></span>
+            )}
         </div>
         <Flex gap=.sm items=.center>
-            <div class="media-upload-progress" id="upload-progress" style="display:none">
-                <div class="upload-progress-bar" id="upload-progress-bar"></div>
-                <span class="upload-progress-text" id="upload-progress-text">Uploading...</span>
+            <div
+                class="media-upload-progress flex min-w-[180px] items-center gap-2"
+                id="upload-progress"
+                style="display:none"
+            >
+                <div
+                    class="upload-progress-bar relative h-1 flex-1 overflow-hidden rounded-full bg-muted after:absolute after:inset-y-0 after:left-0 after:w-[var(--progress,0%)] after:rounded-full after:bg-primary after:content-[''] after:transition-[width]"
+                    id="upload-progress-bar"
+                >
+
+                </div>
+                <span
+                    class="upload-progress-text text-xs text-muted-foreground"
+                    id="upload-progress-text"
+                >
+                    Uploading...
+                </span>
             </div>
         </Flex>
     </div>
@@ -668,42 +1548,130 @@ pub fn MediaControls(props: struct {
     <Flex justify=.between items=.center gap=.lg>
         <Flex gap=.md items=.center>
             <label for="media-select-all"><Text size=.sm color=.muted as=.span>Select all:</Text></label>
-            <input type="checkbox" class="media-select-all" id="media-select-all" aria-label="Select all" />
+            <input
+                type="checkbox"
+                class="media-select-all h-4 w-4 cursor-pointer accent-primary"
+                id="media-select-all"
+                aria-label="Select all"
+                onChange="toggleAll"
+            />
             <Flex gap=.md items=.center>
                 <span>
-                    <Text size=.sm color=.muted as=.span id="media-count-default">{props.filtered_count} files</Text>
-                    <span id="media-selection-info"><span id="media-selection-count">0</span> selected</span>
+                    <Text
+                        size=.sm
+                        color=.muted
+                        as=.span
+                        :showIf="not $anySelected"
+                    >
+                        {props.filtered_count} files
+                    </Text>
+                    <span class="hidden" :showIf="$anySelected"><span :text="$count">0</span>
+                    selected</span>
                 </span>
-                <div data-publr-component="dropdown" class="media-bulk-actions">
-                    <button class="btn btn-sm" id="media-bulk-actions-btn" data-publr-part="trigger">Bulk Actions</button>
+                <DropdownMenu class="media-bulk-actions inline-flex">
+                    <DropdownMenuTrigger as_child={true}>
+                        <button
+                            type="button"
+                            class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground shadow-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                            id="media-bulk-actions-btn"
+                            disabled=""
+                        >
+                            Bulk Actions
+                        </button>
+                    </DropdownMenuTrigger>
                     <DropdownMenuContent>
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="delete">Delete</button>
+                        <button
+                            type="button"
+                            class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm hover:bg-accent"
+                            data-publr-part="item"
+                            role="menuitem"
+                            data-bulk-action="delete"
+                            onClick="bulkAction"
+                        >
+                            Delete
+                        </button>
                         <DropdownMenuSeparator />
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="add-tag">Add Tag...</button>
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="remove-tag">Remove Tag...</button>
+                        <button
+                            type="button"
+                            class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm hover:bg-accent"
+                            data-publr-part="item"
+                            role="menuitem"
+                            data-bulk-action="add-tag"
+                            onClick="bulkAction"
+                        >
+                            Add Tag...
+                        </button>
+                        <button
+                            type="button"
+                            class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm hover:bg-accent"
+                            data-publr-part="item"
+                            role="menuitem"
+                            data-bulk-action="remove-tag"
+                            onClick="bulkAction"
+                        >
+                            Remove Tag...
+                        </button>
                         <DropdownMenuSeparator />
-                        <button type="button" class="dropdown-item" data-publr-part="item" data-bulk-action="move-folder">Move to Folder...</button>
+                        <button
+                            type="button"
+                            class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm hover:bg-accent"
+                            data-publr-part="item"
+                            role="menuitem"
+                            data-bulk-action="move-folder"
+                            onClick="bulkAction"
+                        >
+                            Move to Folder...
+                        </button>
                     </DropdownMenuContent>
-                </div>
+                </DropdownMenu>
             </Flex>
         </Flex>
         <Flex items=.center gap=.md>
-            <div class="media-view-toggle">
-                <a href={props.view_grid_url} class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active") else ("media-view-btn")} aria-label="Grid view">
+            <div
+                class="media-view-toggle flex gap-0.5 rounded-[calc(var(--radius)*0.8)] bg-muted p-0.5"
+            >
+                <a
+                    href={props.view_grid_url}
+                    class={if (std.mem.eql(u8, props.view_mode, "grid")) ("media-view-btn active flex h-7 w-8 items-center justify-center rounded-[calc(var(--radius)*0.6)] bg-background text-foreground shadow-xs") else ("media-view-btn flex h-7 w-8 items-center justify-center rounded-[calc(var(--radius)*0.6)] text-muted-foreground hover:text-foreground")}
+                    aria-label="Grid view"
+                >
                     <Icon name={IconName.grid} />
                 </a>
-                <a href={props.view_list_url} class={if (std.mem.eql(u8, props.view_mode, "list")) ("media-view-btn active") else ("media-view-btn")} aria-label="List view">
+                <a
+                    href={props.view_list_url}
+                    class={if (std.mem.eql(u8, props.view_mode, "list")) ("media-view-btn active flex h-7 w-8 items-center justify-center rounded-[calc(var(--radius)*0.6)] bg-background text-foreground shadow-xs") else ("media-view-btn flex h-7 w-8 items-center justify-center rounded-[calc(var(--radius)*0.6)] text-muted-foreground hover:text-foreground")}
+                    aria-label="List view"
+                >
                     <Icon name={IconName.list} />
                 </a>
             </div>
             {if (props.active_folder.len > 0 and !std.mem.eql(u8, props.active_folder, "default")) (
-                <button type="button" class="btn btn-sm" id="upload-default-btn">Upload to default</button>
-                <button type="button" class="btn btn-sm btn-primary" id="upload-here-btn">
-                    <Icon name={IconName.upload} /> Upload here
+                <button
+                    type="button"
+                    class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground shadow-xs hover:bg-accent"
+                    id="upload-default-btn"
+                    onClick="uploadDefault"
+                >
+                    Upload to default
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-sm btn-primary inline-flex cursor-pointer items-center justify-center gap-1 rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                    id="upload-here-btn"
+                    onClick="uploadHere"
+                >
+                    <Icon name={IconName.upload} />
+                    Upload here
                 </button>
             ) else (
-                <button type="button" class="btn btn-sm btn-primary" id="upload-default-btn">
-                    <Icon name={IconName.upload} /> Upload
+                <button
+                    type="button"
+                    class="btn btn-sm btn-primary inline-flex cursor-pointer items-center justify-center gap-1 rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                    id="upload-default-btn"
+                    onClick="uploadDefault"
+                >
+                    <Icon name={IconName.upload} />
+                    Upload
                 </button>
             )}
         </Flex>

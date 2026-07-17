@@ -1,20 +1,34 @@
-// Group field control — a <fieldset> wrapping nested sub-fields (a nested JSON
-// object). Does NOT use FieldLabelRow (it's a fieldset with its own legend, not
-// a form-group). `children` is the pre-rendered sub-fields HTML, composed by the
-// adapter (which owns JSON parsing + the `{name}.{sub}` name contract).
-// data-publr-component="toggle" makes the legend collapse the content.
+// Group field control — a collapsible <details> wrapping nested sub-fields
+// (a nested JSON object). Does NOT use FieldLabelRow (it has its own summary
+// header, not a form-group). `children` is the pre-rendered sub-fields HTML,
+// composed by the adapter (which owns JSON parsing + the `{name}.{sub}` name
+// contract).
+//
+// Collapse is NATIVE <details>/<summary> — zero JS (this retired the
+// publr-core.js toggle scanner, #471). Inputs inside a closed <details>
+// stay form-associated and submit normally. The summary's flex display (plus
+// list-none) suppresses the default disclosure marker; the chevron is the
+// ::before, flipped via the JIT's group-open variant. `.field-group` /
+// `.field-group-content` class names are load-bearing: entry-editor.js and
+// presence.js resolve nested fields through them.
 
-// The fieldset is the `group` state-holder; the content collapses via the
-// group-data variant — visible when the group is `open`, hidden otherwise
-// (the toggle JS flips data-publr-state). admin.css previously only rotated
-// the legend arrow and never hid the content, so this wires up the collapse.
 pub fn FieldGroup(props: struct {
     name: []const u8,
     display_name: []const u8,
     children: []const u8 = "",
 }) {
-    <fieldset class="field-group group" data-publr-component="toggle" data-publr-state="open" data-field={props.name}>
-        <legend class="field-group-legend" data-publr-part="trigger">{props.display_name}</legend>
-        <div class="field-group-content hidden group-data-[publr-state=open]:block" data-publr-part="content">{@raw props.children}</div>
-    </fieldset>
+    <details
+        class="field-group group mb-4 rounded-[calc(var(--radius)*0.8)] border border-border p-0"
+        open=""
+        data-field={props.name}
+    >
+        <summary
+            class="field-group-legend flex w-full cursor-pointer select-none list-none items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold text-muted-foreground hover:text-foreground before:inline-block before:h-1.5 before:w-1.5 before:shrink-0 before:-rotate-45 before:border-b-2 before:border-r-2 before:border-current before:content-[''] before:transition-transform group-open:before:rotate-45"
+        >
+            {props.display_name}
+        </summary>
+        <div class="field-group-content px-4 pb-1 pt-3">
+            {@raw props.children}
+        </div>
+    </details>
 }

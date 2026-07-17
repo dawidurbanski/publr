@@ -409,10 +409,10 @@ test "route matching with wildcard" {
         fn handle(_: *Context) !void {}
     }.handle);
 
-    var ctx1 = Context.init(allocator, .GET, "/static/admin.css");
+    var ctx1 = Context.init(allocator, .GET, "/static/styles/publr.css");
     defer ctx1.deinit();
-    try std.testing.expect(route_match.matchRoute(router.routes.items[0].segments, "/static/admin.css", &ctx1));
-    try std.testing.expectEqualStrings("admin.css", ctx1.wildcard.?);
+    try std.testing.expect(route_match.matchRoute(router.routes.items[0].segments, "/static/styles/publr.css", &ctx1));
+    try std.testing.expectEqualStrings("publr.css", ctx1.wildcard.?);
 
     var ctx2 = Context.init(allocator, .GET, "/static/js/app.js");
     defer ctx2.deinit();

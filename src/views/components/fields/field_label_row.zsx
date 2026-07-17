@@ -12,7 +12,7 @@
 // The control is placed AFTER the label row, inside form-group — matching the
 // original writer output. The error slot is net-new (RenderContext.errors was
 // plumbed but never rendered before) and uses utility classes so it needs no
-// admin.css.
+// a separate stylesheet.
 pub fn FieldLabelRow(props: struct {
     name: []const u8,
     display_name: []const u8,
@@ -21,25 +21,52 @@ pub fn FieldLabelRow(props: struct {
     errors: []const []const u8 = &.{},
     children: []const u8 = "",
 }) {
-    <div class="form-group" data-field={props.name}>
-        <div class="form-label-row">
+    <div class="form-group mb-5" data-field={props.name}>
+        <div
+            class="form-label-row mb-1 flex items-center justify-between gap-2"
+        >
             {if (props.kind == .with_for) (
-                <label class="form-label" for={props.name}>{props.display_name}</label>
+                <label
+                    class="form-label mb-1 block text-sm font-medium leading-5 text-muted-foreground"
+                    for={props.name}
+                >
+                    {props.display_name}
+                </label>
             ) else (
                 {if (props.kind == .no_for) (
-                    <label class="form-label">{props.display_name}</label>
+                    <label
+                        class="form-label mb-1 block text-sm font-medium leading-5 text-muted-foreground"
+                    >
+                        {props.display_name}
+                    </label>
                 ) else (
-                    <span class="form-label">{props.display_name}</span>
+                    <span
+                        class="form-label mb-1 block text-sm font-medium leading-5 text-muted-foreground"
+                    >
+                        {props.display_name}
+                    </span>
                 )}
             )}
-            <div class="field-check-row">
-                <span class="field-editor-badge" data-field={props.name}></span>
-                <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field={props.name} checked="checked" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
+            <div class="field-check-row flex items-center gap-2">
+                <span
+                    class="field-editor-badge hidden items-center gap-1 whitespace-nowrap text-xs text-muted-foreground [.form-group.field-changed_&.field-editor-active]:flex [.form-group.field-deselected_&.field-editor-active]:flex [.form-group.field-in-release_&.field-editor-active]:flex"
+                    data-field={props.name}
+                >
+
+                </span>
+                <label
+                    class="switch-label field-publish-switch hidden cursor-pointer items-center gap-2 text-sm [.form-group.field-changed_&]:inline-flex [.form-group.field-deselected_&]:inline-flex"
+                >
+                    <input type="checkbox" class="switch-input field-publish-check peer absolute h-0 w-0 opacity-0" data-field={props.name} checked="checked" /><span class="switch-track relative inline-block h-5 w-9 rounded-full bg-input transition-colors peer-checked:bg-primary peer-checked:[&_.switch-thumb]:translate-x-4" role="switch" aria-checked="true"><span class="switch-thumb absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform"></span></span>
+                </label>
             </div>
         </div>
         {@raw props.children}
         {if (props.errors.len > 0) (
-            <div class="mt-1 flex flex-col gap-1" data-field-errors={props.name}>
+            <div
+                class="mt-1 flex flex-col gap-1"
+                data-field-errors={props.name}
+            >
                 {for (props.errors) |err| (
                     <span class="text-sm text-destructive">{err}</span>
                 )}

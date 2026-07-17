@@ -2,8 +2,9 @@
 // Fields are pre-rendered by the adapter and injected as {@raw fields_html}.
 // State data-attrs that were conditionally present (entry-id / entry-status /
 // published-state) use the `?=` conditional-attribute syntax; the adapter
-// passes them as optionals (null → omitted). The KV-picker scripts render only
-// when vars_json is present (auth).
+// passes them as optionals (null → omitted). The KV-picker's #kv-vars-data
+// JSON renders only when vars_json is present (auth); the picker island +
+// its store script render alongside it (<KvPicker />, static/kv-picker.js).
 pub fn EntryForm(props: struct {
     type_id: []const u8,
     entry_id: []const u8 = "",
@@ -18,15 +19,20 @@ pub fn EntryForm(props: struct {
     fields_html: []const u8 = "",
     vars_json: ?[]const u8 = null,
 }) {
-    <form method="POST" action="/admin/action" id="entry-form" class="form"
-          data-base-url={`/admin/content/${props.type_id}`}
-          data-entry-id?={props.entry_id_attr}
-          data-entry-status?={props.status_attr}
-          data-published-state?={props.published_state}
-          data-fields-in-releases={props.fields_in_releases}
-          data-field-editors={props.field_editors}
-          data-lock-timeout-ms={props.lock_timeout_ms}
-          data-heartbeat-interval-ms={props.heartbeat_interval_ms}>
+    <form
+        method="POST"
+        action="/admin/action"
+        id="entry-form"
+        class="form w-full max-w-[720px]"
+        data-base-url={`/admin/content/${props.type_id}`}
+        data-entry-id?={props.entry_id_attr}
+        data-entry-status?={props.status_attr}
+        data-published-state?={props.published_state}
+        data-fields-in-releases={props.fields_in_releases}
+        data-field-editors={props.field_editors}
+        data-lock-timeout-ms={props.lock_timeout_ms}
+        data-heartbeat-interval-ms={props.heartbeat_interval_ms}
+    >
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <input type="hidden" name="action" value="content.update" />
         <input type="hidden" name="type" value={props.type_id} />
@@ -35,7 +41,9 @@ pub fn EntryForm(props: struct {
         {@raw props.fields_html}
     </form>
     {if (props.vars_json != null) (
-        <script id="kv-vars-data" type="application/json">{@raw props.vars_json.?}</script>
-        <script src="/static/interact/kv-picker.js"></script>
+        <div>
+            <script id="kv-vars-data" type="application/json">{@raw props.vars_json.?}</script>
+            <KvPicker />
+        </div>
     )}
 }

@@ -9,12 +9,22 @@ pub fn AuthorCell(props: struct {
     overflow: usize = 0,
 }) {
     {if (props.total == 0) (
-        <span class="text-tertiary">System</span>
+        <span class="text-tertiary text-muted-foreground">System</span>
     ) else (
         {if (props.total == 1) (
-            {for (props.authors) |a| (<img src={a.avatar_url} alt="" title={a.label} class="version-avatar" />{@raw " "}{a.label})}
+            {for (props.authors) |a| (
+                <img
+                    src={a.avatar_url}
+                    alt=""
+                    title={a.label}
+                    class="version-avatar h-6 w-6 shrink-0 rounded-full"
+                />
+                {@raw " "}
+                {a.label}
+            )}
         ) else (
-            <span class="version-avatars">{for (props.authors) |a| (<img src={a.avatar_url} alt="" title={a.label} class="version-avatar version-avatar-stacked" />)}{if (props.overflow > 0) (<span class="version-avatar version-avatar-overflow">+{props.overflow}</span>)}</span>{@raw " "}{props.total}{@raw " authors"}
+            <span class="version-avatars flex shrink-0">{for (props.authors) |a| (<img src={a.avatar_url} alt="" title={a.label} class="version-avatar version-avatar-stacked -ml-3 h-6 w-6 shrink-0 rounded-full border-2 border-background first:ml-0" />)}{if (props.overflow > 0) (<span class="version-avatar version-avatar-overflow -ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground">+{props.overflow}</span>
+            )}</span>{@raw " "}{props.total}{@raw " authors"}
         )}
     )}
 }

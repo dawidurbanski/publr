@@ -10,6 +10,7 @@
 //!   /cms-runtime.js -> browser/cms-runtime.js
 //!   /cms-worker.js  -> browser/cms-worker.js
 //!   /cms.wasm       -> zig-out/browser/cms.wasm (built by `zig build browser`)
+//!   /static/scripts/publr{,-query,-position,-focus}.js -> lib/publr/* (vendored runtime)
 //!   /static/*       -> static/*
 //!
 //! Sets COOP=same-origin and COEP=credentialless headers (matching the prior
@@ -130,6 +131,27 @@ fn serveFile(allocator: std.mem.Allocator, stream: std.net.Stream, path: []const
 /// null for paths that don't map to anything we serve.
 fn resolvePath(path: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, path, "/")) return "browser/index.html";
+
+    // The vendored PublrJS runtime lives in lib/publr/ on disk (not authored
+    // by the CMS) but is SERVED under /static/scripts/ — same URLs the
+    // DS-built modules import by absolute specifier.
+    const vendored_runtime = [_][]const u8{
+        "/static/scripts/publr.js",
+        "/static/scripts/publr-query.js",
+        "/static/scripts/publr-position.js",
+        "/static/scripts/publr-focus.js",
+    };
+    for (vendored_runtime, 0..) |v, i| {
+        if (std.mem.eql(u8, path, v)) {
+            const targets = [_][]const u8{
+                "lib/publr/publr.js",
+                "lib/publr/publr-query.js",
+                "lib/publr/publr-position.js",
+                "lib/publr/publr-focus.js",
+            };
+            return targets[i];
+        }
+    }
 
     // /static/* -> static/*
     if (std.mem.startsWith(u8, path, "/static/")) {

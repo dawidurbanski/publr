@@ -25,11 +25,18 @@ pub fn main() !void {
 
     std.debug.print("Creating browser bundle...\n", .{});
 
+    // The tool owns this staging subtree. Recreate it so an older flat vendor
+    // layout cannot leak obsolete objects into a new archive.
+    var vendor_buf: [512]u8 = undefined;
+    const vendor_out = std.fmt.bufPrint(&vendor_buf, "{s}/vendor", .{out_dir}) catch unreachable;
+    try std.fs.cwd().deleteTree(vendor_out);
+
     // 1. Create directory structure
     for ([_][]const u8{
         "src/schema",                "src/schemas",               "src/plugins",               "src/tools",
         "src/gen/views/admin/posts", "src/gen/views/admin/users", "src/gen/views/admin/media", "src/gen/views/admin/releases",
-        "src/gen/views/components",  "src/gen/views/error",       "vendor",                    "bindings",
+        "src/gen/views/components",  "src/gen/views/error",       "lib",                       "vendor/sqlite",
+        "vendor/stb",                "vendor/libwebp",            "vendor/zig",                "bindings",
     }) |sub| {
         var buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&buf, "{s}/{s}", .{ out_dir, sub }) catch unreachable;
@@ -40,15 +47,23 @@ pub fn main() !void {
     std.debug.print("  Copying source files...\n", .{});
     try copyDir(alloc, "src", out_dir, "src", &.{ ".zig", ".sql" });
     try copyDir(alloc, gen_views_dir, out_dir, "src/gen/views", &.{".zig"});
-    try copyFile("vendor/zsx.zig", out_dir, "vendor/zsx.zig");
-    try copyFile("vendor/publr_ui.zig", out_dir, "vendor/publr_ui.zig");
-    try copyFile("vendor/publr_icons.zig", out_dir, "vendor/publr_icons.zig");
+    try copyFile("lib/zsx.zig", out_dir, "lib/zsx.zig");
+    try copyFile("lib/publr_ui.zig", out_dir, "lib/publr_ui.zig");
+    try copyFile("lib/publr_icons.zig", out_dir, "lib/publr_icons.zig");
+    try copyFile("THIRD_PARTY_NOTICES.md", out_dir, "THIRD_PARTY_NOTICES.md");
+    try copyFile("vendor/sqlite/LICENSE.md", out_dir, "vendor/sqlite/LICENSE.md");
+    try copyFile("vendor/stb/LICENSE.txt", out_dir, "vendor/stb/LICENSE.txt");
+    try copyFile("vendor/libwebp/AUTHORS", out_dir, "vendor/libwebp/AUTHORS");
+    try copyFile("vendor/libwebp/COPYING", out_dir, "vendor/libwebp/COPYING");
+    try copyFile("vendor/libwebp/PATENTS", out_dir, "vendor/libwebp/PATENTS");
+    try copyFile("vendor/libwebp/VERSION", out_dir, "vendor/libwebp/VERSION");
 
     // 3. Compile C to .o and pre-compile WASI libc
     std.debug.print("  Compiling C dependencies...\n", .{});
     try compileCObjects(alloc, out_dir);
     std.debug.print("  Compiling WASI libc...\n", .{});
     try compileWasiLibc(alloc, out_dir);
+    try copyToolchainNotices(alloc, out_dir);
 
     // 4. Generate translate-c bindings
     std.debug.print("  Generating C bindings...\n", .{});
@@ -148,11 +163,11 @@ fn compileWasiLibc(alloc: Allocator, out_dir: []const u8) !void {
 
     try writeFile(out_dir, "_dummy_libc.zig", "export fn _start() void {}\n");
 
-    const libc_out = try std.fmt.allocPrint(alloc, "{s}/vendor/libc.a", .{out_dir});
+    const libc_out = try std.fmt.allocPrint(alloc, "{s}/vendor/zig/libc.a", .{out_dir});
     defer alloc.free(libc_out);
-    const zigc_out = try std.fmt.allocPrint(alloc, "{s}/vendor/libzigc.a", .{out_dir});
+    const zigc_out = try std.fmt.allocPrint(alloc, "{s}/vendor/zig/libzigc.a", .{out_dir});
     defer alloc.free(zigc_out);
-    const crt_out = try std.fmt.allocPrint(alloc, "{s}/vendor/libcompiler_rt.a", .{out_dir});
+    const crt_out = try std.fmt.allocPrint(alloc, "{s}/vendor/zig/libcompiler_rt.a", .{out_dir});
     defer alloc.free(crt_out);
 
     // Run zig build-exe with verbose-link to find the cached .a files.
@@ -230,12 +245,42 @@ fn compileWasiLibc(alloc: Allocator, out_dir: []const u8) !void {
     std.fs.cwd().deleteFile(dummy_path) catch {};
 }
 
+fn copyToolchainNotices(alloc: Allocator, out_dir: []const u8) !void {
+    const zig_lib = try getZigLibDir(alloc);
+    defer alloc.free(zig_lib);
+    const zig_root = std.fs.path.dirname(zig_lib) orelse return error.ZigRootNotFound;
+
+    const notices = [_]struct { src: []const u8, dest: []const u8 }{
+        .{ .src = "LICENSE", .dest = "vendor/zig/LICENSE-Zig.txt" },
+        .{ .src = "lib/libc/musl/COPYRIGHT", .dest = "vendor/zig/COPYRIGHT-musl.txt" },
+        .{ .src = "lib/libc/wasi/LICENSE", .dest = "vendor/zig/LICENSE-WASI.txt" },
+        .{ .src = "lib/libc/wasi/LICENSE-APACHE", .dest = "vendor/zig/LICENSE-WASI-APACHE.txt" },
+        .{ .src = "lib/libc/wasi/LICENSE-APACHE-LLVM", .dest = "vendor/zig/LICENSE-WASI-APACHE-LLVM.txt" },
+        .{ .src = "lib/libc/wasi/LICENSE-MIT", .dest = "vendor/zig/LICENSE-WASI-MIT.txt" },
+        .{ .src = "lib/libc/wasi/libc-bottom-half/cloudlibc/LICENSE", .dest = "vendor/zig/LICENSE-WASI-cloudlibc.txt" },
+        .{ .src = "lib/libc/wasi/libc-top-half/musl/COPYRIGHT", .dest = "vendor/zig/COPYRIGHT-WASI-musl.txt" },
+    };
+    for (notices) |notice| {
+        const src = try std.fs.path.join(alloc, &.{ zig_root, notice.src });
+        defer alloc.free(src);
+        try copyFile(src, out_dir, notice.dest);
+    }
+    try writeFile(out_dir, "vendor/zig/README.md",
+        \\# Browser bundle toolchain archives
+        \\
+        \\The archives in this directory were generated from the installed Zig and
+        \\WASI libc toolchain. The license and copyright files beside them were
+        \\copied from that same toolchain installation when this bundle was built.
+        \\
+    );
+}
+
 fn compileCObjects(alloc: Allocator, out_dir: []const u8) !void {
     // SQLite
-    const sqlite_out = try std.fmt.allocPrint(alloc, "{s}/vendor/sqlite3.o", .{out_dir});
+    const sqlite_out = try std.fmt.allocPrint(alloc, "{s}/vendor/sqlite/sqlite3.o", .{out_dir});
     defer alloc.free(sqlite_out);
     try runZigCC(alloc, &.{
-        "vendor/sqlite3.c",
+        "vendor/sqlite/sqlite3.c",
     }, sqlite_out, &.{
         "-DSQLITE_DQS=0",
         "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
@@ -246,29 +291,29 @@ fn compileCObjects(alloc: Allocator, out_dir: []const u8) !void {
         "-DSQLITE_ENABLE_JSON1",
         "-DSQLITE_OMIT_LOAD_EXTENSION",
         "-I",
-        "vendor",
+        "vendor/sqlite",
     });
 
     // stb_image
-    const stb_out = try std.fmt.allocPrint(alloc, "{s}/vendor/stb_impl.o", .{out_dir});
+    const stb_out = try std.fmt.allocPrint(alloc, "{s}/vendor/stb/stb_impl.o", .{out_dir});
     defer alloc.free(stb_out);
     try runZigCC(alloc, &.{
-        "vendor/stb_impl.c",
+        "vendor/stb/stb_impl.c",
     }, stb_out, &.{
         "-fno-sanitize=alignment",
         "-I",
-        "vendor",
+        "vendor/stb",
     });
 
     // libwebp (124 parts)
     for (0..124) |part| {
-        const out_path = try std.fmt.allocPrint(alloc, "{s}/vendor/libwebp_{d}.o", .{ out_dir, part });
+        const out_path = try std.fmt.allocPrint(alloc, "{s}/vendor/libwebp/libwebp_{d}.o", .{ out_dir, part });
         defer alloc.free(out_path);
         const flag = try std.fmt.allocPrint(alloc, "-DWEBP_AMALGAMATION_PART={d}", .{part});
         defer alloc.free(flag);
         try runZigCC(alloc, &.{
-            "vendor/libwebp.c",
-        }, out_path, &.{ flag, "-I", "vendor" });
+            "vendor/libwebp/libwebp.c",
+        }, out_path, &.{ flag, "-I", "vendor/libwebp" });
     }
 }
 
@@ -305,8 +350,8 @@ fn generateBindings(alloc: Allocator, out_dir: []const u8) !void {
     defer alloc.free(generic_include);
 
     // SQLite bindings
-    const sqlite_out = try runTranslateC(alloc, "vendor/sqlite3.h", &.{
-        "-I",                           "vendor",
+    const sqlite_out = try runTranslateC(alloc, "vendor/sqlite/sqlite3.h", &.{
+        "-I",                           "vendor/sqlite",
         "-isystem",                     wasi_include,
         "-isystem",                     generic_include,
         "-DSQLITE_DQS=0",               "-DSQLITE_THREADSAFE=0",
@@ -329,7 +374,8 @@ fn generateBindings(alloc: Allocator, out_dir: []const u8) !void {
         );
     }
     const stb_out = try runTranslateC(alloc, shim, &.{
-        "-I",       "vendor",
+        "-I",       "vendor/stb",
+        "-I",       "vendor/libwebp",
         "-isystem", wasi_include,
         "-isystem", generic_include,
     });
@@ -382,7 +428,7 @@ fn runTranslateC(alloc: Allocator, header: []const u8, flags: []const []const u8
 
 fn patchCImports(alloc: Allocator, out_dir: []const u8) !void {
     // db.zig: module-level @cImport for sqlite3
-    try patchFile(alloc, out_dir, "src/db.zig",
+    try patchFile(alloc, out_dir, "src/core/db.zig",
         \\const c = @cImport({
         \\    @cInclude("sqlite3.h");
         \\});
@@ -403,7 +449,7 @@ fn patchCImports(alloc: Allocator, out_dir: []const u8) !void {
     );
 
     // media_sync.zig: function-level @cImport for stb_image
-    try patchFile(alloc, out_dir, "src/media_sync.zig",
+    try patchFile(alloc, out_dir, "src/core/media_sync.zig",
         \\    const c = @cImport({
         \\        @cInclude("stb_image.h");
         \\    });
@@ -479,7 +525,7 @@ const modules = [_]Module{
     .{ .name = "wasm_media_handler", .src = "src/wasm/media_handler.zig", .deps = &.{ "middleware", "wasm_storage", "auth_middleware", "media_handler", "image", "storage" } },
     .{ .name = "wasm_router", .src = "src/wasm/router.zig", .deps = &.{ "middleware", "admin_api" } },
     // Views
-    .{ .name = "zsx", .src = "vendor/zsx.zig", .deps = &.{} },
+    .{ .name = "zsx", .src = "lib/zsx.zig", .deps = &.{} },
     .{ .name = "views", .src = "src/gen/views/views.zig", .deps = &.{"zsx"} },
     // Plugins
     .{ .name = "plugin_dashboard", .src = "src/plugins/dashboard.zig", .deps = &.{ "admin_api", "middleware", "tpl", "db", "csrf", "auth_middleware", "media", "views", "registry" } },
@@ -514,13 +560,13 @@ fn writeManifest(alloc: Allocator, out_dir: []const u8) !void {
 
     // Object files (includes pre-compiled WASI libc and compiler-rt)
     try w.writeAll("  \"object_files\": [\n");
-    try w.writeAll("    \"vendor/libc.a\",\n");
-    try w.writeAll("    \"vendor/libzigc.a\",\n");
-    try w.writeAll("    \"vendor/libcompiler_rt.a\",\n");
-    try w.writeAll("    \"vendor/sqlite3.o\",\n");
-    try w.writeAll("    \"vendor/stb_impl.o\"");
+    try w.writeAll("    \"vendor/zig/libc.a\",\n");
+    try w.writeAll("    \"vendor/zig/libzigc.a\",\n");
+    try w.writeAll("    \"vendor/zig/libcompiler_rt.a\",\n");
+    try w.writeAll("    \"vendor/sqlite/sqlite3.o\",\n");
+    try w.writeAll("    \"vendor/stb/stb_impl.o\"");
     for (0..124) |part| {
-        try w.print(",\n    \"vendor/libwebp_{d}.o\"", .{part});
+        try w.print(",\n    \"vendor/libwebp/libwebp_{d}.o\"", .{part});
     }
     try w.writeAll("\n  ],\n");
 
@@ -563,8 +609,9 @@ fn createTar(alloc: Allocator, out_dir: []const u8) !void {
     const tar_path = try std.fmt.allocPrint(alloc, "{s}/cms-source.tar.gz", .{out_dir});
     defer alloc.free(tar_path);
     var child = std.process.Child.init(&.{
-        "tar", "czf",    tar_path,   "-C",         out_dir,
-        "src", "vendor", "bindings", "config.zig", "build-manifest.json",
+        "tar",                 "czf",                    tar_path, "-C",       out_dir,
+        "src",                 "lib",                    "vendor", "bindings", "config.zig",
+        "build-manifest.json", "THIRD_PARTY_NOTICES.md",
     }, alloc);
     child.stderr_behavior = .Inherit;
     const term = try child.spawnAndWait();

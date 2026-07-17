@@ -12,40 +12,42 @@ pub fn setDevMode(dev_mode: bool) void {
 // loop can write to it without depending on the static handler's wiring.
 const runtime_css = @import("runtime_css");
 
-const AdminCss = static.Asset("admin.css", @embedFile("static_admin_css"));
-const AdminJs = static.Asset("admin.js", @embedFile("static_admin_js"));
 const LogoSvg = static.Asset("logo.svg", @embedFile("static_logo_svg"));
 
-const InteractCore = static.Asset("core.js", @embedFile("static_interact_core_js"));
-const InteractToggle = static.Asset("toggle.js", @embedFile("static_interact_toggle_js"));
-const InteractKvPicker = static.Asset("kv-picker.js", @embedFile("static_interact_kv_picker_js"));
-const InteractPortal = static.Asset("portal.js", @embedFile("static_interact_portal_js"));
-const InteractFocusTrap = static.Asset("focus-trap.js", @embedFile("static_interact_focus_trap_js"));
-const InteractDismiss = static.Asset("dismiss.js", @embedFile("static_interact_dismiss_js"));
-const InteractComponents = static.Asset("components.js", @embedFile("static_interact_components_js"));
-const InteractIndex = static.Asset("index.js", @embedFile("static_interact_index_js"));
+const KvPickerJs = static.Asset("kv-picker.js", @embedFile("static_kv_picker_js"));
+const PresenceJs = static.Asset("presence.js", @embedFile("static_presence_js"));
 const ShellJs = static.Asset("shell.js", @embedFile("static_shell_js"));
-const PDropdownJs = static.Asset("p/dropdown.js", @embedFile("static_p_dropdown_js"));
-const InteractRepeater = static.Asset("repeater.js", @embedFile("static_interact_repeater_js"));
-const MediaSelectionJs = static.Asset("media-selection.js", @embedFile("static_media_selection_js"));
-const InteractWebSocket = static.Asset("websocket.js", @embedFile("static_interact_websocket_js"));
-const InteractPresence = static.Asset("presence.js", @embedFile("static_interact_presence_js"));
+const RepeaterJs = static.Asset("repeater.js", @embedFile("static_repeater_js"));
+const MediaLibraryJs = static.Asset("media-library.js", @embedFile("static_media_library_js"));
+const MediaPickerJs = static.Asset("media-picker.js", @embedFile("static_media_picker_js"));
+const MediaEditJs = static.Asset("media-edit.js", @embedFile("static_media_edit_js"));
+const ImageFieldJs = static.Asset("image-field.js", @embedFile("static_image_field_js"));
+const KvFilterJs = static.Asset("kv-filter.js", @embedFile("static_kv_filter_js"));
+const VersionCompareJs = static.Asset("version-compare.js", @embedFile("static_version_compare_js"));
+const ContentListJs = static.Asset("content-list.js", @embedFile("static_content_list_js"));
+const RecompileBarJs = static.Asset("recompile-bar.js", @embedFile("static_recompile_bar_js"));
+const EntryEditorJs = static.Asset("entry-editor.js", @embedFile("static_entry_editor_js"));
+const WsJs = static.Asset("ws.js", @embedFile("static_ws_js"));
 const PublrCore = static.Asset("publr.js", @embedFile("static_publr_js"));
+const PublrAdminJs = static.Asset("publr-admin.js", @embedFile("static_publr_admin_js"));
 const PublrQuery = static.Asset("publr-query.js", @embedFile("static_publr_query_js"));
 const PublrPosition = static.Asset("publr-position.js", @embedFile("static_publr_position_js"));
 const PublrFocus = static.Asset("publr-focus.js", @embedFile("static_publr_focus_js"));
-const DashboardDemoJs = static.Asset("dashboard-demo.js", @embedFile("static_dashboard_demo_js"));
 
 const publr_ui = @import("publr_ui");
 const PreflightCss = @embedFile("static_preflight_css");
 const JitUtilitiesCss = @embedFile("static_jit_css");
 const PublrCss = static.Asset("publr.css", PreflightCss ++ "\n" ++ JitUtilitiesCss);
 const TokensCss = static.Asset("tokens.css", @embedFile("static_tokens_css"));
-const PublrCoreJs = static.Asset("publr-core.js", publr_ui.core_js);
+
+const PublrCheckboxJs = static.Asset("publr-checkbox.js", publr_ui.checkbox_js);
 const PublrDialogJs = static.Asset("publr-dialog.js", publr_ui.dialog_js);
 const PublrDropdownJs = static.Asset("publr-dropdown.js", publr_ui.dropdown_js);
-const PublrPortalJs = static.Asset("publr-portal.js", publr_ui.portal_js);
-const PublrPositionJs = static.Asset("publr-position.js", publr_ui.position_js);
+const PublrPopoverJs = static.Asset("publr-popover.js", publr_ui.popover_js);
+const PublrRadioGroupJs = static.Asset("publr-radio-group.js", publr_ui.radio_group_js);
+const PublrSelectJs = static.Asset("publr-select.js", publr_ui.select_js);
+const PublrSwitchJs = static.Asset("publr-switch.js", publr_ui.switch_js);
+const PublrTabsJs = static.Asset("publr-tabs.js", publr_ui.tabs_js);
 const PublrToastJs = static.Asset("publr-toast.js", publr_ui.toast_js);
 const PublrTooltipJs = static.Asset("publr-tooltip.js", publr_ui.tooltip_js);
 
@@ -55,37 +57,38 @@ const AssetEntry = struct {
 };
 
 const asset_map = .{
-    .{ "admin.css", AssetEntry{ .asset = AdminCss, .disk_path = "static/admin.css" } },
-    .{ "admin.js", AssetEntry{ .asset = AdminJs, .disk_path = "static/admin.js" } },
     .{ "logo.svg", AssetEntry{ .asset = LogoSvg, .disk_path = "static/logo.svg" } },
-    .{ "interact/core.js", AssetEntry{ .asset = InteractCore, .disk_path = "static/interact/core.js" } },
-    .{ "interact/toggle.js", AssetEntry{ .asset = InteractToggle, .disk_path = "static/interact/toggle.js" } },
-    .{ "interact/kv-picker.js", AssetEntry{ .asset = InteractKvPicker, .disk_path = "static/interact/kv-picker.js" } },
-    .{ "interact/portal.js", AssetEntry{ .asset = InteractPortal, .disk_path = "static/interact/portal.js" } },
-    .{ "interact/focus-trap.js", AssetEntry{ .asset = InteractFocusTrap, .disk_path = "static/interact/focus-trap.js" } },
-    .{ "interact/dismiss.js", AssetEntry{ .asset = InteractDismiss, .disk_path = "static/interact/dismiss.js" } },
-    .{ "interact/components.js", AssetEntry{ .asset = InteractComponents, .disk_path = "static/interact/components.js" } },
-    .{ "interact/index.js", AssetEntry{ .asset = InteractIndex, .disk_path = "static/interact/index.js" } },
-    .{ "shell.js", AssetEntry{ .asset = ShellJs, .disk_path = "static/shell.js" } },
-    .{ "p/dropdown.js", AssetEntry{ .asset = PDropdownJs, .disk_path = "static/p/dropdown.js" } },
-    .{ "interact/repeater.js", AssetEntry{ .asset = InteractRepeater, .disk_path = "static/interact/repeater.js" } },
-    .{ "media-selection.js", AssetEntry{ .asset = MediaSelectionJs, .disk_path = "static/media-selection.js" } },
-    .{ "interact/websocket.js", AssetEntry{ .asset = InteractWebSocket, .disk_path = "static/interact/websocket.js" } },
-    .{ "interact/presence.js", AssetEntry{ .asset = InteractPresence, .disk_path = "static/interact/presence.js" } },
-    .{ "publr.js", AssetEntry{ .asset = PublrCore, .disk_path = "static/publr.js" } },
-    .{ "publr-query.js", AssetEntry{ .asset = PublrQuery, .disk_path = "static/publr-query.js" } },
-    .{ "publr-position.js", AssetEntry{ .asset = PublrPosition, .disk_path = "static/publr-position.js" } },
-    .{ "publr-focus.js", AssetEntry{ .asset = PublrFocus, .disk_path = "static/publr-focus.js" } },
-    .{ "dashboard-demo.js", AssetEntry{ .asset = DashboardDemoJs, .disk_path = "static/dashboard-demo.js" } },
-    .{ "tokens.css", AssetEntry{ .asset = TokensCss, .disk_path = "vendor/tokens.css" } },
-    .{ "publr.css", AssetEntry{ .asset = PublrCss, .disk_path = null } },
-    .{ "publr-core.js", AssetEntry{ .asset = PublrCoreJs, .disk_path = null } },
-    .{ "publr-dialog.js", AssetEntry{ .asset = PublrDialogJs, .disk_path = null } },
-    .{ "publr-dropdown.js", AssetEntry{ .asset = PublrDropdownJs, .disk_path = null } },
-    .{ "publr-portal.js", AssetEntry{ .asset = PublrPortalJs, .disk_path = null } },
-    .{ "publr-position.js", AssetEntry{ .asset = PublrPositionJs, .disk_path = null } },
-    .{ "publr-toast.js", AssetEntry{ .asset = PublrToastJs, .disk_path = null } },
-    .{ "publr-tooltip.js", AssetEntry{ .asset = PublrTooltipJs, .disk_path = null } },
+    .{ "scripts/kv-picker.js", AssetEntry{ .asset = KvPickerJs, .disk_path = "static/scripts/kv-picker.js" } },
+    .{ "scripts/presence.js", AssetEntry{ .asset = PresenceJs, .disk_path = "static/scripts/presence.js" } },
+    .{ "scripts/shell.js", AssetEntry{ .asset = ShellJs, .disk_path = "static/scripts/shell.js" } },
+    .{ "scripts/repeater.js", AssetEntry{ .asset = RepeaterJs, .disk_path = "static/scripts/repeater.js" } },
+    .{ "scripts/media-library.js", AssetEntry{ .asset = MediaLibraryJs, .disk_path = "static/scripts/media-library.js" } },
+    .{ "scripts/media-picker.js", AssetEntry{ .asset = MediaPickerJs, .disk_path = "static/scripts/media-picker.js" } },
+    .{ "scripts/media-edit.js", AssetEntry{ .asset = MediaEditJs, .disk_path = "static/scripts/media-edit.js" } },
+    .{ "scripts/image-field.js", AssetEntry{ .asset = ImageFieldJs, .disk_path = "static/scripts/image-field.js" } },
+    .{ "scripts/kv-filter.js", AssetEntry{ .asset = KvFilterJs, .disk_path = "static/scripts/kv-filter.js" } },
+    .{ "scripts/version-compare.js", AssetEntry{ .asset = VersionCompareJs, .disk_path = "static/scripts/version-compare.js" } },
+    .{ "scripts/content-list.js", AssetEntry{ .asset = ContentListJs, .disk_path = "static/scripts/content-list.js" } },
+    .{ "scripts/recompile-bar.js", AssetEntry{ .asset = RecompileBarJs, .disk_path = "static/scripts/recompile-bar.js" } },
+    .{ "scripts/entry-editor.js", AssetEntry{ .asset = EntryEditorJs, .disk_path = "static/scripts/entry-editor.js" } },
+    .{ "scripts/ws.js", AssetEntry{ .asset = WsJs, .disk_path = "static/scripts/ws.js" } },
+    .{ "scripts/publr.js", AssetEntry{ .asset = PublrCore, .disk_path = "lib/publr/publr.js" } },
+    .{ "scripts/publr-admin.js", AssetEntry{ .asset = PublrAdminJs, .disk_path = "static/scripts/publr-admin.js" } },
+    .{ "scripts/publr-query.js", AssetEntry{ .asset = PublrQuery, .disk_path = "lib/publr/publr-query.js" } },
+    .{ "scripts/publr-position.js", AssetEntry{ .asset = PublrPosition, .disk_path = "lib/publr/publr-position.js" } },
+    .{ "scripts/publr-focus.js", AssetEntry{ .asset = PublrFocus, .disk_path = "lib/publr/publr-focus.js" } },
+    .{ "styles/tokens.css", AssetEntry{ .asset = TokensCss, .disk_path = "static/styles/tokens.css" } },
+    .{ "styles/publr.css", AssetEntry{ .asset = PublrCss, .disk_path = null } },
+    .{ "scripts/publr-checkbox.js", AssetEntry{ .asset = PublrCheckboxJs, .disk_path = null } },
+    .{ "scripts/publr-dialog.js", AssetEntry{ .asset = PublrDialogJs, .disk_path = null } },
+    .{ "scripts/publr-dropdown.js", AssetEntry{ .asset = PublrDropdownJs, .disk_path = null } },
+    .{ "scripts/publr-popover.js", AssetEntry{ .asset = PublrPopoverJs, .disk_path = null } },
+    .{ "scripts/publr-radio-group.js", AssetEntry{ .asset = PublrRadioGroupJs, .disk_path = null } },
+    .{ "scripts/publr-select.js", AssetEntry{ .asset = PublrSelectJs, .disk_path = null } },
+    .{ "scripts/publr-switch.js", AssetEntry{ .asset = PublrSwitchJs, .disk_path = null } },
+    .{ "scripts/publr-tabs.js", AssetEntry{ .asset = PublrTabsJs, .disk_path = null } },
+    .{ "scripts/publr-toast.js", AssetEntry{ .asset = PublrToastJs, .disk_path = null } },
+    .{ "scripts/publr-tooltip.js", AssetEntry{ .asset = PublrTooltipJs, .disk_path = null } },
 };
 
 pub fn handleStatic(ctx: *Context) !void {
@@ -97,10 +100,10 @@ pub fn handleStatic(ctx: *Context) !void {
     };
 
     // In dev mode, the HMR loop may have set a runtime override for
-    // admin.css after a fast-path swap (see runtime_css.set). Serve
+    // publr.css after a fast-path swap (see runtime_css.set). Serve
     // that first so just-extracted classes are covered before the next
     // `zig build` regenerates the embedded copy.
-    if (is_dev_mode and std.mem.eql(u8, file, "admin.css")) {
+    if (is_dev_mode and std.mem.eql(u8, file, "styles/publr.css")) {
         if (try runtime_css.dupCurrent(std.heap.page_allocator)) |content| {
             ctx.response.setContentType(static.getMimeType(file));
             ctx.response.setBody(content);

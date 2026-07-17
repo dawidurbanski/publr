@@ -4,7 +4,6 @@
 //! but that handler imports publr_ui + theme_static which aren't wired into the
 //! WASM target. This trimmed-down handler covers just the CSS files the WASM
 //! browser shell needs at boot — tokens.css and publr.css (preflight + JIT).
-//! admin.css is served by Vite directly from disk.
 
 const std = @import("std");
 const mw = @import("middleware");
@@ -23,13 +22,13 @@ pub fn handleStatic(ctx: *mw.Context) !void {
         return;
     };
 
-    if (std.mem.eql(u8, file, "tokens.css")) {
+    if (std.mem.eql(u8, file, "styles/tokens.css")) {
         ctx.response.setContentType("text/css");
         ctx.response.setBody(TokensCss);
         return;
     }
 
-    if (std.mem.eql(u8, file, "publr.css")) {
+    if (std.mem.eql(u8, file, "styles/publr.css")) {
         ctx.response.setContentType("text/css");
         ctx.response.setBody(PublrCss);
         return;

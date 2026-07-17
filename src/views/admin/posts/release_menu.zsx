@@ -6,6 +6,10 @@ const std = @import("std");
 const Icon = @import("publr_ui").icon.Icon;
 const IconName = @import("publr_ui").icon.Name;
 const Size = @import("publr_ui").icon.Size;
+const DropdownMenu = @import("publr_ui").dropdown.DropdownMenu;
+const DropdownMenuTrigger = @import("publr_ui").dropdown.DropdownMenuTrigger;
+const DropdownMenuContent = @import("publr_ui").dropdown.DropdownMenuContent;
+const DropdownMenuSeparator = @import("publr_ui").dropdown.DropdownMenuSeparator;
 
 const ReleaseOption = struct {
     id: []const u8,
@@ -17,35 +21,87 @@ pub fn ReleaseMenu(props: struct {
     releases: []const ReleaseOption,
 }) {
     // Hidden fields associated with main post form
-    <input type="hidden" name="action" value="" form="entry-form" id="release-action" />
-    <input type="hidden" name="release_id" value="" form="entry-form" id="release-id" />
-    <input type="hidden" name="release_name" value="" form="entry-form" id="release-name" />
-
-    <div data-publr-component="dropdown" data-publr-state="closed" id="release-dropdown">
-        <button type="button" data-publr-part="trigger" class="btn btn-full" aria-expanded="false" aria-haspopup="true" disabled="">
-            <span id="release-trigger-text">Add to Release</span>
-            <Icon name={IconName.chevron_down} />
-        </button>
-        <div data-publr-part="content" class="dropdown-menu" role="menu">
-            {for (props.releases) |rel| (
-                {if (rel.is_added) (
-                    <span class="dropdown-item dropdown-item-added" role="menuitem">
-                        <Icon name={IconName.check} size={Size.sm} />
-                        {rel.name}
-                    </span>
-                ) else (
-                    <button type="button" class="dropdown-item" data-publr-part="item" role="menuitem" data-release-id={rel.id}>
-                        {rel.name}
-                    </button>
+    <input
+        type="hidden"
+        name="action"
+        value=""
+        form="entry-form"
+        id="release-action"
+    />
+    <input
+        type="hidden"
+        name="release_id"
+        value=""
+        form="entry-form"
+        id="release-id"
+    />
+    <input
+        type="hidden"
+        name="release_name"
+        value=""
+        form="entry-form"
+        id="release-name"
+    />
+    <div id="release-dropdown">
+        <DropdownMenu class="w-full">
+            <DropdownMenuTrigger as_child={true}>
+                <button
+                    type="button"
+                    data-publr-part="trigger"
+                    class="btn btn-full inline-flex w-full cursor-pointer items-center justify-center gap-1 rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-2 text-sm font-semibold text-secondary-foreground shadow-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled=""
+                >
+                    <span id="release-trigger-text">Add to Release</span>
+                    <Icon name={IconName.chevron_down} />
+                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+                onkeydown="if(event.key==='Tab')event.stopImmediatePropagation()"
+            >
+                {for (props.releases) |rel| (
+                    {if (rel.is_added) (
+                        <span
+                            class="dropdown-item dropdown-item-added flex w-full cursor-default items-center gap-2 rounded-[calc(var(--radius)*0.8)] px-2 py-1.5 text-sm text-muted-foreground"
+                            role="menuitem"
+                        >
+                            <Icon name={IconName.check} size={Size.sm} />
+                            {rel.name}
+                        </span>
+                    ) else (
+                        <button
+                            type="button"
+                            class="dropdown-item block w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border-0 bg-transparent px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent focus:bg-accent focus:outline-none"
+                            data-publr-part="item"
+                            role="menuitem"
+                            data-release-id={rel.id}
+                            onClick="addToRelease"
+                        >
+                            {rel.name}
+                        </button>
+                    )}
                 )}
-            )}
-            {if (props.releases.len > 0) (
-                <hr class="dropdown-divider" />
-            )}
-            <div class="dropdown-create-row">
-                <input type="text" id="release-name-input" placeholder="New release..." class="dropdown-create-input" />
-                <button type="button" class="dropdown-create-btn" data-publr-part="item" id="release-create-btn">Create</button>
-            </div>
-        </div>
+                {if (props.releases.len > 0) (
+                    <DropdownMenuSeparator />
+                )}
+                <div class="dropdown-create-row flex gap-1 px-2 py-1">
+                    <input
+                        type="text"
+                        id="release-name-input"
+                        placeholder="New release..."
+                        class="dropdown-create-input min-w-0 flex-1 rounded-[calc(var(--radius)*0.6)] border border-border px-2 py-1 text-base focus:border-primary focus:outline-none sm:text-sm"
+                        onkeydown="if(event.key!=='Escape')event.stopPropagation()"
+                        onKeydown.enter.prevent="createRelease"
+                    />
+                    <button
+                        type="button"
+                        class="dropdown-create-btn cursor-pointer rounded-[calc(var(--radius)*0.6)] border-0 bg-primary px-2 py-1 text-sm font-medium text-primary-foreground"
+                        data-publr-part="item"
+                        onClick="createRelease"
+                    >
+                        Create
+                    </button>
+                </div>
+            </DropdownMenuContent>
+        </DropdownMenu>
     </div>
 }

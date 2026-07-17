@@ -715,6 +715,11 @@ fn emit(
         \\    source_path: []const u8,
         \\    /// Pointer to the baked `<Fn>_manifest` const in the view module.
         \\    manifest: *const zsx.manifest_mod.Manifest,
+        \\    /// The view file's file-wide `manifest_nodes` (every function in the
+        \\    /// file, concatenated in source order). The HMR gate compares this so
+        \\    /// a structural/attr change in a HELPER function the view renders
+        \\    /// (e.g. `fn FilterBar` — not its own entry) still forces a rebuild.
+        \\    file_manifest_nodes: []const zsx.manifest_mod.Node,
         \\    /// File-scoped `setL` — replaces the literal table.
         \\    setL: *const fn ([]const []const u8) void,
         \\    /// Trampoline: ZON-parses props, calls the view. Returns
@@ -743,8 +748,8 @@ fn emit(
         );
         try writeZigStringLiteral(w, e.source_path);
         try w.print(
-            ", .manifest = &{s}.{s}_manifest, .setL = &{s}.setL, .render_from_zon = &{s} }},\n",
-            .{ e.import_path, e.fn_name, e.import_path, e.trampoline_id },
+            ", .manifest = &{s}.{s}_manifest, .file_manifest_nodes = {s}.manifest_nodes, .setL = &{s}.setL, .render_from_zon = &{s} }},\n",
+            .{ e.import_path, e.fn_name, e.import_path, e.import_path, e.trampoline_id },
         );
     }
     try w.writeAll("};\n");

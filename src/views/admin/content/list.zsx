@@ -97,11 +97,16 @@ fn HeaderActions(props: struct {
     new_url: []const u8,
     new_label: []const u8,
     new_options: []const TypeOption = &.{},
-}) void {
+}) {
     <Flex items=.center gap=.sm>
         <DropdownMenu>
             <DropdownMenuTrigger>
-                <Button hierarchy=.secondary size=.sm icon=.bookmark label="View" />
+                <Button
+                    hierarchy=.secondary
+                    size=.sm
+                    icon=.bookmark
+                    label="View"
+                />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
                 <DropdownMenuItem>Default view</DropdownMenuItem>
@@ -111,7 +116,12 @@ fn HeaderActions(props: struct {
         {if (props.new_options.len > 0) (
             <DropdownMenu>
                 <DropdownMenuTrigger>
-                    <Button hierarchy=.primary size=.sm icon=.plus label={props.new_label} />
+                    <Button
+                        hierarchy=.primary
+                        size=.sm
+                        icon=.plus
+                        label={props.new_label}
+                    />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {for (props.new_options) |opt| (
@@ -120,7 +130,13 @@ fn HeaderActions(props: struct {
                 </DropdownMenuContent>
             </DropdownMenu>
         ) else (
-            <Button hierarchy=.primary size=.sm icon=.plus label={props.new_label} href={props.new_url} />
+            <Button
+                hierarchy=.primary
+                size=.sm
+                icon=.plus
+                label={props.new_label}
+                href={props.new_url}
+            />
         )}
     </Flex>
 }
@@ -135,27 +151,38 @@ fn FilterBar(props: struct {
     search_action: []const u8,
     type_options: []const TypeOption = &.{},
     current_type_label: []const u8 = "Any2",
-}) void {
+}) {
     <Flex
         items=.stretch
         gap=.sm
         class="px-3 py-2 bg-card border border-border rounded-full shadow-xs"
     >
         <Flex items=.stretch class="shrink-0">
-            <Flex items=.center class="text-xs font-medium text-muted-foreground pl-3 pr-2 py-1 bg-muted rounded-ss-full rounded-es-full select-none">
+            <Flex
+                items=.center
+                class="text-xs font-medium text-muted-foreground pl-3 pr-2 py-1 bg-muted rounded-ss-full rounded-es-full select-none"
+            >
                 Content type
             </Flex>
             {if (props.is_type_locked) (
-                <Flex items=.center class="inline-flex items-center gap-1 text-xs font-medium pl-2 pr-3 py-1 bg-primary/10 text-primary rounded-se-full rounded-ee-full">
+                <Flex
+                    items=.center
+                    class="inline-flex items-center gap-1 text-xs font-medium pl-2 pr-3 py-1 bg-primary/10 text-primary rounded-se-full rounded-ee-full"
+                >
                     {props.locked_type_label}
                 </Flex>
             ) else (
                 <DropdownMenu>
-                    <DropdownMenuTrigger>
-                        <Flex display=.inline_flex items=.center gap=.xs class="h-full text-xs font-medium pl-2 pr-3 py-1 bg-primary text-primary-foreground rounded-se-full rounded-ee-full cursor-pointer">
+                    <DropdownMenuTrigger as_child={true}>
+                        <Button
+                            hierarchy=.unstyled
+                            size=.sm
+                            icon_trailing=.chevron_down
+                            label={props.current_type_label}
+                            class="h-full pl-2 pr-5 text-xs bg-primary text-white font-medium rounded-se-full rounded-ee-full"
+                        >
                             {props.current_type_label}
-                            <Icon name=.chevron_down size={12} />
-                        </Flex>
+                        </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
                         {for (props.type_options) |opt| (
@@ -178,42 +205,47 @@ fn FilterBar(props: struct {
     </Flex>
 }
 
-pub fn List(props: struct {
-    // Page chrome
-    page_title: []const u8,
-    new_url: []const u8,
-    new_label: []const u8 = "Add entry",
-    /// When set, "Add entry" renders as a dropdown of these options
-    /// (one per content type) instead of a single link.
-    new_options: []const TypeOption = &.{},
+pub fn List(
+    props: struct {
+        // Page chrome
+        page_title: []const u8,
+        new_url: []const u8,
+        new_label: []const u8 = "Add entry",
+        /// When set, "Add entry" renders as a dropdown of these options
+        /// (one per content type) instead of a single link.
+        new_options: []const TypeOption = &.{},
 
-    // Filter bar
-    is_type_locked: bool = true,
-    locked_type_label: []const u8 = "",
-    search_query: []const u8 = "",
-    search_action: []const u8 = "",
-    suggested_filters: []const SuggestedFilter = &.{},
-    /// Type picker dropdown items — used only when `is_type_locked = false`.
-    type_options: []const TypeOption = &.{},
-    /// Current type filter label shown in the dropdown trigger
-    /// (e.g. "Any", "Blog Post").
-    current_type_label: []const u8 = "Any",
+        // Filter bar
+        is_type_locked: bool = true,
+        locked_type_label: []const u8 = "",
+        search_query: []const u8 = "",
+        search_action: []const u8 = "",
+        suggested_filters: []const SuggestedFilter = &.{},
+        /// Type picker dropdown items — used only when `is_type_locked = false`.
+        type_options: []const TypeOption = &.{},
+        /// Current type filter label shown in the dropdown trigger
+        /// (e.g. "Any", "Blog Post").
+        current_type_label: []const u8 = "Any",
 
-    // Table data
-    has_entries: bool,
-    entries: []const Entry,
-    total_count: []const u8,
+        // Table data
+        has_entries: bool,
+        entries: []const Entry,
+        total_count: []const u8,
 
-    // Pagination
-    total_pages: u32,
-    prev_page_url: []const u8,
-    next_page_url: []const u8,
-    page_urls: []const PageUrl,
-}) {
+        // Pagination
+        total_pages: u32,
+        prev_page_url: []const u8,
+        next_page_url: []const u8,
+        page_urls: []const PageUrl,
+    }
+) {
     <PageHeader title={props.page_title}>
-        <HeaderActions new_url={props.new_url} new_label={props.new_label} new_options={props.new_options} />
+        <HeaderActions
+            new_url={props.new_url}
+            new_label={props.new_label}
+            new_options={props.new_options}
+        />
     </PageHeader>
-
     <FilterBar
         is_type_locked={props.is_type_locked}
         locked_type_label={props.locked_type_label}
@@ -222,7 +254,6 @@ pub fn List(props: struct {
         type_options={props.type_options}
         current_type_label={props.current_type_label}
     />
-
     {if (props.suggested_filters.len > 0) (
         <Flex items=.center gap=.xs class="flex-wrap py-2">
             {for (props.suggested_filters) |sf| (
@@ -235,11 +266,15 @@ pub fn List(props: struct {
             )}
         </Flex>
     )}
-
     <Flex items=.center justify=.between class="py-2">
         <DropdownMenu>
             <DropdownMenuTrigger>
-                <Button hierarchy=.tertiary size=.sm icon=.menu_03 label="Sort by" />
+                <Button
+                    hierarchy=.tertiary
+                    size=.sm
+                    icon=.menu_03
+                    label="Sort by"
+                />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
                 <DropdownMenuItem>Updated (newest first)</DropdownMenuItem>
@@ -250,17 +285,31 @@ pub fn List(props: struct {
         </DropdownMenu>
         <Text size=.sm color=.muted>{props.total_count} items</Text>
     </Flex>
-
     {if (props.has_entries) (
-        <div data-publr-component="content-list">
-            <BulkActions count={0} visible={false} class="content-bulk-actions">
-                <BulkActionsItem icon=.copy label="Duplicate" />
-                <BulkActionsItem icon=.calendar_check label="Add to release" />
-                <BulkActionsSeparator />
-                <BulkActionsItem icon=.trash label="Delete" variant=.destructive />
-                <BulkActionsClear />
-            </BulkActions>
-            <Table class="bg-card border border-border rounded-lg overflow-hidden">
+        <div @store="local:content-list" onChange="selectionChanged">
+            <div :showIf="$anySelected" class="hidden">
+                <BulkActions
+                    count={0}
+                    visible={true}
+                    class="content-bulk-actions"
+                >
+                    <BulkActionsItem icon=.copy label="Duplicate" />
+                    <BulkActionsItem
+                        icon=.calendar_check
+                        label="Add to release"
+                    />
+                    <BulkActionsSeparator />
+                    <BulkActionsItem
+                        icon=.trash
+                        label="Delete"
+                        variant=.destructive
+                    />
+                    <BulkActionsClear onClick="clearSelection" />
+                </BulkActions>
+            </div>
+            <Table
+                class="bg-card border border-border rounded-lg overflow-hidden"
+            >
                 <TableHeader>
                     <TableRow>
                         <TableHead class="w-10">
@@ -272,7 +321,11 @@ pub fn List(props: struct {
                         <TableHead>Last updated by</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead class="w-10">
-                            <Icon name=.settings size={14} class="text-muted-foreground" />
+                            <Icon
+                                name=.settings
+                                size={14}
+                                class="text-muted-foreground"
+                            />
                         </TableHead>
                     </TableRow>
                 </TableHeader>
@@ -280,14 +333,26 @@ pub fn List(props: struct {
                     {for (props.entries) |entry| (
                         <TableRow>
                             <TableCell class="w-10">
-                                <Checkbox name="select-entry" value={entry.id} />
+                                <Checkbox
+                                    name="select-entry"
+                                    value={entry.id}
+                                />
                             </TableCell>
                             <TableCell>
-                                <a href={entry.edit_url} class="font-medium no-underline hover:underline">{entry.name}</a>
+                                <a
+                                    href={entry.edit_url}
+                                    class="font-medium no-underline hover:underline"
+                                >
+                                    {entry.name}
+                                </a>
                             </TableCell>
                             <TableCell>
                                 <Flex items=.center gap=.xs>
-                                    <Icon name=.file size={14} class="shrink-0 text-muted-foreground" />
+                                    <Icon
+                                        name=.file
+                                        size={14}
+                                        class="shrink-0 text-muted-foreground"
+                                    />
                                     <Text as=.span size=.sm>{entry.content_type_label}</Text>
                                 </Flex>
                             </TableCell>
@@ -298,7 +363,10 @@ pub fn List(props: struct {
                                 <Flex items=.center gap=.xs>
                                     <Avatar size=.sm>
                                         {if (entry.author_avatar_url.len > 0) (
-                                            <AvatarImage src={entry.author_avatar_url} alt="" />
+                                            <AvatarImage
+                                                src={entry.author_avatar_url}
+                                                alt=""
+                                            />
                                         ) else (
                                             <AvatarFallback>?</AvatarFallback>
                                         )}
@@ -308,17 +376,35 @@ pub fn List(props: struct {
                             </TableCell>
                             <TableCell>
                                 {if (std.mem.eql(u8, entry.status, "published")) (
-                                    <Badge label="Published" variant={BadgeVariant.success} size={BadgeSize.sm} />
+                                    <Badge
+                                        label="Published"
+                                        variant={BadgeVariant.success}
+                                        size={BadgeSize.sm}
+                                    />
                                 ) else if (std.mem.eql(u8, entry.status, "changed")) (
-                                    <Badge label="Changed" variant={BadgeVariant.warning} size={BadgeSize.sm} />
+                                    <Badge
+                                        label="Changed"
+                                        variant={BadgeVariant.warning}
+                                        size={BadgeSize.sm}
+                                    />
                                 ) else (
-                                    <Badge label="Draft" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
+                                    <Badge
+                                        label="Draft"
+                                        variant={BadgeVariant.secondary}
+                                        size={BadgeSize.sm}
+                                    />
                                 )}
                             </TableCell>
                             <TableCell class="w-10">
                                 <DropdownMenu>
                                     <DropdownMenuTrigger>
-                                        <Button hierarchy=.tertiary size=.sm label="" icon=.more aria_label="Row actions" />
+                                        <Button
+                                            hierarchy=.tertiary
+                                            size=.sm
+                                            label=""
+                                            icon=.more
+                                            aria_label="Row actions"
+                                        />
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent>
                                         <DropdownMenuItem href={entry.edit_url}>Edit</DropdownMenuItem>
@@ -337,7 +423,10 @@ pub fn List(props: struct {
                     <Pagination>
                         <PaginationContent>
                             <PaginationItem>
-                                <PaginationPrevious href={props.prev_page_url} disabled={props.prev_page_url.len == 0} />
+                                <PaginationPrevious
+                                    href={props.prev_page_url}
+                                    disabled={props.prev_page_url.len == 0}
+                                />
                             </PaginationItem>
                             {for (props.page_urls) |pg| (
                                 {if (pg.is_ellipsis) (
@@ -347,19 +436,27 @@ pub fn List(props: struct {
                                 )}
                             )}
                             <PaginationItem>
-                                <PaginationNext href={props.next_page_url} disabled={props.next_page_url.len == 0} />
+                                <PaginationNext
+                                    href={props.next_page_url}
+                                    disabled={props.next_page_url.len == 0}
+                                />
                             </PaginationItem>
                         </PaginationContent>
                     </Pagination>
                 </Flex>
             )}
+            <script type="module" src="/static/scripts/content-list.js"></script>
         </div>
     ) else (
         <Empty>
             <EmptyTitle>No entries yet</EmptyTitle>
             <EmptyDescription>Create your first entry to get started.</EmptyDescription>
             <EmptyContent>
-                <Button hierarchy=.primary label={props.new_label} href={props.new_url} />
+                <Button
+                    hierarchy=.primary
+                    label={props.new_label}
+                    href={props.new_url}
+                />
             </EmptyContent>
         </Empty>
     )}

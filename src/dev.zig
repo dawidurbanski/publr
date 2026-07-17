@@ -68,13 +68,21 @@ const live_reload_script =
     \\    in_flight.delete(name);
     \\    if(in_flight.size===0) hidePill();
     \\  }
+    \\  function swap(node, html){
+    \\    // PublrJS stores must be torn down BEFORE the subtree is replaced —
+    \\    // dropdown/tooltip content may be portalled outside the node — and
+    \\    // re-hydrated after so data-p-* islands get fresh state/actions.
+    \\    try{ if(window.Publr&&window.Publr.destroy) window.Publr.destroy(node); }
+    \\    catch(e){ console.warn('[hmr] publr destroy failed',e); }
+    \\    node.innerHTML=html;
+    \\    try{
+    \\      if(window.Publr&&window.Publr.hydrate) window.Publr.hydrate(node);
+    \\      node.dispatchEvent(new CustomEvent('publr:init',{bubbles:true}));
+    \\    }catch(e){ console.warn('[hmr] publr hydrate failed',e); }
+    \\    reinit(node);
+    \\  }
     \\  function reinit(node){
-    \\    // 1) Re-wire interact-runtime components (data-publr-component /
-    \\    //    data-widget). init() is idempotent (guards via _publrInit), so
-    \\    //    it only touches the freshly swapped-in nodes.
-    \\    try{ if(window.__publrReinit) window.__publrReinit(); }
-    \\    catch(e){ console.warn('[hmr] reinit failed',e); }
-    \\    // 2) Re-execute INLINE <script> blocks inside the swapped subtree.
+    \\    // Re-execute INLINE <script> blocks inside the swapped subtree.
     \\    //    Scripts inserted via innerHTML never run, so any component that
     \\    //    wires itself with an inline IIFE (e.g. the admin sidebar toggle)
     \\    //    would otherwise lose its handlers. We skip scripts with `src`:
@@ -104,7 +112,7 @@ const live_reload_script =
     \\      }
     \\      return r.text().then(function(html){
     \\        var node=document.querySelector('[data-component="'+name+'"]');
-    \\        if(node){ node.innerHTML=html; reinit(node); }
+    \\        if(node){ swap(node, html); }
     \\        else console.warn('[hmr] no DOM target for',name);
     \\        hideOverlay(name); clearInFlight(name);
     \\        console.log('[hmr] post-rebuild swap',name);
@@ -166,7 +174,7 @@ const live_reload_script =
     \\      var nodes=document.querySelectorAll('[data-component="'+name+'"]');
     \\      if(!nodes.length){ console.warn('[hmr] no DOM target for',name); hideOverlay(name); clearInFlight(name); return; }
     \\      var after=payload.html;
-    \\      nodes.forEach(function(n){ n.innerHTML=after; reinit(n); });
+    \\      nodes.forEach(function(n){ swap(n, after); });
     \\      hideOverlay(name); clearInFlight(name);
     \\      console.log('[hmr] swapped '+name);
     \\    });

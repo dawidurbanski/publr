@@ -282,7 +282,7 @@ test "Group validation is no-op at group level" {
     try std.testing.expect(group.validate("anything") == null);
 }
 
-test "Group render emits fieldset" {
+test "Group render emits collapsible details group" {
     const group = Group("seo", .{}, &.{
         String("meta_title", .{ .required = true }),
     });
@@ -299,11 +299,11 @@ test "Group render emits fieldset" {
     });
 
     const html = buf.items;
-    try std.testing.expect(std.mem.indexOf(u8, html, "<fieldset class=\"field-group") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<details class=\"field-group") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "data-field=\"seo\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "SEO") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "name=\"seo.meta_title\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "</fieldset>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "</details>") != null);
 }
 
 test "Group render populates sub-field values from JSON" {
@@ -497,8 +497,8 @@ test "Repeater render emits container with items" {
     });
 
     const html = buf.items;
-    try std.testing.expect(std.mem.indexOf(u8, html, "class=\"field-repeater\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "data-widget=\"repeater\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "class=\"field-repeater ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-p-store=\"local:repeater\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "data-min=\"1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "data-max=\"5\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "name=\"questions._count\" value=\"1\"") != null);

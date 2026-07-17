@@ -30,33 +30,56 @@ pub fn Setup(props: struct {
             />
             <title>Setup - Publr</title>
             <link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
-            <link rel="stylesheet" href="/static/publr.css" />
-            <link rel="stylesheet" href="/static/admin.css" />
+            <link rel="stylesheet" href="/static/styles/tokens.css" />
+            <link rel="stylesheet" href="/static/styles/publr.css" />
             {if (props.bg_dark) (
                 <style>{"body { background: #0a0d12 !important; } .auth-container { min-height: 100vh; } .auth-card { background: #181d27; border: 1px solid #333; } .auth-title, .auth-logo { color: #e0e0e0; } .auth-subtitle, .form-label, .form-hint { color: #888; } .form-input { background: #252b37; color: #e0e0e0; border-color: #414651; } .auth-error { background: #3d1418; border-color: #7a271a; color: #fda29b; }"}</style>
             )}
         </head>
-        <body>
-            <div class="min-h-screen flex items-center justify-center bg-muted p-4">
+        <body class="antialiased">
+            <div
+                class="min-h-screen flex items-center justify-center bg-muted p-4"
+            >
                 <Card>
                     <CardHeader>
-                        <svg fill="none" viewBox="0 0 42 48" xmlns="http://www.w3.org/2000/svg" width="36" height="42" aria-label="Publr" role="img">
-                            <path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="currentColor" fill-rule="evenodd" />
+                        <svg
+                            fill="none"
+                            viewBox="0 0 42 48"
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="36"
+                            height="42"
+                            aria-label="Publr"
+                            role="img"
+                        >
+                            <path
+                                clip-rule="evenodd"
+                                d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z"
+                                fill="currentColor"
+                                fill-rule="evenodd"
+                            />
                         </svg>
                         <CardTitle>Welcome!</CardTitle>
                         <CardDescription>Create your admin account to get started</CardDescription>
                     </CardHeader>
-
                     <CardContent>
                         {if (props.error_message.len > 0) (
-                            <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                            <div
+                                class="rounded-md border border-destructive/50 bg-destructive/10 p-3"
+                            >
                                 <Text size=.sm color=.destructive>{props.error_message}</Text>
                             </div>
                         )}
-
-                        <form method="POST" action="/admin/setup" id="setup-form">
+                        <form
+                            method="POST"
+                            action="/admin/setup"
+                            id="setup-form"
+                        >
                             <Stack gap=.lg>
-                                <input type="hidden" name="_csrf" value={props.csrf_token} />
+                                <input
+                                    type="hidden"
+                                    name="_csrf"
+                                    value={props.csrf_token}
+                                />
                                 <Field>
                                     <FieldLabel html_for="email">Email</FieldLabel>
                                     <Input
@@ -65,7 +88,6 @@ pub fn Setup(props: struct {
                                         required={true}
                                     />
                                 </Field>
-
                                 <Field>
                                     <FieldLabel html_for="password">Password</FieldLabel>
                                     <Input
@@ -75,7 +97,6 @@ pub fn Setup(props: struct {
                                     />
                                     <FieldDescription>At least 8 characters</FieldDescription>
                                 </Field>
-
                                 <Field>
                                     <FieldLabel html_for="confirm_password">Confirm Password</FieldLabel>
                                     <Input
@@ -84,24 +105,33 @@ pub fn Setup(props: struct {
                                         required={true}
                                     />
                                 </Field>
-
-                                <Button button_type=.submit hierarchy=.primary label="Create Account" />
+                                <Button
+                                    button_type=.submit
+                                    hierarchy=.primary
+                                    label="Create Account"
+                                />
                             </Stack>
                         </form>
-
                         <Separator spacing=.lg />
                         <Stack gap=.sm>
-                            <button type="button" id="recompile-btn" style="width: 100%; padding: 0.6rem; border: 1px solid #d5d7da; border-radius: 8px; background: transparent; color: #535862; font-size: 0.875rem; cursor: pointer;">
+                            <button
+                                type="button"
+                                id="recompile-btn"
+                                style="width: 100%; padding: 0.6rem; border: 1px solid #d5d7da; border-radius: 8px; background: transparent; color: #535862; font-size: 0.875rem; cursor: pointer;"
+                            >
                                 {"Recompile (Dark Mode)"}
                             </button>
-                            <p id="recompile-status" style="margin-top: 0.5rem; font-size: 0.75rem; color: #717680; text-align: center;"></p>
+                            <p
+                                id="recompile-status"
+                                style="margin-top: 0.5rem; font-size: 0.75rem; color: #717680; text-align: center;"
+                            >
+
+                            </p>
                         </Stack>
                     </CardContent>
                 </Card>
             </div>
-
             <script>{@raw "document.getElementById('recompile-btn').addEventListener('click',async function(){var btn=this,status=document.getElementById('recompile-status');btn.disabled=true;btn.textContent='Loading compiler...';status.textContent='';try{var worker=new Worker('/compiler-worker.js',{type:'module'});worker.onmessage=async function(e){if(e.data.type==='status'){status.textContent=e.data.message}else if(e.data.type==='ready'){btn.textContent='Compiling full CMS...';worker.postMessage({type:'compile-full-cms',config:{setup_bg_dark:true}})}else if(e.data.type==='log'){if(e.data.message.startsWith('[stderr]'))status.textContent=e.data.message}else if(e.data.type==='compiled'){worker.terminate();btn.textContent='Uploading...';status.textContent='Compiled '+e.data.binary.byteLength+' bytes, swapping...';try{var resp=await fetch('/admin/system/swap-binary',{method:'POST',headers:{'Content-Type':'application/wasm'},body:e.data.binary});if(resp.ok){btn.textContent='Reloading...';setTimeout(function(){location.reload()},500)}else{var j=await resp.json();btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Swap failed: '+(j.error||resp.status)}}catch(err){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Upload failed: '+err.message}}else if(e.data.type==='error'){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Error: '+e.data.message;worker.terminate()}};worker.postMessage({type:'init'})}catch(e){btn.textContent='Recompile (Dark Mode)';btn.disabled=false;status.textContent='Error: '+e.message}});"}</script>
-
         </body>
     </html>
 }

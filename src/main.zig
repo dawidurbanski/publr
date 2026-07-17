@@ -387,8 +387,9 @@ fn resolveHeartbeatIntervalMs(cli_heartbeat_interval_ms: ?u32) u32 {
 // `runDevMode` replaces the three-watchexec setup that lived in
 // `runWithWatchers`. The whole live-reload pipeline now lives in-process:
 //
-//   * `watcher_mod.Watcher` polls the same roots watchexec used (src/,
-//     themes/, vendor/, build.zig) every 200 ms via mtime polling.
+//   * `watcher_mod.Watcher` polls source, static assets, first-party libraries,
+//     third-party vendor files, themes, and build.zig every 200 ms via mtime
+//     polling.
 //   * `hmr_loop_mod.Loop` decides per-event whether a `.zsx` save can
 //     be hot-swapped (literals only, manifest equal) or needs a full
 //     rebuild (structural change, or non-`.zsx` file).
@@ -435,8 +436,10 @@ fn runDevMode(
     //   and `themes/*/src/**`. The watcher takes root-relative prefixes
     //   so a wildcard isn't expressible here; we filter the ignored
     //   subtrees inside the swap-loop dispatch below via `shouldIgnore`.
-    // vendor/ -> any extension. Vendor changes are rare; treat as
-    //   rebuild events.
+    // static/ -> any extension. Static asset changes require a rebuild so the
+    //   new bytes are embedded.
+    // lib/ -> any extension. First-party library updates are rare; rebuild.
+    // vendor/ -> any extension. Third-party updates are rare; rebuild.
     // build.zig -> single-file root, matches the watchexec server-watcher.
     var watcher = try watcher_mod.Watcher.init(allocator, &.{
         .{
@@ -448,6 +451,16 @@ fn runDevMode(
             .path = "themes",
             .extensions = &.{ ".publr", ".zon", ".zsx" },
             .ignore_prefixes = &.{}, // wildcards filtered in shouldIgnoreEvent
+        },
+        .{
+            .path = "static",
+            .extensions = &.{},
+            .ignore_prefixes = &.{},
+        },
+        .{
+            .path = "lib",
+            .extensions = &.{},
+            .ignore_prefixes = &.{},
         },
         .{
             .path = "vendor",

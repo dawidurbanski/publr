@@ -24,7 +24,26 @@ pub fn Input(props: struct {
     source: ?[]const u8 = null,
     errors: []const []const u8 = &.{},
 }) {
-    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
-        <input type={props.input_type} class="form-control" id={props.name} name={props.name} value={props.value} maxlength?={props.maxlength} min?={props.min} max?={props.max} step?={props.step} placeholder?={props.placeholder} data-widget?={props.widget} data-source?={props.source} required?={props.required} />
+    <FieldLabelRow
+        name={props.name}
+        display_name={props.display_name}
+        required={props.required}
+        errors={props.errors}
+    >
+        <input
+            type={props.input_type}
+            class="form-control w-full rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base leading-6 text-foreground transition-colors placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+            id={props.name}
+            name={props.name}
+            value={props.value}
+            maxlength?={props.maxlength}
+            min?={props.min}
+            max?={props.max}
+            step?={props.step}
+            placeholder?={props.placeholder}
+            data-widget?={props.widget}
+            data-source?={props.source}
+            required?={props.required}
+        />
     </FieldLabelRow>
 }

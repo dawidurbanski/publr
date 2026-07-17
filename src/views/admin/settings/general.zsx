@@ -9,7 +9,7 @@ pub fn General() {
     <div class="form-section">
         <h2 class="form-section-title">Site Settings</h2>
         <p class="form-section-desc">Configure your site's basic settings.</p>
-        <div class="empty-state">
+        <div class="empty-state px-5 py-8 text-center text-muted-foreground">
             <p>General settings coming soon.</p>
         </div>
     </div>

@@ -49,16 +49,24 @@ publr/
 │       └── assets.zig     # Asset pipeline
 │
 ├── static/
-│   ├── admin.js
-│   ├── admin.css
-│   └── editor.js          # Phase 2: Block editor
+│   ├── scripts/            # CMS-authored PublrJS stores + the publr-admin.js bootstrap
+│   │   └── media-library.js  # (also: entry-editor, presence, repeater, …)
+│   ├── styles/
+│   │   └── tokens.css      # Publr design-system tokens
+│   └── logo.svg
+│
+├── lib/                    # Generated/vendored first-party Publr libraries
+│   ├── publr/              # PublrJS runtime (publr.js + addons; served at /static/scripts/*)
+│   ├── zsx.zig
+│   ├── publr_ui.zig
+│   ├── publr_icons.zig
+│   └── publr_jit.zig
 │
 └── vendor/
-    ├── sqlite3.c
-    ├── sqlite3.h
-    ├── stb_image.h
-    ├── stb_image_resize2.h
-    └── stb_image_write.h
+    ├── sqlite/             # SQLite source + public-domain notice
+    ├── stb/                # stb image sources + dual license
+    ├── libwebp/            # libwebp source + license/provenance
+    └── tailwindcss/        # Preflight asset + MIT license
 ```
 
 ## User Site (created via `publr init my-site`)
@@ -99,4 +107,4 @@ my-site/
 2. **src/http.zig** — Router implementation, middleware pattern.
 3. **src/db.zig** — SQLite bindings, query helpers.
 4. **src/templates/entries.zig** — Example of HTML generation pattern.
-5. **static/admin.js** — All frontend interactivity.
+5. **static/scripts/*.js** — PublrJS store modules per admin page (entry-editor, media-library, …).

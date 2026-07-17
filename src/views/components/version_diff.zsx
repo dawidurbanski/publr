@@ -8,15 +8,42 @@ pub fn VersionDiff(props: struct {
     entries: []const struct { status: []const u8, key: []const u8, old_val: []const u8, new_val: []const u8 } = &.{},
 }) {
     {if (props.error_msg != null) (
-        <p class="diff-error">{props.error_msg.?}</p>
+        <p class="diff-error text-sm text-destructive">{props.error_msg.?}</p>
     ) else (
-        <div class="diff">
+        <div class="diff flex flex-col gap-3">
             {for (props.entries) |e| (
-                <div class={`diff-field diff-${e.status}`}>
-                    <span class="diff-key">{e.key}</span>
-                    <span class="diff-badge">{e.status}</span>
-                    {if (!std.mem.eql(u8, e.status, "added")) (<div class="diff-val diff-old">{e.old_val}</div>)}
-                    {if (!std.mem.eql(u8, e.status, "removed")) (<div class="diff-val diff-new">{e.new_val}</div>)}
+                <div
+                    class={`diff-field diff-${e.status} overflow-hidden rounded-[calc(var(--radius)*0.8)] border border-border`}
+                >
+                    <span
+                        class="diff-key inline-block w-full border-b border-border bg-muted px-3 py-2 text-sm font-semibold text-muted-foreground"
+                    >
+                        {e.key}
+                    </span>
+                    <span
+                        class={if (std.mem.eql(u8, e.status, "added"))
+                        "diff-badge ml-2 rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success"
+                    else if (std.mem.eql(u8, e.status, "removed"))
+                        "diff-badge ml-2 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive"
+                    else
+                        "diff-badge ml-2 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning"}
+                    >
+                        {e.status}
+                    </span>
+                    {if (!std.mem.eql(u8, e.status, "added")) (
+                        <div
+                            class="diff-val diff-old whitespace-pre-wrap break-words bg-destructive/5 px-3 py-2 text-sm text-destructive"
+                        >
+                            {e.old_val}
+                        </div>
+                    )}
+                    {if (!std.mem.eql(u8, e.status, "removed")) (
+                        <div
+                            class="diff-val diff-new whitespace-pre-wrap break-words bg-success/5 px-3 py-2 text-sm text-success"
+                        >
+                            {e.new_val}
+                        </div>
+                    )}
                 </div>
             )}
         </div>

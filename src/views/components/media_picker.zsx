@@ -1,0 +1,321 @@
+// Media picker dialog — ZSX-rendered shell for the PublrJS "media-picker"
+// store (static/media-picker.js). Rendered once per admin layout (like
+// ToastRegion); hidden until window.PublrAdmin.pickMedia() or an image-picker
+// field opens it. All dynamic lists render client-side via @for templates
+// over store state; the store fetches /admin/media/picker/list.
+//
+// Replaces the modal that interact/components.js used to build in JS (and its
+// bespoke stylesheet block) — these utilities are harvested by the build scan.
+//
+// NOTE: `:showIf` nodes must not carry display utilities (flex/block/grid) —
+// the runtime toggles the `hidden` class, and the JIT currently orders some
+// display utilities after `hidden` so they would win. Layout lives on inner
+// wrappers instead (same convention as the DS components).
+
+const ui = @import("publr_ui");
+const Icon = ui.icon.Icon;
+const IconName = ui.icon.Name;
+const Size = ui.icon.Size;
+
+pub fn MediaPicker() {
+    <div @store="local:media-picker">
+        <div
+            :showIf="$open"
+            data-publr-part="overlay"
+            class="hidden fixed inset-0 z-50 bg-black/50 [.dark_&]:bg-black/75"
+        >
+            <div
+                onClick="overlayClick"
+                class="flex h-full w-full items-center justify-center p-8"
+            >
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Select media"
+                    data-publr-part="content"
+                    class="flex h-full min-h-[500px] w-full flex-col overflow-hidden rounded-[calc(var(--radius)+4px)] border border-border bg-popover text-popover-foreground"
+                >
+                    <div
+                        class="flex items-center justify-between px-5 py-4 border-b border-border"
+                    >
+                        <h3 class="m-0 text-base font-semibold">Select Image</h3>
+                        <button
+                            type="button"
+                            onClick="close"
+                            aria-label="Close"
+                            class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-xl leading-none text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                        >
+                            &times;
+                        </button>
+                    </div>
+                    <div class="flex flex-1 min-h-0">
+                        <aside
+                            class="w-52 shrink-0 overflow-y-auto border-r border-border bg-muted/40 p-3"
+                        >
+                            <div>
+                                <h4
+                                    class="m-0 mb-1.5 px-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground"
+                                >
+                                    Folders
+                                </h4>
+                                <ul class="m-0 list-none p-0">
+                                    <template
+                                        @for="folder of $folders"
+                                        :key="$folder.id"
+                                    >
+                                        <li
+                                            onClick="clickFolder"
+                                            :data-folder-id="$folder.id"
+                                            :data-folder-name="$folder.name"
+                                            :style="padding-left -> $folder.pad"
+                                            class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] text-foreground hover:bg-accent hover:text-accent-foreground"
+                                            :class="$folder.active -> bg-accent text-accent-foreground font-semibold"
+                                        >
+                                            <Icon
+                                                name={IconName.folder}
+                                                size={Size.sm}
+                                                class="shrink-0 text-muted-foreground"
+                                            />
+                                            <span
+                                                class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                                                :text="$folder.name"
+                                            >
+                                                
+                                            </span>
+                                            <span
+                                                class="text-[0.6875rem] text-muted-foreground"
+                                                :text="$folder.count"
+                                            >
+                                                
+                                            </span>
+                                        </li>
+                                    </template>
+                                </ul>
+                                <span
+                                    :showIf="not $hasFolders"
+                                    class="hidden px-2 py-1 text-xs text-muted-foreground"
+                                >
+                                    No folders
+                                </span>
+                            </div>
+                            <div class="mt-4">
+                                <h4
+                                    class="m-0 mb-1.5 px-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground"
+                                >
+                                    Tags
+                                </h4>
+                                <div class="flex flex-wrap gap-1.5 px-1">
+                                    <template
+                                        @for="tag of $tags"
+                                        :key="$tag.id"
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick="clickTag"
+                                            :data-tag-id="$tag.id"
+                                            :data-tag-name="$tag.name"
+                                            class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:border-ring"
+                                            :class="$tag.active -> bg-primary border-primary text-primary-foreground"
+                                        >
+                                            <span :text="$tag.name"></span>
+                                            <span
+                                                class="text-[0.6875rem] text-muted-foreground"
+                                                :class="$tag.active -> text-primary-foreground/70"
+                                                :text="$tag.count"
+                                            >
+                                                
+                                            </span>
+                                        </button>
+                                    </template>
+                                </div>
+                                <span
+                                    :showIf="not $hasTags"
+                                    class="hidden px-2 py-1 text-xs text-muted-foreground"
+                                >
+                                    No tags
+                                </span>
+                            </div>
+                        </aside>
+                        <div class="flex min-w-0 flex-1 flex-col">
+                            <div
+                                class="flex items-center justify-between gap-3 border-b border-border px-5 py-3"
+                            >
+                                <div class="flex flex-wrap gap-1.5">
+                                    <template
+                                        @for="chip of $chips"
+                                        :key="$chip.key"
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick="removeChip"
+                                            :data-kind="$chip.kind"
+                                            :data-id="$chip.id"
+                                            class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-xs text-foreground hover:border-ring"
+                                        >
+                                            <span
+                                                class="text-muted-foreground"
+                                                :text="$chip.label"
+                                            >
+                                                
+                                            </span>
+                                            <span :text="$chip.text"></span>
+                                            <span
+                                                class="text-[0.8125rem] leading-none text-muted-foreground"
+                                            >
+                                                &times;
+                                            </span>
+                                        </button>
+                                    </template>
+                                </div>
+                                <div
+                                    class="ml-auto flex items-center gap-2 rounded-md border border-input bg-background px-2.5 text-muted-foreground focus-within:border-ring"
+                                >
+                                    <Icon
+                                        name={IconName.search}
+                                        size={Size.sm}
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="Search media..."
+                                        onInput="searchInput"
+                                        data-publr-part="search"
+                                        class="h-9 w-52 border-0 bg-transparent text-[0.8125rem] text-foreground outline-none"
+                                    />
+                                </div>
+                                <label
+                                    class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-[0.8125rem] font-semibold text-secondary-foreground shadow-xs hover:bg-accent"
+                                    :class="$uploading -> opacity-60 pointer-events-none"
+                                >
+                                    <span
+                                        aria-live="polite"
+                                        :text="$uploadText"
+                                    >
+                                        Upload
+                                    </span>
+                                    <input
+                                        type="file"
+                                        multiple
+                                        class="hidden"
+                                        onChange="filesChosen"
+                                        data-publr-part="file"
+                                    />
+                                </label>
+                            </div>
+                            <div class="min-h-0 flex-1 overflow-y-auto p-5">
+                                <div
+                                    class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3"
+                                >
+                                    <template
+                                        @for="item of $items"
+                                        :key="$item.id"
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick="selectItem"
+                                            onDblclick="pickItem"
+                                            :data-media-id="$item.id"
+                                            :data-selected="$item.selected"
+                                            :aria-selected="$item.selected"
+                                            class="group relative flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-visible rounded-md border-0 bg-transparent p-0 text-left outline-none hover:bg-muted/40 focus-visible:outline-none"
+                                            :class="$item.selected -> bg-primary/10"
+                                        >
+                                            <span
+                                                :showIf="$item.selected"
+                                                class="hidden pointer-events-none absolute inset-0 z-10"
+                                            >
+                                                <span
+                                                    class="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm"
+                                                    aria-hidden="true"
+                                                >
+                                                    <Icon
+                                                        name={IconName.check}
+                                                        size={Size.sm}
+                                                    />
+                                                </span>
+                                            </span>
+                                            <template
+                                                @renderIf="$item.is_image"
+                                            >
+                                                <img
+                                                    :src="$item.thumb_url"
+                                                    :alt="$item.alt_text"
+                                                    loading="lazy"
+                                                    class="aspect-square w-full rounded-sm bg-muted object-cover"
+                                                    :class="$item.selected -> inset-ring-2 inset-ring-primary"
+                                                />
+                                            </template>
+                                            <template
+                                                @renderIf="not $item.is_image"
+                                            >
+                                                <div
+                                                    class="flex aspect-square w-full items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                                                    :class="$item.selected -> inset-ring-2 inset-ring-primary"
+                                                >
+                                                    <Icon
+                                                        name={IconName.file}
+                                                    />
+                                                </div>
+                                            </template>
+                                            <div
+                                                class="overflow-hidden text-ellipsis whitespace-nowrap px-1 text-[0.6875rem] text-muted-foreground"
+                                                :text="$item.filename"
+                                            >
+                                                
+                                            </div>
+                                        </button>
+                                    </template>
+                                    <div
+                                        :showIf="$loading"
+                                        class="hidden col-span-full py-12 text-center text-[0.8125rem] text-muted-foreground"
+                                    >
+                                        Loading...
+                                    </div>
+                                    <div
+                                        :showIf="$emptyGrid"
+                                        class="hidden col-span-full py-12 text-center text-[0.8125rem] text-muted-foreground"
+                                    >
+                                        <div
+                                            class="flex flex-col items-center justify-center gap-2"
+                                        >
+                                            <Icon name={IconName.image} />
+                                            <span>No images found</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div
+                        class="flex items-center justify-between border-t border-border px-5 py-3"
+                    >
+                        <div
+                            class="text-xs text-muted-foreground"
+                            aria-live="polite"
+                            :text="$info"
+                        >
+                            
+                        </div>
+                        <div class="flex gap-2">
+                            <button
+                                type="button"
+                                class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-[0.8125rem] font-semibold text-secondary-foreground shadow-xs hover:bg-accent"
+                                onClick="close"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-sm btn-primary inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-1.5 text-[0.8125rem] font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick="confirmSelect"
+                                :disabled="not $canSelect"
+                                disabled=""
+                            >
+                                Select
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}

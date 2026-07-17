@@ -11,4 +11,11 @@ pub fn VersionFlowAudit(props: struct {
         relative: []const u8 = "",
         actor: []const u8 = "",
     } = &.{},
-}) {<div class="version-flow-audit">{for (props.events) |e| (<div class="version-flow-event"><span class="version-flow-action">{e.action_label}</span>{if (e.step_text != null) (<span class="version-flow-step">{@raw e.step_text.?}</span>)}<span class="version-flow-time" title={e.time_title}>{e.relative} · {e.actor}</span></div>)}</div>}
+}) {
+    <div
+        class="version-flow-audit flex flex-col gap-2 rounded-[calc(var(--radius)*0.8)] border border-border bg-background p-3"
+    >
+        {for (props.events) |e| (<div class="version-flow-event flex flex-col gap-1 border-b border-border pb-1.5 last:border-b-0 last:pb-0"><span class="version-flow-action text-xs font-medium text-muted-foreground">{e.action_label}</span>{if (e.step_text != null) (<span class="version-flow-step text-[11px] text-muted-foreground">{@raw e.step_text.?}</span>)}<span class="version-flow-time text-[11px] text-muted-foreground" title={e.time_title}>{e.relative} · {e.actor}</span>
+    </div>
+    )}</div>
+}

@@ -37,7 +37,7 @@ pub const Deps = struct {
     setup_bg_dark: bool,
     /// The transpile step the WASM exe must run after.
     transpile_step: *std.Build.Step,
-    /// JIT-compiled Tailwind utilities (admin scope). Embedded for /static/publr.css.
+    /// JIT-compiled Tailwind utilities (admin scope). Embedded for /static/styles/publr.css.
     jit_css_output: std.Build.LazyPath,
 };
 
@@ -138,8 +138,8 @@ pub fn build(b: *std.Build, deps: Deps) Result {
             .{ .name = "middleware", .module = deps.middleware },
         },
     });
-    wasm_static_handler_module.addAnonymousImport("static_tokens_css", .{ .root_source_file = b.path("vendor/tokens.css") });
-    wasm_static_handler_module.addAnonymousImport("static_preflight_css", .{ .root_source_file = b.path("vendor/jit/preflight.css") });
+    wasm_static_handler_module.addAnonymousImport("static_tokens_css", .{ .root_source_file = b.path("static/styles/tokens.css") });
+    wasm_static_handler_module.addAnonymousImport("static_preflight_css", .{ .root_source_file = b.path("vendor/tailwindcss/preflight.css") });
     wasm_static_handler_module.addAnonymousImport("static_jit_css", .{ .root_source_file = deps.jit_css_output });
 
     // Editor assets handler — same source as native (src/http_handlers/editor_assets.zig).

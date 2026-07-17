@@ -385,7 +385,7 @@ pub const undo: []const u8 =
 ;
 
 pub const ungroup: []const u8 =
-    \\<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.75" y="7" width="13.25" height="13.25" rx="2" stroke-dasharray="3.1 2.6"/><rect x="13.75" y="3.75" width="6.5" height="6.5" rx="1"/></g>
+    \\<g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2.75" y="5.25" width="15.5" height="16" rx="2.25" stroke-dasharray="3.25 2.5"/><rect x="11.75" y="2.75" width="9.5" height="9.5" rx="1.75"/></g>
 ;
 
 pub const upload: []const u8 =

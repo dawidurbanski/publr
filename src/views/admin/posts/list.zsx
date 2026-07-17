@@ -71,7 +71,12 @@ pub fn List(props: struct {
     {if (props.available_authors.len > 0) (
         <Flex gap=.md items=.center>
             <form method="get" action="/admin/posts">
-                <select name="author" class="form-control form-control-sm" onchange="this.form.submit()" aria-label="Filter by author">
+                <select
+                    name="author"
+                    class="form-control form-control-sm cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-1.5 text-base text-foreground focus:border-ring focus:outline-none sm:text-sm"
+                    onchange="this.form.submit()"
+                    aria-label="Filter by author"
+                >
                     <option value="">All authors</option>
                     {for (props.available_authors) |author| (
                         <option value={author.value} selected={author.selected}>{author.label}</option>
@@ -79,7 +84,13 @@ pub fn List(props: struct {
                 </select>
             </form>
             {if (props.active_author_filter.len > 0) (
-                <Button hierarchy=.tertiary size=.sm label="Clear filter" icon=.x_close href="/admin/posts" />
+                <Button
+                    hierarchy=.tertiary
+                    size=.sm
+                    label="Clear filter"
+                    icon=.x_close
+                    href="/admin/posts"
+                />
             )}
         </Flex>
     )}
@@ -94,7 +105,10 @@ pub fn List(props: struct {
                         <TableHead class="w-10"></TableHead>
                         <TableHead>
                             Title
-                            <Icon name={IconName.chevron_up} size={IconSize.sm} />
+                            <Icon
+                                name={IconName.chevron_up}
+                                size={IconSize.sm}
+                            />
                         </TableHead>
                         <TableHead>Author</TableHead>
                         <TableHead>Status</TableHead>
@@ -119,22 +133,43 @@ pub fn List(props: struct {
                             </TableCell>
                             <TableCell>
                                 {if (@import("std").mem.eql(u8, post.status, "published")) (
-                                    <Badge label="published" variant={BadgeVariant.success} size={BadgeSize.sm} />
+                                    <Badge
+                                        label="published"
+                                        variant={BadgeVariant.success}
+                                        size={BadgeSize.sm}
+                                    />
                                 ) else if (@import("std").mem.eql(u8, post.status, "changed")) (
-                                    <Badge label="changed" variant={BadgeVariant.warning} size={BadgeSize.sm} />
+                                    <Badge
+                                        label="changed"
+                                        variant={BadgeVariant.warning}
+                                        size={BadgeSize.sm}
+                                    />
                                 ) else (
-                                    <Badge label="draft" variant={BadgeVariant.secondary} size={BadgeSize.sm} />
+                                    <Badge
+                                        label="draft"
+                                        variant={BadgeVariant.secondary}
+                                        size={BadgeSize.sm}
+                                    />
                                 )}
                             </TableCell>
                             <TableCell>{post.date}</TableCell>
                             <TableCell class="w-10">
                                 <DropdownMenu>
                                     <DropdownMenuTrigger>
-                                        <Button hierarchy=.tertiary size=.sm label="" icon=.more />
+                                        <Button
+                                            hierarchy=.tertiary
+                                            size=.sm
+                                            label=""
+                                            icon=.more
+                                        />
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent>
                                         <DropdownMenuItem href={post.edit_url}>Edit</DropdownMenuItem>
-                                        <DropdownMenuItem href={post.preview_url}>Preview</DropdownMenuItem>
+                                        <DropdownMenuItem
+                                            href={post.preview_url}
+                                        >
+                                            Preview
+                                        </DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem variant=.destructive>Delete</DropdownMenuItem>
                                     </DropdownMenuContent>
@@ -150,7 +185,10 @@ pub fn List(props: struct {
                     <Pagination>
                         <PaginationContent>
                             <PaginationItem>
-                                <PaginationPrevious href={props.prev_page_url} disabled={props.prev_page_url.len == 0} />
+                                <PaginationPrevious
+                                    href={props.prev_page_url}
+                                    disabled={props.prev_page_url.len == 0}
+                                />
                             </PaginationItem>
                             {for (props.page_urls) |pg| (
                                 {if (pg.is_ellipsis) (
@@ -160,7 +198,10 @@ pub fn List(props: struct {
                                 )}
                             )}
                             <PaginationItem>
-                                <PaginationNext href={props.next_page_url} disabled={props.next_page_url.len == 0} />
+                                <PaginationNext
+                                    href={props.next_page_url}
+                                    disabled={props.next_page_url.len == 0}
+                                />
                             </PaginationItem>
                         </PaginationContent>
                     </Pagination>
@@ -172,7 +213,11 @@ pub fn List(props: struct {
             <EmptyTitle>No posts yet</EmptyTitle>
             <EmptyDescription>Create your first post to get started.</EmptyDescription>
             <EmptyContent>
-                <Button hierarchy=.primary label="Create your first post" href="/admin/posts/new" />
+                <Button
+                    hierarchy=.primary
+                    label="Create your first post"
+                    href="/admin/posts/new"
+                />
             </EmptyContent>
         </Empty>
     )}

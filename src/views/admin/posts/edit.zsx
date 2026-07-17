@@ -33,7 +33,11 @@ pub fn Edit(props: struct {
     fields_in_releases: []const u8 = "[]",
     field_editors: []const u8 = "{}",
 }) {
-    <form method="POST" action={props.action} id="entry-form" class="form"
+    <form
+        method="POST"
+        action={props.action}
+        id="entry-form"
+        class="form w-full"
         data-base-url="/admin/posts"
         data-entry-id={props.post.entry_id}
         data-entry-status={props.post.status}
@@ -43,12 +47,23 @@ pub fn Edit(props: struct {
     >
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <input type="hidden" name="fields" value="" id="publish-fields" />
-        <div class="form-group" data-field="title">
-            <div class="form-label-row">
+        <div class="form-group mb-5" data-field="title">
+            <div
+                class="form-label-row mb-1 flex items-center justify-between gap-2"
+            >
                 <FieldLabel html_for="title">Title</FieldLabel>
-                <div class="field-check-row">
-                    <span class="field-editor-badge" data-field="title"></span>
-                    <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="title" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
+                <div class="field-check-row flex items-center gap-2">
+                    <span
+                        class="field-editor-badge hidden items-center gap-1 whitespace-nowrap text-xs text-muted-foreground [.form-group.field-changed_&.field-editor-active]:flex [.form-group.field-deselected_&.field-editor-active]:flex [.form-group.field-in-release_&.field-editor-active]:flex"
+                        data-field="title"
+                    >
+
+                    </span>
+                    <label
+                        class="switch-label field-publish-switch hidden cursor-pointer items-center gap-2 text-sm [.form-group.field-changed_&]:inline-flex [.form-group.field-deselected_&]:inline-flex"
+                    >
+                        <input type="checkbox" class="switch-input field-publish-check peer absolute h-0 w-0 opacity-0" data-field="title" checked="" /><span class="switch-track relative inline-block h-5 w-9 rounded-full bg-input transition-colors peer-checked:bg-primary peer-checked:[&_.switch-thumb]:translate-x-4" role="switch" aria-checked="true"><span class="switch-thumb absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform"></span></span>
+                    </label>
                 </div>
             </div>
             <Input
@@ -58,12 +73,23 @@ pub fn Edit(props: struct {
                 required={true}
             />
         </div>
-        <div class="form-group" data-field="slug">
-            <div class="form-label-row">
+        <div class="form-group mb-5" data-field="slug">
+            <div
+                class="form-label-row mb-1 flex items-center justify-between gap-2"
+            >
                 <FieldLabel html_for="slug">Slug</FieldLabel>
-                <div class="field-check-row">
-                    <span class="field-editor-badge" data-field="slug"></span>
-                    <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="slug" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
+                <div class="field-check-row flex items-center gap-2">
+                    <span
+                        class="field-editor-badge hidden items-center gap-1 whitespace-nowrap text-xs text-muted-foreground [.form-group.field-changed_&.field-editor-active]:flex [.form-group.field-deselected_&.field-editor-active]:flex [.form-group.field-in-release_&.field-editor-active]:flex"
+                        data-field="slug"
+                    >
+
+                    </span>
+                    <label
+                        class="switch-label field-publish-switch hidden cursor-pointer items-center gap-2 text-sm [.form-group.field-changed_&]:inline-flex [.form-group.field-deselected_&]:inline-flex"
+                    >
+                        <input type="checkbox" class="switch-input field-publish-check peer absolute h-0 w-0 opacity-0" data-field="slug" checked="" /><span class="switch-track relative inline-block h-5 w-9 rounded-full bg-input transition-colors peer-checked:bg-primary peer-checked:[&_.switch-thumb]:translate-x-4" role="switch" aria-checked="true"><span class="switch-thumb absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform"></span></span>
+                    </label>
                 </div>
             </div>
             <Input
@@ -72,18 +98,29 @@ pub fn Edit(props: struct {
                 value={props.post.slug}
             />
         </div>
-        <div class="form-group" data-field="body">
-            <div class="form-label-row">
+        <div class="form-group mb-5" data-field="body">
+            <div
+                class="form-label-row mb-1 flex items-center justify-between gap-2"
+            >
                 <FieldLabel html_for="content">Content</FieldLabel>
-                <div class="field-check-row">
-                    <span class="field-editor-badge" data-field="body"></span>
-                    <label class="switch-label field-publish-switch"><input type="checkbox" class="switch-input field-publish-check" data-field="body" checked="" /><span class="switch-track" role="switch" aria-checked="true"><span class="switch-thumb"></span></span></label>
+                <div class="field-check-row flex items-center gap-2">
+                    <span
+                        class="field-editor-badge hidden items-center gap-1 whitespace-nowrap text-xs text-muted-foreground [.form-group.field-changed_&.field-editor-active]:flex [.form-group.field-deselected_&.field-editor-active]:flex [.form-group.field-in-release_&.field-editor-active]:flex"
+                        data-field="body"
+                    >
+
+                    </span>
+                    <label
+                        class="switch-label field-publish-switch hidden cursor-pointer items-center gap-2 text-sm [.form-group.field-changed_&]:inline-flex [.form-group.field-deselected_&]:inline-flex"
+                    >
+                        <input type="checkbox" class="switch-input field-publish-check peer absolute h-0 w-0 opacity-0" data-field="body" checked="" /><span class="switch-track relative inline-block h-5 w-9 rounded-full bg-input transition-colors peer-checked:bg-primary peer-checked:[&_.switch-thumb]:translate-x-4" role="switch" aria-checked="true"><span class="switch-thumb absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform"></span></span>
+                    </label>
                 </div>
             </div>
             <textarea
                 id="content"
                 name="content"
-                class="form-control"
+                class="form-control min-h-32 w-full resize-y rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base leading-6 text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:text-sm"
                 rows="12"
             >{props.post.content}</textarea>
         </div>
@@ -100,22 +137,51 @@ pub fn EditSidebar(props: struct {
 }) {
     <div class="p-4 border-b border-border">
         <Stack gap=.sm>
-            <div class="autosave-status" id="autosave-status"></div>
+            <div
+                class="autosave-status min-h-[1.125rem] text-center text-xs leading-[1.125rem]"
+                id="autosave-status"
+            ></div>
             {if (props.post.is_draft) (
-                <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn">
+                <button
+                    type="submit"
+                    form="entry-form"
+                    name="status"
+                    value="published"
+                    class="btn btn-primary btn-full inline-flex w-full cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-xs hover:opacity-90"
+                    id="publish-btn"
+                >
                     Publish
                 </button>
             ) else if (props.post.is_changed) (
-                <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn">
+                <button
+                    type="submit"
+                    form="entry-form"
+                    name="status"
+                    value="published"
+                    class="btn btn-primary btn-full inline-flex w-full cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-xs hover:opacity-90"
+                    id="publish-btn"
+                >
                     Publish Changes
                 </button>
             ) else (
-                <button type="submit" form="entry-form" name="status" value="published" class="btn btn-primary btn-full" id="publish-btn" disabled="">
+                <button
+                    type="submit"
+                    form="entry-form"
+                    name="status"
+                    value="published"
+                    class="btn btn-primary btn-full inline-flex w-full cursor-not-allowed items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground opacity-50 shadow-xs"
+                    id="publish-btn"
+                    disabled=""
+                >
                     Published
                 </button>
             )}
             {if (!props.post.is_draft) (
-                <button type="button" class={if (props.post.is_changed) "btn btn-ghost btn-full" else "btn btn-ghost btn-full hidden"} id="discard-btn">
+                <button
+                    type="button"
+                    class={if (props.post.is_changed) "btn btn-ghost btn-full inline-flex w-full cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-transparent bg-transparent px-3 py-2 text-sm font-semibold text-secondary-foreground hover:bg-accent" else "btn btn-ghost btn-full hidden w-full cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-transparent bg-transparent px-3 py-2 text-sm font-semibold text-secondary-foreground hover:bg-accent"}
+                    id="discard-btn"
+                >
                     Discard Changes
                 </button>
             )}
@@ -133,7 +199,7 @@ pub fn EditSidebar(props: struct {
                 id="date"
                 name="date"
                 value={props.post.date}
-                class="form-control"
+                class="form-control w-full cursor-pointer rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base leading-6 text-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:text-sm"
                 form="entry-form"
             />
         </Stack>
@@ -142,31 +208,105 @@ pub fn EditSidebar(props: struct {
         <Heading level=.h3 size=.xs>Featured Image</Heading>
         <Stack gap=.sm>
             {if (props.post.featured_image.len > 0) (
-                <div class="image-picker" data-publr-component="image-picker" data-publr-state="selected" data-publr-accept="image/*">
-                    <input type="hidden" name="featured_image" value={props.post.featured_image} data-publr-part="value" form="entry-form" />
-                    <div class="image-picker-preview" data-publr-part="preview">
-                        <img src={props.post.featured_image_url} alt="" class="image-picker-thumb" />
+                <div
+                    @store="local:image-field"
+                    class="image-picker overflow-hidden rounded-[calc(var(--radius)*0.8)] border border-border bg-muted"
+                    data-publr-state="selected"
+                    data-publr-accept="image/*"
+                >
+                    <input
+                        type="hidden"
+                        name="featured_image"
+                        value={props.post.featured_image}
+                        data-publr-part="value"
+                        form="entry-form"
+                    />
+                    <div
+                        class="image-picker-preview flex min-h-[120px] items-center justify-center border-b border-border bg-muted"
+                        data-publr-part="preview"
+                    >
+                        <img
+                            src={props.post.featured_image_url}
+                            alt=""
+                            class="image-picker-thumb block max-h-[200px] max-w-full object-contain"
+                        />
                     </div>
-                    <div class="image-picker-actions">
-                        <button type="button" class="btn btn-sm" data-publr-part="trigger">Change Image</button>
-                        <button type="button" class="btn btn-sm btn-ghost" data-publr-part="remove">Remove</button>
+                    <div class="image-picker-actions flex gap-2 bg-muted p-3">
+                        <button
+                            type="button"
+                            class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground shadow-xs hover:bg-accent"
+                            data-publr-part="trigger"
+                            onClick="pick"
+                        >
+                            Change Image
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-ghost inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-transparent bg-transparent px-3 py-1.5 text-sm font-semibold text-secondary-foreground hover:bg-accent"
+                            data-publr-part="remove"
+                            onClick="clear"
+                        >
+                            Remove
+                        </button>
                     </div>
-                    <div class="image-picker-alt" data-publr-part="alt"></div>
+                    <div
+                        class="image-picker-alt empty:hidden px-3 pb-3 text-sm text-muted-foreground"
+                        data-publr-part="alt"
+                    ></div>
                 </div>
             ) else (
-                <div class="image-picker" data-publr-component="image-picker" data-publr-state="empty" data-publr-accept="image/*">
-                    <input type="hidden" name="featured_image" value="" data-publr-part="value" form="entry-form" />
-                    <div class="image-picker-preview" data-publr-part="preview">
-                        <div class="image-picker-placeholder">
-                            <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            <span>No image selected</span>
+                <div
+                    @store="local:image-field"
+                    class="image-picker overflow-hidden rounded-[calc(var(--radius)*0.8)] border border-border bg-muted"
+                    data-publr-state="empty"
+                    data-publr-accept="image/*"
+                >
+                    <input
+                        type="hidden"
+                        name="featured_image"
+                        value=""
+                        data-publr-part="value"
+                        form="entry-form"
+                    />
+                    <div
+                        class="image-picker-preview flex min-h-[120px] items-center justify-center border-b border-border bg-muted"
+                        data-publr-part="preview"
+                    >
+                        <div
+                            class="image-picker-placeholder flex flex-col items-center gap-2 p-4 text-muted-foreground"
+                        >
+                            <svg
+                                class="icon h-8 w-8 opacity-50"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                            >
+                                <path d="M4 16L8.58579 11.4142C9.36683 10.6332 10.6332 10.6332 11.4142 11.4142L16 16M14 14L15.5858 12.4142C16.3668 11.6332 17.6332 11.6332 18.4142 12.4142L20 14M14 8H14.01M6 20H18C19.1046 20 20 19.1046 20 18V6C20 4.89543 19.1046 4 18 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span class="text-sm">No image selected</span>
                         </div>
                     </div>
-                    <div class="image-picker-actions">
-                        <button type="button" class="btn btn-sm" data-publr-part="trigger">Select Image</button>
-                        <button type="button" class="btn btn-sm btn-ghost" data-publr-part="remove">Remove</button>
+                    <div class="image-picker-actions flex gap-2 bg-muted p-3">
+                        <button
+                            type="button"
+                            class="btn btn-sm inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold text-secondary-foreground shadow-xs hover:bg-accent"
+                            data-publr-part="trigger"
+                            onClick="pick"
+                        >
+                            Select Image
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-ghost hidden cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-transparent bg-transparent px-3 py-1.5 text-sm font-semibold text-secondary-foreground hover:bg-accent"
+                            data-publr-part="remove"
+                            onClick="clear"
+                        >
+                            Remove
+                        </button>
                     </div>
-                    <div class="image-picker-alt" data-publr-part="alt"></div>
+                    <div
+                        class="image-picker-alt empty:hidden px-3 pb-3 text-sm text-muted-foreground"
+                        data-publr-part="alt"
+                    ></div>
                 </div>
             )}
         </Stack>
@@ -176,9 +316,18 @@ pub fn EditSidebar(props: struct {
     )}
     {if (props.delete_url.len > 0) (
         <div class="p-4 mt-auto">
-            <form method="POST" action={props.delete_url} onsubmit="return confirm('Delete this post permanently?')">
+            <form
+                method="POST"
+                action={props.delete_url}
+                onsubmit="return confirm('Delete this post permanently?')"
+            >
                 <input type="hidden" name="_csrf" value={props.csrf_token} />
-                <button type="submit" class="btn btn-danger btn-sm btn-full">Delete Post</button>
+                <button
+                    type="submit"
+                    class="btn btn-danger btn-sm btn-full inline-flex w-full cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-destructive bg-destructive px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                >
+                    Delete Post
+                </button>
             </form>
         </div>
     )}

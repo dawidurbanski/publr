@@ -34,7 +34,7 @@
 ### Adding a new field type
 1. Add type to field type enum in `cms.zig`
 2. Add rendering case in `templates/entries.zig` `renderField`
-3. Add any JS handling in `static/admin.js`
+3. If interactive, add a PublrJS store module under `static/scripts/` (see media-library.js)
 
 ### Modifying the schema
 1. Update schema in `db.zig`

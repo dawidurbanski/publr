@@ -27,7 +27,7 @@ const PickerEntry = struct {
     value: []const u8,
 };
 
-/// Build the JSON payload consumed by `static/interact/kv-picker.js`. Each
+/// Build the JSON payload consumed by `static/kv-picker.js`. Each
 /// entry has `{key, label, mode, source, value}`. Values are truncated to
 /// `max_value` chars. If `exclude_key` is non-empty, that key is filtered
 /// out (used on var-edit pages so a variable can't reference itself via

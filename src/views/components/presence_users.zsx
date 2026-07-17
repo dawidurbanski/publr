@@ -1,0 +1,38 @@
+// Presence avatar stack — the local:presence island (static/presence.js).
+// Rendered in the edit top bar (layout_edit.zsx); the store fills $users
+// with the OTHER editors on this entry and renders them as overlapping
+// avatars. All the realtime machinery (field locks, takeover, heartbeat)
+// lives in the store; this shell is display only.
+//
+// The <template> is an element child, so `first:ml-0` can never match a
+// stamped avatar — instead the container compensates the first avatar's
+// -ml-3 with pl-3, applied only while avatars are shown so an empty stack
+// adds no phantom spacing to the top bar.
+
+pub fn PresenceUsers() {
+    <div
+        @store="local:presence"
+        id="presence-users"
+        class="flex items-center"
+        :class="$hasUsers -> pl-3"
+    >
+        <template @for="user of $users" :key="$user.id">
+            <img
+                :src="$user.avatar_url"
+                alt=""
+                :title="$user.name"
+                class="version-avatar version-avatar-stacked -ml-3 h-6 w-6 shrink-0 rounded-full border-2 border-background"
+                :class="$user.inactive -> presence-inactive opacity-40"
+            />
+        </template>
+        <span :showIf="$overflow" class="hidden">
+            <span
+                class="version-avatar version-avatar-overflow -ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground"
+                :text="$overflowText"
+            >
+
+            </span>
+        </span>
+        <script type="module" src="/static/scripts/presence.js"></script>
+    </div>
+}

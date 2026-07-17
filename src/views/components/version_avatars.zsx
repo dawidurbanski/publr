@@ -7,11 +7,27 @@
 pub fn Stack(props: struct {
     avatars: []const struct { url: []const u8, title: []const u8 } = &.{},
     overflow: usize = 0,
-}) {<span class="version-avatars">{for (props.avatars) |a| (<img src={a.url} alt="" title={a.title} class="version-avatar version-avatar-stacked" />)}{if (props.overflow > 0) (<span class="version-avatar version-avatar-overflow">+{props.overflow}</span>)}</span>}
+}) {
+    <span class="version-avatars flex shrink-0">{for (props.avatars) |a| (<img src={a.url} alt="" title={a.title} class="version-avatar version-avatar-stacked -ml-3 h-6 w-6 shrink-0 rounded-full border-2 border-background first:ml-0" />)}{if (props.overflow > 0) (<span class="version-avatar version-avatar-overflow -ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground">+{props.overflow}</span>
+    )}</span>
+}
 
 pub fn Single(props: struct {
     url: []const u8 = "",
     title: []const u8 = "",
-}) {<img src={props.url} alt="" title={props.title} class="version-avatar" />}
+}) {
+    <img
+        src={props.url}
+        alt=""
+        title={props.title}
+        class="version-avatar h-6 w-6 shrink-0 rounded-full"
+    />
+}
 
-pub fn System(props: struct {}) {<span class="version-avatar version-avatar-system">S</span>}
+pub fn System(props: struct {}) {
+    <span
+        class="version-avatar version-avatar-system flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
+    >
+        S
+    </span>
+}

@@ -14,8 +14,11 @@ pub const Props = struct {
 
 pub fn New(props: Props) {
     <PageHeader title="New Release" />
-
-    <form method="POST" action="/admin/action" class="form" style="max-width: 480px">
+    <form
+        method="POST"
+        action="/admin/action"
+        class="form w-full max-w-[480px]"
+    >
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <input type="hidden" name="action" value="releases.create" />
         <Field>
@@ -28,8 +31,16 @@ pub fn New(props: Props) {
             />
         </Field>
         <Flex gap=.md>
-            <Button button_type=.submit hierarchy=.primary label="Create Release" />
-            <Button hierarchy=.secondary label="Cancel" href="/admin/releases" />
+            <Button
+                button_type=.submit
+                hierarchy=.primary
+                label="Create Release"
+            />
+            <Button
+                hierarchy=.secondary
+                label="Cancel"
+                href="/admin/releases"
+            />
         </Flex>
     </form>
 }

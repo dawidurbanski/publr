@@ -40,7 +40,9 @@ pub const Props = struct {
 };
 
 pub fn List(props: Props) {
-    <PageHeader title="Users" />
+    <PageHeader title="Users">
+        <Button hierarchy=.primary label="Add User" href="/admin/settings/users/new" />
+    </PageHeader>
     <SettingsTabs current="settings.users" />
 
     {if (props.has_users) (

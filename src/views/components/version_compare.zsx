@@ -25,54 +25,148 @@ pub fn VersionCompare(props: struct {
         radio_name: []const u8,
     } = &.{},
 }) {
-    <form method="POST" action="/admin/action" class="version-compare">
+    <form
+        method="POST"
+        action="/admin/action"
+        class="version-compare w-full p-6"
+        @store="local:version-compare"
+    >
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <input type="hidden" name="action" value="content.restore" />
         <input type="hidden" name="type" value={props.type_id} />
         <input type="hidden" name="entry_id" value={props.entry_id} />
         <input type="hidden" name="version_id" value={props.version_id} />
         <input type="hidden" name="_partial" value="1" />
-        <div class="version-compare-header">
+        <div
+            class="version-compare-header mb-4 grid grid-cols-2 gap-4 border-b border-border pb-4"
+        >
             <div class="version-compare-col-old">
-                <span class="version-compare-col-title">{if (props.old_avatar_url != null) (<img src={props.old_avatar_url.?} alt="" title={props.old_avatar_title} class="version-avatar" />{@raw " "})}{props.old_prefix}{props.author_str}{@raw " &middot; "}{props.time_str}</span>
-                <a href="#" id="select-all-old" class="version-compare-select-all">Select all from this version</a>
+                <span
+                    class="version-compare-col-title flex items-center gap-2 text-sm font-semibold text-foreground"
+                >
+                    {if (props.old_avatar_url != null) (<img src={props.old_avatar_url.?} alt="" title={props.old_avatar_title} class="version-avatar h-6 w-6 shrink-0 rounded-full" />{@raw " "})}{props.old_prefix}{props.author_str}{@raw " &middot; "}{props.time_str}
+                </span>
+                <button
+                    type="button"
+                    class="version-compare-select-all mt-1 inline-block border-0 bg-transparent p-0 text-xs text-primary"
+                    onClick="selectAllOld"
+                >
+                    Select all from this version
+                </button>
             </div>
             <div class="version-compare-col-current">
-                <span class="version-compare-col-title">{@raw props.current_avatars_html}{props.current_title}</span>
+                <span
+                    class="version-compare-col-title flex items-center gap-2 text-sm font-semibold text-foreground"
+                >
+                    {@raw props.current_avatars_html}{props.current_title}
+                </span>
             </div>
         </div>
-        <div class="version-compare-toolbar">
-            <label class="version-compare-toggle">
-                <input type="checkbox" id="show-diff-only" />
+        <div class="version-compare-toolbar pb-4 pt-2">
+            <label
+                class="version-compare-toggle inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground"
+            >
+                <input
+                    type="checkbox"
+                    class="accent-primary"
+                    onChange="toggleDiffOnly"
+                />
                 Show only differences ({props.changed_count})
             </label>
         </div>
-        <div class="version-compare-fields" id="version-compare-fields">
+        <div
+            class="version-compare-fields flex flex-col gap-3"
+            onChange="radioChanged"
+            :class="$diffOnly -> show-diff-only [&_[data-field-status=unchanged]]:hidden"
+        >
             {for (props.entries) |e| (
-                <div class="version-compare-row" data-field-status={e.changed ? "changed" : "unchanged"}>
-                    <div class="version-compare-label">
+                <div
+                    class={e.changed ? "version-compare-row grid grid-cols-2 overflow-hidden rounded-[calc(var(--radius)*0.8)] border border-border" : "version-compare-row grid grid-cols-2 overflow-hidden rounded-[calc(var(--radius)*0.8)] border border-border opacity-60"}
+                    data-field-status={e.changed ? "changed" : "unchanged"}
+                >
+                    <div
+                        class="version-compare-label col-span-full border-b border-border bg-muted px-3 py-2 text-sm font-semibold text-muted-foreground"
+                    >
                         {e.key}
-                        {if (e.changed) ({@raw " "}<span class="version-compare-badge">changed</span>)}
-                        {if (e.changed and e.changed_by != null) ({@raw " "}<span class="version-compare-author">by {e.changed_by.?}</span>)}
+                        {if (e.changed) (
+                            {@raw " "}
+                            <span
+                                class="version-compare-badge ml-2 rounded-full bg-warning/10 px-2 py-px text-xs font-semibold text-warning"
+                            >
+                                changed
+                            </span>
+                        )}
+                        {if (e.changed and e.changed_by != null) (
+                            {@raw " "}
+                            <span
+                                class="version-compare-author text-xs text-muted-foreground"
+                            >
+                                by {e.changed_by.?}
+                            </span>
+                        )}
                     </div>
-                    <div class="version-compare-cell version-compare-cell-old">
-                        <label class="version-compare-radio">
-                            <input type="radio" name={e.radio_name} value="old" disabled?={!e.changed} />
-                            <span class={e.changed ? "version-compare-value version-compare-value-old" : "version-compare-value"}>{if (e.old_value.len > 0) ({e.old_value}) else (<em class="version-compare-empty">(empty)</em>)}</span>
+                    <div
+                        class="version-compare-cell version-compare-cell-old min-h-10 border-r border-border px-3 py-2"
+                    >
+                        <label
+                            class="version-compare-radio flex cursor-pointer items-start gap-2 text-sm"
+                        >
+                            <input
+                                type="radio"
+                                class="mt-0.5 shrink-0 accent-primary"
+                                name={e.radio_name}
+                                value="old"
+                                disabled?={!e.changed}
+                            />
+                            <span
+                                class={e.changed ? "version-compare-value version-compare-value-old whitespace-pre-wrap break-words text-destructive" : "version-compare-value whitespace-pre-wrap break-words"}
+                            >
+                                {if (e.old_value.len > 0) ({e.old_value}) else (<em class="version-compare-empty italic text-muted-foreground">(empty)</em>)}
+                            </span>
                         </label>
                     </div>
-                    <div class="version-compare-cell version-compare-cell-current">
-                        <label class="version-compare-radio">
-                            <input type="radio" name={e.radio_name} value="current" checked?={true} disabled?={!e.changed} />
-                            <span class={e.changed ? "version-compare-value version-compare-value-current" : "version-compare-value"}>{if (e.new_value.len > 0) ({e.new_value}) else (<em class="version-compare-empty">(empty)</em>)}</span>
+                    <div
+                        class="version-compare-cell version-compare-cell-current min-h-10 px-3 py-2"
+                    >
+                        <label
+                            class="version-compare-radio flex cursor-pointer items-start gap-2 text-sm"
+                        >
+                            <input
+                                type="radio"
+                                class="mt-0.5 shrink-0 accent-primary"
+                                name={e.radio_name}
+                                value="current"
+                                checked?={true}
+                                disabled?={!e.changed}
+                            />
+                            <span
+                                class={e.changed ? "version-compare-value version-compare-value-current whitespace-pre-wrap break-words text-success" : "version-compare-value whitespace-pre-wrap break-words"}
+                            >
+                                {if (e.new_value.len > 0) ({e.new_value}) else (<em class="version-compare-empty italic text-muted-foreground">(empty)</em>)}
+                            </span>
                         </label>
                     </div>
                 </div>
             )}
         </div>
-        <div class="version-compare-actions">
-            <a href={props.back_url} class="btn">Cancel</a>
-            <button type="submit" class="btn btn-primary" id="apply-changes-btn" disabled?={true}>Apply changes</button>
+        <div
+            class="version-compare-actions mt-6 flex justify-end gap-3 border-t border-border pt-6"
+        >
+            <a
+                href={props.back_url}
+                class="btn inline-flex cursor-pointer items-center justify-center gap-1 rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-2 text-sm font-semibold leading-5 text-secondary-foreground no-underline shadow-xs hover:bg-accent hover:no-underline"
+            >
+                Cancel
+            </a>
+            <button
+                type="submit"
+                class="btn btn-primary inline-flex cursor-pointer items-center justify-center gap-1 rounded-[calc(var(--radius)*0.8)] border border-primary bg-primary px-3 py-2 text-sm font-semibold leading-5 text-primary-foreground shadow-xs hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="not $canApply"
+                disabled?={true}
+            >
+                Apply changes
+            </button>
         </div>
+        <script type="module" src="/static/scripts/version-compare.js"></script>
     </form>
 }

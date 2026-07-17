@@ -18,14 +18,18 @@ pub const Props = struct {
 pub fn New(props: Props) {
     <PageHeader title="Add User" />
     <SettingsTabs current="settings.users.new" />
-
     {if (props.error_message.len > 0) (
-        <div class="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+        <div
+            class="rounded-md border border-destructive/50 bg-destructive/10 p-3"
+        >
             <Text size=.sm color=.destructive>{props.error_message}</Text>
         </div>
     )}
-
-    <form method="POST" action="/admin/action" class="form">
+    <form
+        method="POST"
+        action="/admin/action"
+        class="form w-full max-w-[720px]"
+    >
         <input type="hidden" name="_csrf" value={props.csrf_token} />
         <input type="hidden" name="action" value="settings.user_create" />
         <Field>
@@ -50,7 +54,7 @@ pub fn New(props: Props) {
                 type="password"
                 id="password"
                 name="password"
-                class="form-control"
+                class="form-control w-full rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring sm:text-sm"
                 required=""
                 minlength="8"
                 autocomplete="new-password"
@@ -62,15 +66,23 @@ pub fn New(props: Props) {
                 type="password"
                 id="confirm_password"
                 name="confirm_password"
-                class="form-control"
+                class="form-control w-full rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring sm:text-sm"
                 required=""
                 minlength="8"
                 autocomplete="new-password"
             />
         </Field>
         <Flex gap=.md>
-            <Button button_type=.submit hierarchy=.primary label="Create User" />
-            <Button hierarchy=.secondary label="Cancel" href="/admin/settings/users" />
+            <Button
+                button_type=.submit
+                hierarchy=.primary
+                label="Create User"
+            />
+            <Button
+                hierarchy=.secondary
+                label="Cancel"
+                href="/admin/settings/users"
+            />
         </Flex>
     </form>
 }

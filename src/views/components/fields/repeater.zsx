@@ -1,6 +1,9 @@
 // Repeater field control — an array of sub-field groups, with add/move/remove
-// controls and a <template> for cloning new items. Driven by the
-// data-widget="repeater" JS (interact/repeater.js).
+// controls and a <template> for cloning new items. Each repeater is one
+// local:repeater PublrJS island (static/repeater.js). The buttons carry no
+// onClick actions on purpose: the store dispatches them through one delegated
+// click listener on the island root (rows come and go — per-button wiring
+// would accumulate scope cleanups), keyed on the data-repeater-* markers.
 //
 // The adapter owns all the dynamic composition (JSON array parsing, the
 // `{name}.{idx}.{sub}` / `{name}.__INDEX__.{sub}` name contract, buffering each
@@ -11,13 +14,38 @@
 pub fn RepeaterItem(props: struct {
     children: []const u8 = "",
 }) {
-    <div class="field-repeater-item">
-        <div class="field-repeater-item-controls">
-            <button type="button" class="btn btn-sm btn-icon" title="Move up" data-repeater-up?={true}>&uarr;</button>
-            <button type="button" class="btn btn-sm btn-icon" title="Move down" data-repeater-down?={true}>&darr;</button>
-            <button type="button" class="btn btn-sm btn-icon btn-ghost" title="Remove" data-repeater-remove?={true}>&times;</button>
+    <div
+        class="field-repeater-item mb-2 rounded-[calc(var(--radius)*0.8)] border border-border bg-background last:mb-0"
+    >
+        <div
+            class="field-repeater-item-controls flex items-center justify-end gap-1 rounded-t-[calc(var(--radius)*0.8)] border-b border-border bg-muted px-2 py-1"
+        >
+            <button
+                type="button"
+                class="btn btn-sm btn-icon inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold leading-5 text-secondary-foreground shadow-xs hover:bg-accent"
+                title="Move up"
+                data-repeater-up?={true}
+            >
+                &uarr;
+            </button>
+            <button
+                type="button"
+                class="btn btn-sm btn-icon inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold leading-5 text-secondary-foreground shadow-xs hover:bg-accent"
+                title="Move down"
+                data-repeater-down?={true}
+            >
+                &darr;
+            </button>
+            <button
+                type="button"
+                class="btn btn-sm btn-icon btn-ghost inline-flex cursor-pointer items-center justify-center rounded-[calc(var(--radius)*0.8)] border border-transparent bg-transparent px-3 py-1.5 text-sm font-semibold leading-5 text-secondary-foreground hover:bg-accent"
+                title="Remove"
+                data-repeater-remove?={true}
+            >
+                &times;
+            </button>
         </div>
-        <div class="field-repeater-item-content">{@raw props.children}</div>
+        <div class="field-repeater-item-content px-4 pb-1 pt-3">{@raw props.children}</div>
     </div>
 }
 
@@ -32,12 +60,39 @@ pub fn Repeater(props: struct {
     template_html: []const u8 = "",
     errors: []const []const u8 = &.{},
 }) {
-    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} kind=.no_for errors={props.errors}>
-        <div class="field-repeater" data-widget="repeater" data-field={props.name} data-min?={props.min} data-max?={props.max}>
-            <input type="hidden" name={`${props.name}._count`} value={props.item_count} data-repeater-count?={true} />
-            <div class="field-repeater-items">{@raw props.items_html}</div>
+    <FieldLabelRow
+        name={props.name}
+        display_name={props.display_name}
+        required={props.required}
+        kind=.no_for
+        errors={props.errors}
+    >
+        <div
+            @store="local:repeater"
+            class="field-repeater mb-4 rounded-[calc(var(--radius)*0.8)] border border-border p-0"
+            data-field={props.name}
+            data-min?={props.min}
+            data-max?={props.max}
+        >
+            <input
+                type="hidden"
+                name={`${props.name}._count`}
+                value={props.item_count}
+                data-repeater-count?={true}
+            />
+            <div
+                class="field-repeater-items px-4 py-2 empty:p-4 empty:text-center empty:text-sm empty:text-muted-foreground empty:after:content-['No_items_yet']"
+            >
+                {@raw props.items_html}
+            </div>
             <template data-repeater-template?={true}>{@raw props.template_html}</template>
-            <button type="button" class="btn btn-sm" data-repeater-add?={true}>Add</button>
+            <button
+                type="button"
+                class="btn btn-sm m-[0.5rem_1rem_0.75rem] inline-flex cursor-pointer items-center justify-center gap-1 rounded-[calc(var(--radius)*0.8)] border border-input bg-secondary px-3 py-1.5 text-sm font-semibold leading-5 text-secondary-foreground shadow-xs hover:bg-accent"
+                data-repeater-add?={true}
+            >
+                Add
+            </button>
         </div>
     </FieldLabelRow>
 }

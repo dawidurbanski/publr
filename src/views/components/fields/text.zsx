@@ -12,7 +12,19 @@ pub fn TextArea(props: struct {
     widget: ?[]const u8 = null,
     errors: []const []const u8 = &.{},
 }) {
-    <FieldLabelRow name={props.name} display_name={props.display_name} required={props.required} errors={props.errors}>
-        <textarea class="form-control" id={props.name} name={props.name} rows={props.rows} data-widget?={props.widget} required?={props.required}>{props.value}</textarea>
+    <FieldLabelRow
+        name={props.name}
+        display_name={props.display_name}
+        required={props.required}
+        errors={props.errors}
+    >
+        <textarea
+            class="form-control min-h-32 w-full resize-y rounded-[calc(var(--radius)*0.8)] border border-input bg-background px-3 py-2 text-base leading-6 text-foreground transition-colors placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+            id={props.name}
+            name={props.name}
+            rows={props.rows}
+            data-widget?={props.widget}
+            required?={props.required}
+        >{props.value}</textarea>
     </FieldLabelRow>
 }
