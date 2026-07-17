@@ -270,6 +270,12 @@ pub const Loop = struct {
                 break;
             }
         }
+
+        // Also catch structural/attr changes in HELPER functions the view
+        // renders (not their own entries) — see `fileWideNodesEqual`.
+        if (fast_path and !fileWideNodesEqual(file_entries[0].file_manifest_nodes, manifests)) {
+            fast_path = false;
+        }
         const equal_ns = equal_timer.read();
 
         if (!fast_path) {
@@ -382,7 +388,7 @@ pub const Loop = struct {
         // Runtime CSS recompile from the just-rendered HTML. Bytes go
         // into the runtime_css holder via std.heap.page_allocator (its
         // owner). The static handler will serve these next time the
-        // browser fetches admin.css (after the WS css-bump signal).
+        // browser fetches publr.css (after the WS css-bump signal).
         if (all_rendered.items.len > 0) {
             const new_css = css_jit.compileFromHtml(std.heap.page_allocator, all_rendered.items) catch |err| blk: {
                 std.log.warn("[hmr] css recompile failed: {s}", .{@errorName(err)});
@@ -420,6 +426,36 @@ pub const Loop = struct {
 
 /// Linear scan over the registry; returns all entries whose
 /// `source_path` matches.
+/// True when the baked file-wide `manifest_nodes` structurally match the fresh
+/// parse (every function in the file, concatenated in source order).
+///
+/// The per-entry `manifestEqual` gate only covers REGISTERED views; a helper
+/// function a view renders (e.g. `fn FilterBar`) isn't its own entry, so a
+/// component-attr change inside one wouldn't flip any entry's manifest — and it
+/// can't fast-path either, since component attrs are baked into the compiled
+/// call, not in the swappable L table. Comparing the whole file's node stream
+/// catches those. `.literal` nodes compare equal regardless of content (so pure
+/// text edits still fast-path); `spliceDomAttribute` only mutates literals, so
+/// it doesn't perturb this. Shared by the real gate and the test double so they
+/// can't drift.
+fn fileWideNodesEqual(
+    baked_nodes: []const zsx.manifest_mod.Node,
+    manifests: []const zsx.manifest_mod.Manifest,
+) bool {
+    var fresh_total: usize = 0;
+    for (manifests) |m| fresh_total += m.nodes.len;
+    if (fresh_total != baked_nodes.len) return false;
+
+    var bi: usize = 0;
+    for (manifests) |m| {
+        for (m.nodes) |node| {
+            if (!zsx.manifest_mod.nodeEqual(baked_nodes[bi], node)) return false;
+            bi += 1;
+        }
+    }
+    return true;
+}
+
 fn collectEntriesForFile(alloc: Allocator, source_path: []const u8) ![]const *const Entry {
     const all = view_registry_runtime.iter();
     var out: std.ArrayList(*const Entry) = .{};
@@ -578,6 +614,11 @@ const LoopForTest = struct {
                 all_equal = false;
                 break;
             }
+        }
+
+        // Mirror of Loop.handleZsx: catch helper-function changes too.
+        if (all_equal and !fileWideNodesEqual(file_entries[0].file_manifest_nodes, manifests)) {
+            all_equal = false;
         }
 
         if (!all_equal) {
@@ -808,6 +849,7 @@ test "hmr_loop: structurally-different fresh manifest triggers rebuild (not swap
         .name = "foo:Foo",
         .source_path = "src/views/foo.zsx",
         .manifest = &baked,
+        .file_manifest_nodes = baked.nodes,
         .setL = &TestView.setL,
         .render_from_zon = &TestView.renderFromZon,
     };
@@ -831,6 +873,131 @@ test "hmr_loop: structurally-different fresh manifest triggers rebuild (not swap
     try testing.expectEqual(@as(usize, 1), rec.rebuild_call_count);
     try testing.expectEqual(@as(usize, 1), rec.rebuild_calls.items.len);
     try testing.expectEqualStrings("foo:Foo", rec.rebuild_calls.items[0]);
+    try testing.expectEqual(@as(usize, 0), TestView.set_l_call_count);
+}
+
+test "hmr_loop: string-attr VALUE change in a HELPER fast-paths + swaps (no rebuild)" {
+    const alloc = testing.allocator;
+    TestView.reset();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var guard: CwdGuard = .{};
+    try guard.enter(tmp.dir);
+    defer guard.restore();
+
+    // A registered view `Foo` renders a HELPER `Bar` via `<Bar/>`; the changed
+    // class lives in Bar. Foo itself is unchanged, so the per-entry compare
+    // passes; the file-wide node compare (fileWideNodesEqual) sees Bar's change.
+    // Since a string-attr VALUE is now swappable (lifted into L), the change
+    // compares EQUAL → fast-path setL swap, no rebuild. This is the helper-gate
+    // composing with the attr-hotswap design (#171).
+    try tmp.dir.makePath("src/views");
+    try tmp.dir.writeFile(.{
+        .sub_path = "src/views/foo.zsx",
+        .data = "pub fn Foo() void { <Bar /> }\nfn Bar() void { <Flex class=\"new\">t</Flex> }",
+    });
+
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    // Baked Foo manifest: unchanged (`<Bar/>`). Baked file-wide nodes: Foo + Bar
+    // with the OLD class value.
+    var baked_foo = try bakedManifest(aa, "pub fn Foo() void { <Bar /> }");
+    const baked_all = try zsx.parseAll(aa, "pub fn Foo() void { <Bar /> }\nfn Bar() void { <Flex class=\"old\">t</Flex> }");
+    var baked_nodes: std.ArrayListUnmanaged(zsx.manifest_mod.Node) = .{};
+    for (baked_all) |m| try baked_nodes.appendSlice(aa, m.nodes);
+
+    const entry = try aa.create(Entry);
+    entry.* = .{
+        .name = "foo:Foo",
+        .source_path = "src/views/foo.zsx",
+        .manifest = &baked_foo,
+        .file_manifest_nodes = baked_nodes.items,
+        .setL = &TestView.setL,
+        .render_from_zon = &TestView.renderFromZon,
+    };
+
+    // Point hmr at an empty subdir so the fast path finds no prop snapshots to
+    // re-render/broadcast — it should still swap L.
+    const prev_hmr = hmr.getHmrDir();
+    defer hmr.setHmrDir(prev_hmr);
+    try tmp.dir.makePath(".publr/hmr");
+    hmr.setHmrDir(".publr/hmr");
+
+    var rec = Recorder.init(alloc);
+    defer rec.deinit();
+    var loop = LoopForTest.init(alloc, rec.broadcaster());
+    defer loop.deinit();
+    try loop.putEntries("src/views/foo.zsx", &.{entry});
+
+    const events = [_]watcher.ChangeEvent{
+        .{ .path = "views/foo.zsx", .extension = ".zsx", .kind = .modified, .mtime_ns = 0 },
+    };
+    _ = try loop.handle(&events);
+
+    // Fast path: L swapped, no rebuild. No metadata snapshots → no broadcasts.
+    try testing.expectEqual(@as(usize, 0), rec.rebuild_call_count);
+    try testing.expectEqual(@as(usize, 1), TestView.set_l_call_count);
+    try testing.expectEqual(@as(usize, 0), rec.swap_calls.items.len);
+}
+
+test "hmr_loop: STRUCTURAL change in a HELPER function still triggers rebuild" {
+    const alloc = testing.allocator;
+    TestView.reset();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var guard: CwdGuard = .{};
+    try guard.enter(tmp.dir);
+    defer guard.restore();
+
+    // Same shape as above, but the helper `Bar` gains a NODE (an extra <span>).
+    // That's structural — fileWideNodesEqual sees differing node counts → the
+    // fast path is refused and the loop rebuilds. Guards the boundary of the
+    // attr-value relaxation: values swap, structure does not.
+    try tmp.dir.makePath("src/views");
+    try tmp.dir.writeFile(.{
+        .sub_path = "src/views/foo.zsx",
+        .data = "pub fn Foo() void { <Bar /> }\nfn Bar() void { <Flex class=\"x\">t<span>y</span></Flex> }",
+    });
+
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var baked_foo = try bakedManifest(aa, "pub fn Foo() void { <Bar /> }");
+    const baked_all = try zsx.parseAll(aa, "pub fn Foo() void { <Bar /> }\nfn Bar() void { <Flex class=\"x\">t</Flex> }");
+    var baked_nodes: std.ArrayListUnmanaged(zsx.manifest_mod.Node) = .{};
+    for (baked_all) |m| try baked_nodes.appendSlice(aa, m.nodes);
+
+    const entry = try aa.create(Entry);
+    entry.* = .{
+        .name = "foo:Foo",
+        .source_path = "src/views/foo.zsx",
+        .manifest = &baked_foo,
+        .file_manifest_nodes = baked_nodes.items,
+        .setL = &TestView.setL,
+        .render_from_zon = &TestView.renderFromZon,
+    };
+
+    var rec = Recorder.init(alloc);
+    defer rec.deinit();
+    var loop = LoopForTest.init(alloc, rec.broadcaster());
+    defer loop.deinit();
+    try loop.putEntries("src/views/foo.zsx", &.{entry});
+
+    const events = [_]watcher.ChangeEvent{
+        .{ .path = "views/foo.zsx", .extension = ".zsx", .kind = .modified, .mtime_ns = 0 },
+    };
+    _ = try loop.handle(&events);
+
+    // Structural helper change: slow-path rebuild, no swap.
+    try testing.expectEqual(@as(usize, 0), rec.swap_calls.items.len);
+    try testing.expectEqual(@as(usize, 1), rec.rebuild_call_count);
     try testing.expectEqual(@as(usize, 0), TestView.set_l_call_count);
 }
 
@@ -862,6 +1029,7 @@ test "hmr_loop: manifestEqual=true with no metadata files calls setL but no broa
         .name = "foo:Foo",
         .source_path = "src/views/foo.zsx",
         .manifest = &baked,
+        .file_manifest_nodes = baked.nodes,
         .setL = &TestView.setL,
         .render_from_zon = &TestView.renderFromZon,
     };
@@ -918,6 +1086,7 @@ test "hmr_loop: manifestEqual=true with one metadata file → swap broadcast fir
         .name = "foo:Foo",
         .source_path = "src/views/foo.zsx",
         .manifest = &baked,
+        .file_manifest_nodes = baked.nodes,
         .setL = &TestView.setL,
         .render_from_zon = &TestView.renderFromZon,
     };
@@ -979,6 +1148,7 @@ test "hmr_loop: slow-path-only entry (PropTypeUnresolvable) skipped without cras
         .name = "foo:Foo",
         .source_path = "src/views/foo.zsx",
         .manifest = &baked,
+        .file_manifest_nodes = baked.nodes,
         .setL = &TestView.setL,
         .render_from_zon = &TestView.renderFromZon,
     };
