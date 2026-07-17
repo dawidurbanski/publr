@@ -759,7 +759,7 @@ pub const avatar = struct {
 ///       <AvatarGroupCount size=.sm count="3" />
 ///   </AvatarGroup>
 pub const Size = enum { xs, sm, default, lg };
-pub const FallbackVariant = enum { default, primary };
+pub const FallbackVariant = enum { default, primary, secondary };
 // ── Components (shadcn API) ─────────────────────────
 pub const AvatarProps = struct {
     size: Size = .default,
@@ -770,7 +770,7 @@ pub fn Avatar(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(AvatarProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarProps, _props);
-    const dimensions = if (props.size == .xs) "h-4 w-4 text-[10px]"
+    const dimensions = if (props.size == .xs) "h-4 w-4 text-3xs"
         else if (props.size == .sm) "h-8 w-8 text-xs"
         else if (props.size == .lg) "h-14 w-14 text-lg"
         else "h-10 w-10 text-sm";
@@ -817,12 +817,13 @@ pub fn AvatarFallback(__fw: anytype, __fp: anytype) !void {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarFallbackProps, _props);
     const surface = switch (props.variant) {
-        .default => "bg-muted text-muted-foreground",
-        .primary => "bg-primary text-primary-foreground",
+        .default => "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+        .primary => "bg-primary text-primary-foreground ring-1 ring-inset ring-primary/20",
+        .secondary => "bg-review/15 text-review ring-1 ring-inset ring-review/30",
     };
     try writer.writeAll("<span data-publr-part=\"fallback\" data-publr-variant=\"");
     try runtime.render(writer, props.variant);
-    try writer.writeAll("\" class=\"flex h-full w-full items-center justify-center rounded-full font-medium uppercase ");
+    try writer.writeAll("\" class=\"flex h-full w-full items-center justify-center rounded-full font-semibold uppercase ");
     try writer.writeAll(surface);
     try writer.writeAll(" ");
     try writer.writeAll(props.class);
@@ -873,7 +874,7 @@ pub fn AvatarGroupCount(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(AvatarGroupCountProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(AvatarGroupCountProps, _props);
-    const dimensions = if (props.size == .sm) "h-8 w-8 text-[10px]"
+    const dimensions = if (props.size == .sm) "h-8 w-8 text-3xs"
         else if (props.size == .lg) "h-14 w-14 text-sm"
         else "h-10 w-10 text-xs";
     try writer.writeAll("<span data-publr-part=\"count\" class=\"relative inline-flex items-center justify-center rounded-full border-2 border-background bg-muted font-medium text-muted-foreground ");
@@ -1100,7 +1101,7 @@ pub const AvatarImage = root.avatar.AvatarImage;
 // callers (passing `variant=`) keep compiling. `default`, `outline`, and
 // `destructive` are deprecated names mapped to their semantic equivalents.
 pub const Color = enum {
-    gray, secondary, brand, info, @"error", warning, success,
+    gray, secondary, brand, info, @"error", warning, success, review,
     // Legacy aliases — keep for backward compatibility.
     default, outline, destructive,
 };
@@ -1176,6 +1177,7 @@ const props = runtime.withDefaults(BadgeProps, _props);
         .@"error", .destructive => "bg-error/10 text-error ring-error/30",
         .warning => "bg-warning/10 text-warning ring-warning/30",
         .success => "bg-success/10 text-success ring-success/30",
+        .review => "bg-review/10 text-review ring-review/30",
     };
 
     const accent_class = switch (effective) {
@@ -1186,6 +1188,7 @@ const props = runtime.withDefaults(BadgeProps, _props);
         .@"error", .destructive => "text-error",
         .warning => "text-warning",
         .success => "text-success",
+        .review => "text-review",
     };
 
     const dot_size: u16 = 8;
@@ -1316,7 +1319,7 @@ const props = runtime.withDefaults(BreadcrumbListProps, _props);
         try _children_w_0.writeAll("\n");
         try _children_w_0.writeAll(props.children);
         try _children_w_0.writeAll("\n");
-        try Flex(writer, .{ .as = .ol,  .items = .center,  .gap = .none,  .wrap = .wrap,  .class = runtime.concatRt(&.{ "gap-1.5 list-none p-0 m-0 ", props.class }), .children = _children_buf_0.items });
+        try Flex(writer, .{ .as = .ol,  .items = .center,  .gap = .none,  .wrap = .wrap,  .class = runtime.concatRt(&.{ "gap-2 list-none p-0 m-0 text-xs ", props.class }), .children = _children_buf_0.items });
     }
         }
     }.b);
@@ -1339,7 +1342,7 @@ const props = runtime.withDefaults(BreadcrumbItemProps, _props);
         try _children_w_0.writeAll("\n");
         try _children_w_0.writeAll(props.children);
         try _children_w_0.writeAll("\n");
-        try Flex(writer, .{ .as = .li,  .display = .inline_flex,  .items = .center,  .gap = .none,  .class = runtime.concatRt(&.{ "gap-1.5 ", props.class }), .children = _children_buf_0.items });
+        try Flex(writer, .{ .as = .li,  .display = .inline_flex,  .items = .center,  .gap = .none,  .class = runtime.concatRt(&.{ "gap-2 ", props.class }), .children = _children_buf_0.items });
     }
         }
     }.b);
@@ -1356,7 +1359,7 @@ pub fn BreadcrumbLink(__fw: anytype, __fp: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbLinkProps, _props);
     try writer.writeAll("<a href=\"");
     try runtime.render(writer, props.href);
-    try writer.writeAll("\" class=\"text-sm text-muted-foreground hover:text-foreground transition-colors ");
+    try writer.writeAll("\" class=\"truncate text-xs font-medium text-primary transition-colors hover:text-primary/80 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -1373,7 +1376,7 @@ pub fn BreadcrumbPage(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(BreadcrumbPageProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbPageProps, _props);
-    try writer.writeAll("<span aria-current=\"page\" class=\"text-sm font-medium text-foreground ");
+    try writer.writeAll("<span aria-current=\"page\" class=\"text-xs font-medium text-foreground ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -1389,11 +1392,9 @@ pub fn BreadcrumbSeparator(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(BreadcrumbSeparatorProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbSeparatorProps, _props);
-    try writer.writeAll("<li role=\"presentation\" class=\"text-muted-foreground ");
+    try writer.writeAll("<li role=\"presentation\" aria-hidden=\"true\" class=\"text-border ");
     try writer.writeAll(props.class);
-    try writer.writeAll("\">\n");
-    try Icon(writer, .{ .name = .chevron_right,  .size = 14,  .class = "text-muted-foreground" });
-    try writer.writeAll("\n</li>");
+    try writer.writeAll("\">/</li>");
         }
     }.b);
 }
@@ -1405,7 +1406,7 @@ pub fn BreadcrumbEllipsis(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(BreadcrumbEllipsisProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BreadcrumbEllipsisProps, _props);
-    try writer.writeAll("<li class=\"text-sm text-muted-foreground ");
+    try writer.writeAll("<li class=\"text-xs text-muted-foreground ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">...</li>");
         }
@@ -1810,11 +1811,11 @@ const props = runtime.withDefaults(BulkActionsProps, _props);
     try runtime.render(writer, state);
     try writer.writeAll("\" class=\"");
     try writer.writeAll(visibility_class);
-    try writer.writeAll(" items-center gap-2.5 px-3 py-2 bg-card border border-border border-b-0 rounded-t-lg shadow-xs ");
+    try writer.writeAll(" h-10 items-center gap-3 border-b border-border bg-primary/10 px-4 text-xs text-primary ");
     try writer.writeAll(props.class);
-    try writer.writeAll("\">\n<span data-publr-part=\"count\" class=\"text-xs font-medium text-foreground\">\n");
+    try writer.writeAll("\">\n<span data-publr-part=\"count\" class=\"text-xs font-semibold\">\n");
     try runtime.render(writer, props.count);
-    try writer.writeAll("<span class=\"text-muted-foreground font-normal\">selected</span>\n</span>\n");
+    try writer.writeAll("<span class=\"font-normal\">selected</span>\n</span>\n");
     try writer.writeAll(props.children);
     try writer.writeAll("\n</div>");
         }
@@ -1834,8 +1835,8 @@ pub fn BulkActionsItem(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(BulkActionsItemProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BulkActionsItemProps, _props);
-    const color = if (props.variant == .destructive) "text-destructive" else "text-foreground";
-    const item_class = "inline-flex items-center gap-1 px-2 py-1 rounded-sm text-xs font-medium hover:bg-accent cursor-pointer disabled:cursor-not-allowed disabled:opacity-50";
+    const color = if (props.variant == .destructive) "text-destructive" else "text-primary";
+    const item_class = "inline-flex items-center gap-1 rounded-sm text-xs font-semibold hover:underline cursor-pointer disabled:cursor-not-allowed disabled:opacity-50";
     const variant_attr = if (props.variant == .destructive) "destructive" else "default";
     const has_icon = props.icon != null;
     const is_link = props.href.len > 0;
@@ -1918,7 +1919,7 @@ pub fn BulkActionsClear(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(BulkActionsClearProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(BulkActionsClearProps, _props);
-    try writer.writeAll("<button type=\"button\" data-publr-part=\"clear\" class=\"ml-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer ");
+    try writer.writeAll("<button type=\"button\" data-publr-part=\"clear\" class=\"ml-auto text-xs font-medium text-primary hover:underline cursor-pointer ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try runtime.render(writer, props.label);
@@ -2016,8 +2017,9 @@ pub const button = struct {
 ///   - unstyled: no visual chrome — keeps button semantics + icon/label
 ///     slots + disabled behavior, all appearance driven by `class`
 ///
-/// Size variants: sm, md, lg, xl. Padding, gap, and text size scale per UI
-/// reference; icons are size-5 across all sizes.
+/// Size variants: xs, sm, md, lg, xl, xxl. Fixed heights (h-8 … h-14) with
+/// square icon-only variants; gap and text size scale per size. Icons are
+/// size-4 at xs/sm and size-5 from md up.
 ///
 /// State data-attributes:
 ///   - data-loading="true" while loading (drives `data-[loading=true]:` utilities)
@@ -2077,7 +2079,7 @@ const props = runtime.withDefaults(ButtonProps, _props);
     const base = if (is_unstyled)
         "group inline-flex items-center cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
     else
-        "group relative inline-flex h-max cursor-pointer items-center whitespace-nowrap font-semibold transition duration-100 ease-linear focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+        "group relative inline-flex cursor-pointer items-center whitespace-nowrap font-semibold transition duration-150 ease-out active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
     const justify = if (is_unstyled) "" else if (is_link) "justify-normal" else "justify-center";
 
@@ -2103,19 +2105,19 @@ const props = runtime.withDefaults(ButtonProps, _props);
         .xl => "gap-1.5 rounded",
         .xxl => "gap-2 rounded",
     } else if (is_icon_only) switch (props.size) {
-        .xs => "rounded-md p-1.5",
-        .sm => "rounded-lg p-2",
-        .md => "rounded-lg p-2.5",
-        .lg => "rounded-lg p-3",
-        .xl => "rounded-lg p-3.5",
-        .xxl => "rounded-xl p-4",
+        .xs => "rounded-md size-8",
+        .sm => "rounded-md size-9",
+        .md => "rounded-lg size-10",
+        .lg => "rounded-lg size-11",
+        .xl => "rounded-lg size-12",
+        .xxl => "rounded-xl size-14",
     } else switch (props.size) {
-        .xs => "gap-1 rounded-md px-2.5 py-1.5",
-        .sm => "gap-1 rounded-lg px-3 py-2",
-        .md => "gap-1 rounded-lg px-3.5 py-2.5",
-        .lg => "gap-1.5 rounded-lg px-4 py-2.5",
-        .xl => "gap-1.5 rounded-lg px-4.5 py-3",
-        .xxl => "gap-2 rounded-xl px-5 py-3.5",
+        .xs => "gap-1.5 rounded-md h-8 px-2.5",
+        .sm => "gap-1.5 rounded-md h-9 px-3",
+        .md => "gap-2 rounded-lg h-10 px-3.5",
+        .lg => "gap-2 rounded-lg h-11 px-4",
+        .xl => "gap-2 rounded-lg h-12 px-4.5",
+        .xxl => "gap-2.5 rounded-xl h-14 px-5",
     };
 
     const hierarchy_classes = switch (props.hierarchy) {
@@ -2144,7 +2146,27 @@ const props = runtime.withDefaults(ButtonProps, _props);
         .unstyled => "",
     };
 
-    const icon_class = switch (props.hierarchy) {
+    // Icons scale with the button: size-4 at xs/sm, size-5 from md up.
+    const small_icon = props.size == .xs or props.size == .sm;
+    const icon_px: u16 = if (small_icon) 16 else 20;
+    const spinner_class = if (small_icon)
+        "size-4 shrink-0 animate-spin"
+    else
+        "size-5 shrink-0 animate-spin";
+    const icon_class = if (small_icon) switch (props.hierarchy) {
+        .primary, .destructive =>
+            "size-4 shrink-0 group-hover:text-primary-foreground/80",
+        .secondary, .tertiary =>
+            "size-4 shrink-0 group-hover:text-foreground",
+        .secondary_destructive, .tertiary_destructive =>
+            "size-4 shrink-0",
+        .link =>
+            "size-4 shrink-0 group-hover:text-primary/80",
+        .link_gray =>
+            "size-4 shrink-0 group-hover:text-foreground",
+        .unstyled =>
+            "size-4 shrink-0",
+    } else switch (props.hierarchy) {
         .primary, .destructive =>
             "size-5 shrink-0 group-hover:text-primary-foreground/80",
         .secondary, .tertiary =>
@@ -2200,9 +2222,9 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(props.class);
         try writer.writeAll("\">\n");
         if (props.loading) {
-            try Icon(writer, .{ .name = .sync,  .size = 20,  .class = "size-5 shrink-0 animate-spin" });
+            try Icon(writer, .{ .name = .sync,  .size = icon_px,  .class = spinner_class });
         } else if (props.icon != null) {
-            try Icon(writer, .{ .name = props.icon.?,  .size = 20,  .class = icon_class });
+            try Icon(writer, .{ .name = props.icon.?,  .size = icon_px,  .class = icon_class });
         }
         try writer.writeAll("\n");
         if (has_label) {
@@ -2214,7 +2236,7 @@ const props = runtime.withDefaults(ButtonProps, _props);
         }
         try writer.writeAll("\n");
         if (props.icon_trailing != null and !props.loading) {
-            try Icon(writer, .{ .name = props.icon_trailing.?,  .size = 20,  .class = icon_class });
+            try Icon(writer, .{ .name = props.icon_trailing.?,  .size = icon_px,  .class = icon_class });
         }
         try writer.writeAll("\n</a>");
     } else if (is_disabled) {
@@ -2250,9 +2272,9 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try runtime.render(writer, true);
         try writer.writeAll("\">\n");
         if (props.loading) {
-            try Icon(writer, .{ .name = .sync,  .size = 20,  .class = "size-5 shrink-0 animate-spin" });
+            try Icon(writer, .{ .name = .sync,  .size = icon_px,  .class = spinner_class });
         } else if (props.icon != null) {
-            try Icon(writer, .{ .name = props.icon.?,  .size = 20,  .class = icon_class });
+            try Icon(writer, .{ .name = props.icon.?,  .size = icon_px,  .class = icon_class });
         }
         try writer.writeAll("\n");
         if (has_label) {
@@ -2264,7 +2286,7 @@ const props = runtime.withDefaults(ButtonProps, _props);
         }
         try writer.writeAll("\n");
         if (props.icon_trailing != null and !props.loading) {
-            try Icon(writer, .{ .name = props.icon_trailing.?,  .size = 20,  .class = icon_class });
+            try Icon(writer, .{ .name = props.icon_trailing.?,  .size = icon_px,  .class = icon_class });
         }
         try writer.writeAll("\n</button>");
     } else {
@@ -2298,7 +2320,7 @@ const props = runtime.withDefaults(ButtonProps, _props);
         try writer.writeAll(props.class);
         try writer.writeAll("\">\n");
         if (props.icon != null) {
-            try Icon(writer, .{ .name = props.icon.?,  .size = 20,  .class = icon_class });
+            try Icon(writer, .{ .name = props.icon.?,  .size = icon_px,  .class = icon_class });
         }
         try writer.writeAll("\n");
         if (has_label) {
@@ -2310,7 +2332,7 @@ const props = runtime.withDefaults(ButtonProps, _props);
         }
         try writer.writeAll("\n");
         if (props.icon_trailing != null) {
-            try Icon(writer, .{ .name = props.icon_trailing.?,  .size = 20,  .class = icon_class });
+            try Icon(writer, .{ .name = props.icon_trailing.?,  .size = icon_px,  .class = icon_class });
         }
         try writer.writeAll("\n</button>");
     }
@@ -4219,7 +4241,7 @@ const props = runtime.withDefaults(EmptyTitleProps, _props);
         try _children_w_0.writeAll("\n");
         try _children_w_0.writeAll(props.children);
         try _children_w_0.writeAll("\n");
-        try Heading(writer, .{ .level = props.level,  .size = .md,  .class = props.class, .children = _children_buf_0.items });
+        try Heading(writer, .{ .level = props.level,  .size = .xs,  .class = props.class, .children = _children_buf_0.items });
     }
         }
     }.b);
@@ -4242,7 +4264,7 @@ const props = runtime.withDefaults(EmptyDescriptionProps, _props);
         try _children_w_0.writeAll("\n");
         try _children_w_0.writeAll(props.children);
         try _children_w_0.writeAll("\n");
-        try Text(writer, .{ .size = .sm,  .color = .muted,  .as = .p,  .class = runtime.concatRt(&.{ "mt-1 max-w-sm ", props.class }), .children = _children_buf_0.items });
+        try Text(writer, .{ .size = .xs,  .color = .muted,  .as = .p,  .class = runtime.concatRt(&.{ "mt-1 max-w-sm leading-5 ", props.class }), .children = _children_buf_0.items });
     }
         }
     }.b);
@@ -4615,6 +4637,43 @@ const props = runtime.withDefaults(FieldLabelProps, _props);
             try Label(writer, .{ .html_for = props.html_for,  .class = props.class, .children = _children_buf_0.items });
         }
     }
+        }
+    }.b);
+}
+
+/// FieldLabelRow — dense-admin baseline row: semibold micro label with an
+/// optional right-aligned hint. Sits above the field control (mb-2).
+pub const FieldLabelRowProps = struct {
+    label: []const u8 = "",
+    hint: []const u8 = "",
+    html_for: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn FieldLabelRow(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(FieldLabelRowProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(FieldLabelRowProps, _props);
+    try writer.writeAll("<div data-publr-part=\"label-row\" class=\"mb-2 flex items-baseline ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n");
+    {
+        var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+        const _children_alloc_0 = @import("std").heap.page_allocator;
+        defer _children_buf_0.deinit(_children_alloc_0);
+        const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
+        _ = &_children_w_0;
+        try _children_w_0.writeAll("\n");
+        try runtime.render(_children_w_0, props.label);
+        try _children_w_0.writeAll("\n");
+        try Label(writer, .{ .html_for = props.html_for,  .class = "text-xs font-semibold text-foreground", .children = _children_buf_0.items });
+    }
+    try writer.writeAll("\n");
+    if (props.hint.len > 0) {
+        try writer.writeAll("<span data-publr-part=\"description\" class=\"ml-auto text-2xs text-muted-foreground\">");
+        try runtime.render(writer, props.hint);
+        try writer.writeAll("</span>");
+    }
+    try writer.writeAll("\n</div>");
         }
     }.b);
 }
@@ -5313,11 +5372,11 @@ const props = runtime.withDefaults(InputGroupInputProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-background ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-card ");
         try writer.writeAll(pad_l);
         try writer.writeAll(" ");
         try writer.writeAll(pad_r);
-        try writer.writeAll(" py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ");
+        try writer.writeAll(" py-2 text-sm text-foreground shadow-xs transition duration-150 placeholder:text-muted-foreground hover:border-gray-400 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 ");
         try writer.writeAll(props.class);
         try writer.writeAll("\" disabled=\"");
         try runtime.render(writer, true);
@@ -5327,11 +5386,11 @@ const props = runtime.withDefaults(InputGroupInputProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-background ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-card ");
         try writer.writeAll(pad_l);
         try writer.writeAll(" ");
         try writer.writeAll(pad_r);
-        try writer.writeAll(" py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ");
+        try writer.writeAll(" py-2 text-sm text-foreground shadow-xs transition duration-150 placeholder:text-muted-foreground hover:border-gray-400 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 ");
         try writer.writeAll(props.class);
         try writer.writeAll("\">");
     }
@@ -5354,7 +5413,7 @@ const props = runtime.withDefaults(InputGroupTextareaProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground shadow-xs transition duration-150 placeholder:text-muted-foreground hover:border-gray-400 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(props.class);
         try writer.writeAll("\" disabled=\"");
         try runtime.render(writer, true);
@@ -5364,7 +5423,7 @@ const props = runtime.withDefaults(InputGroupTextareaProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground shadow-xs transition duration-150 placeholder:text-muted-foreground hover:border-gray-400 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(props.class);
         try writer.writeAll("\"></textarea>");
     }
@@ -5539,7 +5598,7 @@ pub fn Input(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(InputProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(InputProps, _props);
-    const base = "flex rounded-md border bg-background px-3 py-2 text-base sm:text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+    const base = "flex rounded-md border bg-card px-3 py-2 text-base sm:text-sm text-foreground shadow-xs transition duration-150 placeholder:text-muted-foreground hover:border-gray-400 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50";
 
     const border = if (props.invalid) "border-error" else "border-input";
     if (props.disabled and props.required) {
@@ -5657,7 +5716,7 @@ const props = runtime.withDefaults(TextareaProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-background px-3 py-2 text-base sm:text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-card px-3 py-2 text-base sm:text-sm text-foreground shadow-xs transition duration-150 placeholder:text-muted-foreground hover:border-gray-400 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(border);
         try writer.writeAll(" ");
         try writer.writeAll(props.class);
@@ -5675,7 +5734,7 @@ const props = runtime.withDefaults(TextareaProps, _props);
         try runtime.render(writer, props.name);
         try writer.writeAll("\" placeholder=\"");
         try runtime.render(writer, props.placeholder);
-        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-background px-3 py-2 text-base sm:text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
+        try writer.writeAll("\" class=\"flex w-full rounded-md border bg-card px-3 py-2 text-base sm:text-sm text-foreground shadow-xs transition duration-150 placeholder:text-muted-foreground hover:border-gray-400 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 min-h-20 resize-y ");
         try writer.writeAll(border);
         try writer.writeAll(" ");
         try writer.writeAll(props.class);
@@ -6723,12 +6782,15 @@ const props = runtime.withDefaults(RadioGroupProps, _props);
     }.b);
 }
 
+pub const ItemVariant = enum { default, card };
 pub const RadioGroupItemProps = struct {
     value: []const u8 = "",
     label: []const u8 = "",
     description: []const u8 = "",
     name: []const u8 = "",
     disabled: bool = false,
+    // card: bordered option card with dense label + description (admin forms).
+    variant: ItemVariant = .default,
     class: []const u8 = "",
 };
 pub fn RadioGroupItem(__fw: anytype, __fp: anytype) !void {
@@ -6737,9 +6799,23 @@ pub fn RadioGroupItem(__fw: anytype, __fp: anytype) !void {
 const props = runtime.withDefaults(RadioGroupItemProps, _props);
     const has_description = props.description.len > 0;
     const radio_class = "mt-0.5 h-4 w-4 shrink-0 rounded-full border border-input bg-background text-primary accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+    const wrapper_base = if (props.variant == .card)
+        "flex items-start gap-3 rounded-md border border-border bg-background px-3 py-3 transition-colors hover:border-gray-300 hover:bg-muted/20"
+    else
+        "flex items-start gap-2";
+    const label_class = if (props.variant == .card)
+        "text-xs font-medium text-foreground"
+    else
+        "text-sm text-foreground";
+    const desc_class = if (props.variant == .card)
+        "mt-0.5 text-2xs leading-4 text-muted-foreground"
+    else
+        "text-xs text-muted-foreground";
     if (props.disabled) {
         if (props.name.len > 0) {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50 ");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"");
+            try writer.writeAll(wrapper_base);
+            try writer.writeAll(" cursor-not-allowed opacity-50 ");
             try writer.writeAll(props.class);
             try writer.writeAll("\">\n<input type=\"radio\" name=\"");
             try runtime.render(writer, props.name);
@@ -6749,17 +6825,23 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
             try runtime.render(writer, radio_class);
             try writer.writeAll("\" disabled=\"");
             try runtime.render(writer, true);
-            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"text-sm text-foreground\">");
+            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"");
+            try runtime.render(writer, label_class);
+            try writer.writeAll("\">");
             try runtime.render(writer, props.label);
             try writer.writeAll("</span>\n");
             if (has_description) {
-                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try writer.writeAll("<span class=\"");
+                try runtime.render(writer, desc_class);
+                try writer.writeAll("\">");
                 try runtime.render(writer, props.description);
                 try writer.writeAll("</span>");
             }
             try writer.writeAll("\n</div>\n</label>");
         } else {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-not-allowed opacity-50 ");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"");
+            try writer.writeAll(wrapper_base);
+            try writer.writeAll(" cursor-not-allowed opacity-50 ");
             try writer.writeAll(props.class);
             try writer.writeAll("\">\n<input type=\"radio\" value=\"");
             try runtime.render(writer, props.value);
@@ -6767,11 +6849,15 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
             try runtime.render(writer, radio_class);
             try writer.writeAll("\" disabled=\"");
             try runtime.render(writer, true);
-            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"text-sm text-foreground\">");
+            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"");
+            try runtime.render(writer, label_class);
+            try writer.writeAll("\">");
             try runtime.render(writer, props.label);
             try writer.writeAll("</span>\n");
             if (has_description) {
-                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try writer.writeAll("<span class=\"");
+                try runtime.render(writer, desc_class);
+                try writer.writeAll("\">");
                 try runtime.render(writer, props.description);
                 try writer.writeAll("</span>");
             }
@@ -6779,7 +6865,9 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
         }
     } else {
         if (props.name.len > 0) {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-pointer ");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"");
+            try writer.writeAll(wrapper_base);
+            try writer.writeAll(" cursor-pointer ");
             try writer.writeAll(props.class);
             try writer.writeAll("\">\n<input type=\"radio\" name=\"");
             try runtime.render(writer, props.name);
@@ -6787,27 +6875,37 @@ const props = runtime.withDefaults(RadioGroupItemProps, _props);
             try runtime.render(writer, props.value);
             try writer.writeAll("\" class=\"");
             try runtime.render(writer, radio_class);
-            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"text-sm text-foreground\">");
+            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"");
+            try runtime.render(writer, label_class);
+            try writer.writeAll("\">");
             try runtime.render(writer, props.label);
             try writer.writeAll("</span>\n");
             if (has_description) {
-                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try writer.writeAll("<span class=\"");
+                try runtime.render(writer, desc_class);
+                try writer.writeAll("\">");
                 try runtime.render(writer, props.description);
                 try writer.writeAll("</span>");
             }
             try writer.writeAll("\n</div>\n</label>");
         } else {
-            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"flex items-start gap-2 cursor-pointer ");
+            try writer.writeAll("<label data-publr-part=\"item\" data-publr-state=\"unchecked\" class=\"");
+            try writer.writeAll(wrapper_base);
+            try writer.writeAll(" cursor-pointer ");
             try writer.writeAll(props.class);
             try writer.writeAll("\">\n<input type=\"radio\" value=\"");
             try runtime.render(writer, props.value);
             try writer.writeAll("\" class=\"");
             try runtime.render(writer, radio_class);
-            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"text-sm text-foreground\">");
+            try writer.writeAll("\">\n<div class=\"grid gap-0.5\">\n<span class=\"");
+            try runtime.render(writer, label_class);
+            try writer.writeAll("\">");
             try runtime.render(writer, props.label);
             try writer.writeAll("</span>\n");
             if (has_description) {
-                try writer.writeAll("<span class=\"text-xs text-muted-foreground\">");
+                try writer.writeAll("<span class=\"");
+                try runtime.render(writer, desc_class);
+                try writer.writeAll("\">");
                 try runtime.render(writer, props.description);
                 try writer.writeAll("</span>");
             }
@@ -6858,6 +6956,73 @@ const props = runtime.withDefaults(RadioGroupPreviewProps, _props);
         try RadioGroupItem(_children_w_0, .{ .value = props.value_3,  .label = props.label_3,  .description = props.description_3 });
         try _children_w_0.writeAll("\n");
         try RadioGroup(writer, .{ .name = props.name,  .legend = props.legend,  .orientation = props.orientation,  .disabled = props.disabled, .children = _children_buf_0.items });
+    }
+        }
+    }.b);
+}
+
+};
+
+pub const section_title = struct {
+
+/// SectionTitle — dense admin section header row.
+///
+/// h-12 bordered row with an uppercase micro-type eyebrow title and an
+/// optional trailing action slot (children, right-aligned).
+///
+/// Example:
+///   <SectionTitle title="Review queue" />
+///   <SectionTitle title="Recent activity">
+///       <Button hierarchy=.tertiary size=.xs label="View all" />
+///   </SectionTitle>
+pub const SectionTitleProps = struct {
+    title: []const u8 = "",
+    children: []const u8 = "",
+    class: []const u8 = "",
+};
+pub fn SectionTitle(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(SectionTitleProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SectionTitleProps, _props);
+    try writer.writeAll("<div data-publr-component=\"section-title\" class=\"flex h-12 items-center border-b border-border px-5 ");
+    try writer.writeAll(props.class);
+    try writer.writeAll("\">\n<h2 data-publr-part=\"title\" class=\"text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground\">");
+    try runtime.render(writer, props.title);
+    try writer.writeAll("</h2>\n");
+    if (props.children.len > 0) {
+        try writer.writeAll("<div data-publr-part=\"action\" class=\"ml-auto flex items-center gap-2\">\n");
+        try writer.writeAll(props.children);
+        try writer.writeAll("\n</div>");
+    }
+    try writer.writeAll("\n</div>");
+        }
+    }.b);
+}
+
+// ── Gallery Demo ────────────────────────────────────
+pub const Button = root.button.Button;
+pub const SectionTitleDemoProps = struct {
+    demo: enum { plain, with_action } = .plain,
+    title: []const u8 = "Review queue",
+};
+pub fn SectionTitleDemo(__fw: anytype, __fp: anytype) !void {
+    return runtime.forward(SectionTitleDemoProps, __fw, __fp, struct {
+        fn b(writer: anytype, _props: anytype) !void {
+const props = runtime.withDefaults(SectionTitleDemoProps, _props);
+    if (props.demo == .with_action) {
+        {
+            var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
+            const _children_alloc_0 = @import("std").heap.page_allocator;
+            defer _children_buf_0.deinit(_children_alloc_0);
+            const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
+            _ = &_children_w_0;
+            try _children_w_0.writeAll("\n");
+            try Button(_children_w_0, .{ .hierarchy = .tertiary,  .size = .xs,  .label = "View all" });
+            try _children_w_0.writeAll("\n");
+            try SectionTitle(writer, .{ .title = props.title, .children = _children_buf_0.items });
+        }
+    } else {
+        try SectionTitle(writer, .{ .title = props.title });
     }
         }
     }.b);
@@ -6919,19 +7084,25 @@ const props = runtime.withDefaults(SelectProps, _props);
     }.b);
 }
 
+pub const TriggerSize = enum { sm, md };
 pub const SelectTriggerProps = struct {
     children: []const u8 = "",
     disabled: bool = false,
+    // sm: dense filter-row trigger (h-7, text-xs); md: default form control.
+    size: TriggerSize = .md,
     class: []const u8 = "",
 };
 pub fn SelectTrigger(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(SelectTriggerProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(SelectTriggerProps, _props);
-    const base = "inline-flex items-center justify-between w-48 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+    const size_class = if (props.size == .sm) "h-7 gap-1.5 px-2 text-xs" else "px-3 py-2 text-sm";
+    const base = "inline-flex items-center justify-between w-48 rounded-md border border-input bg-card shadow-xs transition duration-150 hover:border-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50";
     if (props.disabled) {
         try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" aria-expanded=\"false\" class=\"");
         try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(size_class);
         try writer.writeAll(" ");
         try writer.writeAll(props.class);
         try writer.writeAll("\" disabled=\"");
@@ -6944,6 +7115,8 @@ const props = runtime.withDefaults(SelectTriggerProps, _props);
     } else {
         try writer.writeAll("<button data-publr-part=\"trigger\" type=\"button\" aria-haspopup=\"listbox\" data-p-bind=\"aria-expanded:state.open\" data-p-on=\"click:toggle;keydown.down:openList\" class=\"");
         try writer.writeAll(base);
+        try writer.writeAll(" ");
+        try writer.writeAll(size_class);
         try writer.writeAll(" ");
         try writer.writeAll(props.class);
         try writer.writeAll("\">\n");
@@ -8263,71 +8436,18 @@ pub fn TableBulkBar(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TableBulkBarProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TableBulkBarProps, _props);
-    const all = props.selected > 0 and props.selected == props.total;
-    const some = props.selected > 0 and props.selected < props.total;
     const hidden_class = if (props.selected == 0) "hidden" else "";
     try writer.writeAll("<div data-publr-component=\"table-bulk-bar\" data-publr-state=\"");
     try runtime.render(writer, if (props.selected == 0) "empty" else "active");
     try writer.writeAll("\" class=\"");
     try writer.writeAll(hidden_class);
-    try writer.writeAll(" ");
+    try writer.writeAll(" flex h-10 items-center gap-3 border-b border-border bg-primary/10 px-4 text-xs text-primary ");
     try writer.writeAll(props.class);
-    try writer.writeAll("\">\n");
-    {
-        var _children_buf_0: @import("std").ArrayListUnmanaged(u8) = .{};
-        const _children_alloc_0 = @import("std").heap.page_allocator;
-        defer _children_buf_0.deinit(_children_alloc_0);
-        const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
-        _ = &_children_w_0;
-        try _children_w_0.writeAll("\n");
-        if (all) {
-            try Checkbox(_children_w_0, .{ .checked = .checked });
-        } else if (some) {
-            try Checkbox(_children_w_0, .{ .checked = .indeterminate });
-        } else {
-            try Checkbox(_children_w_0, .{ .checked = .unchecked });
-        }
-        try _children_w_0.writeAll("\n");
-        {
-            var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
-            const _children_alloc_1 = @import("std").heap.page_allocator;
-            defer _children_buf_1.deinit(_children_alloc_1);
-            const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
-            _ = &_children_w_1;
-            try _children_w_1.writeAll("\n<span data-publr-part=\"count\">");
-            try runtime.render(_children_w_1, props.selected);
-            try _children_w_1.writeAll("</span> selected\n                ");
-            {
-                var _children_buf_2: @import("std").ArrayListUnmanaged(u8) = .{};
-                const _children_alloc_2 = @import("std").heap.page_allocator;
-                defer _children_buf_2.deinit(_children_alloc_2);
-                const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
-                _ = &_children_w_2;
-                try _children_w_2.writeAll("of ");
-                try runtime.render(_children_w_2, props.total);
-                try Text(_children_w_1, .{ .as = .span,  .size = .sm,  .color = .muted,  .class = "ml-1", .children = _children_buf_2.items });
-            }
-            try _children_w_1.writeAll("\n");
-            try Text(_children_w_0, .{ .size = .sm,  .weight = .medium, .children = _children_buf_1.items });
-        }
-        try _children_w_0.writeAll("\n");
-        try Separator(_children_w_0, .{ .orientation = .vertical,  .class = "h-3.5" });
-        try _children_w_0.writeAll("\n<span data-publr-part=\"actions\" class=\"contents\">");
-        try _children_w_0.writeAll(props.children);
-        try _children_w_0.writeAll("</span>\n<span data-publr-part=\"clear\" class=\"ml-auto\">\n");
-        {
-            var _children_buf_1: @import("std").ArrayListUnmanaged(u8) = .{};
-            const _children_alloc_1 = @import("std").heap.page_allocator;
-            defer _children_buf_1.deinit(_children_alloc_1);
-            const _children_w_1 = _children_buf_1.writer(_children_alloc_1);
-            _ = &_children_w_1;
-            try _children_w_1.writeAll("Clear selection");
-            try Text(_children_w_0, .{ .as = .span,  .size = .sm,  .color = .muted,  .class = "cursor-pointer hover:text-foreground", .children = _children_buf_1.items });
-        }
-        try _children_w_0.writeAll("\n</span>\n");
-        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "px-3 py-2 bg-card border border-border border-b-0 rounded-t-lg shadow-xs", .children = _children_buf_0.items });
-    }
-    try writer.writeAll("\n</div>");
+    try writer.writeAll("\">\n<span class=\"font-semibold\"><span data-publr-part=\"count\">");
+    try runtime.render(writer, props.selected);
+    try writer.writeAll("</span> selected</span>\n<span data-publr-part=\"actions\" class=\"contents\">");
+    try writer.writeAll(props.children);
+    try writer.writeAll("</span>\n<span data-publr-part=\"clear\" class=\"ml-auto cursor-pointer font-medium hover:underline\">Clear selection</span>\n</div>");
         }
     }.b);
 }
@@ -8422,6 +8542,8 @@ pub const TableHeadProps = struct {
     sortable: bool = false,
     sort_direction: SortDirection = .none,
     href: []const u8 = "#",
+    // Dense admin-list treatment: h-12 uppercase micro-type header.
+    dense: bool = false,
     class: []const u8 = "",
 };
 pub fn TableHead(__fw: anytype, __fp: anytype) !void {
@@ -8433,9 +8555,16 @@ const props = runtime.withDefaults(TableHeadProps, _props);
         .descending => "descending",
         .none => "none",
     };
+
+    const head_class = if (props.dense)
+        "h-12 text-left align-middle text-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground px-4 whitespace-nowrap"
+    else
+        "text-left text-xs font-medium text-muted-foreground px-6 py-3 whitespace-nowrap";
     try writer.writeAll("<th aria-sort=\"");
     try runtime.render(writer, aria_sort);
-    try writer.writeAll("\" class=\"text-left text-xs font-medium text-muted-foreground px-6 py-3 whitespace-nowrap ");
+    try writer.writeAll("\" class=\"");
+    try writer.writeAll(head_class);
+    try writer.writeAll(" ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     if (props.sortable) {
@@ -8466,13 +8595,21 @@ const props = runtime.withDefaults(TableHeadProps, _props);
 
 pub const TableCellProps = struct {
     children: []const u8 = "",
+    // Dense admin-list treatment: tighter padding, middle alignment.
+    dense: bool = false,
     class: []const u8 = "",
 };
 pub fn TableCell(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TableCellProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TableCellProps, _props);
-    try writer.writeAll("<td class=\"px-6 py-4 text-sm text-foreground ");
+    const cell_class = if (props.dense)
+        "px-4 py-3 align-middle text-sm text-foreground"
+    else
+        "px-6 py-4 text-sm text-foreground";
+    try writer.writeAll("<td class=\"");
+    try writer.writeAll(cell_class);
+    try writer.writeAll(" ");
     try writer.writeAll(props.class);
     try writer.writeAll("\">\n");
     try writer.writeAll(props.children);
@@ -9016,7 +9153,7 @@ pub fn TabsList(__fw: anytype, __fp: anytype) !void {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TabsListProps, _props);
     const list_class = if (props.variant == .line)
-        "inline-flex items-center gap-0 border-b border-border"
+        "inline-flex items-center gap-5 border-b border-border"
     else
         "inline-flex items-center gap-1 rounded-lg bg-muted p-1";
     try writer.writeAll("<div data-publr-part=\"list\" role=\"tablist\" data-p-on=\"click:tabClick;keydown:navKeys\" data-publr-variant=\"");
@@ -9034,7 +9171,11 @@ const props = runtime.withDefaults(TabsListProps, _props);
 
 pub const TabsTriggerProps = struct {
     value: []const u8 = "",
+    variant: Variant = .default,
     disabled: bool = false,
+    // Optional trailing count (e.g. entry totals on list tabs).
+    count: []const u8 = "",
+    count_class: []const u8 = "text-muted-foreground",
     children: []const u8 = "",
     class: []const u8 = "",
 };
@@ -9042,7 +9183,10 @@ pub fn TabsTrigger(__fw: anytype, __fp: anytype) !void {
     return runtime.forward(TabsTriggerProps, __fw, __fp, struct {
         fn b(writer: anytype, _props: anytype) !void {
 const props = runtime.withDefaults(TabsTriggerProps, _props);
-    const trigger_class = "px-3 py-1.5 text-sm font-medium rounded-md transition-colors data-[publr-state=active]:bg-background data-[publr-state=active]:text-foreground data-[publr-state=active]:shadow-xs data-[publr-state=inactive]:text-muted-foreground data-[publr-state=inactive]:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground";
+    const trigger_class = if (props.variant == .line)
+        "h-12 shrink-0 border-b-2 border-transparent px-0.5 text-xs font-medium transition-colors data-[publr-state=active]:border-foreground data-[publr-state=active]:text-foreground data-[publr-state=inactive]:text-muted-foreground data-[publr-state=inactive]:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground"
+    else
+        "px-3 py-1.5 text-sm font-medium rounded-md transition-colors data-[publr-state=active]:bg-background data-[publr-state=active]:text-foreground data-[publr-state=active]:shadow-xs data-[publr-state=inactive]:text-muted-foreground data-[publr-state=inactive]:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground";
     if (props.disabled) {
         try writer.writeAll("<button data-publr-part=\"trigger\" data-publr-state=\"inactive\" role=\"tab\" aria-selected=\"false\" aria-disabled=\"true\" tabindex=\"-1\" data-publr-tab=\"");
         try runtime.render(writer, props.value);
@@ -9058,6 +9202,14 @@ const props = runtime.withDefaults(TabsTriggerProps, _props);
         try runtime.render(writer, true);
         try writer.writeAll("\">\n");
         try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        if (props.count.len > 0) {
+            try writer.writeAll("<span data-publr-part=\"count\" class=\"ml-1 ");
+            try writer.writeAll(props.count_class);
+            try writer.writeAll("\">");
+            try runtime.render(writer, props.count);
+            try writer.writeAll("</span>");
+        }
         try writer.writeAll("\n</button>");
     } else {
         try writer.writeAll("<button data-publr-part=\"trigger\" data-publr-state=\"inactive\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\" data-publr-tab=\"");
@@ -9072,6 +9224,14 @@ const props = runtime.withDefaults(TabsTriggerProps, _props);
         try writer.writeAll(props.class);
         try writer.writeAll("\">\n");
         try writer.writeAll(props.children);
+        try writer.writeAll("\n");
+        if (props.count.len > 0) {
+            try writer.writeAll("<span data-publr-part=\"count\" class=\"ml-1 ");
+            try writer.writeAll(props.count_class);
+            try writer.writeAll("\">");
+            try runtime.render(writer, props.count);
+            try writer.writeAll("</span>");
+        }
         try writer.writeAll("\n</button>");
     }
         }
@@ -9143,7 +9303,7 @@ const props = runtime.withDefaults(TabsDemoProps, _props);
                     const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
                     _ = &_children_w_2;
                     try runtime.render(_children_w_2, props.label_1);
-                    try TabsTrigger(_children_w_1, .{ .value = "tab1", .children = _children_buf_2.items });
+                    try TabsTrigger(_children_w_1, .{ .value = "tab1",  .variant = .line,  .count = "12", .children = _children_buf_2.items });
                 }
                 try _children_w_1.writeAll("\n");
                 {
@@ -9153,7 +9313,7 @@ const props = runtime.withDefaults(TabsDemoProps, _props);
                     const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
                     _ = &_children_w_2;
                     try runtime.render(_children_w_2, props.label_2);
-                    try TabsTrigger(_children_w_1, .{ .value = "tab2", .children = _children_buf_2.items });
+                    try TabsTrigger(_children_w_1, .{ .value = "tab2",  .variant = .line, .children = _children_buf_2.items });
                 }
                 try _children_w_1.writeAll("\n");
                 {
@@ -9163,7 +9323,7 @@ const props = runtime.withDefaults(TabsDemoProps, _props);
                     const _children_w_2 = _children_buf_2.writer(_children_alloc_2);
                     _ = &_children_w_2;
                     try runtime.render(_children_w_2, props.label_3);
-                    try TabsTrigger(_children_w_1, .{ .value = "tab3",  .disabled = true, .children = _children_buf_2.items });
+                    try TabsTrigger(_children_w_1, .{ .value = "tab3",  .variant = .line,  .disabled = true, .children = _children_buf_2.items });
                 }
                 try _children_w_1.writeAll("\n");
                 try TabsList(_children_w_0, .{ .variant = .line, .children = _children_buf_1.items });
@@ -9463,7 +9623,7 @@ const props = runtime.withDefaults(ToastProps, _props);
         } else if (props.variant == .warning) {
             try Icon(_children_w_0, .{ .name = .alert_triangle,  .size = 16,  .class = "text-warning shrink-0" });
         }
-        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-sm text-foreground\">");
+        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-xs text-popover-foreground\">");
         try runtime.render(_children_w_0, props.message);
         try _children_w_0.writeAll("</p>\n");
         if (props.show_close) {
@@ -9472,7 +9632,7 @@ const props = runtime.withDefaults(ToastProps, _props);
             try _children_w_0.writeAll("\n</button>");
         }
         try _children_w_0.writeAll("\n");
-        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = runtime.concatRt(&.{ "rounded-lg border bg-background px-4 py-3 shadow-lg ", border_class }), .children = _children_buf_0.items });
+        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = runtime.concatRt(&.{ "rounded-md border bg-popover px-3 py-2 shadow-lg ", border_class }), .children = _children_buf_0.items });
     }
     try writer.writeAll("\n</div>");
         }
@@ -9497,10 +9657,10 @@ pub fn ToastRegion(writer: anytype, props: anytype) !void {
         defer _children_buf_0.deinit(_children_alloc_0);
         const _children_w_0 = _children_buf_0.writer(_children_alloc_0);
         _ = &_children_w_0;
-        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-sm text-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
+        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-xs text-popover-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
         try Icon(_children_w_0, .{ .name = .x_close,  .size = 14,  .class = "" });
         try _children_w_0.writeAll("\n</button>\n");
-        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-lg border border-border bg-background px-4 py-3 shadow-lg", .children = _children_buf_0.items });
+        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-md border border-border bg-popover px-3 py-2 shadow-lg", .children = _children_buf_0.items });
     }
     try writer.writeAll("\n</div>\n</template>\n<template data-publr-toast-template=\"success\">\n<div data-publr-component=\"toast\" data-publr-variant=\"success\" class=\"pointer-events-auto\" style=\"opacity:0;transform:translateY(8px);transition:opacity 0.2s,transform 0.2s;\">\n");
     {
@@ -9511,10 +9671,10 @@ pub fn ToastRegion(writer: anytype, props: anytype) !void {
         _ = &_children_w_0;
         try _children_w_0.writeAll("\n");
         try Icon(_children_w_0, .{ .name = .check,  .size = 16,  .class = "text-success shrink-0" });
-        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-sm text-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
+        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-xs text-popover-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
         try Icon(_children_w_0, .{ .name = .x_close,  .size = 14,  .class = "" });
         try _children_w_0.writeAll("\n</button>\n");
-        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-lg border border-success/30 bg-background px-4 py-3 shadow-lg", .children = _children_buf_0.items });
+        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-md border border-success/30 bg-popover px-3 py-2 shadow-lg", .children = _children_buf_0.items });
     }
     try writer.writeAll("\n</div>\n</template>\n<template data-publr-toast-template=\"error\">\n<div data-publr-component=\"toast\" data-publr-variant=\"error\" class=\"pointer-events-auto\" style=\"opacity:0;transform:translateY(8px);transition:opacity 0.2s,transform 0.2s;\">\n");
     {
@@ -9525,10 +9685,10 @@ pub fn ToastRegion(writer: anytype, props: anytype) !void {
         _ = &_children_w_0;
         try _children_w_0.writeAll("\n");
         try Icon(_children_w_0, .{ .name = .alert_hexagon,  .size = 16,  .class = "text-error shrink-0" });
-        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-sm text-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
+        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-xs text-popover-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
         try Icon(_children_w_0, .{ .name = .x_close,  .size = 14,  .class = "" });
         try _children_w_0.writeAll("\n</button>\n");
-        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-lg border border-error/30 bg-background px-4 py-3 shadow-lg", .children = _children_buf_0.items });
+        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-md border border-error/30 bg-popover px-3 py-2 shadow-lg", .children = _children_buf_0.items });
     }
     try writer.writeAll("\n</div>\n</template>\n<template data-publr-toast-template=\"warning\">\n<div data-publr-component=\"toast\" data-publr-variant=\"warning\" class=\"pointer-events-auto\" style=\"opacity:0;transform:translateY(8px);transition:opacity 0.2s,transform 0.2s;\">\n");
     {
@@ -9539,10 +9699,10 @@ pub fn ToastRegion(writer: anytype, props: anytype) !void {
         _ = &_children_w_0;
         try _children_w_0.writeAll("\n");
         try Icon(_children_w_0, .{ .name = .alert_triangle,  .size = 16,  .class = "text-warning shrink-0" });
-        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-sm text-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
+        try _children_w_0.writeAll("\n<p data-publr-part=\"message\" class=\"text-xs text-popover-foreground\"></p>\n<button data-publr-part=\"close\" class=\"ml-auto -mr-1 text-muted-foreground hover:text-foreground transition-colors\" aria-label=\"Close\">\n");
         try Icon(_children_w_0, .{ .name = .x_close,  .size = 14,  .class = "" });
         try _children_w_0.writeAll("\n</button>\n");
-        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-lg border border-warning/30 bg-background px-4 py-3 shadow-lg", .children = _children_buf_0.items });
+        try Flex(writer, .{ .items = .center,  .gap = .md,  .class = "rounded-md border border-warning/30 bg-popover px-3 py-2 shadow-lg", .children = _children_buf_0.items });
     }
     try writer.writeAll("\n</div>\n</template>\n</div>");
 }
