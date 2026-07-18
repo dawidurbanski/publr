@@ -22,121 +22,68 @@ const Avatar = ui.avatar.Avatar;
 const AvatarImage = ui.avatar.AvatarImage;
 const ToastRegion = ui.toast.ToastRegion;
 const TooltipProvider = ui.tooltip.TooltipProvider;
-const DropdownMenu = ui.dropdown.DropdownMenu;
-const DropdownMenuTrigger = ui.dropdown.DropdownMenuTrigger;
-const DropdownMenuContent = ui.dropdown.DropdownMenuContent;
-const DropdownMenuItem = ui.dropdown.DropdownMenuItem;
-const DropdownMenuSeparator = ui.dropdown.DropdownMenuSeparator;
-const InputGroup = ui.input_group.InputGroup;
-const InputGroupInput = ui.input_group.InputGroupInput;
-const InputGroupAddon = ui.input_group.InputGroupAddon;
+const SidebarRail = ui.sidebar.SidebarRail;
+const RailLink = ui.sidebar.RailLink;
+const SidebarNavItem = ui.sidebar.SidebarNavItem;
+const SidebarNavTree = ui.sidebar.SidebarNavTree;
+const SidebarNavSubItem = ui.sidebar.SidebarNavSubItem;
+const Breadcrumb = ui.breadcrumbs.Breadcrumb;
+const BreadcrumbList = ui.breadcrumbs.BreadcrumbList;
+const BreadcrumbItem = ui.breadcrumbs.BreadcrumbItem;
+const BreadcrumbLink = ui.breadcrumbs.BreadcrumbLink;
+const BreadcrumbPage = ui.breadcrumbs.BreadcrumbPage;
+const BreadcrumbSeparator = ui.breadcrumbs.BreadcrumbSeparator;
+const Drawer = ui.drawer.Drawer;
+const DrawerHeader = ui.drawer.DrawerHeader;
+const DrawerContent = ui.drawer.DrawerContent;
 
-fn SidebarItem(props: struct {
-    href: []const u8 = "",
-    icon: IconName,
-    label: []const u8,
-    current: []const u8 = "",
-    match: []const u8 = "",
-    badge: []const u8 = "",
-    submenu: []const u8 = "",
-}) {
-    // Match exact id, or treat the match prop as a prefix when followed by '.'
-    // (so match="content" matches pg.id="content.post", "content.page", etc).
-    const is_active = props.match.len > 0 and (
-    std.mem.eql(u8, props.current, props.match) or
-    (std.mem.startsWith(u8, props.current, props.match) and
-    props.current.len > props.match.len and
-    props.current[props.match.len] == '.')
-    );
-    const link_class = if (is_active)
-    "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
-    else
-    "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
-    <li>
-        <a
-            href={props.href}
-            class={link_class}
-            aria-current={if (is_active) "page" else null}
-        >
-            <Icon name={props.icon} size={14} class="shrink-0" />
-            <span class="flex-1 truncate">{props.label}</span>
-            {if (props.submenu.len > 0) (
-                <Icon
-                    name=.chevron_right
-                    size={14}
-                    class="shrink-0 text-muted-foreground"
-                />
-            ) else if (props.badge.len > 0) (
-                <span class="ml-auto font-mono text-xs text-muted-foreground">{props.badge}</span>
-            )}
-        </a>
-    </li>
-}
-
-fn SubLink(props: struct {
-    href: []const u8,
-    label: []const u8,
-    icon: IconName,
-    current: []const u8 = "",
-    match: []const u8 = "",
-    external: bool = false,
-}) {
-    const is_active = props.match.len > 0 and std.mem.eql(u8, props.current, props.match);
-    const cls = if (is_active)
-    "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium text-foreground bg-gray-500/20 no-underline hover:no-underline"
-    else
-    "flex items-center gap-2.5 py-1 px-2 rounded-sm text-sm font-medium no-underline hover:bg-gray-500/10 hover:text-foreground hover:no-underline";
-    <li>
-        <a
-            href={props.href}
-            class={cls}
-            aria-current={if (is_active) "page" else null}
-            target={if (props.external) "_blank" else null}
-            rel={if (props.external) "noopener noreferrer" else null}
-        >
-            <Icon name={props.icon} size={14} class="shrink-0" />
-            <span class="flex-1 truncate">{props.label}</span>
-            {if (props.external) (
-                <Icon
-                    name=.share_04
-                    size={12}
-                    class="shrink-0 text-muted-foreground/60"
-                />
-            )}
-        </a>
-    </li>
-}
-
-fn SubSectionHeading(props: struct { label: []const u8 }) {
-    <div
-        class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2"
+/// Uppercase micro eyebrow between context-nav sections.
+fn NavEyebrow(props: struct { label: []const u8, first: bool = false }) {
+    const pad = if (props.first) "px-2 pb-1.5 pt-2" else "px-2 pb-1.5 pt-5";
+    <p
+        class={`${@raw pad} text-3xs font-semibold uppercase tracking-[0.1em] text-muted-foreground`}
     >
         {props.label}
-    </div>
+    </p>
 }
 
-fn SubFolder(props: struct {
-    label: []const u8,
-    count: usize = 0,
-    children: []const u8 = "",
+/// One environment choice row in the environment switcher panel.
+fn EnvironmentChoice(props: struct {
+    name: []const u8,
+    description: []const u8,
+    icon: IconName,
+    tone_bg: []const u8,
+    tone_text: []const u8,
+    tone_dot: []const u8,
+    selected_class: []const u8,
 }) {
-    <li>
-        <div class="sidebar-folder-static">
-            <div
-                class="flex items-center gap-2.5 py-1.5 px-2 text-sm font-medium select-none"
+    <button
+        type="button"
+        data-environment={props.name}
+        onClick="setEnvironment"
+        data-p-class={`environment|eq|${props.name}->${props.selected_class}~border-border+bg-card`}
+        class="flex w-full cursor-pointer items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-muted/30"
+    >
+        <span
+            class={`inline-flex size-8 shrink-0 items-center justify-center rounded-md ${@raw props.tone_bg} ${@raw props.tone_text}`}
+        >
+            <Icon name={props.icon} size={16} class="size-4" />
+        </span>
+        <span class="min-w-0 flex-1">
+            <span class="block text-sm font-semibold text-foreground">{props.name}</span>
+            <span
+                class="mt-0.5 block text-2xs text-muted-foreground"
             >
-                <Icon name=.folder size={14} class="shrink-0" />
-                <span class="flex-1 truncate">{props.label}</span>
-                <span class="ml-auto font-mono text-xs text-muted-foreground">{props.count}</span>
-            </div>
-            <ul
-                role="list"
-                class="flex flex-col gap-px list-none p-0 m-0 mt-0.5 pl-2"
-            >
-                {@raw props.children}
-            </ul>
-        </div>
-    </li>
+                {props.description}
+            </span>
+        </span>
+        <span
+            data-p-show={`environment|eq|${props.name}`}
+            class={`size-2 shrink-0 rounded-full ${@raw props.tone_dot}`}
+        >
+
+        </span>
+    </button>
 }
 
 pub fn Layout(props: struct {
@@ -159,7 +106,25 @@ pub fn Layout(props: struct {
     /// `"all"`, `"recent"`, `"created_by_me"`, `"updated_by_me"`, or
     /// `"status_<value>"`. Empty when no filter applies.
     active_content_view: []const u8 = "",
+    /// Rail-only shell: hides the context-nav column so wide surfaces
+    /// (media library, editors) get the full width. Desktop keeps the icon
+    /// rail; mobile has no nav drawer in this mode.
+    compact_nav: bool = false,
 }) {
+    const sec = props.current_section;
+    const in_dashboard = std.mem.eql(u8, sec, "dashboard");
+    const in_content = std.mem.eql(u8, sec, "content") or std.mem.startsWith(u8, sec, "content.");
+    const in_media = std.mem.eql(u8, sec, "media") or std.mem.startsWith(u8, sec, "media.");
+    const in_releases = std.mem.eql(u8, sec, "releases");
+    const in_content_types = std.mem.eql(u8, sec, "content_types");
+    const in_settings = std.mem.eql(u8, sec, "settings");
+
+    const aside_class = if (props.compact_nav)
+        "fixed inset-y-0 left-0 z-50 hidden w-12 flex-row border-r border-border bg-sidebar lg:flex"
+    else
+        "fixed inset-y-0 left-0 z-50 flex w-64 flex-row max-lg:-translate-x-full border-r border-border bg-sidebar transition-transform duration-200 ease-out lg:translate-x-0";
+    const main_pad = if (props.compact_nav) "lg:pl-12" else "lg:pl-64";
+
     <!DOCTYPE html>
     <html class="dark h-full">
         <head>
@@ -177,7 +142,7 @@ pub fn Layout(props: struct {
             </script>
         </head>
         <body
-            class="admin flex min-h-screen flex-col text-foreground antialiased [scrollbar-color:oklch(0.15_0_0/0.3)_transparent] [scrollbar-width:thin]"
+            class="admin min-h-screen bg-background text-foreground antialiased [scrollbar-color:oklch(0.15_0_0/0.3)_transparent] [scrollbar-width:thin]"
             @store="shell"
             onKeydown.esc.window="close"
         >
@@ -214,348 +179,296 @@ pub fn Layout(props: struct {
                     data-publr-component="admin-sidebar"
                     :class="$open == false -> max-lg:-translate-x-full"
                     onClick="navClose"
-                    class="admin-sidebar-safe fixed inset-y-0 left-0 z-50 flex w-70 max-lg:-translate-x-full flex-col border-r border-border bg-background pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-foreground transition-transform duration-200 ease-out lg:border-r-0 lg:bg-transparent"
+                    class={aside_class}
                     aria-label="Admin navigation"
                 >
-                    <Flex items=.center class="gap-2.5 pt-5 pb-3 px-3.5">
+                    <SidebarRail>
                         <a
                             href="/admin"
                             aria-label="Publr"
-                            class="flex items-center gap-2.5 text-foreground no-underline hover:no-underline"
+                            class="mb-2 inline-flex h-12 w-full items-center justify-center border-b border-border no-underline hover:no-underline"
                         >
                             <span
-                                class="inline-flex items-center justify-center w-5 h-5 bg-foreground text-background text-xs font-bold leading-none shrink-0"
+                                class="inline-flex size-7 items-center justify-center rounded-full bg-foreground text-sm font-bold leading-none text-background"
                             >
                                 P
                             </span>
-                            <span class="text-sm font-semibold tracking-tight">publr</span>
                         </a>
-                        <span
-                            class="ml-auto font-mono text-xs text-muted-foreground"
-                        >
-                            v0.4
-                        </span>
-                    </Flex>
-                    <div class="pt-2.5 pb-3 px-1.5">
-                        <InputGroup>
-                            <InputGroupInput
-                                name="search"
-                                placeholder="Search…"
-                                has_start_addon={true}
-                                class="bg-muted py-1.5 pl-7 pr-2.5 text-xs focus-visible:ring-1"
-                            />
-                            <InputGroupAddon class="pl-2.5">
-                                <Icon
-                                    name=.search
-                                    size={13}
-                                    class="text-muted-foreground/50"
-                                />
-                            </InputGroupAddon>
-                        </InputGroup>
-                    </div>
-                    <nav
-                        class="flex-1 overflow-y-auto px-1.5"
-                        data-publr-sidebar-nav
-                    >
-                        <div
-                            data-publr-sidebar-panel="main"
-                            class={if (std.mem.eql(u8, props.current_section, "content") or std.mem.startsWith(u8, props.current_section, "content.")) "hidden" else ""}
-                        >
-                            <ul
-                                role="list"
-                                class="flex flex-col gap-px list-none p-0 m-0"
-                            >
-                                <SidebarItem
-                                    href="/admin"
-                                    icon=.home
-                                    label="Dashboard"
-                                    current={props.current_section}
-                                    match="dashboard"
-                                />
-                                <SidebarItem
-                                    href="/admin/content"
-                                    icon=.bookmark
-                                    label="Content"
-                                    current={props.current_section}
-                                    match="content"
-                                    submenu="content"
-                                />
-                                <SidebarItem
-                                    href="/admin/releases"
-                                    icon=.copy
-                                    label="Releases"
-                                    current={props.current_section}
-                                    match="releases"
-                                />
-                                <SidebarItem
-                                    href="/admin/content-types"
-                                    icon=.package
-                                    label="Content Types"
-                                    current={props.current_section}
-                                    match="content_types"
-                                />
-                                <SidebarItem
-                                    href="/admin/media"
-                                    icon=.image
-                                    label="Media"
-                                    current={props.current_section}
-                                    match="media"
-                                />
-                            </ul>
-                            <div class="h-3.5"></div>
-                            <div
-                                class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2"
-                            >
-                                System
-                            </div>
-                            <ul
-                                role="list"
-                                class="flex flex-col gap-px list-none p-0 m-0"
-                            >
-                                <SidebarItem
-                                    href="/admin/settings"
-                                    icon=.settings
-                                    label="Settings"
-                                    current={props.current_section}
-                                    match="settings"
-                                />
-                            </ul>
-                            {if (props.plugin_pages.len > 0) (
-                                <div class="h-3.5"></div>
-                                <div
-                                    class="text-xs font-medium uppercase tracking-wider text-muted-foreground py-1 px-2"
-                                >
-                                    Plugins
-                                </div>
-                                <ul
-                                    role="list"
-                                    class="flex flex-col gap-px list-none p-0 m-0"
-                                >
-                                    {for (props.plugin_pages) |p| (
-                                        <SidebarItem
-                                            href={p.href}
-                                            icon={p.icon}
-                                            label={p.label}
-                                            current={props.current_section}
-                                            match={p.id}
-                                        />
-                                    )}
-                                </ul>
-                            )}
-                        </div>
-                        <div
-                            data-publr-sidebar-panel="content"
-                            class={if (std.mem.eql(u8, props.current_section, "content") or std.mem.startsWith(u8, props.current_section, "content.")) "" else "hidden"}
-                        >
-                            <a
+                        <nav class="flex flex-col gap-1" aria-label="Primary">
+                            <RailLink
                                 href="/admin"
-                                class="flex items-center gap-2.5 py-1.5 px-2 w-full text-left bg-transparent border-0 rounded-sm text-sm font-semibold text-foreground hover:bg-gray-500/10 cursor-pointer no-underline"
-                            >
-                                <Icon
-                                    name=.chevron_left
-                                    size={14}
-                                    class="shrink-0"
-                                />
-                                <span class="flex-1 truncate">Content</span>
-                            </a>
-                            <ul
-                                role="list"
-                                class="flex flex-col gap-px list-none p-0 m-0 mt-1"
-                            >
-                                <SubLink
-                                    href="/admin/content"
-                                    icon=.menu_03
-                                    label="All content"
-                                    current={props.active_content_view}
-                                    match="all"
-                                />
-                                <SubLink
-                                    href="/admin/content?recent=1"
-                                    icon=.clock_rewind
-                                    label="Recent"
-                                    current={props.active_content_view}
-                                    match="recent"
-                                />
-                                <SubLink
-                                    href="#"
-                                    icon=.clock_check
-                                    label="Scheduled"
-                                />
-                                <SubLink
-                                    href="/admin/releases"
-                                    icon=.calendar_check
-                                    label="Releases"
-                                    external={true}
-                                />
-                            </ul>
-                            <hr class="my-3 border-gray-500/30" />
-                            <SubSectionHeading label="My views" />
-                            <ul
-                                role="list"
-                                class="flex flex-col gap-px list-none p-0 m-0"
-                            >
-                                <SubLink
-                                    href="/admin/content?author=me"
-                                    icon=.bookmark
-                                    label="Created by me"
-                                    current={props.active_content_view}
-                                    match="created_by_me"
-                                />
-                                <SubLink
-                                    href="/admin/content?editor=me"
-                                    icon=.bookmark
-                                    label="Updated by me"
-                                    current={props.active_content_view}
-                                    match="updated_by_me"
-                                />
-                            </ul>
-                            <hr class="my-3 border-gray-500/30" />
-                            <SubSectionHeading label="Views" />
-                            <ul
-                                role="list"
-                                class="flex flex-col gap-px list-none p-0 m-0"
-                            >
-                                <SubLink
-                                    href="/admin/content"
-                                    icon=.menu_03
-                                    label="All"
-                                    current={props.active_content_view}
-                                    match="all"
-                                />
-                                <SubFolder label="Status" count={4}>
-                                    <SubLink
-                                        href="/admin/content?status=published"
-                                        icon=.bookmark
-                                        label="Published"
-                                        current={props.active_content_view}
-                                        match="status_published"
-                                    />
-                                    <SubLink
-                                        href="/admin/content?status=changed"
-                                        icon=.bookmark
-                                        label="Changed"
-                                        current={props.active_content_view}
-                                        match="status_changed"
-                                    />
-                                    <SubLink
-                                        href="/admin/content?status=draft"
-                                        icon=.bookmark
-                                        label="Draft"
-                                        current={props.active_content_view}
-                                        match="status_draft"
-                                    />
-                                    <SubLink
-                                        href="/admin/content?status=archived"
-                                        icon=.bookmark
-                                        label="Archived"
-                                        current={props.active_content_view}
-                                        match="status_archived"
-                                    />
-                                </SubFolder>
-                                <SubFolder
-                                    label="Content type"
-                                    count={props.content_types.len}
-                                >
-                                    {for (props.content_types) |ct| (
-                                        <SubLink
-                                            href={ct.href}
-                                            icon=.bookmark
-                                            label={ct.label}
-                                            current={props.active_content_type_id}
-                                            match={ct.type_id}
-                                        />
-                                    )}
-                                </SubFolder>
-                            </ul>
-                        </div>
-                    </nav>
-                    <Flex items=.center class="mt-auto gap-2.5 p-2.5">
-                        <Avatar>
-                            <AvatarImage
-                                src={props.user_gravatar_url}
-                                alt=""
-                                class=""
+                                label="Dashboard"
+                                icon=.grid
+                                is_active={in_dashboard}
                             />
-                        </Avatar>
-                        <Stack gap=.none class="min-w-0 flex-1">
-                            {if (props.user_name.len > 0) (
-                                <span
-                                    class="text-xs font-medium text-foreground truncate"
-                                >
-                                    {props.user_name}
-                                </span>
-                                <span
-                                    class="text-xs text-muted-foreground truncate"
-                                >
-                                    {props.user_email}
-                                </span>
-                            ) else (
-                                <span
-                                    class="text-xs font-medium text-foreground truncate"
-                                >
-                                    {props.user_email}
-                                </span>
-                            )}
-                        </Stack>
-                        <form
-                            method="POST"
-                            action="/admin/logout"
-                            class="shrink-0 inline-flex"
-                        >
-                            <input
-                                type="hidden"
-                                name="_csrf"
-                                value={props.csrf_token}
+                            <RailLink
+                                href="/admin/content"
+                                label="Content"
+                                icon=.file
+                                is_active={in_content}
                             />
-                            <button
-                                type="submit"
-                                class="inline-flex items-center justify-center bg-transparent border-0 p-0 text-muted-foreground opacity-60 hover:opacity-100 cursor-pointer"
-                                aria-label="Logout"
-                            >
-                                <Icon name=.logout size={13} />
-                            </button>
-                        </form>
-                    </Flex>
-                </aside>
-                <div
-                    class="admin-shell h-dvh pl-[max(0.375rem,env(safe-area-inset-left))] lg:pl-[max(17.5rem,env(safe-area-inset-left))]"
-                >
-                    <div
-                        class="admin-card flex h-full flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xs"
-                    >
-                        <header
-                            class="sticky top-0 z-40 h-12 shrink-0 flex items-center gap-2 sm:gap-3 border-b border-border px-3 sm:px-4 lg:px-6"
-                        >
+                            <RailLink
+                                href="/admin/media"
+                                label="Media"
+                                icon=.image
+                                is_active={in_media}
+                            />
+                            <RailLink
+                                href="/admin/releases"
+                                label="Releases"
+                                icon=.calendar_check_02
+                                is_active={in_releases}
+                            />
+                        </nav>
+                        <nav class="mt-auto flex flex-col gap-1" aria-label="System">
+                            <RailLink
+                                href="/admin/content-types"
+                                label="Content types"
+                                icon=.components
+                                is_active={in_content_types}
+                            />
+                            <RailLink
+                                href="/admin/settings"
+                                label="Settings"
+                                icon=.settings
+                                is_active={in_settings}
+                            />
+                        </nav>
+                    </SidebarRail>
+                    {if (!props.compact_nav) (
+                    <div class="flex min-w-0 flex-1 flex-col bg-sidebar">
+                        <div class="flex h-12 items-center border-b border-border px-2">
                             <button
                                 type="button"
-                                onClick="toggle"
-                                :aria-expanded="$open"
-                                aria-label="Open navigation"
-                                class="lg:hidden inline-flex items-center justify-center bg-transparent border-0 p-1.5 -ml-1 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                                onClick="openCommand"
+                                class="inline-flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-start gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-semibold text-muted-foreground shadow-xs transition duration-150 hover:bg-accent"
                             >
-                                <Icon name=.menu_03 size={16} />
+                                <Icon name=.search size={16} class="size-4 shrink-0" />
+                                <span class="px-0.5">Search</span>
+                                <span
+                                    class="ml-auto font-mono text-3xs text-muted-foreground"
+                                >
+                                    ⌘K
+                                </span>
                             </button>
-                            <span
-                                class="flex-1 min-w-0 text-xs text-muted-foreground truncate"
+                            <button
+                                type="button"
+                                onClick="close"
+                                aria-label="Close navigation"
+                                class="ml-1 inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
                             >
-                                {props.title}
-                            </span>
-                            <Flex
-                                items=.center
-                                class="hidden sm:flex gap-1.5 text-xs text-muted-foreground"
+                                <Icon name=.x_close size={16} class="size-4" />
+                            </button>
+                        </div>
+                        <nav class="flex-1 overflow-y-auto px-2 pb-3" aria-label="Sections">
+                            <NavEyebrow label="Workspace" first={true} />
+                            <SidebarNavItem
+                                href="/admin"
+                                label="Overview"
+                                is_active={in_dashboard}
+                            />
+                            <SidebarNavItem
+                                href="/admin/content"
+                                label="Content"
+                                is_active={in_content and props.active_content_type_id.len == 0}
+                                class="mt-0.5"
+                            />
+                            {if (in_content) (
+                                <SidebarNavTree>
+                                    {for (props.content_types) |ct| (
+                                        <SidebarNavSubItem
+                                            href={ct.href}
+                                            label={ct.label}
+                                            is_active={std.mem.eql(u8, props.active_content_type_id, ct.type_id)}
+                                        />
+                                    )}
+                                </SidebarNavTree>
+                            )}
+                            <SidebarNavItem
+                                href="/admin/media"
+                                label="Media"
+                                is_active={in_media}
+                                class="mt-0.5"
+                            />
+                            <SidebarNavItem
+                                href="/admin/releases"
+                                label="Releases"
+                                is_active={in_releases}
+                                class="mt-0.5"
+                            />
+                            <NavEyebrow label="Structure" />
+                            <SidebarNavItem
+                                href="/admin/content-types"
+                                label="Content types"
+                                is_active={in_content_types}
+                            />
+                            <NavEyebrow label="Saved views" />
+                            <SidebarNavItem
+                                href="/admin/content?recent=1"
+                                label="Recent"
+                                is_active={std.mem.eql(u8, props.active_content_view, "recent")}
+                            />
+                            <SidebarNavItem
+                                href="/admin/content?author=me"
+                                label="Created by me"
+                                is_active={std.mem.eql(u8, props.active_content_view, "created_by_me")}
+                                class="mt-0.5"
+                            />
+                            <SidebarNavItem
+                                href="/admin/content?editor=me"
+                                label="Updated by me"
+                                is_active={std.mem.eql(u8, props.active_content_view, "updated_by_me")}
+                                class="mt-0.5"
+                            />
+                            <SidebarNavItem
+                                href="/admin/content?status=draft"
+                                label="Drafts"
+                                is_active={std.mem.eql(u8, props.active_content_view, "status_draft")}
+                                class="mt-0.5"
+                            />
+                            <SidebarNavItem
+                                href="/admin/content?status=published"
+                                label="Published"
+                                is_active={std.mem.eql(u8, props.active_content_view, "status_published")}
+                                class="mt-0.5"
+                            />
+                            <NavEyebrow label="System" />
+                            <SidebarNavItem
+                                href="/admin/settings"
+                                label="Settings"
+                                is_active={in_settings}
+                            />
+                            {if (props.plugin_pages.len > 0) (
+                                <NavEyebrow label="Plugins" />
+                                {for (props.plugin_pages) |p| (
+                                    <SidebarNavItem
+                                        href={p.href}
+                                        label={p.label}
+                                        is_active={std.mem.eql(u8, sec, p.id)}
+                                        class="mt-0.5"
+                                    />
+                                )}
+                            )}
+                        </nav>
+                        <Flex items=.center class="gap-2.5 border-t border-sidebar-border p-2">
+                            <Avatar size=.sm>
+                                <AvatarImage
+                                    src={props.user_gravatar_url}
+                                    alt=""
+                                    class=""
+                                />
+                            </Avatar>
+                            <Stack gap=.none class="min-w-0 flex-1">
+                                {if (props.user_name.len > 0) (
+                                    <span
+                                        class="truncate text-xs font-medium leading-4 text-foreground"
+                                    >
+                                        {props.user_name}
+                                    </span>
+                                    <span
+                                        class="truncate text-2xs leading-4 text-muted-foreground"
+                                    >
+                                        {props.user_email}
+                                    </span>
+                                ) else (
+                                    <span
+                                        class="truncate text-xs font-medium text-foreground"
+                                    >
+                                        {props.user_email}
+                                    </span>
+                                )}
+                            </Stack>
+                            <form
+                                method="POST"
+                                action="/admin/logout"
+                                class="inline-flex shrink-0"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="_csrf"
+                                    value={props.csrf_token}
+                                />
+                                <button
+                                    type="submit"
+                                    class="inline-flex size-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    aria-label="Logout"
+                                >
+                                    <Icon name=.logout size={13} />
+                                </button>
+                            </form>
+                        </Flex>
+                    </div>
+                    )}
+                </aside>
+                <div class={main_pad}>
+                    <header
+                        class="sticky top-0 z-30 flex h-12 items-center gap-1.5 border-b border-border bg-card/95 px-3 backdrop-blur sm:px-5"
+                    >
+                        {if (!props.compact_nav) (
+                        <button
+                            type="button"
+                            onClick="toggle"
+                            :aria-expanded="$open"
+                            aria-label="Open navigation"
+                            class="-ml-1 mr-1 inline-flex size-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
+                        >
+                            <Icon name=.menu_03 size={16} />
+                        </button>
+                        )}
+                        <Breadcrumb>
+                            <BreadcrumbList>
+                                <BreadcrumbItem>
+                                    <BreadcrumbLink href="/admin">Dashboard</BreadcrumbLink>
+                                </BreadcrumbItem>
+                                <BreadcrumbSeparator />
+                                <BreadcrumbItem>
+                                    <BreadcrumbPage>{props.title}</BreadcrumbPage>
+                                </BreadcrumbItem>
+                            </BreadcrumbList>
+                        </Breadcrumb>
+                        <div class="ml-auto flex items-center gap-1.5">
+                            <button
+                                type="button"
+                                onClick="openEnvironment"
+                                aria-label="Switch environment"
+                                data-p-class="environment|eq|Production->border-success/30+bg-success/10+text-success;environment|eq|Preview->border-primary/30+bg-primary/10+text-primary;environment|eq|Development->border-warning/30+bg-warning/10+text-warning"
+                                class="group hidden h-8 cursor-pointer items-center gap-1.5 rounded-md border border-success/30 bg-success/10 px-2.5 text-xs font-semibold text-success transition duration-150 active:translate-y-px sm:inline-flex"
                             >
                                 <span
-                                    class="w-1.5 h-1.5 rounded-full bg-success inline-block"
+                                    data-p-class="environment|eq|Production->bg-success;environment|eq|Preview->bg-primary;environment|eq|Development->bg-warning"
+                                    class="size-1.5 rounded-full bg-success"
                                 >
 
                                 </span>
-                                <span>Saved</span>
-                            </Flex>
+                                <strong :text="$environment" class="font-semibold">Production</strong>
+                                <Icon
+                                    name=.chevron_down
+                                    size={14}
+                                    class="size-3.5 opacity-70"
+                                />
+                            </button>
+                            <a
+                                href="/"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="hidden h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground no-underline transition-colors hover:bg-accent hover:text-foreground hover:no-underline md:inline-flex"
+                            >
+                                View site
+                                <Icon name=.external size={14} class="size-3.5" />
+                            </a>
+                            <button
+                                type="button"
+                                onClick="openCommand"
+                                aria-label="Open command palette"
+                                class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <Icon name=.search size={16} class="size-4" />
+                            </button>
                             <button
                                 type="button"
                                 onClick="toggleTheme"
                                 aria-label="Toggle theme"
-                                class="ml-1.5 inline-flex items-center justify-center bg-transparent border-0 p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                                class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
                             >
                                 <Icon
                                     name={IconName.sun}
@@ -568,21 +481,173 @@ pub fn Layout(props: struct {
                                     class="theme-toggle-moon dark:hidden"
                                 />
                             </button>
-                        </header>
-                        <main class="flex-1 overflow-auto">
-                            <div
-                                class="admin-content-pad mx-auto flex max-w-7xl flex-col gap-3 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-5 sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pt-5 lg:px-7 lg:pb-7 lg:pt-7"
-                            >
-                                {@raw props.content}
+                        </div>
+                    </header>
+                    <main class="min-h-[calc(100vh-3rem)]">
+                        <div
+                            class="mx-auto flex max-w-7xl flex-col gap-3 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-5 sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pt-5 lg:px-7 lg:pb-7 lg:pt-7"
+                        >
+                            {@raw props.content}
+                        </div>
+                    </main>
+                    {if (props.bottom_bar.len > 0) (
+                        <div class="border-t border-border px-4 py-2">
+                            {@raw props.bottom_bar}
+                        </div>
+                    )}
+                </div>
+                <div :showIf="$commandOpen" class="hidden">
+                    <div
+                        data-publr-component="dialog"
+                        data-publr-state="open"
+                        class="fixed inset-0 z-[60] flex items-start justify-center bg-black/50 px-4 pt-[12vh]"
+                    >
+                        <button
+                            type="button"
+                            data-publr-part="overlay"
+                            onClick="closeCommand"
+                            aria-label="Close command palette"
+                            class="absolute inset-0 h-auto w-auto cursor-default border-0 bg-transparent"
+                        >
+
+                        </button>
+                        <div
+                            data-publr-part="content"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-label="Command palette"
+                            class="relative w-full max-w-xl overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
+                        >
+                            <div class="flex h-11 items-center border-b border-border px-3">
+                                <Icon
+                                    name=.search
+                                    size={16}
+                                    class="size-4 shrink-0 text-muted-foreground"
+                                />
+                                <input
+                                    type="search"
+                                    placeholder="Search content, media, settings…"
+                                    data-autofocus
+                                    class="h-full min-w-0 flex-1 border-0 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                                />
+                                <kbd
+                                    class="rounded border border-border px-1.5 py-0.5 font-mono text-3xs text-muted-foreground"
+                                >
+                                    ESC
+                                </kbd>
                             </div>
-                        </main>
+                            <div class="p-2">
+                                <p
+                                    class="px-2 py-1.5 text-3xs font-semibold uppercase tracking-[0.1em] text-muted-foreground"
+                                >
+                                    Quick actions
+                                </p>
+                                <a
+                                    href="/admin/content"
+                                    class="flex w-full items-center gap-2 rounded px-2 py-2.5 text-left text-sm text-foreground no-underline hover:bg-accent hover:no-underline"
+                                >
+                                    <Icon name=.plus size={16} class="size-4" />
+                                    New content
+                                </a>
+                                <a
+                                    href="/admin"
+                                    class="flex items-center gap-2 rounded px-2 py-2.5 text-sm text-foreground no-underline hover:bg-accent hover:no-underline"
+                                >
+                                    <Icon name=.grid size={16} class="size-4" />
+                                    Open dashboard
+                                </a>
+                                <a
+                                    href="/admin/media"
+                                    class="flex items-center gap-2 rounded px-2 py-2.5 text-sm text-foreground no-underline hover:bg-accent hover:no-underline"
+                                >
+                                    <Icon name=.image size={16} class="size-4" />
+                                    Media library
+                                </a>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                {if (props.bottom_bar.len > 0) (
-                    <div class="border-t border-border px-4 py-2">
-                        {@raw props.bottom_bar}
-                    </div>
-                )}
+                <div
+                    data-p-show="environmentOpen"
+                    onClick="closeEnvironment"
+                    class="fixed inset-0 z-40 hidden bg-black/50"
+                >
+
+                </div>
+                <Drawer
+                    open_key="environmentOpen"
+                    label="Environment switcher"
+                    class="sm:max-w-sm"
+                >
+                    <DrawerHeader>
+                        <span
+                            class="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-bold text-foreground"
+                        >
+                            P
+                        </span>
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-sm font-semibold text-foreground">Publr</p>
+                            <p class="text-2xs text-muted-foreground">Content space</p>
+                        </div>
+                        <button
+                            type="button"
+                            data-drawer-close
+                            onClick="closeEnvironment"
+                            aria-label="Close environment switcher"
+                            class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                            <Icon name=.x_close size={16} class="size-4" />
+                        </button>
+                    </DrawerHeader>
+                    <DrawerContent class="p-4">
+                        <div class="flex items-center">
+                            <h2
+                                class="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+                            >
+                                Environments
+                            </h2>
+                            <span class="ml-auto text-2xs text-muted-foreground">3 available</span>
+                        </div>
+                        <div class="mt-3 space-y-1.5">
+                            <EnvironmentChoice
+                                name="Production"
+                                description="Public site · protected"
+                                icon=.globe
+                                tone_bg="bg-success/10"
+                                tone_text="text-success"
+                                tone_dot="bg-success"
+                                selected_class="border-success/40+bg-success/5"
+                            />
+                            <EnvironmentChoice
+                                name="Preview"
+                                description="Editorial preview environment"
+                                icon=.sync
+                                tone_bg="bg-primary/10"
+                                tone_text="text-primary"
+                                tone_dot="bg-primary"
+                                selected_class="border-primary/40+bg-primary/5"
+                            />
+                            <EnvironmentChoice
+                                name="Development"
+                                description="Schema and content experiments"
+                                icon=.code
+                                tone_bg="bg-warning/10"
+                                tone_text="text-warning"
+                                tone_dot="bg-warning"
+                                selected_class="border-warning/40+bg-warning/5"
+                            />
+                        </div>
+                        <div class="mt-6 rounded-lg border border-border bg-muted/30 p-3">
+                            <p class="text-xs font-medium text-foreground">Environment isolation</p>
+                            <p
+                                class="mt-1 text-2xs leading-4 text-muted-foreground"
+                            >
+                                Content and schema changes stay isolated until they are
+                                promoted to Production.
+                            </p>
+                        </div>
+                    </DrawerContent>
+                </Drawer>
             </TooltipProvider>
             <ToastRegion />
             <MediaPicker />
