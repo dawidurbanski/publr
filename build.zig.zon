@@ -1,0 +1,20 @@
+.{
+    .name = .publr,
+    .version = "0.2.0",
+    .fingerprint = 0x5f016c89bf65ce5c,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // Sibling checkouts, never URLs: the build fetches nothing.
+        .publr_sqlite = .{ .path = "../lib/sqlite" },
+        .publr_http = .{ .path = "../lib/http" },
+        .publr_auth = .{ .path = "../lib/auth" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "scripts",
+        "vendor",
+        "LICENSE",
+    },
+}

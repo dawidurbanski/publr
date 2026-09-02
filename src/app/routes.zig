@@ -1,0 +1,119 @@
+const std = @import("std");
+const auth = @import("../lib/auth.zig");
+const rest = @import("../adapters/rest.zig");
+const sdk = @import("../sdk.zig");
+const registry = @import("registry.zig");
+const heartbeat = @import("../operations/heartbeat.zig");
+const http = @import("../lib/http.zig");
+const admin = @import("../adapters/admin.zig");
+const identity_module = @import("../adapters/rest/identity.zig");
+const rest_auth = @import("../adapters/rest/auth.zig");
+
+const Error = http.Error;
+const Request = http.Request;
+const Response = http.Response;
+const Context = http.Context;
+
+pub const Site = @import("site.zig").Site;
+
+pub fn register(router: *http.Router) void {
+    std.debug.assert(router.routes_len == 0);
+
+    router.get("/", &home);
+    router.get("/api/health", &health);
+    router.post("/api/auth/sign-in", &rest_auth.sign_in);
+    router.post("/api/auth/sign-out", &rest_auth.sign_out);
+    router.post("/api/auth/set-password", &rest_auth.set_password);
+    router.get("/api/auth/session", &rest_auth.whoami);
+    admin.register(router);
+    rest.register(router);
+
+    std.debug.assert(router.routes_len == 8 + admin.routes_count);
+}
+
+pub fn register_static(router: *http.Router) void {
+    std.debug.assert(router.routes_len == 0);
+
+    router.get("/", &static_file);
+    router.get("/*", &static_file);
+
+    std.debug.assert(router.routes_len == 2);
+}
+
+fn static_file(request: *Request, response: *Response, ctx: *Context) Error!void {
+    std.debug.assert(ctx.user_data != null);
+
+    const site = Site.of(ctx);
+    const dir = site.static_dir orelse return response.text(.not_found, "Not Found");
+
+    std.debug.assert(dir.len > 0);
+
+    const cap = ctx.options.response_bytes_max;
+
+    switch (try http.static.serve_file(dir, request.path(), response, ctx.arena, cap)) {
+        .served => try response.set_header("Cache-Control", "no-cache"),
+        .not_found => try response.text(.not_found, "Not Found"),
+        .too_large => try response.text(.internal_server_error, "file too large for this server"),
+    }
+}
+
+fn home(request: *Request, response: *Response, ctx: *Context) Error!void {
+    std.debug.assert(request.method() == .get or request.method() == .head);
+    std.debug.assert(ctx.user_data != null);
+
+    try response.text(.ok, "publr " ++ heartbeat.version ++ "\n");
+}
+
+fn health(request: *Request, response: *Response, ctx: *Context) Error!void {
+    std.debug.assert(ctx.user_data != null);
+    std.debug.assert(request.method() == .get or request.method() == .head);
+
+    const site = Site.of(ctx);
+    const identity = identity_module.identify(request, ctx.arena, site);
+    var sdk_ctx = identity_module.context(site, ctx.arena, identity.caller);
+
+    const out = registry.SDK.dispatch(&sdk_ctx, heartbeat.Check, .{}) catch |err| {
+        try response.text(.internal_server_error, @errorName(err));
+        return;
+    };
+
+    try response.json(.ok, out);
+}
+
+/// For tests: an offline app with every route, driven with raw request text.
+pub const testing = struct {
+    pub const Flow = struct {
+        app: http.App,
+        site: Site,
+        arena: std.mem.Allocator,
+
+        /// In place: the app keeps a pointer to `site`.
+        pub fn init(flow: *Flow, site: Site, arena: std.mem.Allocator) void {
+            std.debug.assert(site.connection.transaction_depth == 0);
+
+            flow.* = .{ .app = http.App.offline(.{}), .site = site, .arena = arena };
+            flow.app.user_data = &flow.site;
+            register(flow.app.router());
+
+            std.debug.assert(flow.app.routes.routes_len > 0);
+        }
+
+        pub fn head(flow: *Flow, comptime template: []const u8, args: anytype) ![]const u8 {
+            std.debug.assert(template.len > 0);
+            std.debug.assert(std.mem.endsWith(u8, template, "\r\n\r\n"));
+
+            return std.fmt.allocPrint(flow.arena, template, args);
+        }
+
+        pub fn call(flow: *Flow, head_text: []const u8, body: []const u8) !http.Response {
+            std.debug.assert(head_text.len > 0);
+            std.debug.assert(std.mem.endsWith(u8, head_text, "\r\n\r\n"));
+
+            const parsed = try http.parse(head_text);
+            const wire = parsed.complete;
+            var request: http.Request = .{ .inner = &wire, .body = body };
+
+            return flow.app.handle(flow.arena, &request);
+        }
+    };
+};

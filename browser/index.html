@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Publr</title>
+  </head>
+  <body>
+    <script type="module">
+      await navigator.serviceWorker.register("/publr-worker.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+      location.reload();
+    </script>
+  </body>
+</html>

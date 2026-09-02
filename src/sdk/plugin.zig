@@ -1,0 +1,374 @@
+const std = @import("std");
+const sdk = @import("../sdk.zig");
+const plugin_context = @import("plugin/context.zig");
+const plugin_types = @import("plugin/types.zig");
+const status_module = @import("../model/status.zig");
+const content_type = @import("../model/content_type.zig");
+const field = @import("../model/field.zig");
+
+pub const PluginCtx = plugin_context.PluginCtx;
+pub const types = plugin_types;
+pub const ContentTypeDef = content_type.Def;
+pub const DeclaredType = plugin_types.Declared;
+pub const content_types_max: u32 = 64;
+
+pub const name_len_max: u32 = 32;
+pub const version_len_max: u32 = 32;
+pub const summary_len_max: u32 = 200;
+pub const plugins_max: u32 = 64;
+
+pub const Manifest = struct {
+    name: []const u8,
+    version: []const u8,
+    summary: []const u8,
+    compiled_in_only: bool = false,
+};
+
+pub fn validate(comptime Plugin: type) void {
+    comptime {
+        const label = @typeName(Plugin);
+
+        if (!@hasDecl(Plugin, "manifest")) {
+            @compileError("plugin " ++ label ++ ": missing `pub const manifest: Manifest`");
+        }
+
+        const manifest: Manifest = Plugin.manifest;
+        assert_name(manifest.name, label);
+
+        if (manifest.version.len == 0 or manifest.version.len > version_len_max) {
+            @compileError("plugin " ++ manifest.name ++ ": `manifest.version` is 1 to 32 chars");
+        }
+
+        if (manifest.summary.len == 0 or manifest.summary.len > summary_len_max) {
+            @compileError("plugin " ++ manifest.name ++ ": `manifest.summary` is 1 to 200 chars");
+        }
+
+        for (operations_of(Plugin)) |Operation| {
+            sdk.operation.validate(Operation);
+
+            if (!manifest.compiled_in_only and !plugin_context.takes_plugin_ctx(Operation.run)) {
+                @compileError("plugin " ++ manifest.name ++ ": " ++ Operation.name ++
+                    " must take *PluginCtx (or set manifest.compiled_in_only)");
+            }
+        }
+
+        for (middleware_of(Plugin)) |Middleware| {
+            sdk.middleware.validate(Middleware);
+
+            if (!manifest.compiled_in_only and !plugin_context.takes_plugin_ctx(Middleware.run)) {
+                @compileError("plugin " ++ manifest.name ++ ": a hook must take *PluginCtx " ++
+                    "(or set manifest.compiled_in_only)");
+            }
+        }
+
+        if (@hasDecl(Plugin, "schema_sql") and Plugin.schema_sql.len == 0) {
+            @compileError("plugin " ++ manifest.name ++ ": `schema_sql` is empty");
+        }
+
+        if (@hasDecl(Plugin, "schema_sql") and !manifest.compiled_in_only) {
+            @compileError("plugin " ++ manifest.name ++ ": own tables need compiled_in_only");
+        }
+
+        for (content_types_of(Plugin)) |def| {
+            var problems: field.Problems = .{};
+            content_type.validate_def(def, &problems);
+
+            if (!problems.is_empty()) {
+                @compileError("plugin " ++ manifest.name ++ ": content type " ++ def.handle ++
+                    ": " ++ problems.items[0].message);
+            }
+        }
+    }
+}
+
+/// The content types a plugin declares; created or updated when the database opens.
+pub fn content_types_of(comptime Plugin: type) []const ContentTypeDef {
+    comptime {
+        std.debug.assert(@hasDecl(Plugin, "manifest"));
+
+        if (!@hasDecl(Plugin, "content_types")) {
+            return &.{};
+        }
+
+        const list: []const ContentTypeDef = &Plugin.content_types;
+
+        std.debug.assert(list.len <= content_types_max);
+
+        return list;
+    }
+}
+
+pub fn assert_name(comptime name: []const u8, comptime label: []const u8) void {
+    comptime {
+        if (name.len == 0 or name.len > name_len_max) {
+            @compileError("plugin " ++ label ++ ": `manifest.name` must be 1 to 32 characters");
+        }
+
+        for (name, 0..) |char, index| {
+            const lower = char >= 'a' and char <= 'z';
+            const digit = char >= '0' and char <= '9';
+            const ok = lower or char == '_' or (digit and index > 0);
+
+            if (!ok) {
+                const rule = ": `manifest.name` is [a-z][a-z0-9_]*: ";
+                @compileError("plugin " ++ label ++ rule ++ name);
+            }
+        }
+    }
+}
+
+pub fn operations_of(comptime Plugin: type) []const type {
+    comptime {
+        std.debug.assert(@hasDecl(Plugin, "manifest"));
+
+        if (!@hasDecl(Plugin, "operations")) {
+            return &.{};
+        }
+
+        const list: []const type = &Plugin.operations;
+
+        std.debug.assert(list.len <= sdk.operations_max);
+
+        return list;
+    }
+}
+
+pub fn namespaces_of(comptime Plugin: type) []const sdk.operation.Namespace {
+    comptime {
+        std.debug.assert(@hasDecl(Plugin, "manifest"));
+
+        if (!@hasDecl(Plugin, "namespaces")) {
+            return &.{};
+        }
+
+        const list: []const sdk.operation.Namespace = &Plugin.namespaces;
+
+        std.debug.assert(list.len <= plugins_max);
+
+        return list;
+    }
+}
+
+pub fn policies_of(comptime Plugin: type) []const sdk.Policy {
+    comptime {
+        std.debug.assert(@hasDecl(Plugin, "manifest"));
+
+        if (!@hasDecl(Plugin, "policies")) {
+            return &.{};
+        }
+
+        const list: []const sdk.Policy = &Plugin.policies;
+
+        std.debug.assert(list.len <= sdk.authorize.policies_max);
+
+        return list;
+    }
+}
+
+pub fn middleware_of(comptime Plugin: type) []const type {
+    comptime {
+        std.debug.assert(@hasDecl(Plugin, "manifest"));
+
+        if (!@hasDecl(Plugin, "middleware")) {
+            return &.{};
+        }
+
+        const list: []const type = &Plugin.middleware;
+
+        std.debug.assert(list.len <= sdk.middleware.middleware_max);
+
+        return list;
+    }
+}
+
+pub fn schema_of(comptime Plugin: type) ?[:0]const u8 {
+    comptime {
+        std.debug.assert(@hasDecl(Plugin, "manifest"));
+
+        if (!@hasDecl(Plugin, "schema_sql")) {
+            return null;
+        }
+
+        const sql: [:0]const u8 = Plugin.schema_sql;
+
+        std.debug.assert(sql.len > 0);
+
+        return sql;
+    }
+}
+
+pub fn Merged(comptime plugins: anytype) type {
+    comptime {
+        @setEvalBranchQuota(100_000);
+
+        var operations: []const type = &.{};
+        var namespaces: []const sdk.operation.Namespace = &.{};
+        var policies: []const sdk.Policy = &.{};
+        var middleware: []const type = &.{};
+        var schemas: []const [:0]const u8 = &.{};
+        var statuses: []const status_module.Status = &.{};
+        var transitions: []const status_module.Transition = &.{};
+        var content_types: []const DeclaredType = &.{};
+
+        std.debug.assert(plugins.len <= plugins_max);
+
+        for (plugins) |Plugin| {
+            validate(Plugin);
+            operations = operations ++ operations_of(Plugin);
+            namespaces = namespaces ++ namespaces_of(Plugin);
+            policies = policies ++ policies_of(Plugin);
+            middleware = middleware ++ middleware_of(Plugin);
+            for (content_types_of(Plugin)) |def| {
+                content_types = content_types ++ &[_]DeclaredType{.{
+                    .owner = Plugin.manifest.name,
+                    .def = def,
+                }};
+            }
+
+            if (schema_of(Plugin)) |sql| {
+                schemas = schemas ++ &[_][:0]const u8{sql};
+            }
+
+            if (@hasDecl(Plugin, "statuses")) {
+                statuses = statuses ++ @as([]const status_module.Status, &Plugin.statuses);
+            }
+
+            if (@hasDecl(Plugin, "transitions")) {
+                transitions = transitions ++ @as(
+                    []const status_module.Transition,
+                    &Plugin.transitions,
+                );
+            }
+        }
+
+        for (plugins, 0..) |Plugin, index| {
+            for (plugins, 0..) |Other, other_index| {
+                const same_name = std.mem.eql(u8, Plugin.manifest.name, Other.manifest.name);
+
+                if (other_index > index and same_name) {
+                    @compileError("two plugins named " ++ Plugin.manifest.name);
+                }
+            }
+        }
+
+        for (content_types, 0..) |declared, index| {
+            for (content_types[index + 1 ..]) |other| {
+                if (std.mem.eql(u8, declared.def.handle, other.def.handle)) {
+                    @compileError("two plugins declare the content type " ++ declared.def.handle);
+                }
+            }
+        }
+
+        return struct {
+            pub const all = plugins;
+            pub const merged_operations = operations;
+            pub const merged_namespaces = namespaces;
+            pub const merged_policies = policies;
+            pub const merged_middleware = middleware;
+            pub const merged_schemas = schemas;
+            pub const merged_statuses = statuses;
+            pub const merged_transitions = transitions;
+            pub const merged_content_types = content_types;
+        };
+    }
+}
+
+pub const testing = struct {
+    pub const Hello = struct {
+        pub const manifest: Manifest = .{
+            .name = "hello",
+            .version = "0.1.0",
+            .summary = "Test plugin: records greetings as records of its own type",
+        };
+        pub const content_types = [_]ContentTypeDef{.{
+            .handle = "greeting",
+            .name = "Greeting",
+            .name_plural = "Greetings",
+            .title_field = "note",
+            .fields = &.{.{ .name = "note", .label = "Note", .kind = .string, .required = true }},
+        }};
+        pub const namespaces = [_]sdk.operation.Namespace{.{
+            .name = "hello",
+            .summary = "Greetings",
+            .details = "A test namespace with one operation.",
+        }};
+        pub const operations = [_]type{Record};
+        pub const middleware = [_]type{Counted};
+        pub const policies = [_]sdk.Policy{&no_shouting};
+
+        pub const Record = struct {
+            pub const name = "hello.record";
+            pub const description = "Record a greeting";
+            pub const kind: sdk.operation.Kind = .write;
+            pub const In = struct { note: []const u8 };
+            pub const Out = struct { rows: u32 };
+            pub const example: In = .{ .note = "hi" };
+            pub const example_out: Out = .{ .rows = 1 };
+
+            pub fn run(ctx: *PluginCtx, in: In, _: *const sdk.Grant) sdk.Error!Out {
+                std.debug.assert(in.note.len > 0);
+                std.debug.assert(ctx.now_ms() >= 0);
+
+                const record = @import("../operations/record.zig");
+                const document = try std.json.Stringify.valueAlloc(
+                    ctx.arena(),
+                    .{ .note = in.note },
+                    .{},
+                );
+
+                _ = try ctx.call(record.Create, .{ .type = "greeting", .document = document });
+
+                const all = try ctx.call(record.List, .{ .type = "greeting", .limit = 200 });
+
+                return .{ .rows = @intCast(all.records.len) };
+            }
+        };
+
+        pub const Counted = struct {
+            pub const stage: sdk.middleware.Stage = .after;
+            pub const operation = "hello.record";
+
+            pub fn run(ctx: *PluginCtx, in: *Record.In, out: *const Record.Out) sdk.Error!void {
+                std.debug.assert(in.note.len > 0);
+                std.debug.assert(out.rows > 0);
+                ctx.notice("hello.recorded", in.note);
+            }
+        };
+
+        fn no_shouting(_: *const sdk.Ctx, request: sdk.authorize.Request) sdk.Grant {
+            std.debug.assert(request.operation_name.len > 0);
+            std.debug.assert(request.resource.fields.len == 0);
+
+            return .{};
+        }
+    };
+};
+
+test "the test plugin passes the contract and merges into a registry" {
+    const Bundle = Merged(.{testing.Hello});
+    const TestSDK = sdk.SDK(.{
+        .operations = Bundle.merged_operations,
+        .namespaces = Bundle.merged_namespaces,
+        .policies = Bundle.merged_policies,
+        .middleware = Bundle.merged_middleware,
+        .schemas = Bundle.merged_schemas,
+    });
+
+    var harness: sdk.testing.Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+
+    try TestSDK.apply_schemas(&harness.fixture.connection);
+
+    var system = harness.ctx(.system);
+    try plugin_types.apply(&system, Bundle.merged_content_types);
+
+    var ctx = harness.ctx(.{ .user = .{ .id = "u_1", .role = .editor } });
+    const first = try TestSDK.dispatch(&ctx, testing.Hello.Record, .{ .note = "hi" });
+    const second = try TestSDK.dispatch(&ctx, testing.Hello.Record, .{ .note = "again" });
+
+    try std.testing.expectEqual(@as(u32, 1), first.rows);
+    try std.testing.expectEqual(@as(u32, 2), second.rows);
+    try std.testing.expect(TestSDK.namespace_of("hello") != null);
+    try std.testing.expectEqual(@as(usize, 1), Bundle.merged_policies.len);
+}

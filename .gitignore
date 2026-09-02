@@ -1,0 +1,4 @@
+.zig-cache/
+.vendor-archives/
+zig-out/
+data/
